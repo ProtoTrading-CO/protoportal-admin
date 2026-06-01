@@ -7,12 +7,13 @@ export async function signIn(email, password) {
 }
 
 export async function signUp(email, password, name) {
-  const { data, error } = await supabase.auth.signUp({
-    email,
-    password,
-    options: { data: { name } },
+  const res = await fetch('/api/register-account', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password, name }),
   });
-  if (error) throw error;
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Account creation failed');
   return data;
 }
 
