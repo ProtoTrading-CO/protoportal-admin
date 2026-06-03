@@ -90,3 +90,13 @@ export async function updateOrderAdmin(id, fields) {
   if (!res.ok) throw new Error(json.error || 'Failed to update order');
   return json.row;
 }
+
+export async function deleteOrderAdmin(id) {
+  const res = await fetch('/api/admin-orders', {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id }),
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || 'Failed to delete order');
+}

@@ -7,6 +7,7 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  FileDown,
   Globe,
   Grip,
   ImagePlus,
@@ -25,6 +26,7 @@ import {
   SlidersHorizontal,
   Star,
   Store,
+  Trash2,
   User,
   Users,
   X,
@@ -42,7 +44,7 @@ import {
   updateProduct,
 } from '../lib/products';
 import { approveCustomer, deleteCustomer, fetchCustomersPage, updateCustomerAdmin } from '../lib/customers';
-import { fetchAllOrdersAdmin, updateOrderAdmin } from '../lib/orders';
+import { deleteOrderAdmin, fetchAllOrdersAdmin, updateOrderAdmin } from '../lib/orders';
 import { fetchSpecials, saveSpecials } from '../lib/specials';
 import categories from '../data/categories.json';
 
@@ -84,6 +86,63 @@ const sections = [
 const orderStatuses = ['viewed', 'order in progress', 'awaiting payment', 'paid', 'delivered'];
 const productTypes = ['General product', 'Hot seller', 'New stock', 'Clearance stock'];
 const ADMIN_PAGE_SIZE = 50;
+
+function generateOrderChecklistHtml(order) {
+  const items = order.original_items || order.items || [];
+  const rows = items.map((item, i) => `
+    <tr>
+      <td style="padding:8px 6px;border:1px solid #ccc;text-align:center">
+        <span style="display:inline-block;width:14px;height:14px;border:1.5px solid #555;vertical-align:middle">&nbsp;</span>
+      </td>
+      <td style="padding:8px 6px;border:1px solid #ccc;color:#666;font-size:12px">${i + 1}</td>
+      <td style="padding:8px 6px;border:1px solid #ccc;font-weight:700;font-size:12px">${item.code || ''}</td>
+      <td style="padding:8px 6px;border:1px solid #ccc;font-size:13px">${item.name || ''}</td>
+      <td style="padding:8px 6px;border:1px solid #ccc;text-align:center;font-weight:700">${item.qty}</td>
+      <td style="padding:8px 6px;border:1px solid #ccc;font-size:12px">
+        In Stock: <span style="display:inline-block;border-bottom:1px solid #000;width:60px;">&nbsp;</span>
+        &nbsp;&nbsp;Qty: <span style="display:inline-block;border-bottom:1px solid #000;width:50px;">&nbsp;</span>
+      </td>
+    </tr>`).join('');
+
+  return `<!DOCTYPE html><html><head><meta charset="UTF-8">
+<title>Order ${order.order_number || order.id}</title>
+<style>
+  body{font-family:Arial,sans-serif;padding:24px;color:#111;max-width:900px;margin:0 auto}
+  h1{font-size:20px;margin-bottom:4px}
+  .meta{color:#555;font-size:13px;margin-bottom:20px}
+  table{width:100%;border-collapse:collapse;font-family:Arial,sans-serif}
+  th{background:#f0f0f0;padding:8px 6px;border:1px solid #ccc;font-size:12px;text-align:left}
+  @media print{.no-print{display:none!important}}
+</style></head><body>
+<h1>Proto Trading — Order Checklist</h1>
+<div class="meta">
+  <strong>Order:</strong> ${order.order_number || order.id} &nbsp;|&nbsp;
+  <strong>Customer:</strong> ${order.customers?.name || 'Unknown'} (${order.customers?.email || ''}) &nbsp;|&nbsp;
+  <strong>Date:</strong> ${new Date(order.created_at || Date.now()).toLocaleDateString('en-ZA', { day: 'numeric', month: 'long', year: 'numeric' })}
+</div>
+<table>
+  <thead><tr>
+    <th style="width:32px">✓</th>
+    <th style="width:28px">#</th>
+    <th style="width:120px">Code</th>
+    <th>Product</th>
+    <th style="width:48px">Qty</th>
+    <th style="width:220px">Stock Status</th>
+  </tr></thead>
+  <tbody>${rows}</tbody>
+</table>
+<div style="margin-top:24px;font-size:13px">
+  <strong>Notes:</strong><br>
+  <span style="display:inline-block;border-bottom:1px solid #aaa;width:100%;margin-top:6px">&nbsp;</span>
+  <span style="display:inline-block;border-bottom:1px solid #aaa;width:100%;margin-top:14px">&nbsp;</span>
+</div>
+<div class="no-print" style="margin-top:20px">
+  <button onclick="window.print()" style="padding:9px 20px;background:#7F1D1D;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer;font-family:Arial">
+    Print / Save as PDF
+  </button>
+</div>
+</body></html>`;
+}
 const CATEGORY_WORK_SIZE = 400;
 
 const emptyForm = {
@@ -173,6 +232,8 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
 
   const [productSearch, setProductSearch] = useState('');
   const [productCategory, setProductCategory] = useState('all');
+  const [productSubcategory, setProductSubcategory] = useState('all');
+  const [productPageSize, setProductPageSize] = useState(50);
   const [productPage, setProductPage] = useState(1);
   const [productRows, setProductRows] = useState([]);
   const [productTotal, setProductTotal] = useState(0);
@@ -189,6 +250,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const [customerTotal, setCustomerTotal] = useState(0);
 
   const [pricingCategory, setPricingCategory] = useState(categories[0]?.id || '');
+  const [pricingSubcategory, setPricingSubcategory] = useState('all');
   const [pricingProducts, setPricingProducts] = useState([]);
   const [selectedPricing, setSelectedPricing] = useState([]);
   const [priceDelta, setPriceDelta] = useState('-10');
@@ -211,7 +273,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     fetchDistinctCategories().then(setLiveCategories).catch(() => {});
   }, []);
 
-  useEffect(() => { setProductPage(1); }, [productSearch, productCategory]);
+  useEffect(() => { setProductPage(1); }, [productSearch, productCategory, productSubcategory, productPageSize]);
   useEffect(() => { setArchivePage(1); }, [archiveSearch]);
   useEffect(() => { setCustomerPage(1); }, [customerTab, customerSearch]);
 
@@ -219,7 +281,8 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     setLoadingProgress(0);
     setLoadingError('');
     try {
-      const data = await fetchAdminProductsPage({ page: productPage, pageSize: ADMIN_PAGE_SIZE, searchQuery: productSearch, categoryFilter: productCategory, onProgress: setLoadingProgress });
+      const catFilter = productSubcategory !== 'all' ? productSubcategory : productCategory;
+      const data = await fetchAdminProductsPage({ page: productPage, pageSize: productPageSize, searchQuery: productSearch, categoryFilter: catFilter, onProgress: setLoadingProgress });
       setProductRows(data.rows);
       setProductTotal(data.total);
     } catch (err) {
@@ -548,6 +611,29 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     finally { setSaving(''); }
   };
 
+  const downloadOrderPdf = (order) => {
+    const html = generateOrderChecklistHtml(order);
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  };
+
+  const deleteOrder = async (order) => {
+    if (!window.confirm(`Delete order ${order.order_number || order.id}? This cannot be undone.`)) return;
+    setSaving(`del-order-${order.id}`);
+    try {
+      await deleteOrderAdmin(order.id);
+      setOrders((prev) => prev.filter((o) => o.id !== order.id));
+    } finally { setSaving(''); }
+  };
+
   const updateOrder = async (order, patch) => {
     setSaving(order.id);
     try {
@@ -556,7 +642,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     } finally { setSaving(''); }
   };
 
-  const productPages = Math.max(1, Math.ceil(productTotal / ADMIN_PAGE_SIZE));
+  const productPages = Math.max(1, Math.ceil(productTotal / productPageSize));
   const customerPages = Math.max(1, Math.ceil(customerTotal / ADMIN_PAGE_SIZE));
 
   return (
@@ -633,30 +719,44 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                   </div>
                 </div>
 
-                <div className="adm-toolbar">
+                <div className="adm-toolbar" style={{ gridTemplateColumns: '1fr auto auto auto auto' }}>
                   <label className="adm-search"><Search size={15} /><input value={productSearch} onChange={(e) => setProductSearch(e.target.value)} placeholder="Search by SKU or product name" className="adm-search-input" /></label>
-                  <select value={productCategory} onChange={(e) => setProductCategory(e.target.value)} className="adm-select">
+                  <select value={productCategory} onChange={(e) => { setProductCategory(e.target.value); setProductSubcategory('all'); }} className="adm-select">
                     <option value="all">All categories</option>
-                    {(liveCategories.length > 0 ? liveCategories : mainCategories.map((c) => c.label)).map((cat) => (
-                      <option key={cat} value={cat}>{cat}</option>
-                    ))}
+                    {mainCategories.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+                  </select>
+                  {productCategory !== 'all' && (
+                    <select value={productSubcategory} onChange={(e) => setProductSubcategory(e.target.value)} className="adm-select">
+                      <option value="all">All subcategories</option>
+                      {subcategoryOptions(productCategory).map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
+                    </select>
+                  )}
+                  <select value={productPageSize} onChange={(e) => setProductPageSize(Number(e.target.value))} className="adm-select" style={{ width: 90 }}>
+                    <option value={25}>25 / page</option>
+                    <option value={50}>50 / page</option>
+                    <option value={100}>100 / page</option>
                   </select>
                 </div>
 
                 <div className="adm-list">
-                  <div className="adm-list-head" style={{ gridTemplateColumns: '2fr 180px 120px' }}>
-                    <span>Product</span><span>Stock</span><span>Actions</span>
+                  <div className="adm-list-head" style={{ gridTemplateColumns: '36px 2fr 180px 120px' }}>
+                    <span></span><span>Product</span><span>Stock</span><span>Actions</span>
                   </div>
                   {productRows.reduce((acc, product, i) => {
                     const cat = product.category || 'Uncategorized';
                     const prevCat = i > 0 ? (productRows[i - 1].category || 'Uncategorized') : null;
                     if (cat !== prevCat) {
                       acc.push(
-                        <div key={`cat-${cat}`} className="adm-category-header">{cat}</div>
+                        <div key={`cat-${cat}`} className="adm-category-header">{categoryLabel(cat) || cat}</div>
                       );
                     }
                     acc.push(
-                      <div key={product.id} className="adm-list-row" style={{ gridTemplateColumns: '2fr 180px 120px' }}>
+                      <div key={product.id} className="adm-list-row" style={{ gridTemplateColumns: '36px 2fr 180px 120px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center' }}>
+                          {product.image
+                            ? <img src={product.image} alt="" style={{ width: 32, height: 32, objectFit: 'contain', borderRadius: 4, background: '#f3f4f6', mixBlendMode: 'multiply' }} />
+                            : <div style={{ width: 32, height: 32, borderRadius: 4, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, color: '#9ca3af' }}>IMG</div>}
+                        </div>
                         <div>
                           <div style={{ fontWeight: 800, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
                             {product.name}
@@ -917,7 +1017,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                   ↑ Drop here to move to top
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 8 }}>
                   {reorderProducts.map((product) => {
                     const isDragging = dragId === product.id;
                     const isOver = dragOverId === product.id && !isDragging;
@@ -933,30 +1033,30 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                         onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setDragOverId(null); }}
                         onDrop={(e) => { e.preventDefault(); swapReorder(product.id); }}
                         className={`adm-reorder-card${isDragging ? ' adm-reorder-card--dragging' : ''}${isOver ? ' adm-reorder-card--over' : ''}${isSelected ? ' adm-reorder-card--selected' : ''}`}
+                        style={{ padding: '6px', cursor: 'grab' }}
                       >
-                        <div className="adm-reorder-handle">
-                          {/* onMouseDown stops the parent drag from starting when the checkbox is clicked */}
+                        <div className="adm-reorder-handle" style={{ marginBottom: 4 }}>
                           <input
                             type="checkbox"
                             checked={isSelected}
                             onChange={() => toggleSelectReorder(product.id)}
                             onMouseDown={(e) => e.stopPropagation()}
                             onClick={(e) => e.stopPropagation()}
-                            style={{ width: 14, height: 14, flexShrink: 0, cursor: 'pointer', accentColor: '#8B1A1A' }}
+                            style={{ width: 12, height: 12, flexShrink: 0, cursor: 'pointer', accentColor: '#8B1A1A' }}
                           />
-                          <Grip size={14} />
-                          <span className="adm-muted" style={{ fontSize: 10 }}>{isSelected ? 'selected' : 'drag to reorder'}</span>
+                          <Grip size={11} />
                           <button
                             onClick={(e) => { e.stopPropagation(); openContentEdit(product); }}
                             className="adm-icon-btn"
-                            title="Edit image & description"
+                            title="Edit image"
+                            style={{ marginLeft: 'auto', padding: '2px' }}
                           >
-                            <ImagePlus size={13} />
+                            <ImagePlus size={11} />
                           </button>
                         </div>
-                        <div className="adm-thumb">{product.image ? <img src={product.image} alt={product.name} style={{ maxWidth: '90%', maxHeight: '90%', width: 'auto', height: 'auto', objectFit: 'contain', mixBlendMode: 'multiply' }} /> : <span className="adm-muted">No image</span>}</div>
-                        <div style={{ fontWeight: 800, fontSize: 13, marginTop: 8 }}>{product.name}</div>
-                        <div className="adm-muted" style={{ fontSize: 11 }}>{product.code}</div>
+                        <div className="adm-thumb" style={{ height: 70 }}>{product.image ? <img src={product.image} alt={product.name} style={{ maxWidth: '100%', maxHeight: '100%', width: 'auto', height: 'auto', objectFit: 'contain', mixBlendMode: 'multiply' }} /> : <span className="adm-muted" style={{ fontSize: 10 }}>No image</span>}</div>
+                        <div style={{ fontWeight: 700, fontSize: 10, marginTop: 4, lineHeight: 1.3, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{product.name}</div>
+                        <div className="adm-muted" style={{ fontSize: 9 }}>{product.code}</div>
                       </div>
                     );
                   })}
@@ -982,39 +1082,31 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                 </div>
 
                 {customerTab === 'requests' ? (
-                  <div className="adm-requests-grid">
+                  <div className="adm-list">
+                    <div className="adm-list-head" style={{ gridTemplateColumns: '1.4fr 1.2fr 0.8fr 0.8fr 160px' }}>
+                      <span>Business</span><span>Email</span><span>Location</span><span>Applied</span><span>Actions</span>
+                    </div>
                     {customerRows.length === 0 && !loading && (
-                      <div className="adm-empty">No pending trade requests.</div>
+                      <div className="adm-empty" style={{ padding: '24px 0' }}>No pending trade requests.</div>
                     )}
                     {customerRows.map((person) => (
-                      <div key={person.id} className="adm-request-card">
-                        <div className="adm-request-card-body">
-                          <div className="adm-request-avatar">
-                            {(person.business_name || person.name || '?')[0].toUpperCase()}
-                          </div>
-                          <div className="adm-request-info">
-                            <div className="adm-request-biz">{person.business_name || person.name || 'Unknown business'}</div>
-                            <div className="adm-request-contact">{person.name}</div>
-                            <div className="adm-request-chips">
-                              {person.country && <span className="adm-chip adm-chip--geo"><Globe size={11} />{person.country}{person.city ? `, ${person.city}` : ''}</span>}
-                              {person.business_type && <span className="adm-chip adm-chip--type"><Store size={11} />{person.business_type}</span>}
-                            </div>
-                            <div className="adm-request-contact-row">
-                              <span><Mail size={11} />{person.email}</span>
-                              {person.phone && <span><Phone size={11} />{person.phone}</span>}
-                            </div>
-                          </div>
+                      <div key={person.id} className="adm-list-row" style={{ gridTemplateColumns: '1.4fr 1.2fr 0.8fr 0.8fr 160px', alignItems: 'center' }}>
+                        <div>
+                          <div style={{ fontWeight: 700, fontSize: 13 }}>{person.business_name || person.name || 'Unknown'}</div>
+                          <div className="adm-muted" style={{ fontSize: 11 }}>{person.name}{person.business_type ? ` · ${person.business_type}` : ''}</div>
                         </div>
-                        <div className="adm-request-actions">
-                          <button onClick={() => setExpandedCustomer(person)} className="adm-btn-ghost adm-btn-sm">View details</button>
-                          <button onClick={() => void approveRequest(person)} className="adm-btn-red adm-btn-sm" disabled={saving === person.id}>
-                            {saving === person.id ? 'Approving…' : <><Check size={14} /> Approve</>}
+                        <div style={{ fontSize: 12 }}>{person.email}</div>
+                        <div style={{ fontSize: 12 }}>{[person.city, person.country].filter(Boolean).join(', ') || '—'}</div>
+                        <div style={{ fontSize: 11, color: '#6b7280' }}>{new Date(person.created_at).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short' })}</div>
+                        <div style={{ display: 'flex', gap: 5 }}>
+                          <button onClick={() => setExpandedCustomer(person)} className="adm-btn-ghost adm-btn-sm" style={{ padding: '3px 8px', fontSize: 11 }}>Details</button>
+                          <button onClick={() => void approveRequest(person)} className="adm-btn-red adm-btn-sm" style={{ padding: '3px 8px', fontSize: 11 }} disabled={saving === person.id}>
+                            {saving === person.id ? '…' : <><Check size={12} /> OK</>}
                           </button>
-                          <button onClick={() => void removeCustomer(person)} className="adm-btn-ghost adm-btn-sm" disabled={saving === `del-${person.id}`} style={{ color: '#c40000' }}>
-                            {saving === `del-${person.id}` ? 'Deleting…' : <><X size={14} /> Delete</>}
+                          <button onClick={() => void removeCustomer(person)} className="adm-btn-ghost adm-btn-sm" style={{ padding: '3px 6px', color: '#c40000' }} disabled={saving === `del-${person.id}`}>
+                            <X size={13} />
                           </button>
                         </div>
-                        <div className="adm-request-date">Applied {new Date(person.created_at).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' })}</div>
                       </div>
                     ))}
                   </div>
@@ -1050,9 +1142,13 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                     <p className="adm-section-note">Select products and apply a percentage price adjustment.</p>
                   </div>
                 </div>
-                <div className="adm-toolbar" style={{ gridTemplateColumns: '1fr auto auto' }}>
-                  <select value={pricingCategory} onChange={(e) => { setPricingCategory(e.target.value); setSelectedPricing([]); }} className="adm-select">
+                <div className="adm-toolbar" style={{ gridTemplateColumns: '1fr 1fr auto auto' }}>
+                  <select value={pricingCategory} onChange={(e) => { setPricingCategory(e.target.value); setPricingSubcategory('all'); setSelectedPricing([]); }} className="adm-select">
                     {mainCategories.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+                  </select>
+                  <select value={pricingSubcategory} onChange={(e) => { setPricingSubcategory(e.target.value); setSelectedPricing([]); }} className="adm-select">
+                    <option value="all">All subcategories</option>
+                    {subcategoryOptions(pricingCategory).map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
                   </select>
                   <button onClick={toggleSelectAllPricing} className="adm-btn-ghost">{selectedPricing.length === pricingProducts.length ? 'Clear all' : 'Select all'}</button>
                   <div style={{ display: 'flex', gap: 8 }}>
@@ -1061,7 +1157,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                   </div>
                 </div>
                 <div className="adm-checkbox-list">
-                  {pricingProducts.map((product) => (
+                  {(pricingSubcategory === 'all' ? pricingProducts : pricingProducts.filter((p) => p.categoryPath?.[1] === pricingSubcategory)).map((product) => (
                     <label key={product.id} className="adm-checkbox-row">
                       <input type="checkbox" checked={selectedPricing.includes(product.id)} onChange={(e) => setSelectedPricing((prev) => e.target.checked ? [...prev, product.id] : prev.filter((id) => id !== product.id))} />
                       <span style={{ fontWeight: 700 }}>{product.name}</span>
@@ -1090,9 +1186,23 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                           <div style={{ fontWeight: 800, fontSize: 15 }}>{order.order_number || order.id.slice(0, 8)}</div>
                           <div className="adm-muted">{order.customers?.name || 'Unknown'} · {order.customers?.email || 'No email'}</div>
                         </div>
-                        <select value={order.status || 'viewed'} onChange={(e) => void updateOrder(order, { status: e.target.value })} className="adm-select">
-                          {orderStatuses.map((status) => <option key={status} value={status}>{status}</option>)}
-                        </select>
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                          <select value={order.status || 'viewed'} onChange={(e) => void updateOrder(order, { status: e.target.value })} className="adm-select">
+                            {orderStatuses.map((status) => <option key={status} value={status}>{status}</option>)}
+                          </select>
+                          <button onClick={() => downloadOrderPdf(order)} className="adm-btn-ghost" title="Download checklist PDF">
+                            <FileDown size={14} /> PDF
+                          </button>
+                          <button
+                            onClick={() => void deleteOrder(order)}
+                            className="adm-btn-ghost"
+                            style={{ color: '#c40000' }}
+                            disabled={saving === `del-order-${order.id}`}
+                            title="Delete order"
+                          >
+                            {saving === `del-order-${order.id}` ? '…' : <Trash2 size={14} />}
+                          </button>
+                        </div>
                       </div>
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 12 }}>
                         <div className="adm-subtle-box"><strong>Order placed</strong><div className="adm-muted">{compactItems(order.original_items || order.items || [])}</div></div>
