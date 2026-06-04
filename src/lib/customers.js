@@ -88,11 +88,13 @@ export async function setCustomerTier(id, tier) {
 }
 
 export async function approveCustomer(id, approved = true) {
-  const { error } = await supabase
-    .from('customers')
-    .update({ is_approved: approved })
-    .eq('id', id);
-  if (error) throw error;
+  const res = await fetch('/api/admin-customers', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id, is_approved: approved }),
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || 'Failed to approve customer');
 }
 
 export async function updateCustomerAdmin(id, fields) {

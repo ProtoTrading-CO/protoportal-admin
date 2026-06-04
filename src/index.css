@@ -1168,6 +1168,24 @@ input, select, textarea { font-family: inherit; outline: none; }
   color: #fff;
 }
 
+.adm-nav-badge {
+  margin-left: auto;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #c40000;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.adm-order-row:hover { background: #f8fafc; }
+
 .adm-main {
   display: grid;
   gap: 16px;
@@ -1868,6 +1886,311 @@ input, select, textarea { font-family: inherit; outline: none; }
 .adm-muted {
   color: #6b7280;
   font-size: 12px;
+}
+
+/* ── Green button ── */
+.adm-btn-green {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: none;
+  background: #16a34a;
+  color: #fff;
+  border-radius: 12px;
+  padding: 10px 18px;
+  font-weight: 800;
+  font-size: 14px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.15s;
+}
+.adm-btn-green:hover { background: #15803d; }
+.adm-btn-green:disabled { opacity: 0.55; cursor: default; }
+.adm-btn-green.adm-btn-sm { padding: 8px 14px; font-size: 13px; border-radius: 10px; }
+
+/* ── Reorder layout ── */
+.adm-panel--reorder { padding: 0; overflow: hidden; }
+.adm-panel--reorder .adm-section-head {
+  padding: 20px 24px;
+  margin-bottom: 0;
+  border-bottom: 1px solid #e8eaed;
+}
+
+.adm-reorder-layout {
+  display: grid;
+  grid-template-columns: 210px 1fr;
+}
+
+.adm-reorder-cat-sidebar {
+  border-right: 1px solid #e8eaed;
+  background: #fafafa;
+  overflow-y: auto;
+  max-height: 620px;
+}
+
+.adm-reorder-cat-heading {
+  padding: 12px 16px;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #9ca3af;
+  background: #f3f4f6;
+  border-bottom: 1px solid #e8eaed;
+}
+
+.adm-reorder-cat-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 11px 16px;
+  border: none;
+  border-bottom: 1px solid #f1f5f9;
+  background: transparent;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: #374151;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.1s, color 0.1s;
+}
+.adm-reorder-cat-item:hover { background: #f1f5f9; color: #0f172a; }
+.adm-reorder-cat-item--active {
+  background: #0f172a;
+  color: #fff;
+  font-weight: 700;
+}
+.adm-reorder-cat-item--active:hover { background: #1e293b; }
+
+.adm-reorder-content {
+  padding: 16px;
+  overflow-y: auto;
+  max-height: 620px;
+}
+
+.adm-reorder-group-header {
+  grid-column: 1 / -1;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #6b7280;
+  padding: 12px 4px 6px;
+  border-bottom: 1px solid #e8eaed;
+  margin-bottom: 6px;
+  margin-top: 8px;
+}
+.adm-reorder-group-header:first-child { margin-top: 0; }
+
+/* Straight lines for reorder cards */
+.adm-reorder-grid .adm-reorder-card { border-radius: 4px; }
+
+/* ── Profile drawer orders ── */
+.adm-profile-orders { display: grid; gap: 8px; margin-top: 8px; }
+.adm-profile-order {
+  padding: 12px 14px;
+  border: 1px solid #e8eaed;
+  background: #f8fafc;
+}
+.adm-profile-order-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 700;
+}
+.adm-profile-order-head .adm-muted { margin-left: auto; }
+
+/* ── Admin hamburger (hidden on desktop) ── */
+.adm-hamburger {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  border: 1.5px solid rgba(255,255,255,0.15);
+  background: transparent;
+  color: #fff;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+.adm-hamburger:hover { background: rgba(255,255,255,0.08); }
+
+/* ── Header actions group ── */
+.adm-header-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+/* ── Reorder grid ── */
+.adm-reorder-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+}
+
+/* ── Mobile sidebar backdrop ── */
+.adm-sidebar-backdrop {
+  display: none;
+}
+
+/* ══════════════════════════════════════════
+   ADMIN — TABLET (≤ 1024px)
+══════════════════════════════════════════ */
+@media (max-width: 1024px) {
+  .adm-layout { grid-template-columns: 200px 1fr; }
+  .adm-reorder-grid { grid-template-columns: repeat(4, 1fr); }
+}
+
+/* ══════════════════════════════════════════
+   ADMIN — MOBILE (≤ 900px)
+══════════════════════════════════════════ */
+@media (max-width: 900px) {
+  /* Hamburger visible */
+  .adm-hamburger { display: flex; }
+
+  /* Hide text labels in header action buttons, keep icons */
+  .adm-btn-text { display: none; }
+  .adm-header-actions .adm-btn-ghost,
+  .adm-header-actions .adm-btn-dark {
+    padding: 9px 10px;
+    min-width: 38px;
+    justify-content: center;
+  }
+
+  /* Body padding */
+  .adm-body { padding: 16px 14px 80px; }
+
+  /* Stats: 2×2 grid */
+  .adm-stats-bar {
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+  .adm-stat { padding: 14px 16px; }
+  .adm-stat-value { font-size: 26px; }
+
+  /* Full-width layout, sidebar becomes a slide-in drawer */
+  .adm-layout { grid-template-columns: 1fr; }
+
+  .adm-sidebar {
+    position: fixed;
+    top: 0;
+    left: -300px;
+    width: 260px;
+    height: 100vh;
+    border-radius: 0 16px 16px 0;
+    border: none;
+    border-right: 1px solid #e8eaed;
+    z-index: 250;
+    overflow-y: auto;
+    transition: left 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: none;
+    padding: 20px 12px;
+  }
+
+  .adm-sidebar--open {
+    left: 0;
+    box-shadow: 8px 0 40px rgba(0,0,0,0.18);
+  }
+
+  .adm-sidebar-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 249;
+    background: rgba(0,0,0,0.4);
+    backdrop-filter: blur(2px);
+  }
+
+  /* Panel */
+  .adm-panel { padding: 18px 16px; border-radius: 16px; }
+
+  /* Section head: stack */
+  .adm-section-head { flex-direction: column; align-items: flex-start; gap: 12px; }
+  .adm-section-head > div:last-child { width: 100%; }
+  .adm-section-title { font-size: 22px; }
+
+  /* Toolbar: single column */
+  .adm-toolbar { grid-template-columns: 1fr !important; gap: 10px; }
+
+  /* List: horizontally scrollable */
+  .adm-list { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .adm-list-head,
+  .adm-list-row { min-width: 540px; }
+
+  /* Customer tabs wrap */
+  .adm-customer-tabs { flex-wrap: wrap; }
+
+  /* Reorder: 3 columns */
+  .adm-reorder-grid { grid-template-columns: repeat(3, 1fr); }
+
+  /* Orders: full-width layout */
+  .adm-order-card { padding: 14px; }
+
+  /* Modal: bottom sheet */
+  .adm-modal-backdrop {
+    padding: 0;
+    align-items: flex-end;
+  }
+  .adm-modal {
+    width: 100%;
+    border-radius: 24px 24px 0 0;
+    padding: 20px 18px 36px;
+    max-height: 94vh;
+    overflow-y: auto;
+  }
+
+  /* Drawer: full width */
+  .adm-drawer { width: 100vw; }
+}
+
+/* ══════════════════════════════════════════
+   ADMIN — SMALL PHONE (≤ 600px)
+══════════════════════════════════════════ */
+@media (max-width: 600px) {
+  /* Header */
+  .adm-header-inner { padding: 0 12px; height: 58px; }
+  .adm-brand small { display: none; }
+  .adm-brand strong { font-size: 14px; }
+  .adm-brand img { height: 26px; }
+
+  /* Body */
+  .adm-body { padding: 12px 10px 80px; }
+
+  /* Stats compact */
+  .adm-stats-bar { gap: 8px; margin-bottom: 12px; }
+  .adm-stat { padding: 12px 14px; border-radius: 12px; }
+  .adm-stat-value { font-size: 22px; }
+  .adm-stat-label { font-size: 11px; }
+
+  /* Panel */
+  .adm-panel { padding: 14px 12px; border-radius: 12px; }
+
+  /* Section title */
+  .adm-section-title { font-size: 18px; }
+
+  /* Reorder: 2 columns */
+  .adm-reorder-grid { grid-template-columns: repeat(2, 1fr); gap: 6px; }
+
+  /* Buttons: compact */
+  .adm-btn-red,
+  .adm-btn-ghost,
+  .adm-btn-dark { font-size: 13px; padding: 9px 14px; border-radius: 10px; }
+
+  /* Order card */
+  .adm-subtle-box { font-size: 12px; }
+
+  /* Customer list min-width smaller */
+  .adm-list-head,
+  .adm-list-row { min-width: 480px; }
+
+  /* Modal */
+  .adm-modal { padding: 16px 14px 32px; }
 }
 
 /* ══════════════════════════════════════════

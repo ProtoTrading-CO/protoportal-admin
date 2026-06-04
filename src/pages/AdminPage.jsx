@@ -16,6 +16,7 @@ import {
   LogOut,
   Mail,
   MapPin,
+  Menu,
   PackagePlus,
   Pencil,
   Phone,
@@ -164,6 +165,22 @@ function subcategoryOptions(categoryId) {
   return categories.find((item) => item.id === categoryId)?.children || [];
 }
 
+function groupBySubcategory(products, mainCategoryId) {
+  const subs = subcategoryOptions(mainCategoryId);
+  const subLabelMap = new Map(subs.map((s) => [s.id, s.label]));
+  const groups = new Map();
+  products.forEach((p) => {
+    const key = p.categoryPath?.[1] || '__other__';
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(p);
+  });
+  return [...groups.entries()].map(([key, prods]) => ({
+    id: key,
+    label: subLabelMap.get(key) || 'Other',
+    products: prods,
+  }));
+}
+
 function getProductType(product) {
   const badges = product.badges || [];
   if (badges.includes('Hot seller')) return 'Hot seller';
@@ -220,7 +237,9 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
   const [productForm, setProductForm] = useState(emptyForm);
-  const [expandedCustomer, setExpandedCustomer] = useState(null);
+  const [profileCustomer, setProfileCustomer] = useState(null);
+  const [profileOrders, setProfileOrders] = useState([]);
+  const [profileOrdersLoading, setProfileOrdersLoading] = useState(false);
 
   const [contentEditProduct, setContentEditProduct] = useState(null);
   const [contentEditForm, setContentEditForm] = useState({ image: '', description: '' });
@@ -260,6 +279,10 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const [dragId, setDragId] = useState(null);
   const [dragOverId, setDragOverId] = useState(null);
   const [selectedIds, setSelectedIds] = useState(new Set());
+
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [pendingCount, setPendingCount] = useState(0);
+  const [expandedOrderId, setExpandedOrderId] = useState(null);
 
   const [orders, setOrders] = useState([]);
   const [orderSearch, setOrderSearch] = useState('');
@@ -337,6 +360,19 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   // Load specials on mount
   useEffect(() => {
     fetchSpecials().then((data) => setSpecials(data?.items || [])).catch(() => {});
+  }, []);
+
+  // Poll pending trade request count for nav badge
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const data = await fetchCustomersPage({ tab: 'requests', pageSize: 1, searchQuery: '' });
+        setPendingCount(data.total || 0);
+      } catch {}
+    };
+    load();
+    const iv = setInterval(load, 60000);
+    return () => clearInterval(iv);
   }, []);
 
   const specialsSet = new Set(specials.map((s) => s.productId));
@@ -592,22 +628,30 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     } finally { setSaving(''); }
   };
 
-  const updateCustomer = async (person, patch) => {
-    setSaving(person.id);
-    try { await updateCustomerAdmin(person.id, patch); await loadCustomers(); }
-    finally { setSaving(''); }
+  const openCustomerProfile = async (person) => {
+    setProfileCustomer(person);
+    setProfileOrders([]);
+    setProfileOrdersLoading(true);
+    try {
+      const res = await fetch(`/api/admin-orders?customerId=${person.id}&limit=20`);
+      const json = await res.json();
+      setProfileOrders(json.rows || []);
+    } catch { /* silent */ }
+    finally { setProfileOrdersLoading(false); }
   };
+
+  const closeCustomerProfile = () => { setProfileCustomer(null); setProfileOrders([]); };
 
   const approveRequest = async (person) => {
     setSaving(person.id);
-    try { await approveCustomer(person.id, true); await loadCustomers(); setExpandedCustomer(null); }
+    try { await approveCustomer(person.id, true); await loadCustomers(); closeCustomerProfile(); }
     finally { setSaving(''); }
   };
 
   const removeCustomer = async (person) => {
     if (!window.confirm(`Delete ${person.name || person.email}? This cannot be undone.`)) return;
     setSaving(`del-${person.id}`);
-    try { await deleteCustomer(person.id); await loadCustomers(); setExpandedCustomer(null); }
+    try { await deleteCustomer(person.id); await loadCustomers(); closeCustomerProfile(); }
     finally { setSaving(''); }
   };
 
@@ -649,17 +693,22 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     <div className="adm-shell">
       <header className="adm-header">
         <div className="adm-header-inner">
-          <div className="adm-brand">
-            <img src="/proto-logo.png" alt="Proto Trading" style={{ height: 32 }} />
-            <div>
-              <strong>PROTO <span style={{ color: '#8B1A1A' }}>TRADING</span></strong>
-              <small>Admin portal</small>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <button onClick={() => setSidebarOpen((s) => !s)} className="adm-hamburger" aria-label="Toggle menu">
+              <Menu size={20} />
+            </button>
+            <div className="adm-brand">
+              <img src="/proto-logo.png" alt="Proto Trading" style={{ height: 32 }} />
+              <div>
+                <strong>PROTO <span style={{ color: '#8B1A1A' }}>TRADING</span></strong>
+                <small>Admin portal</small>
+              </div>
             </div>
           </div>
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-            <button onClick={() => void refreshCurrentSection()} className="adm-btn-ghost"><RefreshCw size={15} /> Refresh</button>
-            <button onClick={onViewPortal} className="adm-btn-ghost"><ArrowLeftRight size={15} /> Portal</button>
-            <button onClick={onLogout} className="adm-btn-dark"><LogOut size={15} /> Log out</button>
+          <div className="adm-header-actions">
+            <button onClick={() => void refreshCurrentSection()} className="adm-btn-ghost"><RefreshCw size={15} /><span className="adm-btn-text">Refresh</span></button>
+            <button onClick={onViewPortal} className="adm-btn-ghost"><ArrowLeftRight size={15} /><span className="adm-btn-text">Portal</span></button>
+            <button onClick={onLogout} className="adm-btn-dark"><LogOut size={15} /><span className="adm-btn-text">Log out</span></button>
           </div>
         </div>
       </header>
@@ -673,17 +722,21 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
         </div>
 
         <div className="adm-layout">
-          <aside className="adm-sidebar">
+          {sidebarOpen && <div className="adm-sidebar-backdrop" onClick={() => setSidebarOpen(false)} />}
+          <aside className={`adm-sidebar${sidebarOpen ? ' adm-sidebar--open' : ''}`}>
             {sections.map((section) => {
               const Icon = section.icon;
               const active = section.id === activeSection;
               return (
                 <button
                   key={section.id}
-                  onClick={() => setActiveSection(section.id)}
+                  onClick={() => { setActiveSection(section.id); setSidebarOpen(false); }}
                   className={`adm-nav-btn${active ? ' adm-nav-btn--active' : ''}`}
                 >
                   <Icon size={17} /> {section.label}
+                  {section.id === 'customers' && pendingCount > 0 && (
+                    <span className="adm-nav-badge">{pendingCount}</span>
+                  )}
                 </button>
               );
             })}
@@ -924,9 +977,9 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                 <div className="adm-section-head">
                   <div>
                     <h2 className="adm-section-title">Archive — 0 Stock</h2>
-                    <p className="adm-section-note">Products automatically moved here when stock hits exactly 0. Hidden from customers. Reappear when stock comes back in.</p>
+                    <p className="adm-section-note">Products hidden from customers when stock hits 0. Restore or edit directly from here.</p>
                   </div>
-                  <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                  <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                     <button onClick={() => void exportArchiveXlsx()} className="adm-btn-ghost">{saving === 'export-archive' ? 'Exporting…' : 'Export Excel'}</button>
                     <span className="adm-pill" style={{ fontSize: 13, padding: '6px 14px' }}>{archiveTotal} products</span>
                   </div>
@@ -944,20 +997,28 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
 
                 <div className="adm-list">
                   {archiveRows.length > 0 && (
-                    <div className="adm-list-head" style={{ gridTemplateColumns: '2fr 120px' }}>
-                      <span>Product</span><span>Stock</span>
+                    <div className="adm-list-head" style={{ gridTemplateColumns: '36px 2fr 180px 120px' }}>
+                      <span></span><span>Product</span><span>Stock</span><span>Actions</span>
                     </div>
                   )}
                   {archiveRows.reduce((acc, product, i) => {
                     const cat = product.category || 'Uncategorized';
                     const prevCat = i > 0 ? (archiveRows[i - 1].category || 'Uncategorized') : null;
                     if (cat !== prevCat) {
-                      acc.push(<div key={`cat-${cat}`} className="adm-category-header">{cat}</div>);
+                      acc.push(<div key={`cat-${cat}`} className="adm-category-header">{categoryLabel(cat) || cat}</div>);
                     }
                     acc.push(
-                      <div key={product.id} className="adm-list-row" style={{ gridTemplateColumns: '2fr 120px', opacity: 0.75 }}>
+                      <div key={product.id} className="adm-list-row" style={{ gridTemplateColumns: '36px 2fr 180px 120px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center' }}>
+                          {product.image
+                            ? <img src={product.image} alt="" style={{ width: 32, height: 32, objectFit: 'contain', borderRadius: 4, background: '#f3f4f6', mixBlendMode: 'multiply' }} />
+                            : <div style={{ width: 32, height: 32, borderRadius: 4, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, color: '#9ca3af' }}>IMG</div>}
+                        </div>
                         <div>
-                          <div style={{ fontWeight: 800, fontSize: 14 }}>{product.name}</div>
+                          <div style={{ fontWeight: 800, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
+                            {product.name}
+                            {!product.image && <span style={{ fontSize: 10, fontWeight: 700, color: '#92400e', background: '#fef3c7', borderRadius: 4, padding: '1px 5px' }}>No image</span>}
+                          </div>
                           <div className="adm-muted" style={{ fontSize: 11 }}>
                             <span title="Barcode">BC: {product.barcode || product.code}</span>
                             {product.websiteSku && <span title="Website SKU" style={{ marginLeft: 8 }}>WSK: {product.websiteSku}</span>}
@@ -967,6 +1028,11 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                         <div>
                           <span style={{ fontWeight: 900, color: '#8B1A1A', fontSize: 15 }}>0</span>
                           <span className="adm-muted" style={{ fontSize: 11, marginLeft: 4 }}>units</span>
+                          {product.supplier && <div className="adm-muted" style={{ fontSize: 11 }}>{product.supplier}</div>}
+                        </div>
+                        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                          <button onClick={() => openEditProduct(product)} className="adm-icon-btn" title="Edit product"><Pencil size={14} /></button>
+                          <button onClick={() => void toggleArchive(product)} className="adm-icon-btn" title="Restore from archive"><ArchiveRestore size={14} /></button>
                         </div>
                       </div>
                     );
@@ -979,13 +1045,13 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
 
             {/* REORDER */}
             {activeSection === 'reorder' && (
-              <div className="adm-panel">
+              <div className="adm-panel adm-panel--reorder">
                 <div className="adm-section-head">
                   <div>
                     <h2 className="adm-section-title">Reorder Grid</h2>
-                    <p className="adm-section-note">Live reflection of the site. Drag to reorder — changes save to the database immediately.</p>
+                    <p className="adm-section-note">Drag products to reorder — saves to the database immediately.</p>
                   </div>
-                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                     {selectedIds.size > 0 && (
                       <>
                         <span className="adm-pill">{selectedIds.size} selected</span>
@@ -993,73 +1059,96 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                         <button onClick={() => setSelectedIds(new Set())} className="adm-btn-ghost">Clear</button>
                       </>
                     )}
-                    <select value={reorderCategory} onChange={(e) => { setSelectedIds(new Set()); setReorderCategory(e.target.value); }} className="adm-select">
-                      {mainCategories.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
-                    </select>
                     <button
                       onClick={() => { setSelectedIds(new Set()); invalidateAdminCache(); void loadCategoryWorkingSet(reorderCategory, 'reorder'); }}
                       className="adm-btn-ghost"
-                      title="Reload from site"
                     >
-                      Refresh
+                      <RefreshCw size={14} /> Refresh
                     </button>
                   </div>
                 </div>
 
-                {/* Top drop zone — visible whenever a drag is in progress */}
-                <div
-                  onDragEnter={(e) => { e.preventDefault(); setDragOverId('__top__'); }}
-                  onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
-                  onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setDragOverId(null); }}
-                  onDrop={(e) => { e.preventDefault(); dropToTop(); }}
-                  className={`adm-reorder-top-zone${dragId ? ' adm-reorder-top-zone--visible' : ''}${dragOverId === '__top__' ? ' adm-reorder-top-zone--over' : ''}`}
-                >
-                  ↑ Drop here to move to top
-                </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 8 }}>
-                  {reorderProducts.map((product) => {
-                    const isDragging = dragId === product.id;
-                    const isOver = dragOverId === product.id && !isDragging;
-                    const isSelected = selectedIds.has(product.id);
-                    return (
-                      <div
-                        key={product.id}
-                        draggable
-                        onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; setDragId(product.id); }}
-                        onDragEnd={() => { setDragId(null); setDragOverId(null); }}
-                        onDragEnter={(e) => { e.preventDefault(); if (product.id !== dragId) setDragOverId(product.id); }}
-                        onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
-                        onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setDragOverId(null); }}
-                        onDrop={(e) => { e.preventDefault(); swapReorder(product.id); }}
-                        className={`adm-reorder-card${isDragging ? ' adm-reorder-card--dragging' : ''}${isOver ? ' adm-reorder-card--over' : ''}${isSelected ? ' adm-reorder-card--selected' : ''}`}
-                        style={{ padding: '6px', cursor: 'grab' }}
+                <div className="adm-reorder-layout">
+                  {/* Category sidebar */}
+                  <div className="adm-reorder-cat-sidebar">
+                    <div className="adm-reorder-cat-heading">Categories</div>
+                    {mainCategories.map((cat) => (
+                      <button
+                        key={cat.id}
+                        onClick={() => { setSelectedIds(new Set()); setReorderCategory(cat.id); }}
+                        className={`adm-reorder-cat-item${reorderCategory === cat.id ? ' adm-reorder-cat-item--active' : ''}`}
                       >
-                        <div className="adm-reorder-handle" style={{ marginBottom: 4 }}>
-                          <input
-                            type="checkbox"
-                            checked={isSelected}
-                            onChange={() => toggleSelectReorder(product.id)}
-                            onMouseDown={(e) => e.stopPropagation()}
-                            onClick={(e) => e.stopPropagation()}
-                            style={{ width: 12, height: 12, flexShrink: 0, cursor: 'pointer', accentColor: '#8B1A1A' }}
-                          />
-                          <Grip size={11} />
-                          <button
-                            onClick={(e) => { e.stopPropagation(); openContentEdit(product); }}
-                            className="adm-icon-btn"
-                            title="Edit image"
-                            style={{ marginLeft: 'auto', padding: '2px' }}
-                          >
-                            <ImagePlus size={11} />
-                          </button>
-                        </div>
-                        <div className="adm-thumb" style={{ height: 70 }}>{product.image ? <img src={product.image} alt={product.name} style={{ maxWidth: '100%', maxHeight: '100%', width: 'auto', height: 'auto', objectFit: 'contain', mixBlendMode: 'multiply' }} /> : <span className="adm-muted" style={{ fontSize: 10 }}>No image</span>}</div>
-                        <div style={{ fontWeight: 700, fontSize: 10, marginTop: 4, lineHeight: 1.3, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{product.name}</div>
-                        <div className="adm-muted" style={{ fontSize: 9 }}>{product.code}</div>
-                      </div>
-                    );
-                  })}
+                        {cat.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Product grid */}
+                  <div className="adm-reorder-content">
+                    <div
+                      onDragEnter={(e) => { e.preventDefault(); setDragOverId('__top__'); }}
+                      onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
+                      onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setDragOverId(null); }}
+                      onDrop={(e) => { e.preventDefault(); dropToTop(); }}
+                      className={`adm-reorder-top-zone${dragId ? ' adm-reorder-top-zone--visible' : ''}${dragOverId === '__top__' ? ' adm-reorder-top-zone--over' : ''}`}
+                    >
+                      ↑ Drop here to move to top
+                    </div>
+
+                    <div className="adm-reorder-grid">
+                      {groupBySubcategory(reorderProducts, reorderCategory).map((group) => (
+                        <>
+                          <div key={`hdr-${group.id}`} className="adm-reorder-group-header">{group.label}</div>
+                          {group.products.map((product) => {
+                            const isDragging = dragId === product.id;
+                            const isOver = dragOverId === product.id && !isDragging;
+                            const isSelected = selectedIds.has(product.id);
+                            return (
+                              <div
+                                key={product.id}
+                                draggable
+                                onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; setDragId(product.id); }}
+                                onDragEnd={() => { setDragId(null); setDragOverId(null); }}
+                                onDragEnter={(e) => { e.preventDefault(); if (product.id !== dragId) setDragOverId(product.id); }}
+                                onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
+                                onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setDragOverId(null); }}
+                                onDrop={(e) => { e.preventDefault(); swapReorder(product.id); }}
+                                className={`adm-reorder-card${isDragging ? ' adm-reorder-card--dragging' : ''}${isOver ? ' adm-reorder-card--over' : ''}${isSelected ? ' adm-reorder-card--selected' : ''}`}
+                                style={{ padding: '6px', cursor: 'grab' }}
+                              >
+                                <div className="adm-reorder-handle" style={{ marginBottom: 4 }}>
+                                  <input
+                                    type="checkbox"
+                                    checked={isSelected}
+                                    onChange={() => toggleSelectReorder(product.id)}
+                                    onMouseDown={(e) => e.stopPropagation()}
+                                    onClick={(e) => e.stopPropagation()}
+                                    style={{ width: 12, height: 12, flexShrink: 0, cursor: 'pointer', accentColor: '#8B1A1A' }}
+                                  />
+                                  <Grip size={11} />
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); openContentEdit(product); }}
+                                    className="adm-icon-btn"
+                                    title="Edit image"
+                                    style={{ marginLeft: 'auto', padding: '2px' }}
+                                  >
+                                    <ImagePlus size={11} />
+                                  </button>
+                                </div>
+                                <div className="adm-thumb" style={{ height: 70 }}>
+                                  {product.image
+                                    ? <img src={product.image} alt={product.name} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', mixBlendMode: 'multiply' }} />
+                                    : <span className="adm-muted" style={{ fontSize: 10 }}>No image</span>}
+                                </div>
+                                <div style={{ fontWeight: 700, fontSize: 10, marginTop: 4, lineHeight: 1.3, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{product.name}</div>
+                                <div className="adm-muted" style={{ fontSize: 9 }}>{product.code}</div>
+                              </div>
+                            );
+                          })}
+                        </>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               </div>
             )}
@@ -1070,40 +1159,45 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                 <div className="adm-section-head">
                   <div>
                     <h2 className="adm-section-title">Customer Management</h2>
-                    <p className="adm-section-note">50 customers per page. Customer requests show full application data.</p>
+                    <p className="adm-section-note">Trade requests and approved customers.</p>
                   </div>
                 </div>
 
                 <div className="adm-customer-tabs">
-                  <button onClick={() => setCustomerTab('requests')} className={`adm-tab${customerTab === 'requests' ? ' adm-tab--active' : ''}`}>Trade requests</button>
+                  <button onClick={() => setCustomerTab('requests')} className={`adm-tab${customerTab === 'requests' ? ' adm-tab--active' : ''}`}>Trade Requests</button>
                   <button onClick={() => setCustomerTab('regular')} className={`adm-tab${customerTab === 'regular' ? ' adm-tab--active' : ''}`}>Approved</button>
-                  <button onClick={() => setCustomerTab('premium')} className={`adm-tab${customerTab === 'premium' ? ' adm-tab--active' : ''}`}>Premium</button>
                   <label className="adm-search adm-search--inline"><Search size={14} /><input value={customerSearch} onChange={(e) => setCustomerSearch(e.target.value)} placeholder="Search…" className="adm-search-input" /></label>
                 </div>
 
                 {customerTab === 'requests' ? (
                   <div className="adm-list">
-                    <div className="adm-list-head" style={{ gridTemplateColumns: '1.4fr 1.2fr 0.8fr 0.8fr 160px' }}>
-                      <span>Business</span><span>Email</span><span>Location</span><span>Applied</span><span>Actions</span>
+                    <div className="adm-list-head" style={{ gridTemplateColumns: '1.4fr 1fr 0.9fr 1.3fr 0.8fr 180px' }}>
+                      <span>Business Name</span><span>Location</span><span>Date Applied</span><span>Email / Phone</span><span>Whatsapp</span><span>Actions</span>
                     </div>
                     {customerRows.length === 0 && !loading && (
                       <div className="adm-empty" style={{ padding: '24px 0' }}>No pending trade requests.</div>
                     )}
                     {customerRows.map((person) => (
-                      <div key={person.id} className="adm-list-row" style={{ gridTemplateColumns: '1.4fr 1.2fr 0.8fr 0.8fr 160px', alignItems: 'center' }}>
+                      <div key={person.id} className="adm-list-row" style={{ gridTemplateColumns: '1.4fr 1fr 0.9fr 1.3fr 0.8fr 180px', alignItems: 'center' }}>
                         <div>
                           <div style={{ fontWeight: 700, fontSize: 13 }}>{person.business_name || person.name || 'Unknown'}</div>
                           <div className="adm-muted" style={{ fontSize: 11 }}>{person.name}{person.business_type ? ` · ${person.business_type}` : ''}</div>
                         </div>
-                        <div style={{ fontSize: 12 }}>{person.email}</div>
-                        <div style={{ fontSize: 12 }}>{[person.city, person.country].filter(Boolean).join(', ') || '—'}</div>
-                        <div style={{ fontSize: 11, color: '#6b7280' }}>{new Date(person.created_at).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short' })}</div>
-                        <div style={{ display: 'flex', gap: 5 }}>
-                          <button onClick={() => setExpandedCustomer(person)} className="adm-btn-ghost adm-btn-sm" style={{ padding: '3px 8px', fontSize: 11 }}>Details</button>
-                          <button onClick={() => void approveRequest(person)} className="adm-btn-red adm-btn-sm" style={{ padding: '3px 8px', fontSize: 11 }} disabled={saving === person.id}>
-                            {saving === person.id ? '…' : <><Check size={12} /> OK</>}
+                        <div style={{ fontSize: 12 }}>{[person.city, person.province, person.country].filter(Boolean).join(', ') || '—'}</div>
+                        <div style={{ fontSize: 11, color: '#6b7280' }}>{new Date(person.created_at).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' })}</div>
+                        <div>
+                          <div style={{ fontSize: 12 }}>{person.email}</div>
+                          <div className="adm-muted" style={{ fontSize: 11 }}>{person.phone || '—'}</div>
+                        </div>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: person.accept_whatsapp ? '#15803d' : '#6b7280' }}>
+                          {person.accept_whatsapp == null ? '—' : person.accept_whatsapp ? 'Yes' : 'No'}
+                        </div>
+                        <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+                          <button onClick={() => void openCustomerProfile(person)} className="adm-btn-ghost adm-btn-sm" style={{ padding: '4px 9px', fontSize: 11 }}>View Profile</button>
+                          <button onClick={() => void approveRequest(person)} className="adm-btn-green adm-btn-sm" disabled={saving === person.id}>
+                            {saving === person.id ? '…' : <><Check size={12} /> Approve</>}
                           </button>
-                          <button onClick={() => void removeCustomer(person)} className="adm-btn-ghost adm-btn-sm" style={{ padding: '3px 6px', color: '#c40000' }} disabled={saving === `del-${person.id}`}>
+                          <button onClick={() => void removeCustomer(person)} className="adm-btn-ghost adm-btn-sm" style={{ padding: '4px 7px', color: '#c40000' }} disabled={saving === `del-${person.id}`}>
                             <X size={13} />
                           </button>
                         </div>
@@ -1112,19 +1206,21 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                   </div>
                 ) : (
                   <div className="adm-list">
-                    <div className="adm-list-head" style={{ gridTemplateColumns: '1.3fr 1.2fr 1fr 80px 110px 80px' }}>
-                      <span>Name</span><span>Email</span><span>Phone</span><span>Orders</span><span>Tier</span><span></span>
+                    <div className="adm-list-head" style={{ gridTemplateColumns: '1.4fr 1.3fr 1fr 80px 80px' }}>
+                      <span>Name</span><span>Email</span><span>Phone</span><span>Orders</span><span></span>
                     </div>
                     {customerRows.map((person) => (
-                      <div key={person.id} className="adm-list-row" style={{ gridTemplateColumns: '1.3fr 1.2fr 1fr 80px 110px 80px' }}>
+                      <div key={person.id} className="adm-list-row" style={{ gridTemplateColumns: '1.4fr 1.3fr 1fr 80px 80px' }}>
                         <span style={{ fontWeight: 700 }}>{person.name || 'Unnamed'}</span>
-                        <span>{person.email}</span>
-                        <span>{person.phone || '—'}</span>
+                        <span style={{ fontSize: 13 }}>{person.email}</span>
+                        <span style={{ fontSize: 13 }}>{person.phone || '—'}</span>
                         <span>{person.orderCount}</span>
-                        <button onClick={() => void updateCustomer(person, { tier: person.tier === 'premium' ? 'regular' : 'premium' })} className="adm-tier-btn adm-tier-btn--active">{person.tier === 'premium' ? 'Premium' : 'Regular'}</button>
-                        <button onClick={() => void removeCustomer(person)} className="adm-btn-ghost adm-btn-sm" disabled={saving === `del-${person.id}`} style={{ color: '#c40000', padding: '4px 8px' }}>
-                          {saving === `del-${person.id}` ? '…' : <X size={14} />}
-                        </button>
+                        <div style={{ display: 'flex', gap: 5 }}>
+                          <button onClick={() => void openCustomerProfile(person)} className="adm-btn-ghost adm-btn-sm" style={{ padding: '4px 9px', fontSize: 11 }}>View Profile</button>
+                          <button onClick={() => void removeCustomer(person)} className="adm-btn-ghost adm-btn-sm" disabled={saving === `del-${person.id}`} style={{ color: '#c40000', padding: '4px 8px' }}>
+                            {saving === `del-${person.id}` ? '…' : <X size={14} />}
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -1174,42 +1270,67 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                 <div className="adm-section-head">
                   <div>
                     <h2 className="adm-section-title">Order Requests</h2>
-                    <p className="adm-section-note">Most recent 150 orders.</p>
+                    <p className="adm-section-note">Most recent 150 orders. Click a row to expand details.</p>
                   </div>
                   <label className="adm-search"><Search size={15} /><input value={orderSearch} onChange={(e) => setOrderSearch(e.target.value)} placeholder="Search orders" className="adm-search-input" /></label>
                 </div>
-                <div style={{ display: 'grid', gap: 12 }}>
-                  {orderRows.map((order) => (
-                    <div key={order.id} className="adm-order-card">
-                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
-                        <div>
-                          <div style={{ fontWeight: 800, fontSize: 15 }}>{order.order_number || order.id.slice(0, 8)}</div>
-                          <div className="adm-muted">{order.customers?.name || 'Unknown'} · {order.customers?.email || 'No email'}</div>
+                <div className="adm-list">
+                  <div className="adm-list-head" style={{ gridTemplateColumns: '1.6fr 1.4fr 1.2fr 1fr 130px 80px' }}>
+                    <span>Order</span><span>Customer</span><span>Date & Time</span><span>Status</span><span>Actions</span><span></span>
+                  </div>
+                  {orderRows.map((order) => {
+                    const isExpanded = expandedOrderId === order.id;
+                    const dt = new Date(order.created_at);
+                    const dateStr = dt.toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' });
+                    const timeStr = dt.toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' });
+                    return (
+                      <div key={order.id}>
+                        <div
+                          className="adm-list-row adm-order-row"
+                          style={{ gridTemplateColumns: '1.6fr 1.4fr 1.2fr 1fr 130px 80px', cursor: 'pointer' }}
+                          onClick={() => setExpandedOrderId(isExpanded ? null : order.id)}
+                        >
+                          <div>
+                            <div style={{ fontWeight: 800, fontSize: 13 }}>{order.order_number || order.id.slice(0, 8)}</div>
+                          </div>
+                          <div>
+                            <div style={{ fontWeight: 600, fontSize: 13 }}>{order.customers?.name || 'Unknown'}</div>
+                            <div className="adm-muted" style={{ fontSize: 11 }}>{order.customers?.email || ''}</div>
+                          </div>
+                          <div>
+                            <div style={{ fontSize: 13, fontWeight: 600 }}>{dateStr}</div>
+                            <div className="adm-muted" style={{ fontSize: 11 }}>{timeStr}</div>
+                          </div>
+                          <div onClick={(e) => e.stopPropagation()}>
+                            <select value={order.status || 'viewed'} onChange={(e) => void updateOrder(order, { status: e.target.value })} className="adm-select" style={{ fontSize: 12, padding: '4px 8px', minHeight: 32 }}>
+                              {orderStatuses.map((s) => <option key={s} value={s}>{s}</option>)}
+                            </select>
+                          </div>
+                          <div style={{ display: 'flex', gap: 6 }} onClick={(e) => e.stopPropagation()}>
+                            <button onClick={() => downloadOrderPdf(order)} className="adm-icon-btn" title="Download PDF"><FileDown size={14} /></button>
+                            <button onClick={() => void deleteOrder(order)} className="adm-icon-btn" style={{ color: '#c40000' }} disabled={saving === `del-order-${order.id}`} title="Delete order">
+                              {saving === `del-order-${order.id}` ? '…' : <Trash2 size={14} />}
+                            </button>
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                            <span className="adm-muted" style={{ fontSize: 18, lineHeight: 1 }}>{isExpanded ? '↑' : '↓'}</span>
+                          </div>
                         </div>
-                        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                          <select value={order.status || 'viewed'} onChange={(e) => void updateOrder(order, { status: e.target.value })} className="adm-select">
-                            {orderStatuses.map((status) => <option key={status} value={status}>{status}</option>)}
-                          </select>
-                          <button onClick={() => downloadOrderPdf(order)} className="adm-btn-ghost" title="Download checklist PDF">
-                            <FileDown size={14} /> PDF
-                          </button>
-                          <button
-                            onClick={() => void deleteOrder(order)}
-                            className="adm-btn-ghost"
-                            style={{ color: '#c40000' }}
-                            disabled={saving === `del-order-${order.id}`}
-                            title="Delete order"
-                          >
-                            {saving === `del-order-${order.id}` ? '…' : <Trash2 size={14} />}
-                          </button>
-                        </div>
+                        {isExpanded && (
+                          <div style={{ background: '#f8fafc', borderTop: '1px solid #f1f5f9', padding: '14px 16px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                            <div className="adm-subtle-box">
+                              <strong style={{ fontSize: 12 }}>Order placed</strong>
+                              <div className="adm-muted" style={{ marginTop: 6 }}>{compactItems(order.original_items || order.items || [])}</div>
+                            </div>
+                            <div className="adm-subtle-box">
+                              <strong style={{ fontSize: 12 }}>Order final</strong>
+                              <div className="adm-muted" style={{ marginTop: 6 }}>{compactItems(order.final_items || order.items || [])}</div>
+                            </div>
+                          </div>
+                        )}
                       </div>
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 12 }}>
-                        <div className="adm-subtle-box"><strong>Order placed</strong><div className="adm-muted">{compactItems(order.original_items || order.items || [])}</div></div>
-                        <div className="adm-subtle-box"><strong>Order final</strong><div className="adm-muted">{compactItems(order.final_items || order.items || [])}</div></div>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -1217,32 +1338,68 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
         </div>
       </div>
 
-      {/* Customer detail drawer */}
-      {expandedCustomer && (
-        <div className="adm-drawer-backdrop" onClick={() => setExpandedCustomer(null)}>
+      {/* Customer profile drawer */}
+      {profileCustomer && (
+        <div className="adm-drawer-backdrop" onClick={closeCustomerProfile}>
           <div className="adm-drawer" onClick={(e) => e.stopPropagation()}>
             <div className="adm-drawer-head">
-              <h3>Application details</h3>
-              <button onClick={() => setExpandedCustomer(null)} className="adm-icon-btn"><X size={16} /></button>
+              <h3>Customer Profile</h3>
+              <button onClick={closeCustomerProfile} className="adm-icon-btn"><X size={16} /></button>
             </div>
             <div className="adm-drawer-body">
-              <div className="adm-drawer-avatar">{(expandedCustomer.business_name || expandedCustomer.name || '?')[0].toUpperCase()}</div>
-              <h2 className="adm-drawer-biz">{expandedCustomer.business_name || expandedCustomer.name}</h2>
+              <div className="adm-drawer-avatar">{(profileCustomer.business_name || profileCustomer.name || '?')[0].toUpperCase()}</div>
+              <h2 className="adm-drawer-biz">{profileCustomer.business_name || profileCustomer.name}</h2>
+
               <div className="adm-drawer-fields">
-                <DrawerField icon={User} label="Contact person" value={expandedCustomer.name} />
-                <DrawerField icon={Mail} label="Email" value={expandedCustomer.email} />
-                {expandedCustomer.phone && <DrawerField icon={Phone} label="Phone" value={expandedCustomer.phone} />}
-                {expandedCustomer.country && <DrawerField icon={Globe} label="Country" value={expandedCustomer.country} />}
-                {expandedCustomer.province && <DrawerField icon={MapPin} label="Province" value={expandedCustomer.province} />}
-                {expandedCustomer.city && <DrawerField icon={MapPin} label="City" value={expandedCustomer.city} />}
-                {expandedCustomer.business_type && <DrawerField icon={Store} label="Business type" value={expandedCustomer.business_type} />}
-                <DrawerField icon={Building2} label="Applied" value={new Date(expandedCustomer.created_at).toLocaleString('en-ZA')} />
+                <DrawerField icon={User} label="Contact person" value={profileCustomer.name} />
+                <DrawerField icon={Mail} label="Email" value={profileCustomer.email} />
+                <DrawerField icon={Phone} label="Phone" value={profileCustomer.phone} />
+                <DrawerField icon={Store} label="Business type" value={profileCustomer.business_type} />
+                <DrawerField icon={Globe} label="Country" value={profileCustomer.country} />
+                <DrawerField icon={MapPin} label="Province" value={profileCustomer.province} />
+                <DrawerField icon={MapPin} label="City" value={profileCustomer.city} />
+                <DrawerField icon={Shield} label="Accept WhatsApp" value={profileCustomer.accept_whatsapp == null ? null : profileCustomer.accept_whatsapp ? 'Yes' : 'No'} />
+                <DrawerField icon={Building2} label="Applied" value={new Date(profileCustomer.created_at).toLocaleString('en-ZA')} />
+              </div>
+
+              {/* Order history */}
+              <div style={{ marginTop: 24 }}>
+                <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 10, fontFamily: 'Outfit, sans-serif' }}>Order History</div>
+                {profileOrdersLoading && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#6b7280', fontSize: 13 }}>
+                    <Loader2 size={14} className="spin" /> Loading orders…
+                  </div>
+                )}
+                {!profileOrdersLoading && profileOrders.length === 0 && (
+                  <div className="adm-muted" style={{ fontSize: 13 }}>No orders found.</div>
+                )}
+                {!profileOrdersLoading && profileOrders.length > 0 && (
+                  <div className="adm-profile-orders">
+                    {profileOrders.map((order) => (
+                      <div key={order.id} className="adm-profile-order">
+                        <div className="adm-profile-order-head">
+                          <span>{order.order_number || order.id.slice(0, 8)}</span>
+                          <span className="adm-pill" style={{ fontSize: 10, padding: '2px 8px' }}>{order.status || 'viewed'}</span>
+                          <span className="adm-muted">{new Date(order.created_at).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+                        </div>
+                        <div className="adm-muted" style={{ fontSize: 11, marginTop: 4 }}>
+                          {compactItems(order.original_items || order.items || [])}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
             <div className="adm-drawer-footer">
-              <button onClick={() => setExpandedCustomer(null)} className="adm-btn-ghost">Cancel</button>
-              <button onClick={() => void approveRequest(expandedCustomer)} className="adm-btn-red" disabled={saving === expandedCustomer.id}>
-                {saving === expandedCustomer.id ? 'Approving…' : <><Check size={15} /> Approve trade access</>}
+              <button onClick={closeCustomerProfile} className="adm-btn-ghost">Close</button>
+              {!profileCustomer.is_approved && (
+                <button onClick={() => void approveRequest(profileCustomer)} className="adm-btn-green" disabled={saving === profileCustomer.id}>
+                  {saving === profileCustomer.id ? 'Approving…' : <><Check size={15} /> Approve</>}
+                </button>
+              )}
+              <button onClick={() => void removeCustomer(profileCustomer)} className="adm-btn-ghost" style={{ color: '#c40000' }} disabled={saving === `del-${profileCustomer.id}`}>
+                {saving === `del-${profileCustomer.id}` ? '…' : <><Trash2 size={14} /> Delete</>}
               </button>
             </div>
           </div>
