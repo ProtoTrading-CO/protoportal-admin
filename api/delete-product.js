@@ -12,22 +12,20 @@ export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   if (req.method !== 'POST') return res.status(405).end();
 
-  const { websiteSku, image, description, active } = req.body || {};
+  const { websiteSku } = req.body || {};
   if (!websiteSku) return res.status(400).json({ error: 'websiteSku is required' });
 
-  const patch = {};
-  if (image !== undefined) patch.image_url = image;
-  if (description !== undefined) patch.description = description;
-  if (active !== undefined) patch.active = Boolean(active);
-
-  if (!Object.keys(patch).length) return res.status(200).json({ ok: true });
-
   const supabase = getStockAdminClient();
-  const { error } = await supabase
-    .from('website_products')
-    .update(patch)
-    .eq('website_sku', websiteSku);
 
-  if (error) return res.status(400).json({ error: error.message });
+  const { error: wpError } = await supabase
+    .from('website_products')
+    .delete()
+    .eq('website_sku', String(websiteSku));
+
+  if (wpError) return res.status(400).json({ error: wpError.message });
+
+  // Also remove from stock table if present (non-fatal if missing)
+  await supabase.from('products').delete().eq('sku', String(websiteSku));
+
   return res.status(200).json({ ok: true });
 }

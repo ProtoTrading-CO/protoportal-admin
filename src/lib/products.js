@@ -325,6 +325,26 @@ export async function exportProductsCsv() {
   return fetchAllProductsAdmin();
 }
 
+export async function fetchDormantProducts({ searchQuery = '' } = {}) {
+  const rows = await fetchAllProductsAdmin();
+  let dormant = rows.filter((p) => p.isArchived);
+  dormant = applySearchFilter(dormant, searchQuery);
+  dormant.sort((a, b) => a.name.localeCompare(b.name));
+  return dormant;
+}
+
+export async function deleteProduct(websiteSku) {
+  const res = await fetch('/api/delete-product', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ websiteSku }),
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || 'Delete failed');
+  invalidateAdminCache();
+  invalidateProductCache();
+}
+
 export async function createProduct() { throw new Error('Products are managed in the stock system'); }
 
 export async function updateProduct(websiteSku, payload) {
@@ -373,7 +393,17 @@ export async function saveSortOrder(updates) {
   invalidateAdminCache();
 }
 
-export async function archiveProduct() { throw new Error('Products are managed in the stock system'); }
+export async function archiveProduct(websiteSku, isArchived) {
+  const res = await fetch('/api/update-product', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ websiteSku, active: !isArchived }),
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || 'Failed to update product status');
+  invalidateAdminCache();
+  invalidateProductCache();
+}
 export async function setSpecial() { throw new Error('Not supported'); }
 export async function updateSortOrder() { throw new Error('Not supported'); }
 export async function bulkUpsertProducts() { throw new Error('Not supported'); }

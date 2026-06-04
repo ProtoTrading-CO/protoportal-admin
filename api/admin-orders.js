@@ -18,7 +18,7 @@ export default async function handler(req, res) {
 
     let ordersQuery = supabase
       .from('orders')
-      .select('*, customers(name, email, tier)')
+      .select('*, customers(name, email, phone, business_name, business_type, city, province, country, tier)')
       .order('created_at', { ascending: false })
       .limit(lim);
 
@@ -44,7 +44,7 @@ export default async function handler(req, res) {
       .from('orders')
       .update(patch)
       .eq('id', id)
-      .select('*, customers(name, email, tier)')
+      .select('*, customers(name, email, phone, business_name, business_type, city, province, country, tier)')
       .single();
 
     if (error) return res.status(400).json({ error: error.message });

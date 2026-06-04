@@ -78,8 +78,8 @@ export default async function handler(req, res) {
       .single();
     if (error) return res.status(400).json({ error: error.message });
 
-    // Send WhatsApp welcome via WATI when approving a customer who opted in
-    if (patch.is_approved === true && data?.accept_whatsapp && data?.phone) {
+    // Send WhatsApp welcome via WATI on approval — skip only if customer explicitly opted out
+    if (patch.is_approved === true && data?.accept_whatsapp !== false && data?.phone) {
       const rawPhone = data.phone.replace(/\D/g, '');
       // WATI expects numbers without + in international format: 27821234567
       const watiPhone = rawPhone.startsWith('0') ? `27${rawPhone.slice(1)}` : rawPhone;

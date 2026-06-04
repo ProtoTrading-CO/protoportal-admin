@@ -8,6 +8,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ClipboardList,
+  Eye,
   FileDown,
   Globe,
   Grip,
@@ -27,19 +28,23 @@ import {
   Shield,
   ShoppingBag,
   SlidersHorizontal,
+  Sparkles,
   Star,
   Store,
   Trash2,
   User,
   Users,
   X,
+  Zap,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import {
   archiveProduct,
   createProduct,
+  deleteProduct,
   fetchAdminProductsPage,
   fetchDistinctCategories,
+  fetchDormantProducts,
   fetchProductsByMainCategory,
   invalidateAdminCache,
   invalidateProductCache,
@@ -77,6 +82,7 @@ function applySavedOrder(products, category) {
 }
 
 const sections = [
+  { id: 'new-products', label: 'New Products', icon: Sparkles },
   { id: 'products', label: 'Product Manager', icon: PackagePlus },
   { id: 'specials', label: "This Week's Specials", icon: Star },
   { id: 'archive', label: 'Archive', icon: Archive },
@@ -86,7 +92,7 @@ const sections = [
   { id: 'orders', label: 'Order Requests', icon: ShoppingBag },
 ];
 
-const orderStatuses = ['viewed', 'order in progress', 'awaiting payment', 'paid', 'delivered'];
+const orderStatuses = ['viewed', 'order in progress', 'awaiting payment', 'paid', 'delivered', 'returned'];
 const productTypes = ['General product', 'Hot seller', 'New stock', 'Clearance stock'];
 const ADMIN_PAGE_SIZE = 50;
 
@@ -230,7 +236,7 @@ function productToForm(product) {
 }
 
 export default function AdminPage({ customer, onLogout, onViewPortal }) {
-  const [activeSection, setActiveSection] = useState('products');
+  const [activeSection, setActiveSection] = useState('new-products');
   const [loading, setLoading] = useState(false);
   const [loadingProgress, setLoadingProgress] = useState(null);
   const [loadingError, setLoadingError] = useState('');
@@ -250,6 +256,18 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const [imageUploading, setImageUploading] = useState(false);
   const [imageDragOver, setImageDragOver] = useState(false);
   const imageFileInputRef = useRef(null);
+
+  const [dormantRows, setDormantRows] = useState([]);
+  const [dormantSearch, setDormantSearch] = useState('');
+  const [dormantSelected, setDormantSelected] = useState(new Set());
+  const [imageViewUrl, setImageViewUrl] = useState('');
+  const [uploadQueue, setUploadQueue] = useState([]); // [{name, status, message, cost}]
+  const [costLog, setCostLog] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('proto_image_gen_costs') || '[]'); } catch { return []; }
+  });
+  const [newProductsTab, setNewProductsTab] = useState('products'); // 'products' | 'costs'
+  const singleImageRef = useRef(null);
+  const folderImageRef = useRef(null);
 
   const [productSearch, setProductSearch] = useState('');
   const [productCategory, setProductCategory] = useState('all');
@@ -297,6 +315,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const swapSearchTimerRef = useRef(null);
 
   const [orders, setOrders] = useState([]);
+  const [orderTab, setOrderTab] = useState('new');
   const [orderSearch, setOrderSearch] = useState('');
 
   const [specials, setSpecials] = useState([]); // [{productId, productName, productCode, productImage, deal, discountPct, bogoX, bogoY}]
@@ -311,6 +330,104 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   useEffect(() => { setProductPage(1); }, [productSearch, productCategory, productSubcategory, productPageSize]);
   useEffect(() => { setArchivePage(1); }, [archiveSearch]);
   useEffect(() => { setCustomerPage(1); }, [customerTab, customerSearch]);
+
+  const processUploadFiles = async (files) => {
+    const imageFiles = Array.from(files).filter((f) => f.type.startsWith('image/'));
+    if (!imageFiles.length) return;
+
+    const initial = imageFiles.map((f) => ({ name: f.name, status: 'pending', message: '', cost: null }));
+    setUploadQueue(initial);
+
+    const newEntries = [];
+
+    for (let i = 0; i < imageFiles.length; i++) {
+      const file = imageFiles[i];
+      const sku = file.name.replace(/\.[^.]+$/, '');
+
+      // Step 1: read file
+      let base64 = '';
+      try {
+        base64 = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result || '').split(',')[1]);
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+      } catch (err) {
+        setUploadQueue((prev) => prev.map((item, idx) => idx === i ? { ...item, status: 'error', message: 'Could not read file' } : item));
+        continue;
+      }
+
+      // Step 2: process with Gemini (store image + extract metadata)
+      setUploadQueue((prev) => prev.map((item, idx) => idx === i ? { ...item, status: 'transforming', message: 'Gemini analysing…' } : item));
+      let imageUrl = '', title = sku, category = '', description = '', cost = 0, model = '';
+      try {
+        const processRes = await fetch('/api/process-product-image', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filename: file.name, contentType: file.type, base64 }),
+        });
+        const processJson = await processRes.json();
+        if (!processRes.ok) throw new Error(processJson.error || 'Processing failed');
+        imageUrl  = processJson.url || '';
+        title     = processJson.title || sku;
+        category  = processJson.category || '';
+        description = processJson.description || '';
+        cost      = processJson.cost || 0;
+        model     = processJson.model || '';
+
+        newEntries.push({
+          sku, title, cost, model,
+          tokensIn: processJson.tokensIn || 0,
+          tokensOut: processJson.tokensOut || 0,
+          processingMs: processJson.processingMs || 0,
+          timestamp: Date.now(),
+        });
+      } catch (err) {
+        setUploadQueue((prev) => prev.map((item, idx) => idx === i ? { ...item, status: 'error', message: err.message } : item));
+        continue;
+      }
+
+      // Step 3: save dormant
+      setUploadQueue((prev) => prev.map((item, idx) => idx === i ? { ...item, status: 'saving', message: 'Saving dormant…' } : item));
+      try {
+        const saveRes = await fetch('/api/save-dormant-product', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ websiteSku: sku, title, imageUrl, category, description }),
+        });
+        const saveJson = await saveRes.json();
+        if (!saveRes.ok) throw new Error(saveJson.error || 'Save failed');
+        const costLabel = cost === 0 ? 'free' : `$${cost.toFixed(5)}`;
+        setUploadQueue((prev) => prev.map((item, idx) => idx === i ? { ...item, status: 'done', message: `Saved ✓  ·  ${costLabel}`, cost } : item));
+      } catch (err) {
+        setUploadQueue((prev) => prev.map((item, idx) => idx === i ? { ...item, status: 'error', message: err.message } : item));
+      }
+    }
+
+    // Persist cost log
+    if (newEntries.length) {
+      setCostLog((prev) => {
+        const next = [...newEntries, ...prev].slice(0, 500); // keep last 500
+        try { localStorage.setItem('proto_image_gen_costs', JSON.stringify(next)); } catch {}
+        return next;
+      });
+    }
+
+    invalidateAdminCache();
+    void loadDormant();
+  };
+
+  const loadDormant = async () => {
+    setLoadingProgress(0);
+    setLoadingError('');
+    try {
+      const rows = await fetchDormantProducts({ searchQuery: dormantSearch });
+      setDormantRows(rows);
+    } catch (err) {
+      setLoadingError(err.message || 'Failed to load dormant products');
+    } finally { setLoadingProgress(null); }
+  };
 
   const loadProducts = async () => {
     setLoadingProgress(0);
@@ -362,6 +479,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     finally { setLoading(false); }
   };
 
+  useEffect(() => { if (activeSection === 'new-products') void loadDormant(); }, [activeSection, dormantSearch]);
   useEffect(() => { if (activeSection === 'products') void loadProducts(); }, [activeSection, productPage, productSearch, productCategory]);
   useEffect(() => { if (activeSection === 'archive') void loadArchive(); }, [activeSection, archivePage, archiveSearch]);
   useEffect(() => { if (activeSection === 'customers') void loadCustomers(); }, [activeSection, customerPage, customerTab, customerSearch]);
@@ -455,8 +573,14 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
 
   const orderRows = useMemo(() => {
     const q = orderSearch.trim().toLowerCase();
-    return orders.filter((order) => !q || [order.order_number, order.customers?.name, order.customers?.email, compactItems(order.original_items || order.items || [])].join(' ').toLowerCase().includes(q));
-  }, [orders, orderSearch]);
+    const filtered = orders.filter((order) => !q || [order.order_number, order.customers?.name, order.customers?.email, compactItems(order.original_items || order.items || [])].join(' ').toLowerCase().includes(q));
+    if (orderTab === 'new') return filtered.filter((o) => !o.status || o.status === 'viewed');
+    if (orderTab === 'sent') return filtered.filter((o) => o.status === 'order in progress' || o.status === 'awaiting payment');
+    if (orderTab === 'paid') return filtered.filter((o) => o.status === 'paid');
+    if (orderTab === 'fulfilled') return filtered.filter((o) => o.status === 'delivered');
+    if (orderTab === 'returned') return filtered.filter((o) => o.status === 'returned');
+    return filtered;
+  }, [orders, orderSearch, orderTab]);
 
   const openNewProduct = () => {
     const firstCategory = categories[0]?.id || '';
@@ -527,6 +651,42 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
       await (editingProduct ? updateProduct(editingProduct.id, payload) : createProduct(payload));
       closeEditor();
       await loadProducts();
+    } finally { setSaving(''); }
+  };
+
+  const goLive = async (product) => {
+    setSaving(product.id);
+    try {
+      await archiveProduct(product.id, false); // false = not archived = live
+      setDormantRows((prev) => prev.filter((p) => p.id !== product.id));
+      setDormantSelected((prev) => { const next = new Set(prev); next.delete(product.id); return next; });
+    } catch (err) {
+      alert(err.message || 'Failed to go live');
+    } finally { setSaving(''); }
+  };
+
+  const goLiveSelected = async () => {
+    if (!dormantSelected.size) return;
+    const ids = [...dormantSelected];
+    setSaving('bulk-live');
+    try {
+      await Promise.all(ids.map((id) => archiveProduct(id, false)));
+      setDormantRows((prev) => prev.filter((p) => !dormantSelected.has(p.id)));
+      setDormantSelected(new Set());
+    } catch (err) {
+      alert(err.message || 'Failed to go live');
+    } finally { setSaving(''); }
+  };
+
+  const removeDormantProduct = async (product) => {
+    if (!window.confirm(`Delete "${product.name}"? This cannot be undone.`)) return;
+    setSaving(`del-dormant-${product.id}`);
+    try {
+      await deleteProduct(product.id);
+      setDormantRows((prev) => prev.filter((p) => p.id !== product.id));
+      setDormantSelected((prev) => { const next = new Set(prev); next.delete(product.id); return next; });
+    } catch (err) {
+      alert(err.message || 'Failed to delete');
     } finally { setSaving(''); }
   };
 
@@ -838,6 +998,319 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
             {loadingError && (
               <div style={{ margin: '12px 0', padding: '10px 16px', background: '#fef2f2', borderRadius: 8, color: '#c40000', fontSize: 13, fontWeight: 600 }}>
                 Error: {loadingError}
+              </div>
+            )}
+
+            {/* NEW PRODUCTS */}
+            {activeSection === 'new-products' && (
+              <div className="adm-panel">
+                {/* Hidden file inputs */}
+                <input
+                  ref={singleImageRef}
+                  type="file"
+                  accept="image/*"
+                  style={{ display: 'none' }}
+                  onChange={(e) => { if (e.target.files?.length) void processUploadFiles(e.target.files); e.target.value = ''; }}
+                />
+                <input
+                  ref={folderImageRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  // @ts-ignore
+                  webkitdirectory=""
+                  style={{ display: 'none' }}
+                  onChange={(e) => { if (e.target.files?.length) void processUploadFiles(e.target.files); e.target.value = ''; }}
+                />
+
+                <div className="adm-section-head">
+                  <div>
+                    <h2 className="adm-section-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <Sparkles size={20} style={{ color: '#8B1A1A' }} /> New Products
+                    </h2>
+                    <p className="adm-section-note">Upload one image or a whole folder. Each filename becomes the product code, enhances the image, and saves the product dormant until you set it live.</p>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                    <button onClick={() => singleImageRef.current?.click()} className="adm-btn-red">
+                      <ImagePlus size={14} /> Upload single image
+                    </button>
+                    <button onClick={() => folderImageRef.current?.click()} className="adm-btn-ghost">
+                      <Upload size={14} /> Upload image folder
+                    </button>
+                    {dormantSelected.size > 0 && (
+                      <>
+                        <span className="adm-pill">{dormantSelected.size} selected</span>
+                        <button
+                          onClick={() => void goLiveSelected()}
+                          className="adm-btn-dark"
+                          disabled={saving === 'bulk-live'}
+                          style={{ background: '#0f172a', color: '#fff', border: 'none', borderRadius: 8, padding: '0 14px', height: 36, fontWeight: 700, fontSize: 13, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontFamily: 'inherit' }}
+                        >
+                          <Zap size={14} /> {saving === 'bulk-live' ? 'Going live…' : 'Set selected live'}
+                        </button>
+                        <button onClick={() => setDormantSelected(new Set())} className="adm-btn-ghost">Clear</button>
+                      </>
+                    )}
+                    {dormantRows.length > 0 && (
+                      <button
+                        onClick={async () => {
+                          if (!window.confirm(`Delete all ${dormantRows.length} dormant products? This cannot be undone.`)) return;
+                          setSaving('delete-all-dormant');
+                          try {
+                            await Promise.all(dormantRows.map((p) => deleteProduct(p.id)));
+                            setDormantRows([]);
+                            setDormantSelected(new Set());
+                          } catch (err) { alert(err.message || 'Delete failed'); }
+                          finally { setSaving(''); }
+                        }}
+                        className="adm-btn-ghost"
+                        disabled={saving === 'delete-all-dormant'}
+                        style={{ color: '#c40000' }}
+                      >
+                        <Trash2 size={14} /> {saving === 'delete-all-dormant' ? 'Deleting…' : 'Delete all'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Upload progress */}
+                {uploadQueue.length > 0 && (
+                  <div style={{ marginBottom: 20, border: '1px solid #e5e7eb', borderRadius: 10, overflow: 'hidden' }}>
+                    <div style={{ padding: '10px 16px', background: '#f8fafc', borderBottom: '1px solid #e5e7eb', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontWeight: 700, fontSize: 13 }}>Upload progress</span>
+                      <button onClick={() => setUploadQueue([])} className="adm-icon-btn"><X size={13} /></button>
+                    </div>
+                    <div style={{ maxHeight: 220, overflowY: 'auto' }}>
+                      {uploadQueue.map((item, i) => (
+                        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 16px', borderBottom: i < uploadQueue.length - 1 ? '1px solid #f1f5f9' : 'none' }}>
+                          <span style={{
+                            width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
+                            background: item.status === 'done' ? '#16a34a' : item.status === 'error' ? '#dc2626' : item.status === 'pending' ? '#d1d5db' : '#f59e0b',
+                          }} />
+                          <span style={{ fontWeight: 700, fontSize: 12, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.name}</span>
+                          <span style={{ fontSize: 11, color: item.status === 'error' ? '#dc2626' : '#64748b', whiteSpace: 'nowrap' }}>
+                            {item.status === 'pending' ? 'Waiting…' : item.message}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Sub-tabs */}
+                <div style={{ display: 'flex', gap: 0, borderBottom: '1px solid #e5e7eb', marginBottom: 20 }}>
+                  {[{ id: 'products', label: 'Dormant Products' }, { id: 'costs', label: `Cost Tracker  ${costLog.length ? `(${costLog.length})` : ''}` }].map((t) => (
+                    <button
+                      key={t.id}
+                      onClick={() => setNewProductsTab(t.id)}
+                      style={{
+                        padding: '9px 18px',
+                        background: 'transparent',
+                        border: 'none',
+                        borderBottom: newProductsTab === t.id ? '2px solid #8B1A1A' : '2px solid transparent',
+                        color: newProductsTab === t.id ? '#0f172a' : '#64748b',
+                        fontWeight: 700,
+                        fontSize: 13,
+                        cursor: 'pointer',
+                        fontFamily: 'inherit',
+                        marginBottom: -1,
+                      }}
+                    >
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+
+                {newProductsTab === 'products' && (
+                <div className="adm-toolbar" style={{ gridTemplateColumns: '1fr' }}>
+                  <label className="adm-search">
+                    <Search size={15} />
+                    <input
+                      value={dormantSearch}
+                      onChange={(e) => setDormantSearch(e.target.value)}
+                      placeholder="Search dormant products by SKU or title"
+                      className="adm-search-input"
+                    />
+                  </label>
+                </div>
+                )}
+
+                {newProductsTab === 'products' && dormantRows.length === 0 && loadingProgress === null && (
+                  <div className="adm-empty" style={{ padding: '48px 0', textAlign: 'center', color: '#64748b' }}>
+                    <Sparkles size={36} style={{ color: '#d1d5db', marginBottom: 12 }} />
+                    <p style={{ margin: 0 }}>No dormant products. All products are live.</p>
+                  </div>
+                )}
+
+                {newProductsTab === 'products' && <div className="adm-list">
+                  {dormantRows.length > 0 && (
+                    <div className="adm-list-head" style={{ gridTemplateColumns: '32px 44px 2fr 160px 180px' }}>
+                      <span>
+                        <input
+                          type="checkbox"
+                          checked={dormantSelected.size === dormantRows.length && dormantRows.length > 0}
+                          onChange={() => setDormantSelected(dormantSelected.size === dormantRows.length ? new Set() : new Set(dormantRows.map((p) => p.id)))}
+                          style={{ accentColor: '#8B1A1A', cursor: 'pointer' }}
+                        />
+                      </span>
+                      <span></span>
+                      <span>Product</span>
+                      <span>Category</span>
+                      <span>Actions</span>
+                    </div>
+                  )}
+                  {dormantRows.map((product) => (
+                    <div key={product.id} className="adm-list-row" style={{ gridTemplateColumns: '32px 44px 2fr 160px 180px', alignItems: 'center' }}>
+                      <div>
+                        <input
+                          type="checkbox"
+                          checked={dormantSelected.has(product.id)}
+                          onChange={() => setDormantSelected((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(product.id)) next.delete(product.id);
+                            else next.add(product.id);
+                            return next;
+                          })}
+                          style={{ accentColor: '#8B1A1A', cursor: 'pointer' }}
+                        />
+                      </div>
+                      <div>
+                        {product.image ? (
+                          <img
+                            src={product.image}
+                            alt={product.name}
+                            onClick={() => setImageViewUrl(product.image)}
+                            style={{ width: 36, height: 36, objectFit: 'contain', borderRadius: 4, background: '#f3f4f6', mixBlendMode: 'multiply', cursor: 'zoom-in' }}
+                            title="Click to view"
+                          />
+                        ) : (
+                          <div style={{ width: 36, height: 36, borderRadius: 4, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, color: '#9ca3af' }}>IMG</div>
+                        )}
+                      </div>
+                      <div>
+                        <div style={{ fontWeight: 800, fontSize: 14 }}>{product.name}</div>
+                        <div className="adm-muted" style={{ fontSize: 11 }}>
+                          <span title="Barcode">BC: {product.barcode || product.code}</span>
+                          {product.websiteSku && <span title="Website SKU" style={{ marginLeft: 8 }}>WSK: {product.websiteSku}</span>}
+                        </div>
+                      </div>
+                      <div style={{ fontSize: 13, color: '#475569' }}>
+                        {product.category ? product.category.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) : '—'}
+                      </div>
+                      <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                        {product.image && (
+                          <button
+                            onClick={() => setImageViewUrl(product.image)}
+                            className="adm-icon-btn"
+                            title="View image"
+                          >
+                            <Eye size={14} />
+                          </button>
+                        )}
+                        <button
+                          onClick={() => void goLive(product)}
+                          disabled={saving === product.id}
+                          style={{
+                            padding: '5px 12px',
+                            background: saving === product.id ? '#e2e8f0' : '#0f172a',
+                            color: saving === product.id ? '#94a3b8' : '#fff',
+                            border: 'none',
+                            borderRadius: 7,
+                            fontWeight: 800,
+                            fontSize: 12,
+                            cursor: saving === product.id ? 'not-allowed' : 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 4,
+                            fontFamily: 'inherit',
+                          }}
+                        >
+                          <Zap size={12} />
+                          {saving === product.id ? '…' : 'Go live'}
+                        </button>
+                        <button
+                          onClick={() => void removeDormantProduct(product)}
+                          className="adm-icon-btn"
+                          title="Delete product"
+                          disabled={saving === `del-dormant-${product.id}`}
+                          style={{ color: '#c40000' }}
+                        >
+                          {saving === `del-dormant-${product.id}` ? '…' : <Trash2 size={14} />}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>}
+
+                {/* COST TRACKER TAB */}
+                {newProductsTab === 'costs' && (() => {
+                  const totalCost = costLog.reduce((s, e) => s + (e.cost || 0), 0);
+                  const avgCost   = costLog.length ? totalCost / costLog.length : 0;
+                  const freeCount = costLog.filter((e) => e.cost === 0).length;
+                  return (
+                    <div>
+                      {/* Summary stats */}
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12, marginBottom: 24 }}>
+                        {[
+                          { label: 'Images processed', value: costLog.length },
+                          { label: 'Free tier', value: freeCount },
+                          { label: 'Total cost', value: `$${totalCost.toFixed(5)}` },
+                          { label: 'Avg per image', value: `$${avgCost.toFixed(5)}` },
+                        ].map(({ label, value }) => (
+                          <div key={label} style={{ background: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: 10, padding: '14px 16px' }}>
+                            <div style={{ fontSize: 20, fontWeight: 800, fontFamily: 'Outfit, sans-serif', color: '#0f172a' }}>{value}</div>
+                            <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b', marginTop: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{label}</div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {costLog.length === 0 ? (
+                        <div style={{ padding: '40px 0', textAlign: 'center', color: '#64748b' }}>
+                          No images processed yet. Upload some products to see cost tracking here.
+                        </div>
+                      ) : (
+                        <>
+                          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+                            <button
+                              onClick={() => {
+                                setCostLog([]);
+                                try { localStorage.removeItem('proto_image_gen_costs'); } catch {}
+                              }}
+                              className="adm-btn-ghost"
+                              style={{ fontSize: 12, color: '#c40000' }}
+                            >
+                              Clear history
+                            </button>
+                          </div>
+                          <div className="adm-list">
+                            <div className="adm-list-head" style={{ gridTemplateColumns: '2fr 1.2fr 80px 80px 80px 120px' }}>
+                              <span>SKU / Title</span><span>Model</span><span>Tokens in</span><span>Tokens out</span><span>Cost</span><span>Time</span>
+                            </div>
+                            {costLog.map((entry, i) => (
+                              <div key={i} className="adm-list-row" style={{ gridTemplateColumns: '2fr 1.2fr 80px 80px 80px 120px' }}>
+                                <div>
+                                  <div style={{ fontWeight: 700, fontSize: 13 }}>{entry.title || entry.sku}</div>
+                                  <div className="adm-muted" style={{ fontSize: 11 }}>{entry.sku}</div>
+                                </div>
+                                <div style={{ fontSize: 11, color: entry.model?.includes('free') ? '#16a34a' : '#475569', fontWeight: 600 }}>
+                                  {entry.model?.includes('free') ? '✓ free' : entry.model?.replace('google/', '') || '—'}
+                                </div>
+                                <div style={{ fontSize: 12 }}>{entry.tokensIn || '—'}</div>
+                                <div style={{ fontSize: 12 }}>{entry.tokensOut || '—'}</div>
+                                <div style={{ fontSize: 12, fontWeight: 700, color: entry.cost === 0 ? '#16a34a' : '#0f172a' }}>
+                                  {entry.cost === 0 ? 'free' : `$${(entry.cost || 0).toFixed(5)}`}
+                                </div>
+                                <div style={{ fontSize: 11, color: '#64748b' }}>
+                                  {new Date(entry.timestamp).toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             )}
 
@@ -1357,6 +1830,51 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                   </div>
                   <label className="adm-search"><Search size={15} /><input value={orderSearch} onChange={(e) => setOrderSearch(e.target.value)} placeholder="Search orders" className="adm-search-input" /></label>
                 </div>
+                <div style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
+                  {[
+                    { key: 'new', label: 'New Orders' },
+                    { key: 'sent', label: 'Sent' },
+                    { key: 'paid', label: 'Paid' },
+                    { key: 'fulfilled', label: 'Fulfilled' },
+                    { key: 'returned', label: 'Returned' },
+                  ].map(({ key, label }) => {
+                    const count = (() => {
+                      if (key === 'new') return orders.filter((o) => !o.status || o.status === 'viewed').length;
+                      if (key === 'sent') return orders.filter((o) => o.status === 'order in progress' || o.status === 'awaiting payment').length;
+                      if (key === 'paid') return orders.filter((o) => o.status === 'paid').length;
+                      if (key === 'fulfilled') return orders.filter((o) => o.status === 'delivered').length;
+                      if (key === 'returned') return orders.filter((o) => o.status === 'returned').length;
+                      return 0;
+                    })();
+                    return (
+                      <button
+                        key={key}
+                        onClick={() => setOrderTab(key)}
+                        style={{
+                          padding: '7px 14px',
+                          borderRadius: 8,
+                          border: 'none',
+                          cursor: 'pointer',
+                          fontSize: 13,
+                          fontWeight: 700,
+                          fontFamily: 'inherit',
+                          background: orderTab === key ? '#0f172a' : '#f1f5f9',
+                          color: orderTab === key ? '#fff' : '#374151',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 6,
+                        }}
+                      >
+                        {label}
+                        {count > 0 && (
+                          <span style={{ fontSize: 11, fontWeight: 700, background: orderTab === key ? 'rgba(255,255,255,0.2)' : '#e2e8f0', color: orderTab === key ? '#fff' : '#64748b', padding: '1px 6px', borderRadius: 999 }}>
+                            {count}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
                 <div className="adm-list">
                   <div className="adm-list-head" style={{ gridTemplateColumns: '1.6fr 1.4fr 1.2fr 1fr 160px 80px' }}>
                     <span>Order</span><span>Customer</span><span>Date & Time</span><span>Status</span><span>Actions</span><span></span>
@@ -1752,6 +2270,32 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Image lightbox */}
+      {imageViewUrl && (
+        <div
+          onClick={() => setImageViewUrl('')}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 9999,
+            background: 'rgba(0,0,0,0.85)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            cursor: 'zoom-out',
+          }}
+        >
+          <img
+            src={imageViewUrl}
+            alt="Product"
+            style={{ maxWidth: '90vw', maxHeight: '90vh', objectFit: 'contain', borderRadius: 8, boxShadow: '0 24px 80px rgba(0,0,0,0.6)' }}
+            onClick={(e) => e.stopPropagation()}
+          />
+          <button
+            onClick={() => setImageViewUrl('')}
+            style={{ position: 'absolute', top: 20, right: 20, background: 'rgba(255,255,255,0.15)', border: 'none', borderRadius: '50%', width: 40, height: 40, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#fff' }}
+          >
+            <X size={18} />
+          </button>
         </div>
       )}
 

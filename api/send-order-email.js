@@ -1,19 +1,40 @@
-function buildEmailHtml({ customerName, orderNumber, orderDate, items, notes, assignedTo, total }) {
+function buildEmailHtml({ customerName, orderNumber, orderDate, items, autoNotes, userNotes, assignedTo, total }) {
   const dateStr = orderDate
     ? new Date(orderDate).toLocaleDateString('en-ZA', { day: 'numeric', month: 'long', year: 'numeric' })
     : '';
 
-  const hasPrice = items.some((item) => item.unitPrice);
+  const hasPrice = items.some((item) => item.unitPrice && !item.removed);
+  const allNotes = [autoNotes, userNotes].filter(Boolean).join('\n\n');
 
   const itemRows = items.map((item) => {
+    if (item.removed) {
+      return `
+        <tr style="background:#fff5f5;border-bottom:1px solid #fee2e2;">
+          <td style="padding:8px 12px">
+            ${item.image ? `<img src="${item.image}" alt="" style="width:48px;height:48px;object-fit:contain;border-radius:6px;background:#f3f4f6;mix-blend-mode:multiply">` : '<div style="width:48px;height:48px;background:#f3f4f6;border-radius:6px"></div>'}
+          </td>
+          <td style="padding:10px 12px;font-weight:700;font-size:12px;color:#94a3b8;text-decoration:line-through">${item.code || '—'}</td>
+          <td style="padding:10px 12px;font-size:13px;color:#94a3b8;text-decoration:line-through">${item.name || '—'}</td>
+          <td style="padding:10px 12px;text-align:center;font-size:13px;color:#94a3b8;text-decoration:line-through">${item.originalQty ?? item.qty}</td>
+          <td style="padding:10px 12px;text-align:center"><span style="font-size:11px;font-weight:700;color:#dc2626;background:#fee2e2;padding:3px 8px;border-radius:4px">OUT OF STOCK</span></td>
+          ${hasPrice ? '<td style="padding:10px 12px;text-align:right;color:#94a3b8">—</td>' : ''}
+        </tr>`;
+    }
     const qtyChanged = item.originalQty != null && item.qty !== item.originalQty;
     const lineTotal = item.unitPrice ? (item.qty * item.unitPrice).toFixed(2) : null;
     return `
-      <tr style="border-bottom:1px solid #f1f5f9;">
+      <tr style="background:${qtyChanged ? '#fffbeb' : 'transparent'};border-bottom:1px solid #f1f5f9;">
+        <td style="padding:8px 12px">
+          ${item.image ? `<img src="${item.image}" alt="" style="width:48px;height:48px;object-fit:contain;border-radius:6px;background:#f3f4f6;mix-blend-mode:multiply">` : '<div style="width:48px;height:48px;background:#f3f4f6;border-radius:6px"></div>'}
+        </td>
         <td style="padding:10px 12px;font-weight:700;font-size:12px;color:#64748b">${item.code || '—'}</td>
-        <td style="padding:10px 12px;font-size:13px">${item.name || '—'}</td>
+        <td style="padding:10px 12px;font-size:13px">
+          ${item.name || '—'}
+          ${item.swapped ? '<span style="margin-left:8px;font-size:10px;font-weight:700;color:#2563eb;background:#dbeafe;padding:2px 6px;border-radius:4px">SUBSTITUTED</span>' : ''}
+          ${qtyChanged ? '<span style="margin-left:8px;font-size:10px;font-weight:700;color:#92400e;background:#fef3c7;padding:2px 6px;border-radius:4px">QTY CHANGED</span>' : ''}
+        </td>
         <td style="padding:10px 12px;text-align:center;font-size:13px;color:#94a3b8">${item.originalQty != null ? item.originalQty : item.qty}</td>
-        <td style="padding:10px 12px;text-align:center;font-weight:700;font-size:13px;background:${qtyChanged ? '#fffbeb' : 'transparent'};color:${qtyChanged ? '#92400e' : '#0f172a'}">${item.qty}${qtyChanged ? ' ✎' : ''}</td>
+        <td style="padding:10px 12px;text-align:center;font-weight:700;font-size:13px;color:${qtyChanged ? '#92400e' : '#0f172a'}">${item.qty}</td>
         ${lineTotal != null ? `<td style="padding:10px 12px;text-align:right;font-size:13px">R${lineTotal}</td>` : ''}
       </tr>`;
   }).join('');
@@ -38,12 +59,14 @@ function buildEmailHtml({ customerName, orderNumber, orderDate, items, notes, as
     <p style="color:#374151;font-size:15px;margin:0 0 20px">Hi <strong>${customerName || 'there'}</strong>,</p>
     <p style="color:#374151;font-size:14px;margin:0 0 24px;line-height:1.6">
       Thank you for your order. Please find your confirmed order summary below.
-      ${items.some((i) => i.originalQty != null && i.qty !== i.originalQty) ? '<br><span style="color:#92400e;font-weight:700">Items marked with ✎ have been adjusted from your original order.</span>' : ''}
+      ${items.some((i) => i.removed) ? '<br><span style="color:#dc2626;font-weight:700">Some items marked OUT OF STOCK are not included in your confirmed order.</span>' : ''}
+      ${items.some((i) => !i.removed && i.originalQty != null && i.qty !== i.originalQty) ? '<br><span style="color:#92400e;font-weight:700">Items marked QTY CHANGED have been adjusted from your original order.</span>' : ''}
     </p>
 
     <table style="width:100%;border-collapse:collapse;font-family:Arial,sans-serif">
       <thead>
         <tr style="background:#f8fafc;border-bottom:2px solid #e2e8f0">
+          <th style="padding:8px 12px;text-align:left;font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.05em;width:60px">Img</th>
           <th style="padding:10px 12px;text-align:left;font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.05em">Code</th>
           <th style="padding:10px 12px;text-align:left;font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.05em">Product</th>
           <th style="padding:10px 12px;text-align:center;font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.05em">Ordered</th>
@@ -60,10 +83,10 @@ function buildEmailHtml({ customerName, orderNumber, orderDate, items, notes, as
       <span style="font-size:20px;font-weight:900;color:#0f172a">R ${total.toFixed(2)}</span>
     </div>` : ''}
 
-    ${notes ? `
+    ${allNotes ? `
     <div style="margin-top:24px;padding:14px 16px;background:#f8fafc;border-radius:8px;border-left:3px solid #0f172a">
-      <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px">Notes</div>
-      <div style="font-size:13px;color:#374151;line-height:1.6;white-space:pre-wrap">${notes}</div>
+      <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px">Order Notes</div>
+      <div style="font-size:13px;color:#374151;line-height:1.6;white-space:pre-wrap">${allNotes}</div>
     </div>` : ''}
 
     ${assignedTo ? `
@@ -87,7 +110,7 @@ function buildEmailHtml({ customerName, orderNumber, orderDate, items, notes, as
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
 
-  const { to, customerName, orderNumber, orderDate, items = [], notes, assignedTo, total } = req.body || {};
+  const { to, customerName, orderNumber, orderDate, items = [], autoNotes, userNotes, assignedTo, total } = req.body || {};
 
   if (!to) return res.status(400).json({ error: 'Recipient email (to) is required.' });
 
@@ -95,7 +118,7 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'Brevo API key not configured (BREVO_API_KEY).' });
   }
 
-  const html = buildEmailHtml({ customerName, orderNumber, orderDate, items, notes, assignedTo, total });
+  const html = buildEmailHtml({ customerName, orderNumber, orderDate, items, autoNotes, userNotes, assignedTo, total });
 
   const resp = await fetch('https://api.brevo.com/v3/smtp/email', {
     method: 'POST',
