@@ -1,4 +1,5 @@
 import AdminPage from './pages/AdminPage';
+import FulfillmentPage from './pages/FulfillmentPage';
 
 const temporaryCustomer = {
   id: 'temporary-admin-access',
@@ -8,6 +9,10 @@ const temporaryCustomer = {
 };
 
 export default function Root() {
+  if (window.location.pathname === '/fulfillment') {
+    return <FulfillmentPage />;
+  }
+
   return (
     <AdminPage
       customer={temporaryCustomer}

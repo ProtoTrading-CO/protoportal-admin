@@ -7,6 +7,7 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  ClipboardList,
   FileDown,
   Globe,
   Grip,
@@ -22,6 +23,7 @@ import {
   Phone,
   RefreshCw,
   Search,
+  Send,
   Shield,
   ShoppingBag,
   SlidersHorizontal,
@@ -283,6 +285,16 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
   const [expandedOrderId, setExpandedOrderId] = useState(null);
+
+  const [fulfillmentOrder, setFulfillmentOrder] = useState(null);
+  const [fulfillmentItems, setFulfillmentItems] = useState([]);
+  const [fulfillmentNotes, setFulfillmentNotes] = useState('');
+  const [fulfillmentSaving, setFulfillmentSaving] = useState(false);
+  const [editingItemIdx, setEditingItemIdx] = useState(null);
+  const [productSwapSearch, setProductSwapSearch] = useState('');
+  const [productSwapResults, setProductSwapResults] = useState([]);
+  const [productSwapLoading, setProductSwapLoading] = useState(false);
+  const swapSearchTimerRef = useRef(null);
 
   const [orders, setOrders] = useState([]);
   const [orderSearch, setOrderSearch] = useState('');
@@ -684,6 +696,77 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
       const updated = await updateOrderAdmin(order.id, patch);
       setOrders((prev) => prev.map((item) => item.id === order.id ? updated : item));
     } finally { setSaving(''); }
+  };
+
+  const openFulfillment = (order) => {
+    const items = (order.original_items || order.items || []).map((item) => ({
+      ...item,
+      checked: false,
+      finalQty: item.qty,
+    }));
+    setFulfillmentOrder(order);
+    setFulfillmentItems(items);
+    setFulfillmentNotes('');
+    setEditingItemIdx(null);
+    setProductSwapSearch('');
+    setProductSwapResults([]);
+  };
+
+  const closeFulfillment = () => {
+    setFulfillmentOrder(null);
+    setFulfillmentItems([]);
+    setFulfillmentNotes('');
+    setEditingItemIdx(null);
+    setProductSwapSearch('');
+    setProductSwapResults([]);
+  };
+
+  const handleSwapSearchChange = (q) => {
+    setProductSwapSearch(q);
+    clearTimeout(swapSearchTimerRef.current);
+    if (!q.trim()) { setProductSwapResults([]); return; }
+    swapSearchTimerRef.current = setTimeout(async () => {
+      setProductSwapLoading(true);
+      try {
+        const data = await fetchAdminProductsPage({ page: 1, pageSize: 8, searchQuery: q });
+        setProductSwapResults(data.rows);
+      } finally { setProductSwapLoading(false); }
+    }, 350);
+  };
+
+  const swapFulfillmentItem = (idx, product) => {
+    setFulfillmentItems((prev) => prev.map((item, i) => i !== idx ? item : {
+      ...item,
+      productId: product.id,
+      code: product.code,
+      name: product.name,
+      image: product.image || '',
+      unitPrice: product.price,
+    }));
+    setEditingItemIdx(null);
+    setProductSwapSearch('');
+    setProductSwapResults([]);
+  };
+
+  const saveFulfillment = async (andSend = false) => {
+    if (!fulfillmentOrder) return;
+    setFulfillmentSaving(true);
+    try {
+      const finalItems = fulfillmentItems.map(({ checked, finalQty, ...rest }) => ({ ...rest, qty: finalQty }));
+      await updateOrder(fulfillmentOrder, {
+        final_items: finalItems,
+        status: 'order in progress',
+        ...(fulfillmentNotes ? { notes: fulfillmentNotes } : {}),
+      });
+      if (andSend) {
+        const customer = fulfillmentOrder.customers;
+        const lines = finalItems.map((i) => `${i.code} — ${i.name} × ${i.qty}`).join('\n');
+        const subject = `Your Order ${fulfillmentOrder.order_number || ''} — Proto Trading`;
+        const body = `Hi ${customer?.name || 'there'},\n\nThank you for your order. Here is your confirmed order summary:\n\nOrder: ${fulfillmentOrder.order_number || fulfillmentOrder.id}\n\n${lines}${fulfillmentNotes ? `\n\nNotes: ${fulfillmentNotes}` : ''}\n\nThank you for your business!\n\nProto Trading`;
+        window.open(`mailto:${customer?.email || ''}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`, '_blank');
+      }
+      closeFulfillment();
+    } finally { setFulfillmentSaving(false); }
   };
 
   const productPages = Math.max(1, Math.ceil(productTotal / productPageSize));
@@ -1275,7 +1358,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                   <label className="adm-search"><Search size={15} /><input value={orderSearch} onChange={(e) => setOrderSearch(e.target.value)} placeholder="Search orders" className="adm-search-input" /></label>
                 </div>
                 <div className="adm-list">
-                  <div className="adm-list-head" style={{ gridTemplateColumns: '1.6fr 1.4fr 1.2fr 1fr 130px 80px' }}>
+                  <div className="adm-list-head" style={{ gridTemplateColumns: '1.6fr 1.4fr 1.2fr 1fr 160px 80px' }}>
                     <span>Order</span><span>Customer</span><span>Date & Time</span><span>Status</span><span>Actions</span><span></span>
                   </div>
                   {orderRows.map((order) => {
@@ -1287,7 +1370,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                       <div key={order.id}>
                         <div
                           className="adm-list-row adm-order-row"
-                          style={{ gridTemplateColumns: '1.6fr 1.4fr 1.2fr 1fr 130px 80px', cursor: 'pointer' }}
+                          style={{ gridTemplateColumns: '1.6fr 1.4fr 1.2fr 1fr 160px 80px', cursor: 'pointer' }}
                           onClick={() => setExpandedOrderId(isExpanded ? null : order.id)}
                         >
                           <div>
@@ -1307,6 +1390,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                             </select>
                           </div>
                           <div style={{ display: 'flex', gap: 6 }} onClick={(e) => e.stopPropagation()}>
+                            <button onClick={() => window.open(`/fulfillment?id=${order.id}`, '_blank', 'noopener,noreferrer')} className="adm-icon-btn" title="Fulfil order (opens in new tab)" style={{ color: '#15803d' }}><ClipboardList size={14} /></button>
                             <button onClick={() => downloadOrderPdf(order)} className="adm-icon-btn" title="Download PDF"><FileDown size={14} /></button>
                             <button onClick={() => void deleteOrder(order)} className="adm-icon-btn" style={{ color: '#c40000' }} disabled={saving === `del-order-${order.id}`} title="Delete order">
                               {saving === `del-order-${order.id}` ? '…' : <Trash2 size={14} />}
@@ -1318,14 +1402,8 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                         </div>
                         {isExpanded && (
                           <div style={{ background: '#f8fafc', borderTop: '1px solid #f1f5f9', padding: '14px 16px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                            <div className="adm-subtle-box">
-                              <strong style={{ fontSize: 12 }}>Order placed</strong>
-                              <div className="adm-muted" style={{ marginTop: 6 }}>{compactItems(order.original_items || order.items || [])}</div>
-                            </div>
-                            <div className="adm-subtle-box">
-                              <strong style={{ fontSize: 12 }}>Order final</strong>
-                              <div className="adm-muted" style={{ marginTop: 6 }}>{compactItems(order.final_items || order.items || [])}</div>
-                            </div>
+                            <OrderItemsList label="Order placed" items={order.original_items || order.items || []} />
+                            <OrderItemsList label="Order final" items={order.final_items || order.items || []} />
                           </div>
                         )}
                       </div>
@@ -1535,6 +1613,148 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
         </div>
       )}
 
+      {/* Fulfillment modal */}
+      {fulfillmentOrder && (
+        <div className="adm-modal-backdrop">
+          <div className="adm-modal" style={{ maxWidth: 740, maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16, flexShrink: 0 }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: 20, fontFamily: 'Outfit, sans-serif', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <ClipboardList size={20} style={{ color: '#15803d' }} /> Order Fulfillment
+                </h3>
+                <p className="adm-muted" style={{ marginTop: 4, fontSize: 13 }}>
+                  {fulfillmentOrder.order_number || fulfillmentOrder.id.slice(0, 8)} &nbsp;·&nbsp; {new Date(fulfillmentOrder.created_at).toLocaleDateString('en-ZA', { day: 'numeric', month: 'long', year: 'numeric' })}
+                </p>
+              </div>
+              <button onClick={closeFulfillment} className="adm-icon-btn"><X size={16} /></button>
+            </div>
+
+            {/* Customer details */}
+            <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: '10px 14px', marginBottom: 14, fontSize: 13, flexShrink: 0 }}>
+              <div style={{ fontWeight: 700, fontSize: 14 }}>{fulfillmentOrder.customers?.name || 'Unknown customer'}</div>
+              <div className="adm-muted" style={{ marginTop: 2 }}>{fulfillmentOrder.customers?.email || '—'}</div>
+            </div>
+
+            {/* Items table */}
+            <div style={{ overflowY: 'auto', flex: 1, marginBottom: 14 }}>
+              {/* Table header */}
+              <div style={{ display: 'grid', gridTemplateColumns: '28px 24px 52px 90px 1fr 64px 72px 32px', gap: '0 8px', padding: '6px 8px', background: '#f1f5f9', borderRadius: 6, marginBottom: 4, fontSize: 11, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', alignItems: 'center' }}>
+                <span>✓</span><span>#</span><span>Img</span><span>Code</span><span>Product</span><span>Ordered</span><span>Final qty</span><span></span>
+              </div>
+              {fulfillmentItems.map((item, idx) => (
+                <div key={idx}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '28px 24px 52px 90px 1fr 64px 72px 32px', gap: '0 8px', padding: '8px', borderBottom: '1px solid #f1f5f9', alignItems: 'center', background: item.checked ? '#f0fdf4' : 'white' }}>
+                    <input
+                      type="checkbox"
+                      checked={item.checked}
+                      onChange={() => setFulfillmentItems((prev) => prev.map((it, i) => i === idx ? { ...it, checked: !it.checked } : it))}
+                      style={{ width: 16, height: 16, accentColor: '#15803d', cursor: 'pointer' }}
+                    />
+                    <span style={{ fontSize: 12, color: '#94a3b8', fontWeight: 700 }}>{idx + 1}</span>
+                    <div style={{ width: 48, height: 48, borderRadius: 6, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                      {item.image
+                        ? <img src={item.image} alt="" style={{ width: 48, height: 48, objectFit: 'contain', mixBlendMode: 'multiply' }} />
+                        : <span style={{ fontSize: 9, color: '#9ca3af' }}>IMG</span>}
+                    </div>
+                    <span style={{ fontWeight: 700, fontSize: 12, wordBreak: 'break-all' }}>{item.code || '—'}</span>
+                    <span style={{ fontSize: 13 }}>{item.name || '—'}</span>
+                    <span style={{ fontSize: 13, color: '#6b7280', textAlign: 'center' }}>× {item.qty}</span>
+                    <input
+                      type="number"
+                      min="0"
+                      value={item.finalQty}
+                      onChange={(e) => setFulfillmentItems((prev) => prev.map((it, i) => i === idx ? { ...it, finalQty: Math.max(0, Number(e.target.value)) } : it))}
+                      className="adm-tiny-input"
+                      style={{ width: 64, textAlign: 'center' }}
+                    />
+                    <button
+                      onClick={() => { setEditingItemIdx(editingItemIdx === idx ? null : idx); setProductSwapSearch(''); setProductSwapResults([]); }}
+                      className="adm-icon-btn"
+                      title="Swap product"
+                      style={{ color: editingItemIdx === idx ? '#8B1A1A' : undefined }}
+                    >
+                      <Pencil size={13} />
+                    </button>
+                  </div>
+
+                  {/* Inline product swap */}
+                  {editingItemIdx === idx && (
+                    <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, padding: 12, margin: '4px 0 8px', display: 'grid', gap: 8 }}>
+                      <div style={{ fontWeight: 700, fontSize: 12, color: '#92400e' }}>Swap product — search by code or name</div>
+                      <label className="adm-search" style={{ background: 'white' }}>
+                        <Search size={13} />
+                        <input
+                          value={productSwapSearch}
+                          onChange={(e) => handleSwapSearchChange(e.target.value)}
+                          placeholder="Type code or product name…"
+                          className="adm-search-input"
+                          autoFocus
+                        />
+                        {productSwapLoading && <Loader2 size={13} className="spin" />}
+                      </label>
+                      {productSwapResults.length > 0 && (
+                        <div style={{ display: 'grid', gap: 4, maxHeight: 200, overflowY: 'auto' }}>
+                          {productSwapResults.map((p) => (
+                            <button
+                              key={p.id}
+                              onClick={() => swapFulfillmentItem(idx, p)}
+                              style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 10px', background: 'white', border: '1px solid #e5e7eb', borderRadius: 6, cursor: 'pointer', textAlign: 'left', fontSize: 13 }}
+                            >
+                              {p.image
+                                ? <img src={p.image} alt="" style={{ width: 36, height: 36, objectFit: 'contain', borderRadius: 4, flexShrink: 0 }} />
+                                : <div style={{ width: 36, height: 36, background: '#f3f4f6', borderRadius: 4, flexShrink: 0 }} />}
+                              <div>
+                                <div style={{ fontWeight: 700, fontSize: 12 }}>{p.code}</div>
+                                <div style={{ color: '#374151' }}>{p.name}</div>
+                              </div>
+                              <span style={{ marginLeft: 'auto', color: '#6b7280', fontSize: 12 }}>R{p.price}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      {productSwapSearch && !productSwapLoading && productSwapResults.length === 0 && (
+                        <div className="adm-muted" style={{ fontSize: 12 }}>No products found.</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {/* Notes */}
+            <div style={{ flexShrink: 0, marginBottom: 16 }}>
+              <label style={{ display: 'grid', gap: 6 }}>
+                <span style={{ fontWeight: 700, fontSize: 13 }}>Notes</span>
+                <textarea
+                  value={fulfillmentNotes}
+                  onChange={(e) => setFulfillmentNotes(e.target.value)}
+                  className="adm-field-input"
+                  rows={2}
+                  placeholder="Add any fulfillment notes…"
+                  style={{ resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }}
+                />
+              </label>
+            </div>
+
+            {/* Footer */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, flexShrink: 0, flexWrap: 'wrap' }}>
+              <button onClick={closeFulfillment} className="adm-btn-ghost"><ChevronLeft size={15} /> Cancel</button>
+              <button onClick={() => void saveFulfillment(false)} className="adm-btn-ghost" disabled={fulfillmentSaving}>
+                {fulfillmentSaving ? 'Saving…' : <><Check size={15} /> Save final order</>}
+              </button>
+              <button
+                onClick={() => void saveFulfillment(true)}
+                disabled={fulfillmentSaving}
+                style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px', background: '#15803d', color: 'white', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 700, cursor: fulfillmentSaving ? 'not-allowed' : 'pointer', opacity: fulfillmentSaving ? 0.7 : 1 }}
+              >
+                <Send size={15} /> Send order to customer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Product editor modal */}
       {editorOpen && (
         <div className="adm-modal-backdrop">
@@ -1577,6 +1797,31 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function OrderItemsList({ label, items }) {
+  return (
+    <div className="adm-subtle-box">
+      <strong style={{ fontSize: 12 }}>{label}</strong>
+      <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {items.length === 0 && <span className="adm-muted" style={{ fontSize: 12 }}>—</span>}
+        {items.map((item, i) => (
+          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ width: 40, height: 40, borderRadius: 5, background: '#f3f4f6', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+              {item.image
+                ? <img src={item.image} alt="" style={{ width: 40, height: 40, objectFit: 'contain', mixBlendMode: 'multiply' }} />
+                : <span style={{ fontSize: 8, color: '#9ca3af' }}>IMG</span>}
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 700, fontSize: 11, color: '#374151' }}>{item.code}</div>
+              <div style={{ fontSize: 12, color: '#6b7280', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{item.name}</div>
+            </div>
+            <span style={{ fontWeight: 700, fontSize: 13, flexShrink: 0 }}>× {item.qty}</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

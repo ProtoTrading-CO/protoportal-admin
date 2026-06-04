@@ -13,7 +13,7 @@ export default async function handler(req, res) {
 
   // GET — list orders (service role bypasses RLS)
   if (req.method === 'GET') {
-    const { limit = '150', customerId = '' } = req.query;
+    const { limit = '150', customerId = '', id = '' } = req.query;
     const lim = Math.min(500, Math.max(1, parseInt(limit, 10) || 150));
 
     let ordersQuery = supabase
@@ -22,6 +22,7 @@ export default async function handler(req, res) {
       .order('created_at', { ascending: false })
       .limit(lim);
 
+    if (id) ordersQuery = ordersQuery.eq('id', id);
     if (customerId) ordersQuery = ordersQuery.eq('customer_id', customerId);
 
     const { data, error } = await ordersQuery;
