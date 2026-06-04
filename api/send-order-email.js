@@ -3,6 +3,8 @@ function buildEmailHtml({ customerName, orderNumber, orderDate, items, notes, as
     ? new Date(orderDate).toLocaleDateString('en-ZA', { day: 'numeric', month: 'long', year: 'numeric' })
     : '';
 
+  const hasPrice = items.some((item) => item.unitPrice);
+
   const itemRows = items.map((item) => {
     const qtyChanged = item.originalQty != null && item.qty !== item.originalQty;
     const lineTotal = item.unitPrice ? (item.qty * item.unitPrice).toFixed(2) : null;
@@ -16,8 +18,6 @@ function buildEmailHtml({ customerName, orderNumber, orderDate, items, notes, as
       </tr>`;
   }).join('');
 
-  const hasPrice = items.some((i) => i.unitPrice);
-
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -28,14 +28,12 @@ function buildEmailHtml({ customerName, orderNumber, orderDate, items, notes, as
 <body style="margin:0;padding:0;background:#f8fafc;font-family:Arial,Helvetica,sans-serif">
 <div style="max-width:600px;margin:32px auto;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 2px 16px rgba(0,0,0,0.08)">
 
-  <!-- Header -->
   <div style="background:#0f172a;padding:28px 32px">
     <div style="color:#4ade80;font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;margin-bottom:6px">Proto Trading</div>
     <h1 style="color:#ffffff;margin:0;font-size:22px;font-weight:800">Order Confirmation</h1>
     <div style="color:#94a3b8;font-size:13px;margin-top:6px">${orderNumber}${dateStr ? ` &nbsp;·&nbsp; ${dateStr}` : ''}</div>
   </div>
 
-  <!-- Body -->
   <div style="padding:28px 32px">
     <p style="color:#374151;font-size:15px;margin:0 0 20px">Hi <strong>${customerName || 'there'}</strong>,</p>
     <p style="color:#374151;font-size:14px;margin:0 0 24px;line-height:1.6">
@@ -43,7 +41,6 @@ function buildEmailHtml({ customerName, orderNumber, orderDate, items, notes, as
       ${items.some((i) => i.originalQty != null && i.qty !== i.originalQty) ? '<br><span style="color:#92400e;font-weight:700">Items marked with ✎ have been adjusted from your original order.</span>' : ''}
     </p>
 
-    <!-- Items table -->
     <table style="width:100%;border-collapse:collapse;font-family:Arial,sans-serif">
       <thead>
         <tr style="background:#f8fafc;border-bottom:2px solid #e2e8f0">
@@ -58,14 +55,12 @@ function buildEmailHtml({ customerName, orderNumber, orderDate, items, notes, as
     </table>
 
     ${total != null ? `
-    <!-- Total -->
-    <div style="display:flex;justify-content:flex-end;margin-top:16px;padding:14px 12px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0">
-      <span style="font-size:14px;font-weight:700;color:#374151;margin-right:16px">Total</span>
+    <div style="margin-top:16px;padding:14px 12px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:center">
+      <span style="font-size:14px;font-weight:700;color:#374151">Total</span>
       <span style="font-size:20px;font-weight:900;color:#0f172a">R ${total.toFixed(2)}</span>
     </div>` : ''}
 
     ${notes ? `
-    <!-- Notes -->
     <div style="margin-top:24px;padding:14px 16px;background:#f8fafc;border-radius:8px;border-left:3px solid #0f172a">
       <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px">Notes</div>
       <div style="font-size:13px;color:#374151;line-height:1.6;white-space:pre-wrap">${notes}</div>
@@ -81,7 +76,6 @@ function buildEmailHtml({ customerName, orderNumber, orderDate, items, notes, as
     </p>
   </div>
 
-  <!-- Footer -->
   <div style="padding:20px 32px;background:#f8fafc;border-top:1px solid #e2e8f0;text-align:center">
     <div style="font-size:12px;color:#94a3b8">Proto Trading · South Africa</div>
   </div>
@@ -97,28 +91,31 @@ export default async function handler(req, res) {
 
   if (!to) return res.status(400).json({ error: 'Recipient email (to) is required.' });
 
-  if (!process.env.RESEND_API_KEY) {
-    return res.status(500).json({ error: 'Email service not configured. Add RESEND_API_KEY to your Vercel environment variables.' });
+  if (!process.env.BREVO_API_KEY) {
+    return res.status(500).json({ error: 'Brevo API key not configured (BREVO_API_KEY).' });
   }
 
   const html = buildEmailHtml({ customerName, orderNumber, orderDate, items, notes, assignedTo, total });
-  const from = process.env.RESEND_FROM || 'Proto Trading <onboarding@resend.dev>';
 
-  const response = await fetch('https://api.resend.com/emails', {
+  const resp = await fetch('https://api.brevo.com/v3/smtp/email', {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
-      'Content-Type': 'application/json',
+      accept: 'application/json',
+      'content-type': 'application/json',
+      'api-key': process.env.BREVO_API_KEY,
     },
     body: JSON.stringify({
-      from,
-      to: [to],
+      sender: { name: 'Proto Trading', email: 'online@proto.co.za' },
+      to: [{ email: to }],
       subject: `Your Order ${orderNumber || ''} — Proto Trading`,
-      html,
+      htmlContent: html,
     }),
   });
 
-  const data = await response.json();
-  if (!response.ok) return res.status(400).json({ error: data.message || data.error || 'Failed to send email' });
-  return res.status(200).json({ ok: true, id: data.id });
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => ({}));
+    return res.status(502).json({ error: body.message || 'Email could not be sent' });
+  }
+
+  return res.status(200).json({ ok: true });
 }
