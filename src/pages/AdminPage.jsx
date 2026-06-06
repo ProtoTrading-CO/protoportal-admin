@@ -2320,10 +2320,12 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                       <div className="adm-analytics-value">{analyticsData.newSignups30d}</div>
                       <div className="adm-analytics-label">New Sign-ups (30d)</div>
                     </div>
-                    <div className="adm-analytics-card">
-                      <div className="adm-analytics-value">{analyticsData.whatsappCustomers}</div>
-                      <div className="adm-analytics-label">WhatsApp Customers</div>
-                    </div>
+                    {analyticsData.whatsappCustomers !== null && (
+                      <div className="adm-analytics-card">
+                        <div className="adm-analytics-value">{analyticsData.whatsappCustomers}</div>
+                        <div className="adm-analytics-label">WhatsApp Customers</div>
+                      </div>
+                    )}
                     <div className="adm-analytics-card">
                       <div className="adm-analytics-value">{analyticsData.totalOrders}</div>
                       <div className="adm-analytics-label">Total Orders</div>

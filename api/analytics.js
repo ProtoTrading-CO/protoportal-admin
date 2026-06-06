@@ -14,7 +14,7 @@ export default async function handler(req, res) {
   const supabase = getAdminClient();
 
   const [custRes, ordRes] = await Promise.all([
-    supabase.from('customers').select('id, created_at, accept_whatsapp, is_approved'),
+    supabase.from('customers').select('id, created_at, is_approved'),
     supabase.from('orders').select('id, total_ex_vat, created_at'),
   ]);
 
@@ -30,7 +30,7 @@ export default async function handler(req, res) {
   return res.status(200).json({
     totalCustomers: approved.length,
     newSignups30d: approved.filter((c) => new Date(c.created_at) > cutoff).length,
-    whatsappCustomers: approved.filter((c) => c.accept_whatsapp).length,
+    whatsappCustomers: null,
     totalOrders: orders.length,
     totalRevenue,
     avgOrderSize: orders.length ? totalRevenue / orders.length : 0,
