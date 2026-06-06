@@ -378,6 +378,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
 
   const [analyticsData, setAnalyticsData] = useState(null);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
+  const [analyticsError, setAnalyticsError] = useState(null);
 
   const mainCategories = categories.map((item) => ({ id: item.id, label: item.label }));
 
@@ -555,7 +556,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   useEffect(() => { if (activeSection === 'reorder') void loadCategoryWorkingSet(reorderCategory, 'reorder'); }, [activeSection, reorderCategory]);
   useEffect(() => { if (activeSection === 'orders' && orders.length === 0) void loadOrders(); }, [activeSection]);
   useEffect(() => { if (activeSection === 'crm' && !crmAllCustomers.length && !crmLoading) void loadCrmCustomers(); }, [activeSection]);
-  useEffect(() => { if (activeSection === 'analytics' && !analyticsData && !analyticsLoading) void loadAnalytics(); }, [activeSection]);
+  useEffect(() => { if (activeSection === 'analytics' && !analyticsData && !analyticsLoading && !analyticsError) void loadAnalytics(); }, [activeSection]);
 
   // Load specials on mount
   useEffect(() => {
@@ -871,13 +872,15 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
 
   const loadAnalytics = async () => {
     setAnalyticsLoading(true);
+    setAnalyticsError(null);
     try {
       const res = await fetch('/api/analytics');
       const json = await res.json();
-      if (!res.ok) throw new Error(json.error || 'Failed to load analytics');
+      if (!res.ok) throw new Error(json.error || `API error ${res.status}`);
       setAnalyticsData(json);
-    } catch (e) { console.error(e); }
-    finally { setAnalyticsLoading(false); }
+    } catch (e) {
+      setAnalyticsError(e.message);
+    } finally { setAnalyticsLoading(false); }
   };
 
   const exportLiveXlsx = async () => {
@@ -2302,6 +2305,11 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                   <button onClick={() => void loadAnalytics()} className="adm-btn-ghost"><RefreshCw size={15} /><span className="adm-btn-text">Refresh</span></button>
                 </div>
                 {analyticsLoading && <div className="adm-muted" style={{ padding: '24px 0', fontSize: 13 }}>Loading analytics…</div>}
+                {analyticsError && (
+                  <div style={{ margin: '16px 0', padding: '12px 16px', background: '#fef2f2', border: '1px solid #fecaca', color: '#c40000', fontSize: 13 }}>
+                    Error: {analyticsError}
+                  </div>
+                )}
                 {analyticsData && (
                   <div className="adm-analytics-grid">
                     <div className="adm-analytics-card">
