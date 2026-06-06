@@ -50,8 +50,11 @@ import {
   invalidateProductCache,
   saveSortOrder,
   updateProduct,
+  uploadDormantImage,
+  uploadDormantImageWithBase64,
 } from '../lib/products';
 import { approveCustomer, deleteCustomer, fetchCustomersPage, updateCustomerAdmin } from '../lib/customers';
+import { buildOrderNoteSections, createEmailOrderItems, generateOrderPdfBase64 } from '../lib/orderDocuments';
 import { deleteOrderAdmin, fetchAllOrdersAdmin, updateOrderAdmin } from '../lib/orders';
 import { fetchSpecials, saveSpecials } from '../lib/specials';
 import categories from '../data/categories.json';
@@ -92,9 +95,40 @@ const sections = [
   { id: 'orders', label: 'Order Requests', icon: ShoppingBag },
 ];
 
-const orderStatuses = ['viewed', 'order in progress', 'awaiting payment', 'paid', 'delivered', 'returned'];
+const orderStatuses = ['pending', 'viewed', 'order in progress', 'awaiting payment', 'paid', 'delivered', 'returned'];
 const productTypes = ['General product', 'Hot seller', 'New stock', 'Clearance stock'];
 const ADMIN_PAGE_SIZE = 50;
+const randFormatter = new Intl.NumberFormat('en-ZA', { style: 'currency', currency: 'ZAR', minimumFractionDigits: 2, maximumFractionDigits: 4 });
+
+function isNewOrderStatus(status) {
+  return !status || status === 'pending' || status === 'viewed';
+}
+
+function formatRandAmount(value) {
+  const amount = Number(value || 0);
+  return randFormatter.format(amount);
+}
+
+function renderNoteSections(noteSections) {
+  if (!noteSections.length) return <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>No notes yet</span>;
+  return (
+    <div style={{ display: 'grid', gap: 10 }}>
+      {noteSections.map((section) => (
+        <div key={section.title} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10, padding: '10px 12px' }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>{section.title}</div>
+          <div style={{ display: 'grid', gap: 6 }}>
+            {section.lines.map((line, index) => (
+              <div key={`${section.title}-${index}`} style={{ fontSize: 13, color: '#374151', lineHeight: 1.55, display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                <span style={{ color: '#16a34a', fontWeight: 700 }}>•</span>
+                <span>{line}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 function generateOrderChecklistHtml(order) {
   const items = order.original_items || order.items || [];
@@ -146,9 +180,9 @@ function generateOrderChecklistHtml(order) {
   <span style="display:inline-block;border-bottom:1px solid #aaa;width:100%;margin-top:14px">&nbsp;</span>
 </div>
 <div class="no-print" style="margin-top:20px">
-  <button onclick="window.print()" style="padding:9px 20px;background:#7F1D1D;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer;font-family:Arial">
-    Print / Save as PDF
-  </button>
+  <div style="padding:9px 20px;background:#f8fafc;color:#334155;border:1px solid #cbd5e1;border-radius:6px;font-size:14px;font-family:Arial;display:inline-block">
+    Downloaded order file for reference
+  </div>
 </div>
 </body></html>`;
 }
@@ -158,6 +192,7 @@ const emptyForm = {
   code: '',
   name: '',
   image: '',
+  secondaryImage: '',
   price: '0',
   stockOnHand: '1',
   categoryId: categories[0]?.id || '',
@@ -227,6 +262,7 @@ function productToForm(product) {
     code: product.code || '',
     name: product.name || '',
     image: product.image || '',
+    secondaryImage: product.secondaryImage || product.images?.[1] || '',
     price: String(product.price ?? 0),
     stockOnHand: String(product.stockOnHand ?? 1),
     categoryId: product.categoryPath?.[0] || categories[0]?.id || '',
@@ -245,6 +281,11 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
   const [productForm, setProductForm] = useState(emptyForm);
+  const [editorError, setEditorError] = useState('');
+  const [editorImageUploading, setEditorImageUploading] = useState(false);
+  const [editorImageDragOver, setEditorImageDragOver] = useState('');
+  const editorPrimaryImageFileInputRef = useRef(null);
+  const editorSecondaryImageFileInputRef = useRef(null);
   const [profileCustomer, setProfileCustomer] = useState(null);
   const [profileOrders, setProfileOrders] = useState([]);
   const [profileOrdersLoading, setProfileOrdersLoading] = useState(false);
@@ -299,6 +340,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const [dragId, setDragId] = useState(null);
   const [dragOverId, setDragOverId] = useState(null);
   const [selectedIds, setSelectedIds] = useState(new Set());
+  const touchDragRef = useRef(null);
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
@@ -344,48 +386,47 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
       const file = imageFiles[i];
       const sku = file.name.replace(/\.[^.]+$/, '');
 
-      // Step 1: read file
-      let base64 = '';
+      // Step 1: compress + upload (compression also produces the base64 we reuse for Gemini)
+      setUploadQueue((prev) => prev.map((item, idx) => idx === i ? { ...item, status: 'transforming', message: 'Uploading…' } : item));
+      let imageUrl = '', uploadedBase64 = '';
       try {
-        base64 = await new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(String(reader.result || '').split(',')[1]);
-          reader.onerror = reject;
-          reader.readAsDataURL(file);
-        });
-      } catch (err) {
-        setUploadQueue((prev) => prev.map((item, idx) => idx === i ? { ...item, status: 'error', message: 'Could not read file' } : item));
-        continue;
-      }
-
-      // Step 2: process with Gemini (store image + extract metadata)
-      setUploadQueue((prev) => prev.map((item, idx) => idx === i ? { ...item, status: 'transforming', message: 'Gemini analysing…' } : item));
-      let imageUrl = '', title = sku, category = '', description = '', cost = 0, model = '';
-      try {
-        const processRes = await fetch('/api/process-product-image', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ filename: file.name, contentType: file.type, base64 }),
-        });
-        const processJson = await processRes.json();
-        if (!processRes.ok) throw new Error(processJson.error || 'Processing failed');
-        imageUrl  = processJson.url || '';
-        title     = processJson.title || sku;
-        category  = processJson.category || '';
-        description = processJson.description || '';
-        cost      = processJson.cost || 0;
-        model     = processJson.model || '';
-
-        newEntries.push({
-          sku, title, cost, model,
-          tokensIn: processJson.tokensIn || 0,
-          tokensOut: processJson.tokensOut || 0,
-          processingMs: processJson.processingMs || 0,
-          timestamp: Date.now(),
-        });
+        // compressImage returns a Blob; we need both the URL and the base64 for Gemini
+        const { url, base64 } = await uploadDormantImageWithBase64(file);
+        imageUrl = url;
+        uploadedBase64 = base64;
       } catch (err) {
         setUploadQueue((prev) => prev.map((item, idx) => idx === i ? { ...item, status: 'error', message: err.message } : item));
         continue;
+      }
+
+      // Step 2: Gemini 2.5 Flash analysis for metadata (non-fatal)
+      setUploadQueue((prev) => prev.map((item, idx) => idx === i ? { ...item, status: 'transforming', message: 'Gemini analysing…' } : item));
+      let title = sku, category = '', description = '', cost = 0, costZar = 0, usdToZar = 0, model = '';
+      if (uploadedBase64) {
+        try {
+          const analyseRes = await fetch('/api/analyze-product-image', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ filename: file.name, contentType: 'image/jpeg', base64: uploadedBase64 }),
+          });
+          const analyseJson = await analyseRes.json();
+          if (analyseRes.ok) {
+            title       = analyseJson.title       || sku;
+            category    = analyseJson.category    || '';
+            description = analyseJson.description || '';
+            cost        = analyseJson.costUsd ?? analyseJson.cost ?? 0;
+            costZar     = analyseJson.costZar ?? 0;
+            usdToZar    = analyseJson.usdToZar ?? 0;
+            model       = analyseJson.model       || '';
+            newEntries.push({
+              sku, title, cost, costUsd: cost, costZar, usdToZar, model,
+              tokensIn: analyseJson.tokensIn || 0,
+              tokensOut: analyseJson.tokensOut || 0,
+              processingMs: analyseJson.processingMs || 0,
+              timestamp: Date.now(),
+            });
+          }
+        } catch { /* non-fatal */ }
       }
 
       // Step 3: save dormant
@@ -398,8 +439,8 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
         });
         const saveJson = await saveRes.json();
         if (!saveRes.ok) throw new Error(saveJson.error || 'Save failed');
-        const costLabel = cost === 0 ? 'free' : `$${cost.toFixed(5)}`;
-        setUploadQueue((prev) => prev.map((item, idx) => idx === i ? { ...item, status: 'done', message: `Saved ✓  ·  ${costLabel}`, cost } : item));
+        const costLabel = costZar === 0 ? 'free' : formatRandAmount(costZar);
+        setUploadQueue((prev) => prev.map((item, idx) => idx === i ? { ...item, status: 'done', message: `Saved ✓  ·  ${costLabel}`, cost: costZar } : item));
       } catch (err) {
         setUploadQueue((prev) => prev.map((item, idx) => idx === i ? { ...item, status: 'error', message: err.message } : item));
       }
@@ -563,6 +604,27 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     }
   };
 
+  const uploadEditorImageFile = async (file, slot = 'primary') => {
+    if (!file || !file.type.startsWith('image/')) {
+      setEditorError('Only image files are supported.');
+      return;
+    }
+    setEditorImageUploading(true);
+    setEditorError('');
+    try {
+      const url = await uploadDormantImage(file);
+      setProductForm((current) => ({
+        ...current,
+        image: slot === 'primary' ? url : current.image,
+        secondaryImage: slot === 'secondary' ? url : current.secondaryImage,
+      }));
+    } catch (err) {
+      setEditorError(err.message || 'Image upload failed');
+    } finally {
+      setEditorImageUploading(false);
+    }
+  };
+
   const stats = useMemo(() => ({
     products: productTotal,
     archived: archiveTotal,
@@ -574,7 +636,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const orderRows = useMemo(() => {
     const q = orderSearch.trim().toLowerCase();
     const filtered = orders.filter((order) => !q || [order.order_number, order.customers?.name, order.customers?.email, compactItems(order.original_items || order.items || [])].join(' ').toLowerCase().includes(q));
-    if (orderTab === 'new') return filtered.filter((o) => !o.status || o.status === 'viewed');
+    if (orderTab === 'new') return filtered.filter((o) => isNewOrderStatus(o.status));
     if (orderTab === 'sent') return filtered.filter((o) => o.status === 'order in progress' || o.status === 'awaiting payment');
     if (orderTab === 'paid') return filtered.filter((o) => o.status === 'paid');
     if (orderTab === 'fulfilled') return filtered.filter((o) => o.status === 'delivered');
@@ -586,16 +648,44 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     const firstCategory = categories[0]?.id || '';
     setEditingProduct(null);
     setProductForm({ ...emptyForm, categoryId: firstCategory, subcategoryId: subcategoryOptions(firstCategory)[0]?.id || '' });
+    setEditorError('');
+    setEditorImageUploading(false);
+    setEditorImageDragOver('');
     setEditorOpen(true);
   };
 
   const openEditProduct = (product) => {
     setEditingProduct(product);
     setProductForm(productToForm(product));
+    setEditorError('');
+    setEditorImageUploading(false);
+    setEditorImageDragOver('');
     setEditorOpen(true);
   };
 
-  const closeEditor = () => { setEditorOpen(false); setEditingProduct(null); };
+  const closeEditor = () => {
+    setEditorOpen(false);
+    setEditingProduct(null);
+    setEditorError('');
+    setEditorImageUploading(false);
+    setEditorImageDragOver('');
+  };
+
+  const swapEditorImages = () => {
+    setProductForm((current) => ({
+      ...current,
+      image: current.secondaryImage || '',
+      secondaryImage: current.image || '',
+    }));
+  };
+
+  const clearEditorImage = (slot) => {
+    setProductForm((current) => ({
+      ...current,
+      image: slot === 'primary' ? '' : current.image,
+      secondaryImage: slot === 'secondary' ? '' : current.secondaryImage,
+    }));
+  };
 
   const openContentEdit = (product) => {
     setContentEditProduct(product);
@@ -641,6 +731,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
       code: productForm.code.trim(),
       name: productForm.name.trim(),
       image: productForm.image.trim(),
+      secondaryImage: productForm.secondaryImage.trim(),
       price: Number(productForm.price || 0),
       stockOnHand: Number(productForm.stockOnHand || 0),
       categoryPath: [productForm.categoryId, productForm.subcategoryId].filter(Boolean),
@@ -690,6 +781,19 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     } finally { setSaving(''); }
   };
 
+  const removeManagedProduct = async (product) => {
+    if (!window.confirm(`Delete "${product.name}" from Product Manager? This cannot be undone.`)) return;
+    setSaving(`del-live-${product.id}`);
+    try {
+      await deleteProduct(product.id);
+      await loadProducts();
+      invalidateProductCache();
+      invalidateAdminCache();
+    } catch (err) {
+      alert(err.message || 'Failed to delete');
+    } finally { setSaving(''); }
+  };
+
   const toggleArchive = async (product) => {
     setSaving(product.id);
     try { await archiveProduct(product.id, !product.isArchived); await loadProducts(); }
@@ -709,10 +813,56 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const exportLiveXlsx = async () => {
     setSaving('export-live');
     try {
-      const data = await fetchAdminProductsPage({ page: 1, pageSize: 999999, searchQuery: productSearch, categoryFilter: productCategory });
-      const ws = XLSX.utils.json_to_sheet(data.rows.map(toXlsxRow));
+      const data = await fetchAdminProductsPage({ page: 1, pageSize: 999999, searchQuery: '', categoryFilter: 'all' });
+      const all = data.rows;
       const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, 'Live Products');
+
+      // Build sheet per main category
+      categories.forEach((cat) => {
+        const catProducts = all.filter((p) => p.category === cat.id);
+        if (!catProducts.length) return;
+
+        const rows = [];
+        const subMap = new Map((cat.children || []).map((s) => [s.id, s.label]));
+
+        // Group by subcategory (categoryPath[1]) — falls back to 'General'
+        const subGroups = new Map();
+        catProducts.forEach((p) => {
+          const subId = p.categoryPath?.[1] || '__general__';
+          if (!subGroups.has(subId)) subGroups.set(subId, []);
+          subGroups.get(subId).push(p);
+        });
+
+        subGroups.forEach((prods, subId) => {
+          const subLabel = subMap.get(subId) || (subId === '__general__' ? 'General' : subId);
+          // Subcategory header row
+          rows.push({ Subcategory: `── ${subLabel} ──`, Code: '', Name: '', Price: '', Stock: '', SKU: '', 'Parent SKU': '' });
+          prods.forEach((p) => {
+            rows.push({
+              Subcategory: subLabel,
+              Code: p.barcode || p.code,
+              Name: p.name,
+              Price: p.price,
+              Stock: p.stockQty,
+              SKU: p.websiteSku || '',
+              'Parent SKU': p.parentSku || '',
+            });
+          });
+        });
+
+        const ws = XLSX.utils.json_to_sheet(rows);
+        // Truncate sheet name to 31 chars (Excel limit)
+        const sheetName = cat.label.slice(0, 31);
+        XLSX.utils.book_append_sheet(wb, ws, sheetName);
+      });
+
+      // Fallback: uncategorised products
+      const uncatProducts = all.filter((p) => !p.category || !categories.find((c) => c.id === p.category));
+      if (uncatProducts.length) {
+        const ws = XLSX.utils.json_to_sheet(uncatProducts.map(toXlsxRow));
+        XLSX.utils.book_append_sheet(wb, ws, 'Uncategorised');
+      }
+
       XLSX.writeFile(wb, 'proto-live-products.xlsx');
     } finally { setSaving(''); }
   };
@@ -785,6 +935,32 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     setDragId(null);
   };
 
+  const handleTouchStart = (e, productId) => {
+    touchDragRef.current = { id: productId };
+    setDragId(productId);
+  };
+
+  const handleTouchMove = (e) => {
+    e.preventDefault();
+    const touch = e.touches[0];
+    const el = document.elementFromPoint(touch.clientX, touch.clientY);
+    const card = el?.closest('[data-reorder-id]');
+    if (card) {
+      const overId = card.dataset.reorderId;
+      if (overId !== touchDragRef.current?.id) setDragOverId(overId);
+    }
+  };
+
+  const handleTouchEnd = () => {
+    if (touchDragRef.current) {
+      if (dragOverId === '__top__') dropToTop();
+      else if (dragOverId) swapReorder(dragOverId);
+    }
+    setDragId(null);
+    setDragOverId(null);
+    touchDragRef.current = null;
+  };
+
   const toggleSelectAllPricing = () => {
     if (selectedPricing.length === pricingProducts.length) return setSelectedPricing([]);
     setSelectedPricing(pricingProducts.map((item) => item.id));
@@ -827,14 +1003,13 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     finally { setSaving(''); }
   };
 
-  const downloadOrderPdf = (order) => {
+  const downloadOrderHtml = (order) => {
     const html = generateOrderChecklistHtml(order);
     const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.target = '_blank';
-    a.rel = 'noopener noreferrer';
+    a.download = `order-${order.order_number || order.id}.html`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -866,7 +1041,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     }));
     setFulfillmentOrder(order);
     setFulfillmentItems(items);
-    setFulfillmentNotes('');
+    setFulfillmentNotes(order.order_change_notes || '');
     setEditingItemIdx(null);
     setProductSwapSearch('');
     setProductSwapResults([]);
@@ -916,14 +1091,37 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
       await updateOrder(fulfillmentOrder, {
         final_items: finalItems,
         status: 'order in progress',
-        ...(fulfillmentNotes ? { notes: fulfillmentNotes } : {}),
+        order_change_notes: fulfillmentNotes,
       });
       if (andSend) {
-        const customer = fulfillmentOrder.customers;
-        const lines = finalItems.map((i) => `${i.code} — ${i.name} × ${i.qty}`).join('\n');
-        const subject = `Your Order ${fulfillmentOrder.order_number || ''} — Proto Trading`;
-        const body = `Hi ${customer?.name || 'there'},\n\nThank you for your order. Here is your confirmed order summary:\n\nOrder: ${fulfillmentOrder.order_number || fulfillmentOrder.id}\n\n${lines}${fulfillmentNotes ? `\n\nNotes: ${fulfillmentNotes}` : ''}\n\nThank you for your business!\n\nProto Trading`;
-        window.open(`mailto:${customer?.email || ''}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`, '_blank');
+        const emailItems = createEmailOrderItems(fulfillmentItems);
+        const pdfBase64 = await generateOrderPdfBase64({
+          order: fulfillmentOrder,
+          items: emailItems,
+          autoNotes: '',
+          userNotes: fulfillmentNotes,
+          assignedTo: '',
+          total: emailItems.some((item) => item.unitPrice || item.price)
+            ? emailItems.filter((item) => !item.removed).reduce((sum, item) => sum + ((item.unitPrice || item.price || 0) * (item.qty || 0)), 0)
+            : null,
+          hasPrices: emailItems.some((item) => item.unitPrice || item.price),
+        });
+        const emailRes = await fetch('/api/send-order-email', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            to: fulfillmentOrder.customers?.email,
+            customerName: fulfillmentOrder.customers?.name,
+            orderNumber: fulfillmentOrder.order_number || fulfillmentOrder.id?.slice(0, 8),
+            orderDate: fulfillmentOrder.created_at,
+            items: emailItems,
+            userNotes: fulfillmentNotes,
+            pdfBase64,
+            pdfFilename: `proto-order-${fulfillmentOrder.order_number || fulfillmentOrder.id?.slice(0, 8) || 'order'}.pdf`,
+          }),
+        });
+        const emailData = await emailRes.json();
+        if (!emailRes.ok) throw new Error(emailData.error || 'Email send failed');
       }
       closeFulfillment();
     } finally { setFulfillmentSaving(false); }
@@ -931,6 +1129,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
 
   const productPages = Math.max(1, Math.ceil(productTotal / productPageSize));
   const customerPages = Math.max(1, Math.ceil(customerTotal / ADMIN_PAGE_SIZE));
+  const fulfillmentNoteSections = buildOrderNoteSections({ userNotes: fulfillmentNotes });
 
   return (
     <div className="adm-shell">
@@ -1244,9 +1443,9 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
 
                 {/* COST TRACKER TAB */}
                 {newProductsTab === 'costs' && (() => {
-                  const totalCost = costLog.reduce((s, e) => s + (e.cost || 0), 0);
+                  const totalCost = costLog.reduce((s, e) => s + (e.costZar ?? e.cost ?? 0), 0);
                   const avgCost   = costLog.length ? totalCost / costLog.length : 0;
-                  const freeCount = costLog.filter((e) => e.cost === 0).length;
+                  const freeCount = costLog.filter((e) => (e.costZar ?? e.cost ?? 0) === 0).length;
                   return (
                     <div>
                       {/* Summary stats */}
@@ -1254,8 +1453,8 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                         {[
                           { label: 'Images processed', value: costLog.length },
                           { label: 'Free tier', value: freeCount },
-                          { label: 'Total cost', value: `$${totalCost.toFixed(5)}` },
-                          { label: 'Avg per image', value: `$${avgCost.toFixed(5)}` },
+                          { label: 'Total cost', value: formatRandAmount(totalCost) },
+                          { label: 'Avg per image', value: formatRandAmount(avgCost) },
                         ].map(({ label, value }) => (
                           <div key={label} style={{ background: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: 10, padding: '14px 16px' }}>
                             <div style={{ fontSize: 20, fontWeight: 800, fontFamily: 'Outfit, sans-serif', color: '#0f172a' }}>{value}</div>
@@ -1283,11 +1482,13 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                             </button>
                           </div>
                           <div className="adm-list">
-                            <div className="adm-list-head" style={{ gridTemplateColumns: '2fr 1.2fr 80px 80px 80px 120px' }}>
-                              <span>SKU / Title</span><span>Model</span><span>Tokens in</span><span>Tokens out</span><span>Cost</span><span>Time</span>
+                            <div className="adm-list-head" style={{ gridTemplateColumns: '2fr 1.2fr 80px 80px 120px 120px' }}>
+                              <span>SKU / Title</span><span>Model</span><span>Tokens in</span><span>Tokens out</span><span>Cost (R)</span><span>Time</span>
                             </div>
-                            {costLog.map((entry, i) => (
-                              <div key={i} className="adm-list-row" style={{ gridTemplateColumns: '2fr 1.2fr 80px 80px 80px 120px' }}>
+                            {costLog.map((entry, i) => {
+                              const entryCost = entry.costZar ?? entry.cost ?? 0;
+                              return (
+                              <div key={i} className="adm-list-row" style={{ gridTemplateColumns: '2fr 1.2fr 80px 80px 120px 120px' }}>
                                 <div>
                                   <div style={{ fontWeight: 700, fontSize: 13 }}>{entry.title || entry.sku}</div>
                                   <div className="adm-muted" style={{ fontSize: 11 }}>{entry.sku}</div>
@@ -1297,14 +1498,14 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                                 </div>
                                 <div style={{ fontSize: 12 }}>{entry.tokensIn || '—'}</div>
                                 <div style={{ fontSize: 12 }}>{entry.tokensOut || '—'}</div>
-                                <div style={{ fontSize: 12, fontWeight: 700, color: entry.cost === 0 ? '#16a34a' : '#0f172a' }}>
-                                  {entry.cost === 0 ? 'free' : `$${(entry.cost || 0).toFixed(5)}`}
+                                <div style={{ fontSize: 12, fontWeight: 700, color: entryCost === 0 ? '#16a34a' : '#0f172a' }}>
+                                  {entryCost === 0 ? 'free' : formatRandAmount(entryCost)}
                                 </div>
                                 <div style={{ fontSize: 11, color: '#64748b' }}>
                                   {new Date(entry.timestamp).toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
                                 </div>
                               </div>
-                            ))}
+                            );})}
                           </div>
                         </>
                       )}
@@ -1392,6 +1593,15 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                           </button>
                           <button onClick={() => openEditProduct(product)} className="adm-icon-btn" title="Edit product details"><Pencil size={14} /></button>
                           <button onClick={() => void toggleArchive(product)} className="adm-icon-btn">{product.isArchived ? <ArchiveRestore size={14} /> : <Archive size={14} />}</button>
+                          <button
+                            onClick={() => void removeManagedProduct(product)}
+                            className="adm-icon-btn"
+                            title="Delete product"
+                            disabled={saving === `del-live-${product.id}`}
+                            style={{ color: '#c40000' }}
+                          >
+                            {saving === `del-live-${product.id}` ? '…' : <Trash2 size={14} />}
+                          </button>
                         </div>
                       </div>
                     );
@@ -1662,6 +1872,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                             return (
                               <div
                                 key={product.id}
+                                data-reorder-id={product.id}
                                 draggable
                                 onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; setDragId(product.id); }}
                                 onDragEnd={() => { setDragId(null); setDragOverId(null); }}
@@ -1669,6 +1880,9 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                                 onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
                                 onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setDragOverId(null); }}
                                 onDrop={(e) => { e.preventDefault(); swapReorder(product.id); }}
+                                onTouchStart={(e) => handleTouchStart(e, product.id)}
+                                onTouchMove={handleTouchMove}
+                                onTouchEnd={handleTouchEnd}
                                 className={`adm-reorder-card${isDragging ? ' adm-reorder-card--dragging' : ''}${isOver ? ' adm-reorder-card--over' : ''}${isSelected ? ' adm-reorder-card--selected' : ''}`}
                                 style={{ padding: '6px', cursor: 'grab' }}
                               >
@@ -1839,7 +2053,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                     { key: 'returned', label: 'Returned' },
                   ].map(({ key, label }) => {
                     const count = (() => {
-                      if (key === 'new') return orders.filter((o) => !o.status || o.status === 'viewed').length;
+                      if (key === 'new') return orders.filter((o) => isNewOrderStatus(o.status)).length;
                       if (key === 'sent') return orders.filter((o) => o.status === 'order in progress' || o.status === 'awaiting payment').length;
                       if (key === 'paid') return orders.filter((o) => o.status === 'paid').length;
                       if (key === 'fulfilled') return orders.filter((o) => o.status === 'delivered').length;
@@ -1903,13 +2117,13 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                             <div className="adm-muted" style={{ fontSize: 11 }}>{timeStr}</div>
                           </div>
                           <div onClick={(e) => e.stopPropagation()}>
-                            <select value={order.status || 'viewed'} onChange={(e) => void updateOrder(order, { status: e.target.value })} className="adm-select" style={{ fontSize: 12, padding: '4px 8px', minHeight: 32 }}>
+                            <select value={order.status || 'pending'} onChange={(e) => void updateOrder(order, { status: e.target.value })} className="adm-select" style={{ fontSize: 12, padding: '4px 8px', minHeight: 32 }}>
                               {orderStatuses.map((s) => <option key={s} value={s}>{s}</option>)}
                             </select>
                           </div>
                           <div style={{ display: 'flex', gap: 6 }} onClick={(e) => e.stopPropagation()}>
                             <button onClick={() => window.open(`/fulfillment?id=${order.id}`, '_blank', 'noopener,noreferrer')} className="adm-icon-btn" title="Fulfil order (opens in new tab)" style={{ color: '#15803d' }}><ClipboardList size={14} /></button>
-                            <button onClick={() => downloadOrderPdf(order)} className="adm-icon-btn" title="Download PDF"><FileDown size={14} /></button>
+                            <button onClick={() => downloadOrderHtml(order)} className="adm-icon-btn" title="Download order file"><FileDown size={14} /></button>
                             <button onClick={() => void deleteOrder(order)} className="adm-icon-btn" style={{ color: '#c40000' }} disabled={saving === `del-order-${order.id}`} title="Delete order">
                               {saving === `del-order-${order.id}` ? '…' : <Trash2 size={14} />}
                             </button>
@@ -1975,7 +2189,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                       <div key={order.id} className="adm-profile-order">
                         <div className="adm-profile-order-head">
                           <span>{order.order_number || order.id.slice(0, 8)}</span>
-                          <span className="adm-pill" style={{ fontSize: 10, padding: '2px 8px' }}>{order.status || 'viewed'}</span>
+                          <span className="adm-pill" style={{ fontSize: 10, padding: '2px 8px' }}>{order.status || 'pending'}</span>
                           <span className="adm-muted">{new Date(order.created_at).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
                         </div>
                         <div className="adm-muted" style={{ fontSize: 11, marginTop: 4 }}>
@@ -2242,17 +2456,21 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
 
             {/* Notes */}
             <div style={{ flexShrink: 0, marginBottom: 16 }}>
-              <label style={{ display: 'grid', gap: 6 }}>
+              <label style={{ display: 'grid', gap: 8 }}>
                 <span style={{ fontWeight: 700, fontSize: 13 }}>Notes</span>
                 <textarea
                   value={fulfillmentNotes}
                   onChange={(e) => setFulfillmentNotes(e.target.value)}
                   className="adm-field-input"
-                  rows={2}
-                  placeholder="Add any fulfillment notes…"
-                  style={{ resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }}
+                  rows={4}
+                  placeholder={'Add clear notes, one point per line…\nExample:\nCustomer approved substitution\nDeliver with next stock run'}
+                  style={{ resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.6 }}
                 />
               </label>
+              <div style={{ marginTop: 10, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: '12px 14px' }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>Notes preview</div>
+                {renderNoteSections(fulfillmentNoteSections)}
+              </div>
             </div>
 
             {/* Footer */}
@@ -2301,15 +2519,42 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
 
       {/* Product editor modal */}
       {editorOpen && (
-        <div className="adm-modal-backdrop">
-          <div className="adm-modal">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+        <div className="adm-modal-backdrop" onClick={closeEditor}>
+          <div className="adm-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 760, maxHeight: '88vh', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexShrink: 0 }}>
               <div>
                 <h3 style={{ margin: 0, fontSize: 22, fontFamily: 'Outfit, sans-serif' }}>{editingProduct ? 'Edit product' : 'Add product'}</h3>
                 <p className="adm-muted" style={{ marginTop: 4 }}>Fill in the details and assign a category.</p>
               </div>
               <button onClick={closeEditor} className="adm-icon-btn"><X size={16} /></button>
             </div>
+
+            <div style={{ overflowY: 'auto', paddingRight: 4, flex: 1, minHeight: 0 }}>
+
+            <input
+              ref={editorPrimaryImageFileInputRef}
+              type="file"
+              accept="image/*"
+              style={{ display: 'none' }}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) void uploadEditorImageFile(file, 'primary');
+                e.target.value = '';
+              }}
+            />
+
+            <input
+              ref={editorSecondaryImageFileInputRef}
+              type="file"
+              accept="image/*"
+              style={{ display: 'none' }}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) void uploadEditorImageFile(file, 'secondary');
+                e.target.value = '';
+              }}
+            />
+
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
               <AdminField label="Product code"><input value={productForm.code} onChange={(e) => setProductForm((p) => ({ ...p, code: e.target.value }))} className="adm-field-input" /></AdminField>
               <AdminField label="Product type">
@@ -2318,7 +2563,96 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                 </select>
               </AdminField>
               <AdminField label="Product name" full><input value={productForm.name} onChange={(e) => setProductForm((p) => ({ ...p, name: e.target.value }))} className="adm-field-input" /></AdminField>
-              <AdminField label="Image URL" full><input value={productForm.image} onChange={(e) => setProductForm((p) => ({ ...p, image: e.target.value }))} className="adm-field-input" /></AdminField>
+
+              <AdminField label="Product images" full>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                  {[
+                    { key: 'primary', label: 'Primary image', value: productForm.image, ref: editorPrimaryImageFileInputRef },
+                    { key: 'secondary', label: 'Secondary image', value: productForm.secondaryImage, ref: editorSecondaryImageFileInputRef },
+                  ].map((slot) => {
+                    const isDragOver = editorImageDragOver === slot.key;
+                    return (
+                      <div key={slot.key} style={{ display: 'grid', gap: 8 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                          <span style={{ fontSize: 12, fontWeight: 700, color: '#334155' }}>{slot.label}</span>
+                          {slot.key === 'secondary' && productForm.secondaryImage && productForm.image && (
+                            <button
+                              type="button"
+                              onClick={swapEditorImages}
+                              className="adm-btn-ghost"
+                              style={{ padding: '6px 10px', fontSize: 12 }}
+                            >
+                              Make secondary the primary
+                            </button>
+                          )}
+                        </div>
+                        <div
+                          onClick={() => !editorImageUploading && slot.ref.current?.click()}
+                          onDragEnter={(e) => { e.preventDefault(); setEditorImageDragOver(slot.key); }}
+                          onDragOver={(e) => { e.preventDefault(); setEditorImageDragOver(slot.key); }}
+                          onDragLeave={(e) => { e.preventDefault(); if (editorImageDragOver === slot.key) setEditorImageDragOver(''); }}
+                          onDrop={(e) => {
+                            e.preventDefault();
+                            setEditorImageDragOver('');
+                            const file = e.dataTransfer.files?.[0];
+                            if (file) void uploadEditorImageFile(file, slot.key);
+                          }}
+                          style={{
+                            position: 'relative',
+                            minHeight: 160,
+                            borderRadius: 16,
+                            border: `2px dashed ${isDragOver ? '#8B1A1A' : slot.value ? '#d1d5db' : '#cbd5e1'}`,
+                            background: isDragOver ? '#fff5f5' : '#f8fafc',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            cursor: editorImageUploading ? 'wait' : 'pointer',
+                            overflow: 'hidden',
+                            transition: 'border-color 0.15s, background 0.15s',
+                          }}
+                        >
+                          {editorImageUploading && isDragOver ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, color: '#8B1A1A' }}>
+                              <Loader2 size={32} className="spin" />
+                              <span style={{ fontSize: 13, fontWeight: 600 }}>Uploading image…</span>
+                            </div>
+                          ) : slot.value ? (
+                            <>
+                              <img src={slot.value} alt={`${slot.label} preview`} style={{ maxWidth: '100%', maxHeight: 160, objectFit: 'contain' }} />
+                              <div style={{ position: 'absolute', inset: 0, background: 'rgba(15, 23, 42, 0.45)', display: isDragOver ? 'flex' : 'none', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 8, color: '#fff' }}>
+                                <Upload size={28} />
+                                <span style={{ fontSize: 13, fontWeight: 600 }}>Drop to replace image</span>
+                              </div>
+                              <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '8px 12px', background: 'rgba(15, 23, 42, 0.55)', color: '#fff', fontSize: 12, textAlign: 'center' }}>
+                                Click or drag a new image here to replace it
+                              </div>
+                            </>
+                          ) : (
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, color: isDragOver ? '#8B1A1A' : '#64748b', pointerEvents: 'none', textAlign: 'center', padding: 20 }}>
+                              <Upload size={32} />
+                              <div style={{ fontWeight: 700, fontSize: 15 }}>Drag & drop {slot.key} image here</div>
+                              <div style={{ fontSize: 12 }}>or click to browse and upload it to Supabase</div>
+                            </div>
+                          )}
+                        </div>
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                          <button type="button" onClick={() => slot.ref.current?.click()} className="adm-btn-ghost" style={{ padding: '8px 12px', fontSize: 12 }} disabled={editorImageUploading}>
+                            Upload {slot.key} image
+                          </button>
+                          {slot.value && (
+                            <button type="button" onClick={() => clearEditorImage(slot.key)} className="adm-btn-ghost" style={{ padding: '8px 12px', fontSize: 12 }} disabled={editorImageUploading}>
+                              Remove {slot.key} image
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </AdminField>
+
+              <AdminField label="Primary image URL" full><input value={productForm.image} onChange={(e) => setProductForm((p) => ({ ...p, image: e.target.value }))} className="adm-field-input" /></AdminField>
+              <AdminField label="Secondary image URL" full><input value={productForm.secondaryImage} onChange={(e) => setProductForm((p) => ({ ...p, secondaryImage: e.target.value }))} className="adm-field-input" /></AdminField>
               <AdminField label="Price"><input value={productForm.price} onChange={(e) => setProductForm((p) => ({ ...p, price: e.target.value }))} className="adm-field-input" /></AdminField>
               <AdminField label="Stock on hand"><input value={productForm.stockOnHand} onChange={(e) => setProductForm((p) => ({ ...p, stockOnHand: e.target.value }))} className="adm-field-input" /></AdminField>
               <AdminField label="Main category">
@@ -2332,9 +2666,15 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                 </select>
               </AdminField>
             </div>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 20 }}>
+            </div>
+            {editorError && (
+              <div style={{ marginTop: 12, padding: '8px 12px', background: '#fef2f2', borderRadius: 6, color: '#c40000', fontSize: 13, flexShrink: 0 }}>
+                {editorError}
+              </div>
+            )}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 16, paddingTop: 14, borderTop: '1px solid #e5e7eb', background: '#fff', flexShrink: 0 }}>
               <button onClick={closeEditor} className="adm-btn-ghost"><ChevronLeft size={15} /> Cancel</button>
-              <button onClick={() => void saveProduct()} className="adm-btn-red">
+              <button onClick={() => void saveProduct()} className="adm-btn-red" disabled={editorImageUploading}>
                 {saving === 'new-product' || saving === editingProduct?.id ? 'Saving…' : <><Check size={15} /> Save product</>}
               </button>
             </div>
