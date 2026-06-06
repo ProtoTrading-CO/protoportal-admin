@@ -3,6 +3,7 @@ import {
   Archive,
   ArchiveRestore,
   ArrowLeftRight,
+  BarChart2,
   Building2,
   Check,
   ChevronLeft,
@@ -32,6 +33,7 @@ import {
   Star,
   Store,
   Trash2,
+  TrendingUp,
   User,
   Users,
   X,
@@ -53,7 +55,8 @@ import {
   uploadDormantImage,
   uploadDormantImageWithBase64,
 } from '../lib/products';
-import { approveCustomer, deleteCustomer, fetchCustomersPage, updateCustomerAdmin } from '../lib/customers';
+import { approveCustomer, deleteCustomer, fetchAllCustomers, fetchCustomersPage, updateCustomerAdmin } from '../lib/customers';
+import { supabase } from '../lib/supabase';
 import { buildOrderNoteSections, createEmailOrderItems, generateOrderPdfBase64 } from '../lib/orderDocuments';
 import { deleteOrderAdmin, fetchAllOrdersAdmin, updateOrderAdmin } from '../lib/orders';
 import { fetchSpecials, saveSpecials } from '../lib/specials';
@@ -91,6 +94,8 @@ const sections = [
   { id: 'archive', label: 'Archive', icon: Archive },
   { id: 'reorder', label: 'Reorder Grid', icon: Grip },
   { id: 'customers', label: 'Customer Management', icon: Users },
+  { id: 'crm', label: 'CRM / Email', icon: Mail },
+  { id: 'analytics', label: 'Analytics', icon: BarChart2 },
   { id: 'pricing', label: 'Pricing & Returns', icon: SlidersHorizontal },
   { id: 'orders', label: 'Order Requests', icon: ShoppingBag },
 ];
@@ -363,7 +368,29 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const [specials, setSpecials] = useState([]); // [{productId, productName, productCode, productImage, deal, discountPct, bogoX, bogoY}]
   const [specialsSaving, setSpecialsSaving] = useState(false);
 
+  const [crmAllCustomers, setCrmAllCustomers] = useState([]);
+  const [crmLoading, setCrmLoading] = useState(false);
+  const [crmFilters, setCrmFilters] = useState({ businessTypes: [], tiers: [] });
+  const [crmSubject, setCrmSubject] = useState('');
+  const [crmBody, setCrmBody] = useState('');
+  const [crmSending, setCrmSending] = useState(false);
+  const [crmSentCount, setCrmSentCount] = useState(null);
+
+  const [analyticsData, setAnalyticsData] = useState(null);
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
+
   const mainCategories = categories.map((item) => ({ id: item.id, label: item.label }));
+
+  const crmBusinessTypeOptions = useMemo(() => (
+    [...new Set(crmAllCustomers.filter((c) => c.business_type).map((c) => c.business_type))].sort()
+  ), [crmAllCustomers]);
+
+  const crmFilteredCustomers = useMemo(() => {
+    let rows = crmAllCustomers.filter((c) => c.is_approved);
+    if (crmFilters.businessTypes.length) rows = rows.filter((c) => crmFilters.businessTypes.includes(c.business_type));
+    if (crmFilters.tiers.length) rows = rows.filter((c) => crmFilters.tiers.includes(c.tier));
+    return rows;
+  }, [crmAllCustomers, crmFilters]);
 
   useEffect(() => {
     fetchDistinctCategories().then(setLiveCategories).catch(() => {});
@@ -527,6 +554,8 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   useEffect(() => { if (activeSection === 'pricing') void loadCategoryWorkingSet(pricingCategory, 'pricing'); }, [activeSection, pricingCategory]);
   useEffect(() => { if (activeSection === 'reorder') void loadCategoryWorkingSet(reorderCategory, 'reorder'); }, [activeSection, reorderCategory]);
   useEffect(() => { if (activeSection === 'orders' && orders.length === 0) void loadOrders(); }, [activeSection]);
+  useEffect(() => { if (activeSection === 'crm' && !crmAllCustomers.length && !crmLoading) void loadCrmCustomers(); }, [activeSection]);
+  useEffect(() => { if (activeSection === 'analytics' && !analyticsData && !analyticsLoading) void loadAnalytics(); }, [activeSection]);
 
   // Load specials on mount
   useEffect(() => {
@@ -809,6 +838,60 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     'Price (excl. VAT)': p.price,
     'Stock Qty': p.stockQty,
   });
+
+  const loadCrmCustomers = async () => {
+    setCrmLoading(true);
+    try {
+      const rows = await fetchAllCustomers();
+      setCrmAllCustomers(rows);
+    } catch (e) { console.error(e); }
+    finally { setCrmLoading(false); }
+  };
+
+  const sendCrmEmail = async () => {
+    if (!crmSubject.trim() || !crmBody.trim() || !crmFilteredCustomers.length) return;
+    if (!window.confirm(`Send to ${crmFilteredCustomers.length} customers?`)) return;
+    setCrmSending(true); setCrmSentCount(null);
+    try {
+      const res = await fetch('/api/send-crm-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          recipients: crmFilteredCustomers.map((c) => ({ email: c.email, name: c.name || c.business_name || '' })),
+          subject: crmSubject,
+          body: crmBody,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Send failed');
+      setCrmSentCount(json.sent ?? crmFilteredCustomers.length);
+    } catch (e) { alert('Error: ' + e.message); }
+    finally { setCrmSending(false); }
+  };
+
+  const loadAnalytics = async () => {
+    setAnalyticsLoading(true);
+    try {
+      const [custRes, ordRes] = await Promise.all([
+        supabase.from('customers').select('id, created_at, accept_whatsapp, is_approved'),
+        supabase.from('orders').select('id, total_ex_vat, created_at'),
+      ]);
+      const customers = custRes.data || [];
+      const orders = ordRes.data || [];
+      const approved = customers.filter((c) => c.is_approved);
+      const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      const totalRevenue = orders.reduce((s, o) => s + (o.total_ex_vat || 0), 0);
+      setAnalyticsData({
+        totalCustomers: approved.length,
+        newSignups30d: approved.filter((c) => new Date(c.created_at) > cutoff).length,
+        whatsappCustomers: approved.filter((c) => c.accept_whatsapp).length,
+        totalOrders: orders.length,
+        totalRevenue,
+        avgOrderSize: orders.length ? totalRevenue / orders.length : 0,
+      });
+    } catch (e) { console.error(e); }
+    finally { setAnalyticsLoading(false); }
+  };
 
   const exportLiveXlsx = async () => {
     setSaving('export-live');
@@ -1133,6 +1216,12 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
 
   return (
     <div className="adm-shell">
+      {/* Fixed top loading indicator — doesn't disturb layout */}
+      {(loadingProgress !== null || loading) && (
+        <div className="adm-top-progress">
+          <div className="adm-top-progress-fill" style={{ width: loadingProgress !== null ? `${loadingProgress}%` : '60%' }} />
+        </div>
+      )}
       <header className="adm-header">
         <div className="adm-header-inner">
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -1181,15 +1270,6 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
           </aside>
 
           <main className="adm-main">
-            {loadingProgress !== null && (
-              <div className="adm-progress-wrap">
-                <div className="adm-progress-fill" style={{ width: `${loadingProgress}%` }} />
-                <span className="adm-progress-label">{loadingProgress}%</span>
-              </div>
-            )}
-            {loading && loadingProgress === null && (
-              <div className="adm-loading-bar"><Loader2 size={16} className="spin" /> Loading…</div>
-            )}
             {loadingError && (
               <div style={{ margin: '12px 0', padding: '10px 16px', background: '#fef2f2', borderRadius: 8, color: '#c40000', fontSize: 13, fontWeight: 600 }}>
                 Error: {loadingError}
@@ -1870,7 +1950,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                                 key={product.id}
                                 data-reorder-id={product.id}
                                 draggable
-                                onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; setDragId(product.id); }}
+                                onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', product.id); setDragId(product.id); }}
                                 onDragEnd={() => { setDragId(null); setDragOverId(null); }}
                                 onDragEnter={(e) => { e.preventDefault(); if (product.id !== dragId) setDragOverId(product.id); }}
                                 onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
@@ -1903,7 +1983,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                                 </div>
                                 <div className="adm-thumb" style={{ height: 70 }}>
                                   {product.image
-                                    ? <img src={product.image} alt={product.name} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', mixBlendMode: 'multiply' }} />
+                                    ? <img draggable={false} src={product.image} alt={product.name} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', mixBlendMode: 'multiply', pointerEvents: 'none' }} />
                                     : <span className="adm-muted" style={{ fontSize: 10 }}>No image</span>}
                                 </div>
                                 <div style={{ fontWeight: 700, fontSize: 10, marginTop: 4, lineHeight: 1.3, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{product.name}</div>
@@ -2138,6 +2218,136 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                     );
                   })}
                 </div>
+              </div>
+            )}
+
+            {/* CRM / EMAIL */}
+            {activeSection === 'crm' && (
+              <div className="adm-panel">
+                <div className="adm-section-head">
+                  <div>
+                    <h2 className="adm-section-title">CRM / Email</h2>
+                    <p className="adm-section-note">Filter customers and send bulk emails via Brevo.</p>
+                  </div>
+                </div>
+                <div className="adm-crm-layout">
+                  <div className="adm-crm-filters">
+                    <div style={{ fontWeight: 700, fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10, color: '#6b7280' }}>Business Type</div>
+                    {crmLoading ? <div className="adm-muted" style={{ fontSize: 13 }}>Loading customers…</div> : (
+                      crmBusinessTypeOptions.length === 0
+                        ? <div className="adm-muted" style={{ fontSize: 13 }}>No business types found</div>
+                        : crmBusinessTypeOptions.map((type) => (
+                          <label key={type} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', cursor: 'pointer', fontSize: 13, borderBottom: '1px solid #f3f4f6' }}>
+                            <input type="checkbox"
+                              checked={crmFilters.businessTypes.includes(type)}
+                              onChange={(e) => setCrmFilters((prev) => ({
+                                ...prev,
+                                businessTypes: e.target.checked ? [...prev.businessTypes, type] : prev.businessTypes.filter((t) => t !== type),
+                              }))}
+                              style={{ accentColor: '#dc2626' }}
+                            />
+                            <span style={{ flex: 1 }}>{type}</span>
+                            <span className="adm-muted" style={{ fontSize: 11 }}>
+                              {crmAllCustomers.filter((c) => c.is_approved && c.business_type === type).length}
+                            </span>
+                          </label>
+                        ))
+                    )}
+                    <div style={{ fontWeight: 700, fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.06em', margin: '18px 0 10px', color: '#6b7280' }}>Tier</div>
+                    {['regular', 'premium'].map((tier) => (
+                      <label key={tier} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', cursor: 'pointer', fontSize: 13, borderBottom: '1px solid #f3f4f6', textTransform: 'capitalize' }}>
+                        <input type="checkbox"
+                          checked={crmFilters.tiers.includes(tier)}
+                          onChange={(e) => setCrmFilters((prev) => ({
+                            ...prev,
+                            tiers: e.target.checked ? [...prev.tiers, tier] : prev.tiers.filter((t) => t !== tier),
+                          }))}
+                          style={{ accentColor: '#dc2626' }}
+                        />
+                        <span style={{ flex: 1 }}>{tier}</span>
+                        <span className="adm-muted" style={{ fontSize: 11 }}>
+                          {crmAllCustomers.filter((c) => c.is_approved && c.tier === tier).length}
+                        </span>
+                      </label>
+                    ))}
+                    <div style={{ marginTop: 16, padding: '10px 14px', background: crmFilteredCustomers.length ? '#f0fdf4' : '#f9fafb', border: `1px solid ${crmFilteredCustomers.length ? '#d1fae5' : '#e5e7eb'}` }}>
+                      <strong style={{ color: crmFilteredCustomers.length ? '#15803d' : '#6b7280', fontSize: 20 }}>{crmFilteredCustomers.length}</strong>
+                      <span className="adm-muted" style={{ fontSize: 13, marginLeft: 6 }}>recipients selected</span>
+                    </div>
+                  </div>
+                  <div className="adm-crm-compose">
+                    <div style={{ marginBottom: 14 }}>
+                      <label style={{ fontSize: 12, fontWeight: 700, display: 'block', marginBottom: 5 }}>Subject</label>
+                      <input value={crmSubject} onChange={(e) => setCrmSubject(e.target.value)} placeholder="Email subject…" className="adm-field-input" style={{ width: '100%' }} />
+                    </div>
+                    <div style={{ marginBottom: 14, flex: 1 }}>
+                      <label style={{ fontSize: 12, fontWeight: 700, display: 'block', marginBottom: 5 }}>Message</label>
+                      <textarea value={crmBody} onChange={(e) => setCrmBody(e.target.value)} placeholder="Write your message… Use {{name}} for customer name." className="adm-field-input" style={{ width: '100%', minHeight: 200, resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.6 }} />
+                    </div>
+                    {crmSentCount !== null && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', background: '#f0fdf4', border: '1px solid #d1fae5', marginBottom: 12, fontSize: 13 }}>
+                        <Check size={14} style={{ color: '#15803d', flexShrink: 0 }} />
+                        <span>Sent to <strong>{crmSentCount}</strong> recipients</span>
+                      </div>
+                    )}
+                    <button
+                      onClick={() => void sendCrmEmail()}
+                      className="adm-btn-red"
+                      disabled={crmSending || !crmSubject.trim() || !crmBody.trim() || !crmFilteredCustomers.length}
+                      style={{ display: 'flex', alignItems: 'center', gap: 8 }}
+                    >
+                      <Send size={15} />
+                      {crmSending ? 'Sending…' : `Send to ${crmFilteredCustomers.length} customer${crmFilteredCustomers.length !== 1 ? 's' : ''}`}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ANALYTICS */}
+            {activeSection === 'analytics' && (
+              <div className="adm-panel">
+                <div className="adm-section-head">
+                  <div>
+                    <h2 className="adm-section-title">Analytics</h2>
+                    <p className="adm-section-note">Business metrics overview.</p>
+                  </div>
+                  <button onClick={() => void loadAnalytics()} className="adm-btn-ghost"><RefreshCw size={15} /><span className="adm-btn-text">Refresh</span></button>
+                </div>
+                {analyticsLoading && <div className="adm-muted" style={{ padding: '24px 0', fontSize: 13 }}>Loading analytics…</div>}
+                {analyticsData && (
+                  <div className="adm-analytics-grid">
+                    <div className="adm-analytics-card">
+                      <div className="adm-analytics-value">{analyticsData.totalCustomers}</div>
+                      <div className="adm-analytics-label">Total Customers</div>
+                    </div>
+                    <div className="adm-analytics-card adm-analytics-card--accent">
+                      <div className="adm-analytics-value">{analyticsData.newSignups30d}</div>
+                      <div className="adm-analytics-label">New Sign-ups (30d)</div>
+                    </div>
+                    <div className="adm-analytics-card">
+                      <div className="adm-analytics-value">{analyticsData.whatsappCustomers}</div>
+                      <div className="adm-analytics-label">WhatsApp Customers</div>
+                    </div>
+                    <div className="adm-analytics-card">
+                      <div className="adm-analytics-value">{analyticsData.totalOrders}</div>
+                      <div className="adm-analytics-label">Total Orders</div>
+                    </div>
+                    <div className="adm-analytics-card adm-analytics-card--accent">
+                      <div className="adm-analytics-value">R {analyticsData.totalRevenue.toLocaleString('en-ZA', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</div>
+                      <div className="adm-analytics-label">Order Revenue</div>
+                    </div>
+                    <div className="adm-analytics-card">
+                      <div className="adm-analytics-value">R {analyticsData.avgOrderSize.toLocaleString('en-ZA', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</div>
+                      <div className="adm-analytics-label">Avg Order Size</div>
+                    </div>
+                    <div className="adm-analytics-card adm-analytics-card--muted">
+                      <div className="adm-analytics-value" style={{ fontSize: 18, color: '#9ca3af' }}>—</div>
+                      <div className="adm-analytics-label">Website Traffic</div>
+                      <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 4 }}>Connect Vercel Analytics</div>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </main>
