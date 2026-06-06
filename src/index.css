@@ -2704,7 +2704,7 @@ html, body { background: #f5f5f5; color: #111827; }
 
 /* ── Header ── */
 .adm-header { background: #fff; border-bottom: 1px solid #e5e7eb; }
-.adm-header-inner { height: 52px; max-width: none; padding: 0 16px; }
+.adm-header-inner { height: 52px; max-width: none; margin: 0; padding: 0 16px; }
 .adm-brand { display: flex; align-items: center; gap: 8px; }
 .adm-brand strong { color: #111827; letter-spacing: 0.08em; font-size: 13px; font-weight: 700; }
 .adm-hamburger { border: none; background: transparent; color: #6b7280; border-radius: 0; padding: 6px; }
@@ -2715,7 +2715,7 @@ html, body { background: #f5f5f5; color: #111827; }
 .adm-btn-dark:hover { background: #374151; }
 
 /* ── Stats bar — inline strip, no cards ── */
-.adm-body { background: #f5f5f5; max-width: none; padding: 0; }
+.adm-body { background: #f5f5f5; max-width: none; padding: 0; margin: 0; width: 100%; }
 
 .adm-stats-bar {
   display: flex;
