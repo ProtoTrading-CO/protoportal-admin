@@ -819,7 +819,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
 
       // Build sheet per main category
       categories.forEach((cat) => {
-        const catProducts = all.filter((p) => p.category === cat.id);
+        const catProducts = all.filter((p) => p.category === cat.id || p.categoryPath?.[0] === cat.id);
         if (!catProducts.length) return;
 
         const rows = [];
@@ -1140,11 +1140,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
               <Menu size={20} />
             </button>
             <div className="adm-brand">
-              <img src="/proto-logo.png" alt="Proto Trading" style={{ height: 32 }} />
-              <div>
-                <strong>PROTO <span style={{ color: '#8B1A1A' }}>TRADING</span></strong>
-                <small>Admin portal</small>
-              </div>
+              <strong>PROTO <span style={{ color: '#dc2626' }}>ADMIN</span></strong>
             </div>
           </div>
           <div className="adm-header-actions">
