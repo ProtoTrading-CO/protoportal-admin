@@ -872,23 +872,10 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const loadAnalytics = async () => {
     setAnalyticsLoading(true);
     try {
-      const [custRes, ordRes] = await Promise.all([
-        supabase.from('customers').select('id, created_at, accept_whatsapp, is_approved'),
-        supabase.from('orders').select('id, total_ex_vat, created_at'),
-      ]);
-      const customers = custRes.data || [];
-      const orders = ordRes.data || [];
-      const approved = customers.filter((c) => c.is_approved);
-      const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-      const totalRevenue = orders.reduce((s, o) => s + (o.total_ex_vat || 0), 0);
-      setAnalyticsData({
-        totalCustomers: approved.length,
-        newSignups30d: approved.filter((c) => new Date(c.created_at) > cutoff).length,
-        whatsappCustomers: approved.filter((c) => c.accept_whatsapp).length,
-        totalOrders: orders.length,
-        totalRevenue,
-        avgOrderSize: orders.length ? totalRevenue / orders.length : 0,
-      });
+      const res = await fetch('/api/analytics');
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Failed to load analytics');
+      setAnalyticsData(json);
     } catch (e) { console.error(e); }
     finally { setAnalyticsLoading(false); }
   };
