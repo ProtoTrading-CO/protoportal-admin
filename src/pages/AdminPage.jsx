@@ -4,6 +4,7 @@ import {
   ArchiveRestore,
   ArrowLeftRight,
   BarChart2,
+  MessageCircle,
   Building2,
   Check,
   ChevronLeft,
@@ -94,7 +95,7 @@ const sections = [
   { id: 'archive', label: 'Archive', icon: Archive },
   { id: 'reorder', label: 'Reorder Grid', icon: Grip },
   { id: 'customers', label: 'Customer Management', icon: Users },
-  { id: 'crm', label: 'CRM / Email', icon: Mail },
+  { id: 'crm', label: 'WhatsApp', icon: MessageCircle },
   { id: 'analytics', label: 'Analytics', icon: BarChart2 },
   { id: 'pricing', label: 'Pricing & Returns', icon: SlidersHorizontal },
   { id: 'orders', label: 'Order Requests', icon: ShoppingBag },
@@ -112,6 +113,32 @@ function isNewOrderStatus(status) {
 function formatRandAmount(value) {
   const amount = Number(value || 0);
   return randFormatter.format(amount);
+}
+
+function formatDateTime(value) {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  return date.toLocaleString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+function formatRelativeDate(value) {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  const diffDays = Math.floor((Date.now() - date.getTime()) / (1000 * 60 * 60 * 24));
+  if (diffDays <= 0) return 'Today';
+  if (diffDays === 1) return '1 day ago';
+  if (diffDays < 30) return `${diffDays} days ago`;
+  return date.toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function formatJoinStatus(value) {
+  const raw = String(value || '').trim().toLowerCase();
+  if (!raw) return 'Pending';
+  if (raw === 'joined') return 'Joined';
+  if (raw === 'not joined' || raw === 'no thanks') return 'No thanks';
+  return raw.replace(/(^|\s)\w/g, (m) => m.toUpperCase());
 }
 
 function renderNoteSections(noteSections) {
@@ -370,11 +397,15 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
 
   const [crmAllCustomers, setCrmAllCustomers] = useState([]);
   const [crmLoading, setCrmLoading] = useState(false);
-  const [crmFilters, setCrmFilters] = useState({ businessTypes: [], tiers: [] });
-  const [crmSubject, setCrmSubject] = useState('');
-  const [crmBody, setCrmBody] = useState('');
+  const [crmFilters, setCrmFilters] = useState({ businessTypes: [], joinedStatuses: [] });
+  const [crmSearch, setCrmSearch] = useState('');
+  const [crmTemplates, setCrmTemplates] = useState([]);
+  const [crmTemplatesLoading, setCrmTemplatesLoading] = useState(false);
+  const [crmSelectedTemplate, setCrmSelectedTemplate] = useState('');
   const [crmSending, setCrmSending] = useState(false);
   const [crmSentCount, setCrmSentCount] = useState(null);
+  const [crmLastSentTemplate, setCrmLastSentTemplate] = useState('');
+  const [crmMeta, setCrmMeta] = useState({ total: 0, totalFiltered: 0, page: 1, pageSize: 25, summary: null });
 
   const [analyticsData, setAnalyticsData] = useState(null);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
@@ -383,15 +414,17 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const mainCategories = categories.map((item) => ({ id: item.id, label: item.label }));
 
   const crmBusinessTypeOptions = useMemo(() => (
-    [...new Set(crmAllCustomers.filter((c) => c.business_type).map((c) => c.business_type))].sort()
+    [...new Set(crmAllCustomers.map((c) => c.businessType).filter(Boolean))].sort()
   ), [crmAllCustomers]);
 
-  const crmFilteredCustomers = useMemo(() => {
-    let rows = crmAllCustomers.filter((c) => c.is_approved);
-    if (crmFilters.businessTypes.length) rows = rows.filter((c) => crmFilters.businessTypes.includes(c.business_type));
-    if (crmFilters.tiers.length) rows = rows.filter((c) => crmFilters.tiers.includes(c.tier));
-    return rows;
-  }, [crmAllCustomers, crmFilters]);
+  const crmJoinStatusOptions = useMemo(() => (
+    [...new Set(crmAllCustomers.map((c) => c.joinedStatus).filter(Boolean))]
+  ), [crmAllCustomers]);
+
+  const crmFilteredCustomers = useMemo(() => crmAllCustomers, [crmAllCustomers]);
+  const crmSelectedTemplateData = useMemo(() => (
+    crmTemplates.find((template) => template.name === crmSelectedTemplate) || null
+  ), [crmTemplates, crmSelectedTemplate]);
 
   useEffect(() => {
     fetchDistinctCategories().then(setLiveCategories).catch(() => {});
@@ -400,6 +433,8 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   useEffect(() => { setProductPage(1); }, [productSearch, productCategory, productSubcategory, productPageSize]);
   useEffect(() => { setArchivePage(1); }, [archiveSearch]);
   useEffect(() => { setCustomerPage(1); }, [customerTab, customerSearch]);
+  useEffect(() => { if (activeSection === 'crm') void loadCrmCustomers(1); }, [crmFilters.businessTypes.join('|'), crmFilters.joinedStatuses.join('|'), crmSearch]);
+  useEffect(() => { if (activeSection === 'crm' && !crmTemplates.length && !crmTemplatesLoading) void loadCrmTemplates(); }, [activeSection, crmTemplates.length, crmTemplatesLoading]);
 
   const processUploadFiles = async (files) => {
     const imageFiles = Array.from(files).filter((f) => f.type.startsWith('image/'));
@@ -549,13 +584,13 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   };
 
   useEffect(() => { if (activeSection === 'new-products') void loadDormant(); }, [activeSection, dormantSearch]);
-  useEffect(() => { if (activeSection === 'products') void loadProducts(); }, [activeSection, productPage, productSearch, productCategory]);
+  useEffect(() => { if (activeSection === 'products') void loadProducts(); }, [activeSection, productPage, productSearch, productCategory, productSubcategory]);
   useEffect(() => { if (activeSection === 'archive') void loadArchive(); }, [activeSection, archivePage, archiveSearch]);
   useEffect(() => { if (activeSection === 'customers') void loadCustomers(); }, [activeSection, customerPage, customerTab, customerSearch]);
   useEffect(() => { if (activeSection === 'pricing') void loadCategoryWorkingSet(pricingCategory, 'pricing'); }, [activeSection, pricingCategory]);
   useEffect(() => { if (activeSection === 'reorder') void loadCategoryWorkingSet(reorderCategory, 'reorder'); }, [activeSection, reorderCategory]);
   useEffect(() => { if (activeSection === 'orders' && orders.length === 0) void loadOrders(); }, [activeSection]);
-  useEffect(() => { if (activeSection === 'crm' && !crmAllCustomers.length && !crmLoading) void loadCrmCustomers(); }, [activeSection]);
+  useEffect(() => { if (activeSection === 'crm' && !crmAllCustomers.length && !crmLoading) void loadCrmCustomers(1); }, [activeSection]);
   useEffect(() => { if (activeSection === 'analytics' && !analyticsData && !analyticsLoading && !analyticsError) void loadAnalytics(); }, [activeSection]);
 
   // Load specials on mount
@@ -840,32 +875,66 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     'Stock Qty': p.stockQty,
   });
 
-  const loadCrmCustomers = async () => {
+  const loadCrmCustomers = async (page = crmMeta.page || 1) => {
     setCrmLoading(true);
     try {
-      const rows = await fetchAllCustomers();
-      setCrmAllCustomers(rows);
+      const params = new URLSearchParams({ page: String(page), pageSize: String(crmMeta.pageSize || 25), search: crmSearch.trim() });
+      crmFilters.businessTypes.forEach((value) => params.append('businessType', value));
+      crmFilters.joinedStatuses.forEach((value) => params.append('joinedStatus', value));
+      const res = await fetch(`/api/whatsapp-contacts?${params}`);
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Failed to load WhatsApp contacts');
+      setCrmAllCustomers(json.contacts || []);
+      setCrmMeta({
+        total: json.total || 0,
+        totalFiltered: json.totalFiltered || 0,
+        page: json.page || page,
+        pageSize: json.pageSize || 25,
+        summary: json.summary || null,
+      });
     } catch (e) { console.error(e); }
     finally { setCrmLoading(false); }
   };
 
+  const loadCrmTemplates = async () => {
+    setCrmTemplatesLoading(true);
+    try {
+      const res = await fetch('/api/whatsapp-templates');
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Failed to load WhatsApp templates');
+      const templates = json.templates || [];
+      setCrmTemplates(templates);
+      setCrmSelectedTemplate((current) => current && templates.some((template) => template.name === current)
+        ? current
+        : (templates[0]?.name || ''));
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setCrmTemplatesLoading(false);
+    }
+  };
+
   const sendCrmEmail = async () => {
-    if (!crmSubject.trim() || !crmBody.trim() || !crmFilteredCustomers.length) return;
-    if (!window.confirm(`Send to ${crmFilteredCustomers.length} customers?`)) return;
+    if (!crmSelectedTemplate || !crmMeta.totalFiltered) return;
+    if (!window.confirm(`Send the ${crmSelectedTemplate} WhatsApp broadcast to ${crmMeta.totalFiltered} contacts?`)) return;
     setCrmSending(true); setCrmSentCount(null);
     try {
-      const res = await fetch('/api/send-crm-email', {
+      const res = await fetch('/api/send-whatsapp-broadcast', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          recipients: crmFilteredCustomers.map((c) => ({ email: c.email, name: c.name || c.business_name || '' })),
-          subject: crmSubject,
-          body: crmBody,
+          templateName: crmSelectedTemplate,
+          broadcastName: crmSelectedTemplate,
+          search: crmSearch.trim(),
+          businessTypes: crmFilters.businessTypes,
+          joinedStatuses: crmFilters.joinedStatuses,
         }),
       });
       const json = await res.json();
-      if (!res.ok) throw new Error(json.error || 'Send failed');
-      setCrmSentCount(json.sent ?? crmFilteredCustomers.length);
+      if (!res.ok) throw new Error(json.error || 'Broadcast failed');
+      setCrmSentCount(json.sent ?? 0);
+      setCrmLastSentTemplate(json.broadcastName || crmSelectedTemplate);
+      await loadCrmCustomers(crmMeta.page || 1);
     } catch (e) { alert('Error: ' + e.message); }
     finally { setCrmSending(false); }
   };
@@ -907,9 +976,10 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
         });
 
         subGroups.forEach((prods, subId) => {
-          const subLabel = subMap.get(subId) || (subId === '__general__' ? 'General' : subId);
-          // Subcategory header row
-          rows.push({ Subcategory: `── ${subLabel} ──`, Code: '', Name: '', Price: '', Stock: '', SKU: '', 'Parent SKU': '' });
+          const subLabel = subId === '__general__' ? '' : (subMap.get(subId) || subId);
+          if (subLabel) {
+            rows.push({ Subcategory: `── ${subLabel} ──`, Code: '', Name: '', Price: '', Stock: '', SKU: '', 'Parent SKU': '' });
+          }
           prods.forEach((p) => {
             rows.push({
               Subcategory: subLabel,
@@ -2211,84 +2281,182 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
               </div>
             )}
 
-            {/* CRM / EMAIL */}
+            {/* WHATSAPP */}
             {activeSection === 'crm' && (
               <div className="adm-panel">
                 <div className="adm-section-head">
                   <div>
-                    <h2 className="adm-section-title">CRM / Email</h2>
-                    <p className="adm-section-note">Filter customers and send bulk emails via Brevo.</p>
+                    <h2 className="adm-section-title">WhatsApp Contacts</h2>
+                    <p className="adm-section-note">View WATI contacts, see joined status and business type, and send WhatsApp broadcasts.</p>
                   </div>
+                  <button onClick={() => { void loadCrmCustomers(crmMeta.page || 1); void loadCrmTemplates(); }} className="adm-btn-ghost"><RefreshCw size={15} /><span className="adm-btn-text">Refresh</span></button>
                 </div>
-                <div className="adm-crm-layout">
+
+                {crmMeta.summary && (
+                  <div className="adm-analytics-grid" style={{ marginBottom: 18 }}>
+                    <div className="adm-analytics-card"><div className="adm-analytics-value">{crmMeta.summary.totalContacts}</div><div className="adm-analytics-label">Total WhatsApp Contacts</div></div>
+                    <div className="adm-analytics-card adm-analytics-card--accent"><div className="adm-analytics-value">{crmMeta.summary.joinedCount}</div><div className="adm-analytics-label">Joined</div></div>
+                    <div className="adm-analytics-card"><div className="adm-analytics-value">{crmMeta.summary.notJoinedCount}</div><div className="adm-analytics-label">No Thanks</div></div>
+                    <div className="adm-analytics-card adm-analytics-card--accent"><div className="adm-analytics-value">{crmMeta.summary.engaged30d}</div><div className="adm-analytics-label">Engaged (30d)</div></div>
+                    <div className="adm-analytics-card"><div className="adm-analytics-value">{crmMeta.summary.broadcastReadyCount}</div><div className="adm-analytics-label">Broadcast Ready</div></div>
+                  </div>
+                )}
+
+                <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 18, alignItems: 'start' }}>
                   <div className="adm-crm-filters">
+                    <label className="adm-search" style={{ marginBottom: 14 }}><Search size={14} /><input value={crmSearch} onChange={(e) => setCrmSearch(e.target.value)} placeholder="Search contact, phone, email…" className="adm-search-input" /></label>
+
                     <div style={{ fontWeight: 700, fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10, color: '#6b7280' }}>Business Type</div>
-                    {crmLoading ? <div className="adm-muted" style={{ fontSize: 13 }}>Loading customers…</div> : (
-                      crmBusinessTypeOptions.length === 0
-                        ? <div className="adm-muted" style={{ fontSize: 13 }}>No business types found</div>
-                        : crmBusinessTypeOptions.map((type) => (
-                          <label key={type} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', cursor: 'pointer', fontSize: 13, borderBottom: '1px solid #f3f4f6' }}>
-                            <input type="checkbox"
-                              checked={crmFilters.businessTypes.includes(type)}
-                              onChange={(e) => setCrmFilters((prev) => ({
-                                ...prev,
-                                businessTypes: e.target.checked ? [...prev.businessTypes, type] : prev.businessTypes.filter((t) => t !== type),
-                              }))}
-                              style={{ accentColor: '#dc2626' }}
-                            />
-                            <span style={{ flex: 1 }}>{type}</span>
-                            <span className="adm-muted" style={{ fontSize: 11 }}>
-                              {crmAllCustomers.filter((c) => c.is_approved && c.business_type === type).length}
-                            </span>
-                          </label>
-                        ))
-                    )}
-                    <div style={{ fontWeight: 700, fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.06em', margin: '18px 0 10px', color: '#6b7280' }}>Tier</div>
-                    {['regular', 'premium'].map((tier) => (
-                      <label key={tier} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', cursor: 'pointer', fontSize: 13, borderBottom: '1px solid #f3f4f6', textTransform: 'capitalize' }}>
-                        <input type="checkbox"
-                          checked={crmFilters.tiers.includes(tier)}
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', cursor: 'pointer', fontSize: 13, borderBottom: '1px solid #f3f4f6', fontWeight: 700 }}>
+                      <input type="checkbox" checked={crmFilters.businessTypes.length === 0} onChange={() => setCrmFilters((prev) => ({ ...prev, businessTypes: [] }))} style={{ accentColor: '#dc2626' }} />
+                      <span style={{ flex: 1 }}>All business types</span>
+                    </label>
+                    {crmBusinessTypeOptions.map((type) => (
+                      <label key={type} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', cursor: 'pointer', fontSize: 13, borderBottom: '1px solid #f3f4f6' }}>
+                        <input
+                          type="checkbox"
+                          checked={crmFilters.businessTypes.includes(type)}
                           onChange={(e) => setCrmFilters((prev) => ({
                             ...prev,
-                            tiers: e.target.checked ? [...prev.tiers, tier] : prev.tiers.filter((t) => t !== tier),
+                            businessTypes: e.target.checked ? [...prev.businessTypes, type] : prev.businessTypes.filter((t) => t !== type),
                           }))}
                           style={{ accentColor: '#dc2626' }}
                         />
-                        <span style={{ flex: 1 }}>{tier}</span>
-                        <span className="adm-muted" style={{ fontSize: 11 }}>
-                          {crmAllCustomers.filter((c) => c.is_approved && c.tier === tier).length}
-                        </span>
+                        <span style={{ flex: 1 }}>{type}</span>
                       </label>
                     ))}
-                    <div style={{ marginTop: 16, padding: '10px 14px', background: crmFilteredCustomers.length ? '#f0fdf4' : '#f9fafb', border: `1px solid ${crmFilteredCustomers.length ? '#d1fae5' : '#e5e7eb'}` }}>
-                      <strong style={{ color: crmFilteredCustomers.length ? '#15803d' : '#6b7280', fontSize: 20 }}>{crmFilteredCustomers.length}</strong>
-                      <span className="adm-muted" style={{ fontSize: 13, marginLeft: 6 }}>recipients selected</span>
+
+                    <div style={{ fontWeight: 700, fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.06em', margin: '18px 0 10px', color: '#6b7280' }}>Joined Status</div>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', cursor: 'pointer', fontSize: 13, borderBottom: '1px solid #f3f4f6', fontWeight: 700 }}>
+                      <input type="checkbox" checked={crmFilters.joinedStatuses.length === 0} onChange={() => setCrmFilters((prev) => ({ ...prev, joinedStatuses: [] }))} style={{ accentColor: '#dc2626' }} />
+                      <span style={{ flex: 1 }}>All statuses</span>
+                    </label>
+                    {crmJoinStatusOptions.map((status) => (
+                      <label key={status} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', cursor: 'pointer', fontSize: 13, borderBottom: '1px solid #f3f4f6' }}>
+                        <input
+                          type="checkbox"
+                          checked={crmFilters.joinedStatuses.includes(status)}
+                          onChange={(e) => setCrmFilters((prev) => ({
+                            ...prev,
+                            joinedStatuses: e.target.checked ? [...prev.joinedStatuses, status] : prev.joinedStatuses.filter((t) => t !== status),
+                          }))}
+                          style={{ accentColor: '#dc2626' }}
+                        />
+                        <span style={{ flex: 1 }}>{formatJoinStatus(status)}</span>
+                      </label>
+                    ))}
+
+                    <div style={{ marginTop: 16, padding: '10px 14px', background: crmMeta.totalFiltered ? '#f0fdf4' : '#f9fafb', border: `1px solid ${crmMeta.totalFiltered ? '#d1fae5' : '#e5e7eb'}` }}>
+                      <strong style={{ color: crmMeta.totalFiltered ? '#15803d' : '#6b7280', fontSize: 20 }}>{crmMeta.totalFiltered}</strong>
+                      <span className="adm-muted" style={{ fontSize: 13, marginLeft: 6 }}>contacts matched</span>
                     </div>
                   </div>
-                  <div className="adm-crm-compose">
-                    <div style={{ marginBottom: 14 }}>
-                      <label style={{ fontSize: 12, fontWeight: 700, display: 'block', marginBottom: 5 }}>Subject</label>
-                      <input value={crmSubject} onChange={(e) => setCrmSubject(e.target.value)} placeholder="Email subject…" className="adm-field-input" style={{ width: '100%' }} />
-                    </div>
-                    <div style={{ marginBottom: 14, flex: 1 }}>
-                      <label style={{ fontSize: 12, fontWeight: 700, display: 'block', marginBottom: 5 }}>Message</label>
-                      <textarea value={crmBody} onChange={(e) => setCrmBody(e.target.value)} placeholder="Write your message… Use {{name}} for customer name." className="adm-field-input" style={{ width: '100%', minHeight: 200, resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.6 }} />
-                    </div>
-                    {crmSentCount !== null && (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', background: '#f0fdf4', border: '1px solid #d1fae5', marginBottom: 12, fontSize: 13 }}>
-                        <Check size={14} style={{ color: '#15803d', flexShrink: 0 }} />
-                        <span>Sent to <strong>{crmSentCount}</strong> recipients</span>
+
+                  <div style={{ display: 'grid', gap: 18 }}>
+                    <div style={{ border: '1px solid #e5e7eb', borderRadius: 16, overflow: 'hidden', background: '#fff' }}>
+                      <div className="adm-list-head" style={{ gridTemplateColumns: '1.6fr 1fr 1fr 1fr 1fr 0.8fr' }}>
+                        <span>Contact</span><span>Joined</span><span>Business Type</span><span>Last Broadcast</span><span>Last Response</span><span>Status</span>
                       </div>
-                    )}
-                    <button
-                      onClick={() => void sendCrmEmail()}
-                      className="adm-btn-red"
-                      disabled={crmSending || !crmSubject.trim() || !crmBody.trim() || !crmFilteredCustomers.length}
-                      style={{ display: 'flex', alignItems: 'center', gap: 8 }}
-                    >
-                      <Send size={15} />
-                      {crmSending ? 'Sending…' : `Send to ${crmFilteredCustomers.length} customer${crmFilteredCustomers.length !== 1 ? 's' : ''}`}
-                    </button>
+                      {crmLoading ? (
+                        <div className="adm-muted" style={{ padding: 18, fontSize: 13 }}>Loading WhatsApp contacts…</div>
+                      ) : crmFilteredCustomers.length === 0 ? (
+                        <div className="adm-muted" style={{ padding: 18, fontSize: 13 }}>No contacts found for these filters.</div>
+                      ) : crmFilteredCustomers.map((contact) => (
+                        <div key={contact.id || contact.phone} className="adm-list-row" style={{ gridTemplateColumns: '1.6fr 1fr 1fr 1fr 1fr 0.8fr', alignItems: 'center' }}>
+                          <div>
+                            <div style={{ fontWeight: 700, fontSize: 13 }}>{contact.displayName || contact.phone}</div>
+                            <div className="adm-muted" style={{ fontSize: 11 }}>{contact.phoneDisplay}</div>
+                            <div className="adm-muted" style={{ fontSize: 11 }}>{contact.email || 'No email saved'}</div>
+                          </div>
+                          <div>
+                            <div style={{ fontWeight: 700, fontSize: 13 }}>{formatJoinStatus(contact.joinedStatus)}</div>
+                            <div className="adm-muted" style={{ fontSize: 11 }}>{formatRelativeDate(contact.joinedAt)}</div>
+                          </div>
+                          <div style={{ fontSize: 13 }}>{contact.businessType || '—'}</div>
+                          <div>
+                            <div style={{ fontSize: 13, fontWeight: 700 }}>{contact.lastBroadcastName || '—'}</div>
+                            <div className="adm-muted" style={{ fontSize: 11 }}>{contact.lastBroadcastAt ? formatDateTime(contact.lastBroadcastAt) : '—'}</div>
+                          </div>
+                          <div>
+                            <div style={{ fontSize: 13 }}>{formatDateTime(contact.lastRespondedAt)}</div>
+                            <div className="adm-muted" style={{ fontSize: 11 }}>{contact.lastRespondedAt ? formatRelativeDate(contact.lastRespondedAt) : '—'}</div>
+                          </div>
+                          <div>
+                            <span className="adm-pill" style={{ background: contact.engaged ? '#ecfdf5' : '#f8fafc', color: contact.engaged ? '#15803d' : '#64748b', borderColor: contact.engaged ? '#bbf7d0' : '#e2e8f0' }}>
+                              {contact.engaged ? 'Engaged' : 'Quiet'}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+                      <div className="adm-muted" style={{ fontSize: 13 }}>Showing page {crmMeta.page} of {Math.max(1, Math.ceil((crmMeta.totalFiltered || 0) / (crmMeta.pageSize || 25)))} • {crmMeta.totalFiltered} filtered contacts</div>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button className="adm-btn-ghost" disabled={crmMeta.page <= 1 || crmLoading} onClick={() => void loadCrmCustomers((crmMeta.page || 1) - 1)}>Previous</button>
+                        <button className="adm-btn-ghost" disabled={crmLoading || (crmMeta.page || 1) >= Math.max(1, Math.ceil((crmMeta.totalFiltered || 0) / (crmMeta.pageSize || 25)))} onClick={() => void loadCrmCustomers((crmMeta.page || 1) + 1)}>Next</button>
+                      </div>
+                    </div>
+
+                    <div className="adm-crm-compose">
+                      <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 4 }}>Send WhatsApp Broadcast</div>
+                      <div className="adm-muted" style={{ fontSize: 13, marginBottom: 12 }}>Choose one of your approved WATI templates below. New broadcasts you create in WATI will appear here.</div>
+
+                      <div style={{ display: 'grid', gap: 12 }}>
+                        <div>
+                          <label className="adm-muted" style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Template</label>
+                          <select value={crmSelectedTemplate} onChange={(e) => setCrmSelectedTemplate(e.target.value)} className="adm-field-input" style={{ width: '100%' }} disabled={crmTemplatesLoading || crmSending || crmTemplates.length === 0}>
+                            <option value="">{crmTemplatesLoading ? 'Loading templates…' : (crmTemplates.length ? 'Select a template' : 'No approved templates found')}</option>
+                            {crmTemplates.map((template) => (
+                              <option key={template.id || template.name} value={template.name}>{template.name}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {crmSelectedTemplateData && (
+                          <div style={{ border: '1px solid #e5e7eb', borderRadius: 14, padding: 14, background: '#fff' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginBottom: 10, flexWrap: 'wrap' }}>
+                              <div>
+                                <div style={{ fontWeight: 800, fontSize: 14 }}>{crmSelectedTemplateData.name}</div>
+                                <div className="adm-muted" style={{ fontSize: 12 }}>{crmSelectedTemplateData.category} • {crmSelectedTemplateData.language || 'Default language'}</div>
+                              </div>
+                              <div className="adm-muted" style={{ fontSize: 12, textAlign: 'right' }}>
+                                <div>Header: {crmSelectedTemplateData.headerType || 'none'}</div>
+                                <div>Updated: {formatDateTime(crmSelectedTemplateData.lastModified)}</div>
+                              </div>
+                            </div>
+                            {crmSelectedTemplateData.mediaFileName && (
+                              <div className="adm-muted" style={{ fontSize: 12, marginBottom: 8 }}>Media: {crmSelectedTemplateData.mediaFileName}</div>
+                            )}
+                            {crmSelectedTemplateData.headerText && (
+                              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>{crmSelectedTemplateData.headerText}</div>
+                            )}
+                            <div style={{ whiteSpace: 'pre-wrap', fontSize: 13, lineHeight: 1.6, marginBottom: crmSelectedTemplateData.footer ? 8 : 0 }}>{crmSelectedTemplateData.body || 'No preview text supplied by WATI for this template.'}</div>
+                            {crmSelectedTemplateData.footer && (
+                              <div className="adm-muted" style={{ fontSize: 12, marginBottom: crmSelectedTemplateData.buttons?.length ? 10 : 0 }}>{crmSelectedTemplateData.footer}</div>
+                            )}
+                            {!!crmSelectedTemplateData.buttons?.length && (
+                              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                                {crmSelectedTemplateData.buttons.map((button) => (
+                                  <span key={`${crmSelectedTemplateData.name}-${button.index}`} className="adm-pill">{button.text}</span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+
+                      {crmSentCount !== null && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', background: '#f0fdf4', border: '1px solid #d1fae5', margin: '12px 0', fontSize: 13 }}>
+                          <Check size={14} style={{ color: '#15803d', flexShrink: 0 }} />
+                          <span>Broadcast <strong>{crmLastSentTemplate || crmSelectedTemplate}</strong> sent to <strong>{crmSentCount}</strong> contacts</span>
+                        </div>
+                      )}
+                      <button onClick={() => void sendCrmEmail()} className="adm-btn-red" disabled={crmSending || !crmSelectedTemplate || !crmMeta.totalFiltered} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <Send size={15} />
+                        {crmSending ? 'Sending…' : `Send ${crmSelectedTemplate || 'template'} to ${crmMeta.totalFiltered || 0} contact${crmMeta.totalFiltered === 1 ? '' : 's'}`}
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>

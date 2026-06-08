@@ -60,11 +60,20 @@ function labelToSlug(label) {
   return label.toLowerCase().replace(/[,&]/g, '').replace(/\s+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
 }
 
+function parseImageUrls(imageValue) {
+  return String(imageValue || '')
+    .split(',')
+    .map((url) => url.trim())
+    .filter(Boolean);
+}
+
 function adapt(wpRow, stockRow) {
   const stockQty = stockRow?.stock_qty ?? 0;
   const rawDept = (wpRow.category || '').trim();
   const deptSlug = DEPT_SLUG_MAP[rawDept] || labelToSlug(rawDept);
-  const categoryPath = deptSlug ? [deptSlug] : [];
+  const subSlug = (wpRow.subcategory || '').trim();
+  const categoryPath = deptSlug ? (subSlug ? [deptSlug, subSlug] : [deptSlug]) : [];
+  const images = parseImageUrls(wpRow.image_url);
   return {
     id: wpRow.website_sku,
     code: wpRow.barcode,
@@ -74,7 +83,9 @@ function adapt(wpRow, stockRow) {
     name: wpRow.title,
     description: wpRow.description || '',
     price: Number(stockRow?.sell_price ?? 0),
-    image: (wpRow.image_url || '').split(',')[0].trim(),
+    images,
+    image: images[0] || '',
+    secondaryImage: images[1] || '',
     stockQty,
     stockOnHand: stockQty,
     colour: wpRow.colour || '',
@@ -305,7 +316,9 @@ export async function fetchAdminProductsPage({
   // Product Manager shows live (in-stock) products; Archive shows zero-stock
   if (zeroStockOnly) rows = rows.filter((p) => p.stockQty === 0);
   else rows = rows.filter((p) => p.stockQty > 0);
-  if (categoryFilter && categoryFilter !== 'all') rows = rows.filter((p) => p.category === categoryFilter);
+  if (categoryFilter && categoryFilter !== 'all') {
+    rows = rows.filter((p) => p.category === categoryFilter || p.categoryPath?.[1] === categoryFilter);
+  }
   rows = applySearchFilter(rows, searchQuery);
   rows = [...rows].sort((a, b) => (a.category || '').localeCompare(b.category || '') || a.name.localeCompare(b.name));
   const total = rows.length;
@@ -323,6 +336,89 @@ export async function fetchProductsByMainCategory(mainCategory, { limit = 300 } 
 
 export async function exportProductsCsv() {
   return fetchAllProductsAdmin();
+}
+
+// Compress to max 800px, JPEG 0.75 — output stays under 200KB so base64 is well under 4.5MB Vercel limit
+export function compressImage(file) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      const SIZE = 800;
+      const scale = Math.min(1, SIZE / Math.max(img.width || 1, img.height || 1));
+      const w = Math.max(1, Math.round(img.width * scale));
+      const h = Math.max(1, Math.round(img.height * scale));
+      const offsetX = Math.round((SIZE - w) / 2);
+      const offsetY = Math.round((SIZE - h) / 2);
+      const canvas = document.createElement('canvas');
+      canvas.width = SIZE;
+      canvas.height = SIZE;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        URL.revokeObjectURL(url);
+        reject(new Error('Canvas unavailable'));
+        return;
+      }
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, SIZE, SIZE);
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(img, offsetX, offsetY, w, h);
+      URL.revokeObjectURL(url);
+      canvas.toBlob((blob) => {
+        if (!blob) { reject(new Error('Canvas compression failed')); return; }
+        resolve(blob);
+      }, 'image/jpeg', 0.92);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Image load failed')); };
+    img.src = url;
+  });
+}
+
+export async function uploadDormantImageWithBase64(file) {
+  const compressed = await compressImage(file);
+  const base64 = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || '').split(',')[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(compressed);
+  });
+
+  const res = await fetch('/api/transform-product-image', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ filename: file.name, contentType: 'image/jpeg', base64 }),
+  });
+
+  // Vercel returns plain-text on 413 — always try JSON, fall back gracefully
+  let json;
+  try { json = await res.json(); } catch { json = {}; }
+
+  if (!res.ok) {
+    if (res.status === 413) throw new Error('Image too large after compression — try a smaller file');
+    throw new Error(json.error || `Image generation failed (${res.status})`);
+  }
+  return { url: json.url, base64 };
+}
+
+export async function uploadDormantImage(file) {
+  // Compress first so the base64 payload stays well under Vercel's 4.5MB limit
+  const compressed = await compressImage(file);
+  const base64 = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || '').split(',')[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(compressed);
+  });
+
+  const res = await fetch('/api/upload-product-image', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ filename: file.name, contentType: 'image/jpeg', base64 }),
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || 'Upload failed');
+  return json.url;
 }
 
 export async function fetchDormantProducts({ searchQuery = '' } = {}) {
@@ -350,7 +446,12 @@ export async function createProduct() { throw new Error('Products are managed in
 export async function updateProduct(websiteSku, payload) {
   // Image and description go through the server-side endpoint (service-role key, no RLS)
   const contentFields = {};
-  if (payload.image       !== undefined) contentFields.image       = payload.image;
+  if (payload.image !== undefined || payload.secondaryImage !== undefined) {
+    const images = [payload.image, payload.secondaryImage]
+      .map((value) => String(value || '').trim())
+      .filter(Boolean);
+    contentFields.image = images.join(',');
+  }
   if (payload.description !== undefined) contentFields.description = payload.description;
 
   if (Object.keys(contentFields).length) {
@@ -365,9 +466,12 @@ export async function updateProduct(websiteSku, payload) {
 
   // Other fields (name, sortOrder, categoryPath) still go through the client
   const patch = {};
-  if (payload.name        !== undefined) patch.title      = payload.name;
-  if (payload.sortOrder   !== undefined) patch.sort_order = payload.sortOrder;
-  if (payload.categoryPath?.length)      patch.category   = payload.categoryPath[0];
+  if (payload.name        !== undefined) patch.title       = payload.name;
+  if (payload.sortOrder   !== undefined) patch.sort_order  = payload.sortOrder;
+  if (payload.categoryPath?.length) {
+    patch.category    = payload.categoryPath[0];
+    patch.subcategory = payload.categoryPath[1] || '';
+  }
 
   if (Object.keys(patch).length) {
     const { error } = await supabaseStock
