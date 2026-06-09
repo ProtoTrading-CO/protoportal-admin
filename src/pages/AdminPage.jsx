@@ -14,8 +14,11 @@ import {
   FileDown,
   Globe,
   Grip,
+  Image,
   ImagePlus,
+  Layout,
   Loader2,
+  Megaphone,
   Upload,
   LogOut,
   Mail,
@@ -61,6 +64,10 @@ import { supabase } from '../lib/supabase';
 import { buildOrderNoteSections, createEmailOrderItems, generateOrderPdfBase64 } from '../lib/orderDocuments';
 import { deleteOrderAdmin, fetchAllOrdersAdmin, updateOrderAdmin } from '../lib/orders';
 import { fetchSpecials, saveSpecials } from '../lib/specials';
+import { fetchBanner, saveBanner, uploadBannerImage } from '../lib/banner';
+import { fetchPopupSpecial, savePopupSpecial, uploadPopupImage } from '../lib/popupSpecial';
+import CrmContactsModal from '../components/CrmContactsModal';
+import BroadcastCalendar from '../components/BroadcastCalendar';
 import categories from '../data/categories.json';
 
 // ─── Reorder sort order — stored in localStorage, applied client-side ─────────
@@ -96,6 +103,8 @@ const sections = [
   { id: 'reorder', label: 'Reorder Grid', icon: Grip },
   { id: 'customers', label: 'Customer Management', icon: Users },
   { id: 'crm', label: 'WhatsApp', icon: MessageCircle },
+  { id: 'banner', label: 'Banner Editor', icon: Layout },
+  { id: 'popup-specials', label: 'Popup Specials', icon: Megaphone },
   { id: 'analytics', label: 'Analytics', icon: BarChart2 },
   { id: 'pricing', label: 'Pricing & Returns', icon: SlidersHorizontal },
   { id: 'orders', label: 'Order Requests', icon: ShoppingBag },
@@ -406,6 +415,15 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const [crmSentCount, setCrmSentCount] = useState(null);
   const [crmLastSentTemplate, setCrmLastSentTemplate] = useState('');
   const [crmMeta, setCrmMeta] = useState({ total: 0, totalFiltered: 0, page: 1, pageSize: 25, summary: null });
+  const [crmContactsOpen, setCrmContactsOpen] = useState(false);
+
+  const [bannerForm, setBannerForm] = useState({ title: '', body: '', imageUrl: '' });
+  const [bannerSaving, setBannerSaving] = useState(false);
+  const [bannerUploading, setBannerUploading] = useState(false);
+
+  const [popupForm, setPopupForm] = useState({ active: false, imageUrl: '', title: '' });
+  const [popupSaving, setPopupSaving] = useState(false);
+  const [popupUploading, setPopupUploading] = useState(false);
 
   const [analyticsData, setAnalyticsData] = useState(null);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
@@ -435,6 +453,8 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   useEffect(() => { setCustomerPage(1); }, [customerTab, customerSearch]);
   useEffect(() => { if (activeSection === 'crm') void loadCrmCustomers(1); }, [crmFilters.businessTypes.join('|'), crmFilters.joinedStatuses.join('|'), crmSearch]);
   useEffect(() => { if (activeSection === 'crm' && !crmTemplates.length && !crmTemplatesLoading) void loadCrmTemplates(); }, [activeSection, crmTemplates.length, crmTemplatesLoading]);
+  useEffect(() => { if (activeSection === 'banner') void loadBannerEditor(); }, [activeSection]);
+  useEffect(() => { if (activeSection === 'popup-specials') void loadPopupEditor(); }, [activeSection]);
 
   const processUploadFiles = async (files) => {
     const imageFiles = Array.from(files).filter((f) => f.type.startsWith('image/'));
@@ -861,8 +881,13 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
 
   const toggleArchive = async (product) => {
     setSaving(product.id);
-    try { await archiveProduct(product.id, !product.isArchived); await loadProducts(); }
-    finally { setSaving(''); }
+    try {
+      await archiveProduct(product.id, !product.isArchived);
+      invalidateAdminCache();
+      await refreshCurrentSection();
+    } catch (err) {
+      alert(err.message || 'Failed to update archive status');
+    } finally { setSaving(''); }
   };
 
   const toXlsxRow = (p) => ({
@@ -914,29 +939,84 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     }
   };
 
-  const sendCrmEmail = async () => {
-    if (!crmSelectedTemplate || !crmMeta.totalFiltered) return;
-    if (!window.confirm(`Send the ${crmSelectedTemplate} WhatsApp broadcast to ${crmMeta.totalFiltered} contacts?`)) return;
+  const sendCrmEmail = async (overrides = {}) => {
+    const templateName = overrides.templateName || crmSelectedTemplate;
+    const businessTypes = overrides.businessTypes ?? crmFilters.businessTypes;
+    const joinedStatuses = overrides.joinedStatuses ?? crmFilters.joinedStatuses;
+    if (!templateName) return;
+    if (!window.confirm(`Send the ${templateName} WhatsApp broadcast now?`)) return;
     setCrmSending(true); setCrmSentCount(null);
     try {
       const res = await fetch('/api/send-whatsapp-broadcast', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          templateName: crmSelectedTemplate,
-          broadcastName: crmSelectedTemplate,
+          templateName,
+          broadcastName: templateName,
           search: crmSearch.trim(),
-          businessTypes: crmFilters.businessTypes,
-          joinedStatuses: crmFilters.joinedStatuses,
+          businessTypes,
+          joinedStatuses,
         }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Broadcast failed');
       setCrmSentCount(json.sent ?? 0);
-      setCrmLastSentTemplate(json.broadcastName || crmSelectedTemplate);
+      setCrmLastSentTemplate(json.broadcastName || templateName);
       await loadCrmCustomers(crmMeta.page || 1);
     } catch (e) { alert('Error: ' + e.message); }
     finally { setCrmSending(false); }
+  };
+
+  const loadBannerEditor = async () => {
+    try {
+      const data = await fetchBanner();
+      setBannerForm({ title: data.title || '', body: data.body || '', imageUrl: data.imageUrl || '' });
+    } catch (e) { alert(e.message || 'Failed to load banner'); }
+  };
+
+  const saveBannerEditor = async () => {
+    setBannerSaving(true);
+    try {
+      await saveBanner(bannerForm);
+      alert('Banner saved');
+    } catch (e) { alert(e.message || 'Failed to save banner'); }
+    finally { setBannerSaving(false); }
+  };
+
+  const handleBannerImage = async (file) => {
+    if (!file) return;
+    setBannerUploading(true);
+    try {
+      const { url } = await uploadBannerImage(file);
+      setBannerForm((prev) => ({ ...prev, imageUrl: url }));
+    } catch (e) { alert(e.message || 'Failed to upload image'); }
+    finally { setBannerUploading(false); }
+  };
+
+  const loadPopupEditor = async () => {
+    try {
+      const data = await fetchPopupSpecial();
+      setPopupForm({ active: Boolean(data.active), imageUrl: data.imageUrl || '', title: data.title || '' });
+    } catch (e) { alert(e.message || 'Failed to load popup'); }
+  };
+
+  const savePopupEditor = async () => {
+    setPopupSaving(true);
+    try {
+      await savePopupSpecial(popupForm);
+      alert('Popup special saved');
+    } catch (e) { alert(e.message || 'Failed to save popup'); }
+    finally { setPopupSaving(false); }
+  };
+
+  const handlePopupImage = async (file) => {
+    if (!file) return;
+    setPopupUploading(true);
+    try {
+      const { url } = await uploadPopupImage(file);
+      setPopupForm((prev) => ({ ...prev, imageUrl: url }));
+    } catch (e) { alert(e.message || 'Failed to upload image'); }
+    finally { setPopupUploading(false); }
   };
 
   const loadAnalytics = async () => {
@@ -2286,15 +2366,21 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
               <div className="adm-panel">
                 <div className="adm-section-head">
                   <div>
-                    <h2 className="adm-section-title">WhatsApp Contacts</h2>
-                    <p className="adm-section-note">View WATI contacts, see joined status and business type, and send WhatsApp broadcasts.</p>
+                    <h2 className="adm-section-title">WhatsApp</h2>
+                    <p className="adm-section-note">View contacts, plan broadcasts on the calendar, and target customer groups from onboarding.</p>
                   </div>
                   <button onClick={() => { void loadCrmCustomers(crmMeta.page || 1); void loadCrmTemplates(); }} className="adm-btn-ghost"><RefreshCw size={15} /><span className="adm-btn-text">Refresh</span></button>
                 </div>
 
                 {crmMeta.summary && (
                   <div className="adm-analytics-grid" style={{ marginBottom: 18 }}>
-                    <div className="adm-analytics-card"><div className="adm-analytics-value">{crmMeta.summary.totalContacts}</div><div className="adm-analytics-label">Total WhatsApp Contacts</div></div>
+                    <div className="adm-analytics-card" style={{ position: 'relative' }}>
+                      <div className="adm-analytics-value">{crmMeta.summary.totalContacts}</div>
+                      <div className="adm-analytics-label">Total WhatsApp Contacts</div>
+                      <button type="button" className="adm-btn-ghost" style={{ marginTop: 8, fontSize: 12, padding: '4px 10px' }} onClick={() => setCrmContactsOpen(true)}>
+                        <Eye size={13} /> View
+                      </button>
+                    </div>
                     <div className="adm-analytics-card adm-analytics-card--accent"><div className="adm-analytics-value">{crmMeta.summary.joinedCount}</div><div className="adm-analytics-label">Joined</div></div>
                     <div className="adm-analytics-card"><div className="adm-analytics-value">{crmMeta.summary.notJoinedCount}</div><div className="adm-analytics-label">No Thanks</div></div>
                     <div className="adm-analytics-card adm-analytics-card--accent"><div className="adm-analytics-value">{crmMeta.summary.engaged30d}</div><div className="adm-analytics-label">Engaged (30d)</div></div>
@@ -2353,110 +2439,100 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                   </div>
 
                   <div style={{ display: 'grid', gap: 18 }}>
-                    <div style={{ border: '1px solid #e5e7eb', borderRadius: 16, overflow: 'hidden', background: '#fff' }}>
-                      <div className="adm-list-head" style={{ gridTemplateColumns: '1.6fr 1fr 1fr 1fr 1fr 0.8fr' }}>
-                        <span>Contact</span><span>Joined</span><span>Business Type</span><span>Last Broadcast</span><span>Last Response</span><span>Status</span>
+                    {crmSentCount !== null && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', background: '#f0fdf4', border: '1px solid #d1fae5', fontSize: 13 }}>
+                        <Check size={14} style={{ color: '#15803d', flexShrink: 0 }} />
+                        <span>Broadcast <strong>{crmLastSentTemplate}</strong> sent to <strong>{crmSentCount}</strong> contacts</span>
                       </div>
-                      {crmLoading ? (
-                        <div className="adm-muted" style={{ padding: 18, fontSize: 13 }}>Loading WhatsApp contacts…</div>
-                      ) : crmFilteredCustomers.length === 0 ? (
-                        <div className="adm-muted" style={{ padding: 18, fontSize: 13 }}>No contacts found for these filters.</div>
-                      ) : crmFilteredCustomers.map((contact) => (
-                        <div key={contact.id || contact.phone} className="adm-list-row" style={{ gridTemplateColumns: '1.6fr 1fr 1fr 1fr 1fr 0.8fr', alignItems: 'center' }}>
-                          <div>
-                            <div style={{ fontWeight: 700, fontSize: 13 }}>{contact.displayName || contact.phone}</div>
-                            <div className="adm-muted" style={{ fontSize: 11 }}>{contact.phoneDisplay}</div>
-                            <div className="adm-muted" style={{ fontSize: 11 }}>{contact.email || 'No email saved'}</div>
-                          </div>
-                          <div>
-                            <div style={{ fontWeight: 700, fontSize: 13 }}>{formatJoinStatus(contact.joinedStatus)}</div>
-                            <div className="adm-muted" style={{ fontSize: 11 }}>{formatRelativeDate(contact.joinedAt)}</div>
-                          </div>
-                          <div style={{ fontSize: 13 }}>{contact.businessType || '—'}</div>
-                          <div>
-                            <div style={{ fontSize: 13, fontWeight: 700 }}>{contact.lastBroadcastName || '—'}</div>
-                            <div className="adm-muted" style={{ fontSize: 11 }}>{contact.lastBroadcastAt ? formatDateTime(contact.lastBroadcastAt) : '—'}</div>
-                          </div>
-                          <div>
-                            <div style={{ fontSize: 13 }}>{formatDateTime(contact.lastRespondedAt)}</div>
-                            <div className="adm-muted" style={{ fontSize: 11 }}>{contact.lastRespondedAt ? formatRelativeDate(contact.lastRespondedAt) : '—'}</div>
-                          </div>
-                          <div>
-                            <span className="adm-pill" style={{ background: contact.engaged ? '#ecfdf5' : '#f8fafc', color: contact.engaged ? '#15803d' : '#64748b', borderColor: contact.engaged ? '#bbf7d0' : '#e2e8f0' }}>
-                              {contact.engaged ? 'Engaged' : 'Quiet'}
-                            </span>
-                          </div>
-                        </div>
-                      ))}
+                    )}
+                    <BroadcastCalendar
+                      templates={crmTemplates}
+                      templatesLoading={crmTemplatesLoading}
+                      filters={crmFilters}
+                      onSendNow={(overrides) => void sendCrmEmail(overrides)}
+                      sending={crmSending}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* BANNER EDITOR */}
+            {activeSection === 'banner' && (
+              <div className="adm-panel">
+                <div className="adm-section-head">
+                  <div>
+                    <h2 className="adm-section-title">Banner Editor</h2>
+                    <p className="adm-section-note">Edit the logged-in portal hero banner. Image is resized to 1774 × 887 px on upload.</p>
+                  </div>
+                  <button type="button" onClick={() => void loadBannerEditor()} className="adm-btn-ghost"><RefreshCw size={15} /><span className="adm-btn-text">Refresh</span></button>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, alignItems: 'start' }}>
+                  <div style={{ display: 'grid', gap: 12 }}>
+                    <div>
+                      <label className="adm-muted" style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Title</label>
+                      <input className="adm-field-input" style={{ width: '100%' }} value={bannerForm.title} onChange={(e) => setBannerForm((p) => ({ ...p, title: e.target.value }))} />
                     </div>
-
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
-                      <div className="adm-muted" style={{ fontSize: 13 }}>Showing page {crmMeta.page} of {Math.max(1, Math.ceil((crmMeta.totalFiltered || 0) / (crmMeta.pageSize || 25)))} • {crmMeta.totalFiltered} filtered contacts</div>
-                      <div style={{ display: 'flex', gap: 8 }}>
-                        <button className="adm-btn-ghost" disabled={crmMeta.page <= 1 || crmLoading} onClick={() => void loadCrmCustomers((crmMeta.page || 1) - 1)}>Previous</button>
-                        <button className="adm-btn-ghost" disabled={crmLoading || (crmMeta.page || 1) >= Math.max(1, Math.ceil((crmMeta.totalFiltered || 0) / (crmMeta.pageSize || 25)))} onClick={() => void loadCrmCustomers((crmMeta.page || 1) + 1)}>Next</button>
-                      </div>
+                    <div>
+                      <label className="adm-muted" style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Body text</label>
+                      <textarea className="adm-field-input" style={{ width: '100%', minHeight: 120 }} value={bannerForm.body} onChange={(e) => setBannerForm((p) => ({ ...p, body: e.target.value }))} />
                     </div>
-
-                    <div className="adm-crm-compose">
-                      <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 4 }}>Send WhatsApp Broadcast</div>
-                      <div className="adm-muted" style={{ fontSize: 13, marginBottom: 12 }}>Choose one of your approved WATI templates below. New broadcasts you create in WATI will appear here.</div>
-
-                      <div style={{ display: 'grid', gap: 12 }}>
-                        <div>
-                          <label className="adm-muted" style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Template</label>
-                          <select value={crmSelectedTemplate} onChange={(e) => setCrmSelectedTemplate(e.target.value)} className="adm-field-input" style={{ width: '100%' }} disabled={crmTemplatesLoading || crmSending || crmTemplates.length === 0}>
-                            <option value="">{crmTemplatesLoading ? 'Loading templates…' : (crmTemplates.length ? 'Select a template' : 'No approved templates found')}</option>
-                            {crmTemplates.map((template) => (
-                              <option key={template.id || template.name} value={template.name}>{template.name}</option>
-                            ))}
-                          </select>
-                        </div>
-
-                        {crmSelectedTemplateData && (
-                          <div style={{ border: '1px solid #e5e7eb', borderRadius: 14, padding: 14, background: '#fff' }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginBottom: 10, flexWrap: 'wrap' }}>
-                              <div>
-                                <div style={{ fontWeight: 800, fontSize: 14 }}>{crmSelectedTemplateData.name}</div>
-                                <div className="adm-muted" style={{ fontSize: 12 }}>{crmSelectedTemplateData.category} • {crmSelectedTemplateData.language || 'Default language'}</div>
-                              </div>
-                              <div className="adm-muted" style={{ fontSize: 12, textAlign: 'right' }}>
-                                <div>Header: {crmSelectedTemplateData.headerType || 'none'}</div>
-                                <div>Updated: {formatDateTime(crmSelectedTemplateData.lastModified)}</div>
-                              </div>
-                            </div>
-                            {crmSelectedTemplateData.mediaFileName && (
-                              <div className="adm-muted" style={{ fontSize: 12, marginBottom: 8 }}>Media: {crmSelectedTemplateData.mediaFileName}</div>
-                            )}
-                            {crmSelectedTemplateData.headerText && (
-                              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>{crmSelectedTemplateData.headerText}</div>
-                            )}
-                            <div style={{ whiteSpace: 'pre-wrap', fontSize: 13, lineHeight: 1.6, marginBottom: crmSelectedTemplateData.footer ? 8 : 0 }}>{crmSelectedTemplateData.body || 'No preview text supplied by WATI for this template.'}</div>
-                            {crmSelectedTemplateData.footer && (
-                              <div className="adm-muted" style={{ fontSize: 12, marginBottom: crmSelectedTemplateData.buttons?.length ? 10 : 0 }}>{crmSelectedTemplateData.footer}</div>
-                            )}
-                            {!!crmSelectedTemplateData.buttons?.length && (
-                              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                                {crmSelectedTemplateData.buttons.map((button) => (
-                                  <span key={`${crmSelectedTemplateData.name}-${button.index}`} className="adm-pill">{button.text}</span>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-
-                      {crmSentCount !== null && (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', background: '#f0fdf4', border: '1px solid #d1fae5', margin: '12px 0', fontSize: 13 }}>
-                          <Check size={14} style={{ color: '#15803d', flexShrink: 0 }} />
-                          <span>Broadcast <strong>{crmLastSentTemplate || crmSelectedTemplate}</strong> sent to <strong>{crmSentCount}</strong> contacts</span>
-                        </div>
-                      )}
-                      <button onClick={() => void sendCrmEmail()} className="adm-btn-red" disabled={crmSending || !crmSelectedTemplate || !crmMeta.totalFiltered} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <Send size={15} />
-                        {crmSending ? 'Sending…' : `Send ${crmSelectedTemplate || 'template'} to ${crmMeta.totalFiltered || 0} contact${crmMeta.totalFiltered === 1 ? '' : 's'}`}
-                      </button>
+                    <div>
+                      <label className="adm-muted" style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Banner image</label>
+                      <label className="adm-btn-ghost" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                        <ImagePlus size={15} /> {bannerUploading ? 'Uploading…' : 'Upload image (1774×887)'}
+                        <input type="file" accept="image/*" hidden onChange={(e) => { void handleBannerImage(e.target.files?.[0]); e.target.value = ''; }} />
+                      </label>
                     </div>
+                    <button type="button" className="adm-btn-red" disabled={bannerSaving} onClick={() => void saveBannerEditor()}>{bannerSaving ? 'Saving…' : 'Save banner'}</button>
+                  </div>
+                  <div style={{ border: '1px solid #e5e7eb', borderRadius: 16, overflow: 'hidden', background: '#050505' }}>
+                    <div style={{ padding: 24 }}>
+                      <span style={{ fontSize: 11, color: '#9ca3af', textTransform: 'uppercase' }}>Established 1987 | Wholesale supply</span>
+                      <h3 style={{ color: '#fff', margin: '12px 0', fontSize: 22, lineHeight: 1.2 }}>{bannerForm.title || 'Banner title'}</h3>
+                      <p style={{ color: '#9ca3af', fontSize: 14, lineHeight: 1.5 }}>{bannerForm.body || 'Banner body text'}</p>
+                    </div>
+                    {bannerForm.imageUrl && (
+                      <img src={bannerForm.imageUrl} alt="Banner preview" style={{ width: '100%', display: 'block', objectFit: 'cover' }} />
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* POPUP SPECIALS */}
+            {activeSection === 'popup-specials' && (
+              <div className="adm-panel">
+                <div className="adm-section-head">
+                  <div>
+                    <h2 className="adm-section-title">Popup Specials</h2>
+                    <p className="adm-section-note">Upload a flyer popup shown once per customer when they log in (while active).</p>
+                  </div>
+                  <button type="button" onClick={() => void loadPopupEditor()} className="adm-btn-ghost"><RefreshCw size={15} /><span className="adm-btn-text">Refresh</span></button>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, alignItems: 'start' }}>
+                  <div style={{ display: 'grid', gap: 12 }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 14, fontWeight: 600 }}>
+                      <input type="checkbox" checked={popupForm.active} onChange={(e) => setPopupForm((p) => ({ ...p, active: e.target.checked }))} style={{ accentColor: '#dc2626' }} />
+                      Active — show popup to logged-in customers
+                    </label>
+                    <div>
+                      <label className="adm-muted" style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Admin label (optional)</label>
+                      <input className="adm-field-input" style={{ width: '100%' }} value={popupForm.title} onChange={(e) => setPopupForm((p) => ({ ...p, title: e.target.value }))} placeholder="e.g. June clearance flyer" />
+                    </div>
+                    <div>
+                      <label className="adm-muted" style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Flyer image</label>
+                      <label className="adm-btn-ghost" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                        <ImagePlus size={15} /> {popupUploading ? 'Uploading…' : 'Upload flyer'}
+                        <input type="file" accept="image/*" hidden onChange={(e) => { void handlePopupImage(e.target.files?.[0]); e.target.value = ''; }} />
+                      </label>
+                    </div>
+                    <button type="button" className="adm-btn-red" disabled={popupSaving} onClick={() => void savePopupEditor()}>{popupSaving ? 'Saving…' : 'Save popup'}</button>
+                  </div>
+                  <div style={{ border: '1px solid #e5e7eb', borderRadius: 16, padding: 16, background: '#f9fafb', minHeight: 200, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    {popupForm.imageUrl
+                      ? <img src={popupForm.imageUrl} alt="Popup preview" style={{ maxWidth: '100%', maxHeight: 400, borderRadius: 8 }} />
+                      : <span className="adm-muted">No image uploaded</span>}
                   </div>
                 </div>
               </div>
@@ -3052,6 +3128,21 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
           </div>
         </div>
       )}
+
+      <CrmContactsModal
+        open={crmContactsOpen}
+        onClose={() => setCrmContactsOpen(false)}
+        contacts={crmFilteredCustomers}
+        loading={crmLoading}
+        search={crmSearch}
+        onSearchChange={setCrmSearch}
+        meta={crmMeta}
+        onPageChange={(page) => void loadCrmCustomers(page)}
+        onRefresh={() => void loadCrmCustomers(crmMeta.page || 1)}
+        formatJoinStatus={formatJoinStatus}
+        formatRelativeDate={formatRelativeDate}
+        formatDateTime={formatDateTime}
+      />
     </div>
   );
 }
