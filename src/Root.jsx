@@ -1,4 +1,5 @@
 import AdminPage from './pages/AdminPage';
+import FulfillmentPage from './pages/FulfillmentPage';
 
 const temporaryCustomer = {
   id: 'temporary-admin-access',
@@ -8,35 +9,15 @@ const temporaryCustomer = {
 };
 
 export default function Root() {
+  if (window.location.pathname === '/fulfillment') {
+    return <FulfillmentPage />;
+  }
+
   return (
-    <div>
-      <div style={styles.noticeBar}>
-        Login is temporarily disabled. The admin dashboard is currently open without sign-in.
-      </div>
-      <AdminPage
-        customer={temporaryCustomer}
-        onLogout={() => {
-          window.location.reload();
-        }}
-        onViewPortal={() => {
-          window.location.href = 'https://protoportal-main.vercel.app';
-        }}
-      />
-    </div>
+    <AdminPage
+      customer={temporaryCustomer}
+      onLogout={() => { window.location.reload(); }}
+      onViewPortal={() => { window.location.href = 'https://protoportal-main.vercel.app'; }}
+    />
   );
 }
-
-const styles = {
-  noticeBar: {
-    background: '#c40000',
-    color: '#fff',
-    fontFamily: 'Inter, sans-serif',
-    fontSize: '13px',
-    fontWeight: '600',
-    textAlign: 'center',
-    padding: '10px 16px',
-    position: 'sticky',
-    top: 0,
-    zIndex: 1000,
-  },
-};

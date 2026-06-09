@@ -66,6 +66,63 @@ export default async function handler(req, res) {
     });
   }
 
+  // PATCH — approve / update customer fields
+  if (req.method === 'PATCH') {
+    const { id, ...patch } = req.body || {};
+    if (!id) return res.status(400).json({ error: 'id required' });
+    const { data, error } = await supabase
+      .from('customers')
+      .update(patch)
+      .eq('id', id)
+      .select('*')
+      .single();
+    if (error) return res.status(400).json({ error: error.message });
+
+    // Send WhatsApp welcome via WATI on approval — skip only if customer explicitly opted out
+    if (patch.is_approved === true && data?.accept_whatsapp !== false && data?.phone) {
+      const rawPhone = data.phone.replace(/\D/g, '');
+      // WATI expects numbers without + in international format: 27821234567
+      const watiPhone = rawPhone.startsWith('0') ? `27${rawPhone.slice(1)}` : rawPhone;
+      const watiBase = process.env.WATI_API_URL || 'https://live-mt-server.wati.io/10138950';
+      const watiToken = process.env.WATI_API_TOKEN;
+      if (watiToken) {
+        try {
+          // Step 1: Add/update contact in WATI so the number is registered
+          await fetch(`${watiBase}/api/v1/addContact`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${watiToken}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              name: data.name || data.business_name || 'Customer',
+              phoneNumber: watiPhone,
+            }),
+          }).catch(() => {}); // non-fatal if contact already exists
+
+          // Step 2: Send the template message
+          const waRes = await fetch(
+            `${watiBase}/api/v1/sendTemplateMessage?whatsappNumber=${watiPhone}`,
+            {
+              method: 'POST',
+              headers: { 'Authorization': `Bearer ${watiToken}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                template_name: 'proto_welcome_',
+                broadcast_name: 'proto_welcome_',
+                parameters: [],
+              }),
+            }
+          );
+          if (!waRes.ok) {
+            const waBody = await waRes.json().catch(() => ({}));
+            console.error('WATI send error:', waRes.status, JSON.stringify(waBody));
+          }
+        } catch (waErr) {
+          console.error('WATI broadcast error:', waErr.message);
+        }
+      }
+    }
+
+    return res.status(200).json({ row: data });
+  }
+
   // DELETE — remove customer
   if (req.method === 'DELETE') {
     const { id } = req.body || {};

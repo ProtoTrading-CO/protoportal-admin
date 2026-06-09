@@ -13,14 +13,19 @@ export default async function handler(req, res) {
 
   // GET — list orders (service role bypasses RLS)
   if (req.method === 'GET') {
-    const { limit = '150' } = req.query;
+    const { limit = '150', customerId = '', id = '' } = req.query;
     const lim = Math.min(500, Math.max(1, parseInt(limit, 10) || 150));
 
-    const { data, error } = await supabase
+    let ordersQuery = supabase
       .from('orders')
-      .select('*, customers(name, email, tier)')
+      .select('*, customers(name, email, phone, business_name, business_type, city, province, country, tier)')
       .order('created_at', { ascending: false })
       .limit(lim);
+
+    if (id) ordersQuery = ordersQuery.eq('id', id);
+    if (customerId) ordersQuery = ordersQuery.eq('customer_id', customerId);
+
+    const { data, error } = await ordersQuery;
 
     if (error) return res.status(400).json({ error: error.message });
     return res.status(200).json({ rows: data || [] });
@@ -39,7 +44,7 @@ export default async function handler(req, res) {
       .from('orders')
       .update(patch)
       .eq('id', id)
-      .select('*, customers(name, email, tier)')
+      .select('*, customers(name, email, phone, business_name, business_type, city, province, country, tier)')
       .single();
 
     if (error) return res.status(400).json({ error: error.message });
