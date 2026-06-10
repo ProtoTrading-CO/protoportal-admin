@@ -1,15 +1,20 @@
 let _cache = null;
 
-export async function fetchBanner() {
-  if (_cache) return _cache;
-  const res = await fetch('/api/banner');
+export function invalidateBannerCache() {
+  _cache = null;
+}
+
+export async function fetchBanner({ force = false } = {}) {
+  if (!force && _cache) return _cache;
+  const res = await fetch(`/api/banner?_=${Date.now()}`, { cache: 'no-store' });
   const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to load banner');
   _cache = data;
   return data;
 }
 
 export async function saveBanner(payload) {
-  _cache = null;
+  invalidateBannerCache();
   const res = await fetch('/api/banner', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

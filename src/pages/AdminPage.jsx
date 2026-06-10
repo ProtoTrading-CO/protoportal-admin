@@ -1019,7 +1019,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
 
   const loadBannerEditor = async () => {
     try {
-      const data = await fetchBanner();
+      const data = await fetchBanner({ force: true });
       setBannerForm({ title: data.title || '', body: data.body || '', imageUrl: data.imageUrl || '' });
     } catch (e) { alert(e.message || 'Failed to load banner'); }
   };
@@ -1027,8 +1027,9 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const saveBannerEditor = async () => {
     setBannerSaving(true);
     try {
-      await saveBanner(bannerForm);
-      alert('Banner saved');
+      const saved = await saveBanner(bannerForm);
+      setBannerForm({ title: saved.title || '', body: saved.body || '', imageUrl: saved.imageUrl || '' });
+      alert('Banner saved — refresh the trade portal (or switch back to its tab) to see changes.');
     } catch (e) { alert(e.message || 'Failed to save banner'); }
     finally { setBannerSaving(false); }
   };
