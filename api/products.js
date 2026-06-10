@@ -42,8 +42,11 @@ function adapt(wpRow, stockRow) {
   const rawDept = (wpRow.category || '').trim();
   const deptSlug = DEPT_SLUG_MAP[rawDept] || labelToSlug(rawDept);
   const subs = SKU_SUBS[wpRow.website_sku] || [];
-  const sub1Slug = subs[0] ? labelToSlug(subs[0]) : '';
-  const sub2Slug = subs[1] ? labelToSlug(subs[1]) : '';
+  // An explicit DB subcategory (set via the admin "Move to category" action)
+  // overrides the file-based mapping; otherwise fall back to SKU_SUBS.
+  const dbSub = (wpRow.subcategory || '').trim();
+  const sub1Slug = dbSub || (subs[0] ? labelToSlug(subs[0]) : '');
+  const sub2Slug = dbSub ? '' : (subs[1] ? labelToSlug(subs[1]) : '');
   const categoryPath = deptSlug
     ? sub1Slug
       ? sub2Slug ? [deptSlug, sub1Slug, sub2Slug] : [deptSlug, sub1Slug]

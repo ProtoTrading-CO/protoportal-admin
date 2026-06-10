@@ -54,6 +54,7 @@ import {
   fetchProductsByMainCategory,
   invalidateAdminCache,
   invalidateProductCache,
+  moveProductsToCategory,
   saveSortOrder,
   updateProduct,
   uploadDormantImage,
@@ -405,6 +406,12 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const [dragOverId, setDragOverId] = useState(null);
   const [selectedIds, setSelectedIds] = useState(new Set());
   const touchDragRef = useRef(null);
+
+  const [moveModalOpen, setMoveModalOpen] = useState(false);
+  const [moveDept, setMoveDept] = useState('');
+  const [moveSub, setMoveSub] = useState('');
+  const [moveSaving, setMoveSaving] = useState(false);
+  const [moveError, setMoveError] = useState('');
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
@@ -1148,6 +1155,34 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
       return next;
     });
     setSelectedIds(new Set());
+  };
+
+  const openMoveModal = () => {
+    if (!selectedIds.size) return;
+    setMoveError('');
+    const dept = reorderCategory || categories[0]?.id || '';
+    setMoveDept(dept);
+    setMoveSub(subcategoryOptions(dept)[0]?.id || '');
+    setMoveModalOpen(true);
+  };
+
+  const applyMoveToCategory = async () => {
+    if (!selectedIds.size || !moveDept) return;
+    setMoveSaving(true);
+    setMoveError('');
+    try {
+      const deptLabel = categories.find((c) => c.id === moveDept)?.label || moveDept;
+      await moveProductsToCategory([...selectedIds], { category: deptLabel, subcategory: moveSub || '' });
+      setMoveModalOpen(false);
+      setSelectedIds(new Set());
+      invalidateAdminCache();
+      invalidateProductCache();
+      await loadCategoryWorkingSet(reorderCategory, 'reorder');
+    } catch (err) {
+      setMoveError(err.message || 'Move failed');
+    } finally {
+      setMoveSaving(false);
+    }
   };
 
   const dropToTop = () => {
@@ -2061,6 +2096,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                       <>
                         <span className="adm-pill">{selectedIds.size} selected</span>
                         <button onClick={moveSelectedToTop} className="adm-btn-red">Move to top</button>
+                        <button onClick={openMoveModal} className="adm-btn-red"><ArrowLeftRight size={14} /> Move to category</button>
                         <button onClick={() => setSelectedIds(new Set())} className="adm-btn-ghost">Clear</button>
                       </>
                     )}
@@ -2685,6 +2721,50 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
       )}
 
       {/* Content quick-edit modal (image drag-drop + description) */}
+      {moveModalOpen && (
+        <div className="adm-modal-backdrop">
+          <div className="adm-modal" style={{ maxWidth: 460 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: 20, fontFamily: 'Outfit, sans-serif' }}>Move to category</h3>
+                <p className="adm-muted" style={{ marginTop: 4, fontSize: 13 }}>{selectedIds.size} product{selectedIds.size === 1 ? '' : 's'} selected</p>
+              </div>
+              <button onClick={() => setMoveModalOpen(false)} className="adm-icon-btn"><X size={16} /></button>
+            </div>
+
+            <label className="adm-field-label" style={{ display: 'block', marginBottom: 6 }}>Department</label>
+            <select
+              value={moveDept}
+              onChange={(e) => { setMoveDept(e.target.value); setMoveSub(subcategoryOptions(e.target.value)[0]?.id || ''); }}
+              className="adm-field-input"
+              style={{ width: '100%', marginBottom: 16 }}
+            >
+              {mainCategories.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+            </select>
+
+            <label className="adm-field-label" style={{ display: 'block', marginBottom: 6 }}>Subcategory</label>
+            <select
+              value={moveSub}
+              onChange={(e) => setMoveSub(e.target.value)}
+              className="adm-field-input"
+              style={{ width: '100%', marginBottom: 20 }}
+            >
+              <option value="">— None (department only) —</option>
+              {subcategoryOptions(moveDept).map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
+            </select>
+
+            {moveError && <p style={{ color: '#dc2626', fontSize: 13, marginBottom: 12 }}>{moveError}</p>}
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button onClick={() => setMoveModalOpen(false)} className="adm-btn-ghost" disabled={moveSaving}>Cancel</button>
+              <button onClick={applyMoveToCategory} className="adm-btn-red" disabled={moveSaving}>
+                {moveSaving ? <><Loader2 size={14} className="spin" /> Moving…</> : 'Move'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {contentEditProduct && (
         <div className="adm-modal-backdrop">
           <div className="adm-modal" style={{ maxWidth: 580 }}>

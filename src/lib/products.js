@@ -484,6 +484,24 @@ export async function updateProduct(websiteSku, payload) {
   invalidateProductCache();
 }
 
+// Batch-assign department (category label) and/or subcategory (slug) to many
+// products at once. Used by the reorder grid's "Move to category" action.
+export async function moveProductsToCategory(websiteSkus, { category, subcategory } = {}) {
+  const skus = (websiteSkus || []).filter(Boolean);
+  if (!skus.length) return;
+  const patch = {};
+  if (category !== undefined) patch.category = category;
+  if (subcategory !== undefined) patch.subcategory = subcategory;
+  if (!Object.keys(patch).length) return;
+  const { error } = await supabaseStock
+    .from('website_products')
+    .update(patch)
+    .in('website_sku', skus);
+  if (error) throw error;
+  invalidateProductCache();
+  invalidateAdminCache();
+}
+
 export async function saveSortOrder(updates) {
   // updates: [{ websiteSku, sortOrder }]
   const res = await fetch('/api/save-sort-order', {
