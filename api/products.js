@@ -57,7 +57,7 @@ function adapt(wpRow, stockRow) {
     parentSku: wpRow.parent_sku,
     name: wpRow.title,
     price: Number(stockRow?.sell_price ?? 0),
-    image: wpRow.image_url || '',
+    image: String(wpRow.image_url || '').split(',')[0].trim(),
     stockQty,
     stockOnHand: stockQty,
     colour: wpRow.colour || '',

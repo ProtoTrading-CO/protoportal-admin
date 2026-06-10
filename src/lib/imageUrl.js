@@ -23,7 +23,8 @@ export function optimizedImageUrl(url) {
 // Ordered list of URLs to try: encoded first, then the raw original as a
 // fallback for hosts that don't tolerate re-encoding.
 export function buildImageCandidates(url) {
-  const raw = (url || '').trim();
+  // image_url can hold several comma-separated URLs; use the first real one.
+  const raw = String(url || '').split(',')[0].trim();
   if (!raw) return [];
   const candidates = [optimizedImageUrl(raw), raw];
   return [...new Set(candidates.filter(Boolean))];
