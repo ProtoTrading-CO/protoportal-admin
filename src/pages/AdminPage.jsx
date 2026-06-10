@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Archive,
   ArchiveRestore,
@@ -52,6 +52,7 @@ import {
   fetchDistinctCategories,
   fetchDormantProducts,
   fetchProductsByMainCategory,
+  fetchReorderCategoryProducts,
   invalidateAdminCache,
   invalidateProductCache,
   moveProductsToCategory,
@@ -275,18 +276,34 @@ function subcategoryOptions(categoryId) {
 
 function groupBySubcategory(products, mainCategoryId) {
   const subs = subcategoryOptions(mainCategoryId);
-  const subLabelMap = new Map(subs.map((s) => [s.id, s.label]));
-  const groups = new Map();
-  products.forEach((p) => {
+  const knownIds = new Set(subs.map((s) => s.id));
+  const buckets = new Map(subs.map((s) => [s.id, []]));
+  buckets.set('__other__', []);
+  const unknown = new Map();
+
+  for (const p of products) {
     const key = p.categoryPath?.[1] || '__other__';
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(p);
-  });
-  return [...groups.entries()].map(([key, prods]) => ({
-    id: key,
-    label: subLabelMap.get(key) || 'Other',
-    products: prods,
-  }));
+    if (knownIds.has(key)) buckets.get(key).push(p);
+    else if (key === '__other__') buckets.get('__other__').push(p);
+    else {
+      if (!unknown.has(key)) unknown.set(key, []);
+      unknown.get(key).push(p);
+    }
+  }
+
+  // Always render subcategory sections in taxonomy order so dragging a card
+  // never shuffles the whole grid — only order within a section changes.
+  const groups = [];
+  for (const sub of subs) {
+    const prods = buckets.get(sub.id);
+    if (prods.length) groups.push({ id: sub.id, label: sub.label, products: prods });
+  }
+  for (const [key, prods] of unknown) {
+    if (prods.length) groups.push({ id: key, label: key.replace(/-/g, ' '), products: prods });
+  }
+  const other = buckets.get('__other__');
+  if (other.length) groups.push({ id: '__other__', label: 'Other', products: other });
+  return groups;
 }
 
 function getProductType(product) {
@@ -621,10 +638,13 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const loadCategoryWorkingSet = async (categoryId, target) => {
     setLoading(true);
     try {
-      const rows = await fetchProductsByMainCategory(categoryId, { limit: CATEGORY_WORK_SIZE });
-      if (target === 'pricing') setPricingProducts(rows);
-      // Reorder shows the live site order (sort_order from DB) — no localStorage override
-      if (target === 'reorder') setReorderProducts(rows);
+      if (target === 'pricing') {
+        setPricingProducts(await fetchProductsByMainCategory(categoryId));
+      }
+      if (target === 'reorder') {
+        // Live DB order + full subcategory paths for every product in the dept.
+        setReorderProducts(await fetchReorderCategoryProducts(categoryId));
+      }
     } finally { setLoading(false); }
   };
 
@@ -2153,14 +2173,10 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                   </div>
 
                   {/* Product grid */}
-                  <div
-                    className="adm-reorder-content"
-                    ref={reorderScrollRef}
-                    onDragOver={(e) => { if (dragId) handleReorderDragScroll(e); }}
-                  >
+                  <div className="adm-reorder-content" ref={reorderScrollRef}>
                     <div
                       onDragEnter={(e) => { e.preventDefault(); setDragOverId('__top__'); }}
-                      onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
+                      onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; handleReorderDragScroll(e); }}
                       onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setDragOverId(null); }}
                       onDrop={(e) => { e.preventDefault(); dropToTop(); }}
                       className={`adm-reorder-top-zone${dragId ? ' adm-reorder-top-zone--visible' : ''}${dragOverId === '__top__' ? ' adm-reorder-top-zone--over' : ''}`}
@@ -2170,8 +2186,8 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
 
                     <div className="adm-reorder-grid">
                       {groupBySubcategory(reorderProducts, reorderCategory).map((group) => (
-                        <>
-                          <div key={`hdr-${group.id}`} className="adm-reorder-group-header">{group.label}</div>
+                        <Fragment key={group.id}>
+                          <div className="adm-reorder-group-header">{group.label}</div>
                           {group.products.map((product) => {
                             const isDragging = dragId === product.id;
                             const isOver = dragOverId === product.id && !isDragging;
@@ -2184,7 +2200,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                                 onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', product.id); setDragId(product.id); }}
                                 onDragEnd={() => { setDragId(null); setDragOverId(null); }}
                                 onDragEnter={(e) => { e.preventDefault(); if (product.id !== dragId) setDragOverId(product.id); }}
-                                onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
+                                onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; handleReorderDragScroll(e); }}
                                 onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setDragOverId(null); }}
                                 onDrop={(e) => { e.preventDefault(); swapReorder(product.id); }}
                                 onTouchStart={(e) => handleTouchStart(e, product.id)}
@@ -2220,7 +2236,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                               </div>
                             );
                           })}
-                        </>
+                        </Fragment>
                       ))}
                     </div>
                   </div>

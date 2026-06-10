@@ -1591,28 +1591,35 @@ input, select, textarea { font-family: inherit; outline: none; }
 
 .adm-reorder-top-zone {
   display: none;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 10;
   align-items: center;
   justify-content: center;
-  height: 0;
-  overflow: hidden;
-  border-radius: 10px;
+  height: 52px;
+  border-radius: 0;
   border: 2px dashed transparent;
-  margin-bottom: 0;
+  margin: 0;
   color: #8B1A1A;
   font-size: 13px;
   font-weight: 700;
   letter-spacing: 0.01em;
-  transition: height 0.15s, margin-bottom 0.15s, border-color 0.15s, background 0.15s, box-shadow 0.15s;
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s, opacity 0.15s;
   cursor: default;
   user-select: none;
+  pointer-events: none;
+  opacity: 0;
 }
 
 .adm-reorder-top-zone--visible {
   display: flex;
-  height: 52px;
-  margin-bottom: 14px;
+  pointer-events: auto;
+  opacity: 1;
   border-color: #d1d5db;
-  background: #f9fafb;
+  background: rgba(249, 250, 251, 0.96);
+  backdrop-filter: blur(4px);
 }
 
 .adm-reorder-top-zone--over {
@@ -1971,6 +1978,7 @@ input, select, textarea { font-family: inherit; outline: none; }
 .adm-reorder-cat-item--active:hover { background: #1e293b; }
 
 .adm-reorder-content {
+  position: relative;
   padding: 16px;
   overflow-y: auto;
   max-height: 620px;

@@ -1,4 +1,5 @@
 import { supabaseStock } from './supabaseStock';
+import SKU_SUBS from '../../api/sku-subcategories.js';
 
 // Promise singletons — prevents parallel fetches when multiple components mount at once
 let _loadPromise = null;
@@ -71,8 +72,15 @@ function adapt(wpRow, stockRow) {
   const stockQty = stockRow?.stock_qty ?? 0;
   const rawDept = (wpRow.category || '').trim();
   const deptSlug = DEPT_SLUG_MAP[rawDept] || labelToSlug(rawDept);
-  const subSlug = (wpRow.subcategory || '').trim();
-  const categoryPath = deptSlug ? (subSlug ? [deptSlug, subSlug] : [deptSlug]) : [];
+  const subs = SKU_SUBS[wpRow.website_sku] || [];
+  const dbSub = (wpRow.subcategory || '').trim();
+  const sub1Slug = dbSub || (subs[0] ? labelToSlug(subs[0]) : '');
+  const sub2Slug = dbSub ? '' : (subs[1] ? labelToSlug(subs[1]) : '');
+  const categoryPath = deptSlug
+    ? sub1Slug
+      ? sub2Slug ? [deptSlug, sub1Slug, sub2Slug] : [deptSlug, sub1Slug]
+      : [deptSlug]
+    : [];
   const images = parseImageUrls(wpRow.image_url);
   return {
     id: wpRow.website_sku,
@@ -326,12 +334,29 @@ export async function fetchAdminProductsPage({
   return { rows: rows.slice(from, from + pageSize), total, page, pageSize };
 }
 
-export async function fetchProductsByMainCategory(mainCategory, { limit = 300 } = {}) {
+function matchesMainCategory(p, mainCategory) {
+  return p.category === mainCategory || p.categoryPath?.[0] === mainCategory;
+}
+
+function sortByCatalogOrder(a, b) {
+  return (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.name.localeCompare(b.name);
+}
+
+export async function fetchProductsByMainCategory(mainCategory, { limit = 0 } = {}) {
   const all = await getAllCached();
-  const filtered = mainCategory && mainCategory !== 'all'
-    ? all.filter((p) => p.category === mainCategory)
-    : all;
-  return filtered.slice(0, limit);
+  let filtered = mainCategory && mainCategory !== 'all'
+    ? all.filter((p) => matchesMainCategory(p, mainCategory))
+    : [...all];
+  filtered.sort(sortByCatalogOrder);
+  return limit > 0 ? filtered.slice(0, limit) : filtered;
+}
+
+// Reorder grid: live DB sort_order + SKU subcategory paths (not edge-cached API).
+export async function fetchReorderCategoryProducts(mainCategory) {
+  const all = await getAllCachedAdmin();
+  return all
+    .filter((p) => !p.isArchived && p.stockQty > 0 && matchesMainCategory(p, mainCategory))
+    .sort(sortByCatalogOrder);
 }
 
 export async function exportProductsCsv() {

@@ -71,7 +71,7 @@ function adapt(wpRow, stockRow) {
     isNew: false,
     isSpecial: false,
     isArchived: !wpRow.active,
-    sortOrder: 0,
+    sortOrder: wpRow.sort_order || 0,
     minQty: 1,
     casePack: '',
     marginCue: '',
