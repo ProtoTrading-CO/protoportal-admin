@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Archive,
   ArchiveRestore,
@@ -52,10 +52,8 @@ import {
   fetchDistinctCategories,
   fetchDormantProducts,
   fetchProductsByMainCategory,
-  fetchReorderCategoryProducts,
   invalidateAdminCache,
   invalidateProductCache,
-  moveProductsToCategory,
   saveSortOrder,
   updateProduct,
   uploadDormantImage,
@@ -71,29 +69,6 @@ import { fetchPopupSpecial, savePopupSpecial, uploadPopupImage } from '../lib/po
 import CrmContactsModal from '../components/CrmContactsModal';
 import BroadcastCalendar from '../components/BroadcastCalendar';
 import categories from '../data/categories.json';
-import { buildImageCandidates } from '../lib/imageUrl';
-
-// Thumbnail that encodes the image URL and falls back through candidates on
-// error, so reorder-grid images with spaces/special chars in the path display.
-function ReorderThumb({ src, alt }) {
-  const candidates = buildImageCandidates(src);
-  const [idx, setIdx] = useState(0);
-  useEffect(() => { setIdx(0); }, [src]);
-  if (!candidates.length || !candidates[idx]) {
-    return <span className="adm-muted" style={{ fontSize: 10 }}>No image</span>;
-  }
-  return (
-    <img
-      draggable={false}
-      src={candidates[idx]}
-      alt={alt}
-      loading="lazy"
-      decoding="async"
-      onError={() => setIdx((i) => i + 1)}
-      style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', mixBlendMode: 'multiply', pointerEvents: 'none' }}
-    />
-  );
-}
 
 // ─── Reorder sort order — stored in localStorage, applied client-side ─────────
 const SORT_STORE_KEY = 'proto_sort_v1';
@@ -252,7 +227,7 @@ function generateOrderChecklistHtml(order) {
 </div>
 </body></html>`;
 }
-const CATEGORY_WORK_SIZE = 400;
+const CATEGORY_WORK_SIZE = 10000;
 
 const emptyForm = {
   code: '',
@@ -276,34 +251,18 @@ function subcategoryOptions(categoryId) {
 
 function groupBySubcategory(products, mainCategoryId) {
   const subs = subcategoryOptions(mainCategoryId);
-  const knownIds = new Set(subs.map((s) => s.id));
-  const buckets = new Map(subs.map((s) => [s.id, []]));
-  buckets.set('__other__', []);
-  const unknown = new Map();
-
-  for (const p of products) {
+  const subLabelMap = new Map(subs.map((s) => [s.id, s.label]));
+  const groups = new Map();
+  products.forEach((p) => {
     const key = p.categoryPath?.[1] || '__other__';
-    if (knownIds.has(key)) buckets.get(key).push(p);
-    else if (key === '__other__') buckets.get('__other__').push(p);
-    else {
-      if (!unknown.has(key)) unknown.set(key, []);
-      unknown.get(key).push(p);
-    }
-  }
-
-  // Always render subcategory sections in taxonomy order so dragging a card
-  // never shuffles the whole grid — only order within a section changes.
-  const groups = [];
-  for (const sub of subs) {
-    const prods = buckets.get(sub.id);
-    if (prods.length) groups.push({ id: sub.id, label: sub.label, products: prods });
-  }
-  for (const [key, prods] of unknown) {
-    if (prods.length) groups.push({ id: key, label: key.replace(/-/g, ' '), products: prods });
-  }
-  const other = buckets.get('__other__');
-  if (other.length) groups.push({ id: '__other__', label: 'Other', products: other });
-  return groups;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(p);
+  });
+  return [...groups.entries()].map(([key, prods]) => ({
+    id: key,
+    label: subLabelMap.get(key) || 'Other',
+    products: prods,
+  }));
 }
 
 function getProductType(product) {
@@ -423,13 +382,6 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const [dragOverId, setDragOverId] = useState(null);
   const [selectedIds, setSelectedIds] = useState(new Set());
   const touchDragRef = useRef(null);
-  const reorderScrollRef = useRef(null);
-
-  const [moveModalOpen, setMoveModalOpen] = useState(false);
-  const [moveDept, setMoveDept] = useState('');
-  const [moveSub, setMoveSub] = useState('');
-  const [moveSaving, setMoveSaving] = useState(false);
-  const [moveError, setMoveError] = useState('');
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
@@ -618,7 +570,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     setLoadingProgress(0);
     setLoadingError('');
     try {
-      const data = await fetchAdminProductsPage({ page: archivePage, pageSize: ADMIN_PAGE_SIZE, searchQuery: archiveSearch, zeroStockOnly: true, onProgress: setLoadingProgress });
+      const data = await fetchAdminProductsPage({ page: archivePage, pageSize: ADMIN_PAGE_SIZE, searchQuery: archiveSearch, archived: true, onProgress: setLoadingProgress });
       setArchiveRows(data.rows);
       setArchiveTotal(data.total);
     } catch (err) {
@@ -638,13 +590,10 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const loadCategoryWorkingSet = async (categoryId, target) => {
     setLoading(true);
     try {
-      if (target === 'pricing') {
-        setPricingProducts(await fetchProductsByMainCategory(categoryId));
-      }
-      if (target === 'reorder') {
-        // Live DB order + full subcategory paths for every product in the dept.
-        setReorderProducts(await fetchReorderCategoryProducts(categoryId));
-      }
+      const rows = await fetchProductsByMainCategory(categoryId, { limit: CATEGORY_WORK_SIZE });
+      if (target === 'pricing') setPricingProducts(rows);
+      // Reorder shows the live site order (sort_order from DB) — no localStorage override
+      if (target === 'reorder') setReorderProducts(rows);
     } finally { setLoading(false); }
   };
 
@@ -1144,7 +1093,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const exportArchiveXlsx = async () => {
     setSaving('export-archive');
     try {
-      const data = await fetchAdminProductsPage({ page: 1, pageSize: 999999, searchQuery: archiveSearch, zeroStockOnly: true });
+      const data = await fetchAdminProductsPage({ page: 1, pageSize: 999999, searchQuery: archiveSearch, archived: true });
       const ws = XLSX.utils.json_to_sheet(data.rows.map(toXlsxRow));
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, 'Archive 0 Stock');
@@ -1178,46 +1127,6 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     setSelectedIds(new Set());
   };
 
-  const openMoveModal = () => {
-    if (!selectedIds.size) return;
-    setMoveError('');
-    const dept = reorderCategory || categories[0]?.id || '';
-    setMoveDept(dept);
-    setMoveSub(subcategoryOptions(dept)[0]?.id || '');
-    setMoveModalOpen(true);
-  };
-
-  const applyMoveToCategory = async () => {
-    if (!selectedIds.size || !moveDept) return;
-    setMoveSaving(true);
-    setMoveError('');
-    const movingIds = new Set(selectedIds);
-    try {
-      const deptLabel = categories.find((c) => c.id === moveDept)?.label || moveDept;
-      await moveProductsToCategory([...movingIds], { category: deptLabel, subcategory: moveSub || '' });
-      // Reflect the move immediately rather than waiting for the edge-cached
-      // /api/products to revalidate (which can lag up to a minute).
-      setReorderProducts((prev) => {
-        if (moveDept !== reorderCategory) {
-          // Moved out of the department currently in view — remove them.
-          return prev.filter((p) => !movingIds.has(p.id));
-        }
-        // Same department (possibly new subcategory) — regroup in place.
-        return prev.map((p) => movingIds.has(p.id)
-          ? { ...p, category: moveDept, categoryPath: moveSub ? [moveDept, moveSub] : [moveDept] }
-          : p);
-      });
-      setMoveModalOpen(false);
-      setSelectedIds(new Set());
-      invalidateAdminCache();
-      invalidateProductCache();
-    } catch (err) {
-      setMoveError(err.message || 'Move failed');
-    } finally {
-      setMoveSaving(false);
-    }
-  };
-
   const dropToTop = () => {
     setDragOverId(null);
     if (!dragId) return;
@@ -1247,21 +1156,6 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
       return next;
     });
     setDragId(null);
-  };
-
-  // Auto-scroll the reorder list when dragging a card near its top/bottom edge,
-  // so products can be dragged across long lists without manual scrolling.
-  const handleReorderDragScroll = (e) => {
-    const el = reorderScrollRef.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    const EDGE = 60;
-    const y = e.clientY;
-    if (y < rect.top + EDGE) {
-      el.scrollTop -= Math.max(6, (rect.top + EDGE - y) / 3);
-    } else if (y > rect.bottom - EDGE) {
-      el.scrollTop += Math.max(6, (y - (rect.bottom - EDGE)) / 3);
-    }
   };
 
   const handleTouchStart = (e, productId) => {
@@ -2144,7 +2038,6 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                       <>
                         <span className="adm-pill">{selectedIds.size} selected</span>
                         <button onClick={moveSelectedToTop} className="adm-btn-red">Move to top</button>
-                        <button onClick={openMoveModal} className="adm-btn-red"><ArrowLeftRight size={14} /> Move to category</button>
                         <button onClick={() => setSelectedIds(new Set())} className="adm-btn-ghost">Clear</button>
                       </>
                     )}
@@ -2173,10 +2066,10 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                   </div>
 
                   {/* Product grid */}
-                  <div className="adm-reorder-content" ref={reorderScrollRef}>
+                  <div className="adm-reorder-content">
                     <div
                       onDragEnter={(e) => { e.preventDefault(); setDragOverId('__top__'); }}
-                      onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; handleReorderDragScroll(e); }}
+                      onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
                       onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setDragOverId(null); }}
                       onDrop={(e) => { e.preventDefault(); dropToTop(); }}
                       className={`adm-reorder-top-zone${dragId ? ' adm-reorder-top-zone--visible' : ''}${dragOverId === '__top__' ? ' adm-reorder-top-zone--over' : ''}`}
@@ -2186,8 +2079,8 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
 
                     <div className="adm-reorder-grid">
                       {groupBySubcategory(reorderProducts, reorderCategory).map((group) => (
-                        <Fragment key={group.id}>
-                          <div className="adm-reorder-group-header">{group.label}</div>
+                        <>
+                          <div key={`hdr-${group.id}`} className="adm-reorder-group-header">{group.label}</div>
                           {group.products.map((product) => {
                             const isDragging = dragId === product.id;
                             const isOver = dragOverId === product.id && !isDragging;
@@ -2200,7 +2093,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                                 onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', product.id); setDragId(product.id); }}
                                 onDragEnd={() => { setDragId(null); setDragOverId(null); }}
                                 onDragEnter={(e) => { e.preventDefault(); if (product.id !== dragId) setDragOverId(product.id); }}
-                                onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; handleReorderDragScroll(e); }}
+                                onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
                                 onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setDragOverId(null); }}
                                 onDrop={(e) => { e.preventDefault(); swapReorder(product.id); }}
                                 onTouchStart={(e) => handleTouchStart(e, product.id)}
@@ -2229,14 +2122,16 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                                   </button>
                                 </div>
                                 <div className="adm-thumb" style={{ height: 70 }}>
-                                  <ReorderThumb src={product.image} alt={product.name} />
+                                  {product.image
+                                    ? <img draggable={false} src={product.image} alt={product.name} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', mixBlendMode: 'multiply', pointerEvents: 'none' }} />
+                                    : <span className="adm-muted" style={{ fontSize: 10 }}>No image</span>}
                                 </div>
                                 <div style={{ fontWeight: 700, fontSize: 10, marginTop: 4, lineHeight: 1.3, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{product.name}</div>
                                 <div className="adm-muted" style={{ fontSize: 9 }}>{product.code}</div>
                               </div>
                             );
                           })}
-                        </Fragment>
+                        </>
                       ))}
                     </div>
                   </div>
@@ -2769,50 +2664,6 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
       )}
 
       {/* Content quick-edit modal (image drag-drop + description) */}
-      {moveModalOpen && (
-        <div className="adm-modal-backdrop">
-          <div className="adm-modal" style={{ maxWidth: 460 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
-              <div>
-                <h3 style={{ margin: 0, fontSize: 20, fontFamily: 'Outfit, sans-serif' }}>Move to category</h3>
-                <p className="adm-muted" style={{ marginTop: 4, fontSize: 13 }}>{selectedIds.size} product{selectedIds.size === 1 ? '' : 's'} selected</p>
-              </div>
-              <button onClick={() => setMoveModalOpen(false)} className="adm-icon-btn"><X size={16} /></button>
-            </div>
-
-            <label className="adm-field-label" style={{ display: 'block', marginBottom: 6 }}>Department</label>
-            <select
-              value={moveDept}
-              onChange={(e) => { setMoveDept(e.target.value); setMoveSub(subcategoryOptions(e.target.value)[0]?.id || ''); }}
-              className="adm-field-input"
-              style={{ width: '100%', marginBottom: 16 }}
-            >
-              {mainCategories.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
-            </select>
-
-            <label className="adm-field-label" style={{ display: 'block', marginBottom: 6 }}>Subcategory</label>
-            <select
-              value={moveSub}
-              onChange={(e) => setMoveSub(e.target.value)}
-              className="adm-field-input"
-              style={{ width: '100%', marginBottom: 20 }}
-            >
-              <option value="">— None (department only) —</option>
-              {subcategoryOptions(moveDept).map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
-            </select>
-
-            {moveError && <p style={{ color: '#dc2626', fontSize: 13, marginBottom: 12 }}>{moveError}</p>}
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-              <button onClick={() => setMoveModalOpen(false)} className="adm-btn-ghost" disabled={moveSaving}>Cancel</button>
-              <button onClick={applyMoveToCategory} className="adm-btn-red" disabled={moveSaving}>
-                {moveSaving ? <><Loader2 size={14} className="spin" /> Moving…</> : 'Move'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {contentEditProduct && (
         <div className="adm-modal-backdrop">
           <div className="adm-modal" style={{ maxWidth: 580 }}>

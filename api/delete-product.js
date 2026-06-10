@@ -13,19 +13,15 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
 
   const { websiteSku } = req.body || {};
-  if (!websiteSku) return res.status(400).json({ error: 'websiteSku is required' });
+  const sku = String(websiteSku || '').trim();
+  if (!sku) return res.status(400).json({ error: 'websiteSku is required' });
 
   const supabase = getStockAdminClient();
 
-  const { error: wpError } = await supabase
-    .from('website_products')
-    .delete()
-    .eq('website_sku', String(websiteSku));
+  const { error: liveError } = await supabase.from('website_stock').delete().eq('sku', sku);
+  if (liveError) return res.status(400).json({ error: liveError.message });
 
-  if (wpError) return res.status(400).json({ error: wpError.message });
+  await supabase.from('archived_products').delete().eq('sku', sku);
 
-  // Also remove from stock table if present (non-fatal if missing)
-  await supabase.from('products').delete().eq('sku', String(websiteSku));
-
-  return res.status(200).json({ ok: true });
+  return res.status(200).json({ ok: true, deletedSku: sku });
 }

@@ -1,15 +1,16 @@
 import { createClient } from '@supabase/supabase-js';
-import SKU_SUBS from './sku-subcategories.js';
 
 const PAGE_SIZE = 1000;
 
-async function fetchAllRows(supabase, table, selectCols = '*', filter = null) {
+async function fetchAllRows(supabase, table, orderBy = 'title') {
   const rows = [];
   let from = 0;
   while (true) {
-    let q = supabase.from(table).select(selectCols).range(from, from + PAGE_SIZE - 1);
-    if (filter) q = filter(q);
-    const { data, error } = await q;
+    const { data, error } = await supabase
+      .from(table)
+      .select('*')
+      .order(orderBy, { ascending: true })
+      .range(from, from + PAGE_SIZE - 1);
     if (error) throw error;
     rows.push(...(data || []));
     if ((data || []).length < PAGE_SIZE) break;
@@ -18,69 +19,63 @@ async function fetchAllRows(supabase, table, selectCols = '*', filter = null) {
   return rows;
 }
 
-const DEPT_SLUG_MAP = {
-  'Arts, Crafts & Stationery': 'arts-crafts-stationery',
-  'Beads, Jewellery & Accessories': 'beads-jewellery',
-  'Beauty & Personal Care': 'beauty-personal-care',
-  'Events & Parties': 'events-parties',
-  'Fashion & Accessories': 'fashion-accessories',
-  'Food & Drinks': 'food-drinks',
-  'Hardware': 'hardware',
-  'Homeware & Kitchen': 'homeware-kitchen',
-  'Packaging': 'packaging',
-  'Textiles': 'textiles',
-  'Toys, Games & Kids': 'toys-games-kids',
-};
-
 function labelToSlug(label) {
   if (!label) return '';
-  return label.toLowerCase().replace(/[,&]/g, '').replace(/\s+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+  return String(label)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
 }
 
-function adapt(wpRow, stockRow) {
-  const stockQty = stockRow?.stock_qty ?? 0;
-  const rawDept = (wpRow.category || '').trim();
-  const deptSlug = DEPT_SLUG_MAP[rawDept] || labelToSlug(rawDept);
-  const subs = SKU_SUBS[wpRow.website_sku] || [];
-  // An explicit DB subcategory (set via the admin "Move to category" action)
-  // overrides the file-based mapping; otherwise fall back to SKU_SUBS.
-  const dbSub = (wpRow.subcategory || '').trim();
-  const sub1Slug = dbSub || (subs[0] ? labelToSlug(subs[0]) : '');
-  const sub2Slug = dbSub ? '' : (subs[1] ? labelToSlug(subs[1]) : '');
-  const categoryPath = deptSlug
-    ? sub1Slug
-      ? sub2Slug ? [deptSlug, sub1Slug, sub2Slug] : [deptSlug, sub1Slug]
-      : [deptSlug]
-    : [];
+function buildCategoryPath(category, subLabels = []) {
+  const catSlug = labelToSlug(category);
+  if (!catSlug) return [];
+  const path = [catSlug];
+  for (const sub of subLabels) {
+    if (sub) path.push(labelToSlug(sub));
+  }
+  return path;
+}
+
+function adapt(row) {
+  const images = [row.image_url_one, row.image_url_two].filter(Boolean);
+  const subLabels = [row.subcategory_one, row.subcategory_two, row.subcategory_three, row.subcategory_four].filter(Boolean);
   return {
-    id: wpRow.website_sku,
-    code: wpRow.barcode,
-    barcode: wpRow.barcode,
-    websiteSku: wpRow.website_sku,
-    parentSku: wpRow.parent_sku,
-    name: wpRow.title,
-    price: Number(stockRow?.sell_price ?? 0),
-    image: String(wpRow.image_url || '').split(',')[0].trim(),
-    stockQty,
-    stockOnHand: stockQty,
-    colour: wpRow.colour || '',
-    category: deptSlug,
-    categoryPath,
+    id: row.sku,
+    code: row.barcode,
+    barcode: row.barcode,
+    websiteSku: row.sku,
+    sku: row.sku,
+    parentSku: null,
+    name: row.title,
+    title: row.title,
+    description: row.original_description || '',
+    price: 0,
+    images,
+    image: images[0] || '',
+    secondaryImage: images[1] || '',
+    stockQty: 0,
+    stockOnHand: 0,
+    colour: '',
+    category: labelToSlug(row.category),
+    categoryLabel: row.category,
+    categoryPath: buildCategoryPath(row.category, subLabels),
     tags: [],
     badges: [],
     isNew: false,
     isSpecial: false,
-    isArchived: !wpRow.active,
-    sortOrder: wpRow.sort_order || 0,
+    isArchived: false,
+    sortOrder: 0,
     minQty: 1,
     casePack: '',
     marginCue: '',
     leadTime: '',
     tradeNote: '',
-    inStock: stockQty > 0,
-    createdAt: wpRow.created_at,
-    yearlySales: stockRow?.yearly_sales ?? 0,
-    supplier: stockRow?.supplier || '',
+    inStock: true,
+    createdAt: row.created_at,
+    yearlySales: 0,
+    supplier: '',
   };
 }
 
@@ -95,19 +90,9 @@ export default async function handler(req, res) {
       process.env.VITE_STOCK_SUPABASE_KEY,
     );
 
-    const [wpRows, stockRows] = await Promise.all([
-      fetchAllRows(supabase, 'website_products', '*', (q) => q.eq('active', true).order('sort_order', { ascending: true })),
-      fetchAllRows(supabase, 'products', 'sku,sell_price,stock_qty,yearly_sales,supplier'),
-    ]);
+    const rows = await fetchAllRows(supabase, 'website_stock');
+    const products = rows.map(adapt).filter((p) => p.category);
 
-    const stockMap = {};
-    for (const s of stockRows) stockMap[s.sku] = s;
-
-    const products = wpRows
-      .map((wp) => adapt(wp, stockMap[wp.barcode]))
-      .filter((p) => p.stockQty > 0 && p.category);
-
-    // Vercel edge cache: serve instantly for 60s, then revalidate in background for up to 1hr
     res.setHeader('Cache-Control', 's-maxage=60, stale-while-revalidate=3600');
     res.setHeader('Content-Type', 'application/json');
     return res.status(200).json(products);

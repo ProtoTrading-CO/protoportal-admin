@@ -1,14 +1,13 @@
 import { supabaseStock } from './supabaseStock';
-import SKU_SUBS from '../../api/sku-subcategories.js';
+import { fuzzyFilter } from './fuzzySearch';
+import { buildCategoryPath, labelToSlug, slugToLabel } from './taxonomy';
 
-// Promise singletons — prevents parallel fetches when multiple components mount at once
 let _loadPromise = null;
 let _cache = null;
 let _adminLoadPromise = null;
 let _adminCache = null;
 
-// ─── localStorage cache (15 min TTL) for instant repeat page loads ────────────
-const LS_KEY = 'proto_catalog_v4';
+const LS_KEY = 'proto_catalog_v7';
 const LS_TTL = 15 * 60 * 1000;
 
 function saveToLocalCache(data) {
@@ -21,6 +20,18 @@ function loadFromLocalCache() {
     const { data, ts } = JSON.parse(raw);
     return (Date.now() - ts < LS_TTL) ? data : null;
   } catch { return null; }
+}
+
+async function fetchJsonWithTimeout(url, timeoutMs = 4500) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { signal: controller.signal, credentials: 'same-origin' });
+    if (!response.ok) throw new Error(`${url} ${response.status}`);
+    return await response.json();
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 const PAGE_SIZE = 1000;
@@ -42,126 +53,74 @@ async function fetchAllRows(table, selectCols = '*', extraFilter = null, orderBy
   return rows;
 }
 
-const DEPT_SLUG_MAP = {
-  'Arts, Crafts & Stationery': 'arts-crafts-stationery',
-  'Beads, Jewellery & Accessories': 'beads-jewellery',
-  'Beauty & Personal Care': 'beauty-personal-care',
-  'Events & Parties': 'events-parties',
-  'Fashion & Accessories': 'fashion-accessories',
-  'Food & Drinks': 'food-drinks',
-  'Hardware': 'hardware',
-  'Homeware & Kitchen': 'homeware-kitchen',
-  'Packaging': 'packaging',
-  'Textiles': 'textiles',
-  'Toys, Games & Kids': 'toys-games-kids',
-};
-
-function labelToSlug(label) {
-  if (!label) return '';
-  return label.toLowerCase().replace(/[,&]/g, '').replace(/\s+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
-}
-
-function parseImageUrls(imageValue) {
-  return String(imageValue || '')
-    .split(',')
-    .map((url) => url.trim())
-    .filter(Boolean);
-}
-
-function adapt(wpRow, stockRow) {
-  const stockQty = stockRow?.stock_qty ?? 0;
-  const rawDept = (wpRow.category || '').trim();
-  const deptSlug = DEPT_SLUG_MAP[rawDept] || labelToSlug(rawDept);
-  const subs = SKU_SUBS[wpRow.website_sku] || [];
-  const dbSub = (wpRow.subcategory || '').trim();
-  const sub1Slug = dbSub || (subs[0] ? labelToSlug(subs[0]) : '');
-  const sub2Slug = dbSub ? '' : (subs[1] ? labelToSlug(subs[1]) : '');
-  const categoryPath = deptSlug
-    ? sub1Slug
-      ? sub2Slug ? [deptSlug, sub1Slug, sub2Slug] : [deptSlug, sub1Slug]
-      : [deptSlug]
-    : [];
-  const images = parseImageUrls(wpRow.image_url);
+function adapt(row, { archived = false } = {}) {
+  const images = [row.image_url_one, row.image_url_two].filter(Boolean);
+  const subLabels = [row.subcategory_one, row.subcategory_two, row.subcategory_three, row.subcategory_four].filter(Boolean);
   return {
-    id: wpRow.website_sku,
-    code: wpRow.barcode,
-    barcode: wpRow.barcode,
-    websiteSku: wpRow.website_sku,
-    parentSku: wpRow.parent_sku,
-    name: wpRow.title,
-    description: wpRow.description || '',
-    price: Number(stockRow?.sell_price ?? 0),
+    id: row.sku,
+    code: row.barcode,
+    barcode: row.barcode,
+    websiteSku: row.sku,
+    sku: row.sku,
+    parentSku: null,
+    name: row.title,
+    title: row.title,
+    description: row.original_description || '',
+    originalDescription: row.original_description || '',
+    price: 0,
     images,
     image: images[0] || '',
     secondaryImage: images[1] || '',
-    stockQty,
-    stockOnHand: stockQty,
-    colour: wpRow.colour || '',
-    category: deptSlug,
-    categoryPath,
+    stockQty: 0,
+    stockOnHand: 0,
+    colour: '',
+    category: labelToSlug(row.category),
+    categoryLabel: row.category,
+    categoryPath: buildCategoryPath(row.category, subLabels),
+    subcategoryLabels: subLabels,
     tags: [],
     badges: [],
     isNew: false,
     isSpecial: false,
-    isArchived: !wpRow.active,
-    sortOrder: wpRow.sort_order || 0,
+    isArchived: archived,
+    sortOrder: 0,
     minQty: 1,
     casePack: '',
     marginCue: '',
     leadTime: '',
     tradeNote: '',
-    inStock: stockQty > 0,
-    createdAt: wpRow.created_at,
-    yearlySales: stockRow?.yearly_sales ?? 0,
-    supplier: stockRow?.supplier || '',
+    inStock: true,
+    createdAt: row.created_at,
+    yearlySales: 0,
+    supplier: '',
   };
 }
 
-async function loadAllFromDB({ includeInactive = false, onProgress } = {}) {
-  onProgress?.(8);
-  // Fetch both tables in parallel — no huge .in() filter, join client-side
-  // sort_order only exists on website_products, NOT on products (stock table)
-  const [wpRows, stockRows] = await Promise.all([
-    fetchAllRows('website_products', '*', includeInactive ? null : (q) => q.eq('active', true), 'sort_order').then((r) => { onProgress?.(55); return r; }),
-    fetchAllRows('products', 'sku,sell_price,stock_qty,yearly_sales,supplier').then((r) => { onProgress?.(85); return r; }),
-  ]);
-
-  const stockMap = {};
-  for (const s of stockRows) stockMap[s.sku] = s;
-
+async function loadLiveFromDB({ onProgress } = {}) {
+  onProgress?.(10);
+  const rows = await fetchAllRows('website_stock', '*', null, 'title');
   onProgress?.(100);
-  return wpRows.map((wp) => adapt(wp, stockMap[wp.barcode]));
+  return rows.map((r) => adapt(r));
 }
 
-// Admin cache — includes inactive products; cached for the session
+async function loadArchivedFromDB() {
+  const rows = await fetchAllRows('archived_products', '*', null, 'archived_at');
+  return rows.map((r) => adapt(r, { archived: true }));
+}
+
 function getAllCachedAdmin(onProgress) {
   if (_adminCache) {
     onProgress?.(100);
     return Promise.resolve(_adminCache);
   }
   if (!_adminLoadPromise) {
-    _adminLoadPromise = loadAllFromDB({ includeInactive: true, onProgress })
-      .then((all) => {
-        _adminCache = all;
-        return _adminCache;
-      })
-      .catch((err) => {
-        _adminLoadPromise = null;
-        throw err;
-      });
+    _adminLoadPromise = loadLiveFromDB({ onProgress })
+      .then((all) => { _adminCache = all; return _adminCache; })
+      .catch((err) => { _adminLoadPromise = null; throw err; });
   }
   return _adminLoadPromise;
 }
 
-export async function fetchDistinctCategories() {
-  const all = await getAllCached();
-  return [...new Set(all.map((p) => p.category).filter(Boolean))].sort();
-}
-
-// Returns only in-stock, categorized, imaged products for the customer catalog.
-// Primary source: /products.json (static CDN file, generated at build time — instant).
-// Fallback 1: /api/products (edge-cached Vercel function — ~200ms warm).
-// Fallback 2: direct Supabase (if both above fail).
 function getAllCached() {
   if (!_loadPromise) {
     const local = loadFromLocalCache();
@@ -169,23 +128,15 @@ function getAllCached() {
       _cache = local;
       _loadPromise = Promise.resolve(local);
     } else {
-      _loadPromise = fetch('/api/products')
-        .then((r) => {
-          if (!r.ok) throw new Error(`API ${r.status}`);
-          return r.json();
-        })
-        .catch(() => fetch('/products.json').then((r) => {
-          if (!r.ok) throw new Error(`products.json ${r.status}`);
-          return r.json();
-        }))
+      _loadPromise = fetchJsonWithTimeout('/api/products', 8000)
         .then((products) => {
           _cache = products;
           saveToLocalCache(products);
           return _cache;
         })
-        .catch(() => loadAllFromDB()
+        .catch(() => loadLiveFromDB()
           .then((all) => {
-            _cache = all.filter((p) => p.stockQty > 0 && p.category && p.image);
+            _cache = all.filter((p) => p.category);
             saveToLocalCache(_cache);
             return _cache;
           }))
@@ -206,61 +157,37 @@ export function invalidateProductCache() {
   try { localStorage.removeItem(LS_KEY); } catch {}
 }
 
-// Clears only the admin cache — use this for admin panel refreshes so the
-// public catalog cache and localStorage are left intact.
 export function invalidateAdminCache() {
   _adminCache = null;
   _adminLoadPromise = null;
 }
 
-// Live stock check — always a fresh single-row query
-export async function checkStock(barcode) {
-  const { data, error } = await supabaseStock
-    .from('products')
-    .select('stock_qty')
-    .eq('sku', barcode)
-    .maybeSingle();
-  if (error) throw error;
-  return data?.stock_qty ?? 0;
-}
-
-// ─── Filtering / sorting helpers ──────────────────────────────────────────────
-
-function applyCollection(products, collection) {
-  if (collection === 'instock') return products.filter((p) => p.stockQty > 0);
-  if (collection === 'soldout') return products.filter((p) => p.stockQty <= 0);
-  if (collection === 'hot') return [...products].sort((a, b) => b.yearlySales - a.yearlySales);
-  if (collection === 'new') return [...products].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-  return products;
-}
-
 function applyPathFilter(products, categoryPath) {
   if (!Array.isArray(categoryPath) || !categoryPath.length) return products;
-  return products.filter((p) => categoryPath.every((seg, i) => p.categoryPath[i] === seg));
+  return products.filter((p) => {
+    const cp = p.categoryPath || [];
+    const depth = Math.min(cp.length, categoryPath.length);
+    return depth > 0 && categoryPath.slice(0, depth).every((seg, i) => cp[i] === seg);
+  });
 }
 
-function applySearchFilter(products, searchQuery) {
-  const q = searchQuery?.trim().toLowerCase();
-  if (!q) return products;
-  return products.filter(
-    (p) =>
-      p.name.toLowerCase().includes(q) ||
-      p.code.toLowerCase().includes(q) ||
-      (p.websiteSku || '').toLowerCase().includes(q) ||
-      (p.parentSku || '').toLowerCase().includes(q)
+function applyCategoryFilter(rows, categoryFilter) {
+  if (!categoryFilter || categoryFilter === 'all') return rows;
+  return rows.filter((p) =>
+    p.category === categoryFilter
+    || p.categoryPath?.[1] === categoryFilter
+    || p.categoryPath?.[2] === categoryFilter
+    || p.categoryPath?.[3] === categoryFilter
+    || p.categoryLabel === categoryFilter
   );
 }
 
-function applySort(products, sort) {
-  const arr = [...products];
-  if (sort === 'price-low') arr.sort((a, b) => a.price - b.price);
-  else if (sort === 'price-high') arr.sort((a, b) => b.price - a.price);
-  else if (sort === 'latest') arr.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-  else if (sort === 'stock') arr.sort((a, b) => b.stockQty - a.stockQty);
-  return arr;
-}
+// ─── Public read API ──────────────────────────────────────────────────────────
 
-// ─── Public API ───────────────────────────────────────────────────────────────
+export async function fetchDistinctCategories() {
+  const all = await getAllCachedAdmin();
+  return [...new Set(all.map((p) => p.categoryLabel).filter(Boolean))].sort();
+}
 
 export async function fetchProducts() {
   return getAllCached();
@@ -271,39 +198,17 @@ export async function fetchProductPage({
   pageSize = 60,
   searchQuery = '',
   categoryPath = [],
-  collection = 'all',
   sort = 'featured',
 } = {}) {
   let products = await getAllCached();
-  products = applyCollection(products, collection);
-  products = applyPathFilter(products, categoryPath);
-  products = applySearchFilter(products, searchQuery);
-  products = applySort(products, sort);
+  const hasSearch = Boolean(searchQuery.trim());
+  if (!hasSearch) products = applyPathFilter(products, categoryPath);
+  products = hasSearch ? fuzzyFilter(products, searchQuery) : products;
+  if (sort === 'latest') products = [...products].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
   const total = products.length;
   const from = (page - 1) * pageSize;
-  return {
-    products: products.slice(from, from + pageSize),
-    total,
-    page,
-    pageSize,
-    hasMore: total > from + pageSize,
-  };
-}
-
-export async function fetchCategoryCounts({ collection = 'all' } = {}) {
-  let products = await getAllCached();
-  products = applyCollection(products, collection);
-  const counts = { '': products.length };
-  for (const p of products) {
-    const cp = p.categoryPath;
-    if (!cp?.length) continue;
-    for (let i = 1; i <= cp.length; i++) {
-      const key = cp.slice(0, i).join('/');
-      counts[key] = (counts[key] || 0) + 1;
-    }
-  }
-  return counts;
+  return { products: products.slice(from, from + pageSize), total, page, pageSize, hasMore: total > from + pageSize };
 }
 
 export async function fetchAllProductsAdmin({ onProgress } = {}) {
@@ -314,56 +219,44 @@ export async function fetchAdminProductsPage({
   page = 1,
   pageSize = 50,
   searchQuery = '',
-  includeArchived = false,
-  zeroStockOnly = false,
+  archived = false,
+  zeroStockOnly = false, // legacy alias — treated as archived
   categoryFilter = '',
   onProgress,
 } = {}) {
-  let rows = await fetchAllProductsAdmin({ onProgress });
-  if (!includeArchived) rows = rows.filter((p) => !p.isArchived);
-  // Product Manager shows live (in-stock) products; Archive shows zero-stock
-  if (zeroStockOnly) rows = rows.filter((p) => p.stockQty === 0);
-  else rows = rows.filter((p) => p.stockQty > 0);
-  if (categoryFilter && categoryFilter !== 'all') {
-    rows = rows.filter((p) => p.category === categoryFilter || p.categoryPath?.[1] === categoryFilter);
-  }
-  rows = applySearchFilter(rows, searchQuery);
-  rows = [...rows].sort((a, b) => (a.category || '').localeCompare(b.category || '') || a.name.localeCompare(b.name));
+  const showArchived = archived || zeroStockOnly;
+  let rows = showArchived ? await loadArchivedFromDB() : await fetchAllProductsAdmin({ onProgress });
+  rows = applyCategoryFilter(rows, categoryFilter);
+  rows = searchQuery.trim() ? fuzzyFilter(rows, searchQuery) : rows;
+  rows = [...rows].sort((a, b) => (a.categoryLabel || '').localeCompare(b.categoryLabel || '') || a.name.localeCompare(b.name));
   const total = rows.length;
   const from = (page - 1) * pageSize;
   return { rows: rows.slice(from, from + pageSize), total, page, pageSize };
 }
 
-function matchesMainCategory(p, mainCategory) {
-  return p.category === mainCategory || p.categoryPath?.[0] === mainCategory;
-}
-
-function sortByCatalogOrder(a, b) {
-  return (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.name.localeCompare(b.name);
-}
-
-export async function fetchProductsByMainCategory(mainCategory, { limit = 0 } = {}) {
-  const all = await getAllCached();
-  let filtered = mainCategory && mainCategory !== 'all'
-    ? all.filter((p) => matchesMainCategory(p, mainCategory))
-    : [...all];
-  filtered.sort(sortByCatalogOrder);
-  return limit > 0 ? filtered.slice(0, limit) : filtered;
-}
-
-// Reorder grid: live DB sort_order + SKU subcategory paths (not edge-cached API).
-export async function fetchReorderCategoryProducts(mainCategory) {
+export async function fetchProductsByMainCategory(mainCategory, { limit = 10000 } = {}) {
   const all = await getAllCachedAdmin();
-  return all
-    .filter((p) => !p.isArchived && p.stockQty > 0 && matchesMainCategory(p, mainCategory))
-    .sort(sortByCatalogOrder);
+  const filtered = mainCategory && mainCategory !== 'all'
+    ? all.filter((p) => p.category === mainCategory)
+    : all;
+  return filtered.sort((a, b) => a.name.localeCompare(b.name)).slice(0, limit);
+}
+
+export async function fetchDormantProducts({ searchQuery = '' } = {}) {
+  let dormant = await loadArchivedFromDB();
+  dormant = searchQuery.trim() ? fuzzyFilter(dormant, searchQuery) : dormant;
+  dormant.sort((a, b) => a.name.localeCompare(b.name));
+  return dormant;
 }
 
 export async function exportProductsCsv() {
   return fetchAllProductsAdmin();
 }
 
-// Compress to max 800px, JPEG 0.75 — output stays under 200KB so base64 is well under 4.5MB Vercel limit
+export async function checkStock() { return null; }
+
+// ─── Image helpers ────────────────────────────────────────────────────────────
+
 export function compressImage(file) {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -415,10 +308,8 @@ export async function uploadDormantImageWithBase64(file) {
     body: JSON.stringify({ filename: file.name, contentType: 'image/jpeg', base64 }),
   });
 
-  // Vercel returns plain-text on 413 — always try JSON, fall back gracefully
   let json;
   try { json = await res.json(); } catch { json = {}; }
-
   if (!res.ok) {
     if (res.status === 413) throw new Error('Image too large after compression — try a smaller file');
     throw new Error(json.error || `Image generation failed (${res.status})`);
@@ -427,7 +318,6 @@ export async function uploadDormantImageWithBase64(file) {
 }
 
 export async function uploadDormantImage(file) {
-  // Compress first so the base64 payload stays well under Vercel's 4.5MB limit
   const compressed = await compressImage(file);
   const base64 = await new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -446,30 +336,50 @@ export async function uploadDormantImage(file) {
   return json.url;
 }
 
-export async function fetchDormantProducts({ searchQuery = '' } = {}) {
-  const rows = await fetchAllProductsAdmin();
-  let dormant = rows.filter((p) => p.isArchived);
-  dormant = applySearchFilter(dormant, searchQuery);
-  dormant.sort((a, b) => a.name.localeCompare(b.name));
-  return dormant;
+// ─── Admin writes ─────────────────────────────────────────────────────────────
+
+function pathToWriteFields(categoryPath = []) {
+  const category = slugToLabel(categoryPath[0]) || '';
+  const subs = categoryPath.slice(1).map((slug) => slugToLabel(slug)).filter(Boolean);
+  return {
+    category,
+    subcategory_one: subs[0] || category,
+    subcategory_two: subs[1] || null,
+    subcategory_three: subs[2] || null,
+    subcategory_four: subs[3] || null,
+  };
 }
 
-export async function deleteProduct(websiteSku) {
-  const res = await fetch('/api/delete-product', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ websiteSku }),
-  });
-  const json = await res.json();
-  if (!res.ok) throw new Error(json.error || 'Delete failed');
-  invalidateAdminCache();
+export async function createProduct(payload) {
+  const sku = String(payload.code || payload.websiteSku || '').trim();
+  const barcode = String(payload.code || sku).trim();
+  const title = String(payload.name || '').trim();
+  if (!sku || !barcode || !title) throw new Error('Barcode and product name are required');
+
+  const { category, subcategory_one, subcategory_two, subcategory_three, subcategory_four } = pathToWriteFields(payload.categoryPath);
+  if (!category) throw new Error('Category is required');
+
+  const row = {
+    sku,
+    barcode,
+    title,
+    original_description: String(payload.description || title).trim(),
+    image_url_one: payload.image?.trim() || null,
+    image_url_two: payload.secondaryImage?.trim() || null,
+    category,
+    subcategory_one,
+    subcategory_two,
+    subcategory_three,
+    subcategory_four,
+  };
+
+  const { error } = await supabaseStock.from('website_stock').insert(row);
+  if (error) throw error;
   invalidateProductCache();
+  invalidateAdminCache();
 }
 
-export async function createProduct() { throw new Error('Products are managed in the stock system'); }
-
-export async function updateProduct(websiteSku, payload) {
-  // Image and description go through the server-side endpoint (service-role key, no RLS)
+export async function updateProduct(sku, payload) {
   const contentFields = {};
   if (payload.image !== undefined || payload.secondaryImage !== undefined) {
     const images = [payload.image, payload.secondaryImage]
@@ -483,74 +393,52 @@ export async function updateProduct(websiteSku, payload) {
     const res = await fetch('/api/update-product', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ websiteSku, ...contentFields }),
+      body: JSON.stringify({ websiteSku: sku, ...contentFields }),
     });
     const json = await res.json();
     if (!res.ok) throw new Error(json.error || 'Update failed');
   }
 
-  // Other fields (name, sortOrder, categoryPath) still go through the client
   const patch = {};
-  if (payload.name        !== undefined) patch.title       = payload.name;
-  if (payload.sortOrder   !== undefined) patch.sort_order  = payload.sortOrder;
-  if (payload.categoryPath?.length) {
-    patch.category    = payload.categoryPath[0];
-    patch.subcategory = payload.categoryPath[1] || '';
+  if (payload.name !== undefined) patch.title = payload.name;
+  if (payload.categoryPath?.length) Object.assign(patch, pathToWriteFields(payload.categoryPath));
+  if (!Object.keys(patch).length) {
+    invalidateAdminCache();
+    return;
   }
 
-  if (Object.keys(patch).length) {
-    const { error } = await supabaseStock
-      .from('website_products')
-      .update(patch)
-      .eq('website_sku', websiteSku);
-    if (error) throw error;
-  }
-
-  invalidateProductCache();
-}
-
-// Batch-assign department (category label) and/or subcategory (slug) to many
-// products at once. Used by the reorder grid's "Move to category" action.
-export async function moveProductsToCategory(websiteSkus, { category, subcategory } = {}) {
-  const skus = (websiteSkus || []).filter(Boolean);
-  if (!skus.length) return;
-  const patch = {};
-  if (category !== undefined) patch.category = category;
-  if (subcategory !== undefined) patch.subcategory = subcategory;
-  if (!Object.keys(patch).length) return;
-  const { error } = await supabaseStock
-    .from('website_products')
-    .update(patch)
-    .in('website_sku', skus);
+  patch.updated_at = new Date().toISOString();
+  const { error } = await supabaseStock.from('website_stock').update(patch).eq('sku', sku);
   if (error) throw error;
   invalidateProductCache();
   invalidateAdminCache();
 }
 
-export async function saveSortOrder(updates) {
-  // updates: [{ websiteSku, sortOrder }]
-  const res = await fetch('/api/save-sort-order', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ updates }),
-  });
-  const json = await res.json();
-  if (!res.ok && res.status !== 207) throw new Error(json.error || 'Save failed');
-  // Clear admin cache so next reorder load gets fresh DB order
+export async function archiveProduct(sku, shouldArchive = true) {
+  if (shouldArchive) {
+    const { error } = await supabaseStock.rpc('archive_product', { p_sku: sku, p_by: null });
+    if (error) throw error;
+  } else {
+    const { error } = await supabaseStock.rpc('unarchive_product', { p_sku: sku });
+    if (error) throw error;
+  }
+  invalidateProductCache();
   invalidateAdminCache();
 }
 
-export async function archiveProduct(websiteSku, isArchived) {
-  const res = await fetch('/api/update-product', {
+export async function deleteProduct(sku) {
+  const res = await fetch('/api/delete-product', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ websiteSku, active: !isArchived }),
+    body: JSON.stringify({ websiteSku: sku }),
   });
   const json = await res.json();
-  if (!res.ok) throw new Error(json.error || 'Failed to update product status');
+  if (!res.ok) throw new Error(json.error || 'Delete failed');
   invalidateAdminCache();
   invalidateProductCache();
 }
+
+export async function saveSortOrder() { /* website_stock has no sort_order column */ }
 export async function setSpecial() { throw new Error('Not supported'); }
 export async function updateSortOrder() { throw new Error('Not supported'); }
 export async function bulkUpsertProducts() { throw new Error('Not supported'); }
