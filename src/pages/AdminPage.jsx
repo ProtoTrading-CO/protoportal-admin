@@ -1227,8 +1227,12 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     try {
       const json = await createSubcategory(newSubModal.parentId, newSubModal.label.trim());
       await reloadTaxonomy();
-      if (json.node?.id) setMoveTargetSubcategory(json.node.id);
+      if (json.node?.id) {
+        setMoveTargetCategory(newSubModal.parentId);
+        setMoveTargetSubcategory(json.node.id);
+      }
       setNewSubModal(null);
+      if (selectedIds.size > 0) setMoveModalOpen(true);
       showToast(json.created ? 'Subcategory created' : 'Subcategory already exists');
     } catch (err) {
       showToast(err.message || 'Create failed', 'error');
@@ -2162,25 +2166,56 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
             {/* REORDER */}
             {activeSection === 'reorder' && (
               <div className="adm-panel adm-panel--reorder">
-                <div className="adm-section-head">
+                <div className="adm-section-head adm-section-head--reorder">
                   <div>
                     <h2 className="adm-section-title">Reorder Grid</h2>
-                    <p className="adm-section-note">Select products for bulk actions, or drag to reorder within the grid.</p>
+                    <p className="adm-section-note">Select products for bulk actions, or drag to reorder.</p>
                   </div>
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                    <button
-                      onClick={() => { setSelectedIds(new Set()); invalidateAdminCache(); void loadReorderProducts(); }}
-                      className="adm-btn-ghost"
-                    >
-                      <RefreshCw size={14} /> Refresh
-                    </button>
+                  <button
+                    onClick={() => { setSelectedIds(new Set()); invalidateAdminCache(); void loadReorderProducts(); }}
+                    className="adm-btn-ghost"
+                    type="button"
+                  >
+                    <RefreshCw size={14} /> Refresh
+                  </button>
+                </div>
+
+                <div className="adm-reorder-toolbar">
+                  <div className="adm-reorder-toolbar__filters">
+                    <label className="adm-filter-field">
+                      <span className="adm-filter-field__label">Subcategory</span>
+                      <select
+                        value={reorderSubcategory}
+                        onChange={(e) => { setReorderSubcategory(e.target.value); setSelectedIds(new Set()); }}
+                        className="adm-select adm-select--compact"
+                      >
+                        <option value="all">All subcategories</option>
+                        {reorderSubcategoryOptions.map((s) => (
+                          <option key={s.id} value={s.id}>{s.path}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="adm-filter-field">
+                      <span className="adm-filter-field__label">Status</span>
+                      <select
+                        value={reorderStatus}
+                        onChange={(e) => { setReorderStatus(e.target.value); setSelectedIds(new Set()); }}
+                        className="adm-select adm-select--compact"
+                      >
+                        <option value="active">Active</option>
+                        <option value="archived">Archived</option>
+                        <option value="all">All</option>
+                      </select>
+                    </label>
+                    <span className="adm-reorder-count">{visibleReorderProducts.length} products</span>
                   </div>
                 </div>
 
                 {selectedIds.size > 0 && (
-                  <div className="adm-bulk-bar">
+                  <div className="adm-bulk-bar" role="region" aria-label="Bulk actions">
                     <div className="adm-bulk-bar__left">
-                      <span className="adm-bulk-bar__count">{selectedIds.size} selected</span>
+                      <span className="adm-bulk-bar__badge">{selectedIds.size}</span>
+                      <span className="adm-bulk-bar__count">selected</span>
                       <button type="button" className="adm-bulk-bar__link" onClick={toggleSelectAllReorder}>
                         {visibleReorderProducts.length > 0 && visibleReorderProducts.every((p) => selectedIds.has(p.id))
                           ? 'Deselect all'
@@ -2188,42 +2223,17 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                       </button>
                     </div>
                     <div className="adm-bulk-bar__actions">
-                      <button type="button" className="adm-btn-red" onClick={openMoveModal} disabled={!!saving}>
-                        <ArrowLeftRight size={16} /> Move to category
+                      <button type="button" className="adm-btn-red adm-btn--sm" onClick={openMoveModal} disabled={!!saving}>
+                        <ArrowLeftRight size={15} /> Move
                       </button>
-                      <button type="button" className="adm-btn-ghost adm-btn-ghost--danger" onClick={() => setArchiveConfirmOpen(true)} disabled={!!saving}>
-                        <Archive size={16} /> Archive
+                      <button type="button" className="adm-btn-ghost adm-btn--sm adm-btn-ghost--danger" onClick={() => setArchiveConfirmOpen(true)} disabled={!!saving}>
+                        <Archive size={15} /> Archive
                       </button>
-                      <button type="button" className="adm-btn-ghost" onClick={moveSelectedToTop} disabled={!!saving}>Move to top</button>
-                      <button type="button" className="adm-btn-ghost" onClick={() => setSelectedIds(new Set())}>Clear</button>
+                      <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={moveSelectedToTop} disabled={!!saving}>To top</button>
+                      <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => setSelectedIds(new Set())}>Clear</button>
                     </div>
                   </div>
                 )}
-
-                <div className="adm-reorder-filters">
-                  <label className="adm-field-label">Subcategory</label>
-                  <select
-                    value={reorderSubcategory}
-                    onChange={(e) => { setReorderSubcategory(e.target.value); setSelectedIds(new Set()); }}
-                    className="adm-select"
-                  >
-                    <option value="all">All subcategories</option>
-                    {reorderSubcategoryOptions.map((s) => (
-                      <option key={s.id} value={s.id}>{s.path}</option>
-                    ))}
-                  </select>
-                  <label className="adm-field-label">Status</label>
-                  <select
-                    value={reorderStatus}
-                    onChange={(e) => { setReorderStatus(e.target.value); setSelectedIds(new Set()); }}
-                    className="adm-select"
-                  >
-                    <option value="active">Active only</option>
-                    <option value="archived">Archived only</option>
-                    <option value="all">All</option>
-                  </select>
-                  <span className="adm-pill">{visibleReorderProducts.length} products</span>
-                </div>
 
                 <div className="adm-reorder-layout">
                   <div className="adm-reorder-cat-sidebar">
@@ -2310,20 +2320,21 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                                 onTouchEnd={handleTouchEnd}
                                 className={`adm-reorder-card${isDragging ? ' adm-reorder-card--dragging' : ''}${isOver ? ' adm-reorder-card--over' : ''}${isSelected ? ' adm-reorder-card--selected' : ''}`}
                               >
-                                <div className="adm-reorder-handle">
-                                  <input
-                                    type="checkbox"
-                                    checked={isSelected}
-                                    onChange={() => toggleSelectReorder(product.id)}
-                                    onMouseDown={(e) => e.stopPropagation()}
-                                    onClick={(e) => e.stopPropagation()}
-                                    className="adm-reorder-checkbox"
-                                    aria-label={`Select ${product.name}`}
-                                  />
-                                  <Grip size={14} />
+                                <div className="adm-reorder-card__bar">
+                                  <label className="adm-reorder-check-wrap" onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
+                                    <input
+                                      type="checkbox"
+                                      checked={isSelected}
+                                      onChange={() => toggleSelectReorder(product.id)}
+                                      className="adm-reorder-checkbox"
+                                      aria-label={`Select ${product.name}`}
+                                    />
+                                  </label>
+                                  <span className="adm-reorder-drag-hint" aria-hidden="true"><Grip size={13} /></span>
                                   <button
+                                    type="button"
                                     onClick={(e) => { e.stopPropagation(); openContentEdit(product); }}
-                                    className="adm-icon-btn"
+                                    className="adm-reorder-edit-btn"
                                     title="Edit image"
                                   >
                                     <ImagePlus size={13} />
@@ -2347,44 +2358,51 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
 
                 {moveModalOpen && (
                   <div className="adm-modal-backdrop" onClick={() => setMoveModalOpen(false)}>
-                    <div className="adm-modal" onClick={(e) => e.stopPropagation()}>
-                      <h3 className="adm-modal-title">Move {selectedIds.size} product(s)</h3>
-                      <p className="adm-modal-note">Choose the destination category and subcategory. Product links update in the database.</p>
-                      <label className="adm-field">
-                        <span className="adm-field-label">Main category</span>
-                        <select
-                          value={moveTargetCategory}
-                          onChange={(e) => { setMoveTargetCategory(e.target.value); setMoveTargetSubcategory(''); }}
-                          className="adm-field-input"
+                    <div className="adm-modal adm-modal--form" onClick={(e) => e.stopPropagation()}>
+                      <div className="adm-modal-header">
+                        <h3 className="adm-modal-title">Move {selectedIds.size} product{selectedIds.size === 1 ? '' : 's'}</h3>
+                        <button type="button" className="adm-modal-close" onClick={() => setMoveModalOpen(false)} aria-label="Close"><X size={18} /></button>
+                      </div>
+                      <p className="adm-modal-note">Choose where these products should live in the catalogue.</p>
+                      <div className="adm-modal-body">
+                        <label className="adm-field">
+                          <span className="adm-field-label">Main category</span>
+                          <select
+                            value={moveTargetCategory}
+                            onChange={(e) => { setMoveTargetCategory(e.target.value); setMoveTargetSubcategory(''); }}
+                            className="adm-field-input"
+                          >
+                            {mainCategories.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+                          </select>
+                        </label>
+                        <label className="adm-field">
+                          <span className="adm-field-label">Subcategory</span>
+                          <select
+                            value={moveTargetSubcategory}
+                            onChange={(e) => setMoveTargetSubcategory(e.target.value)}
+                            className="adm-field-input"
+                          >
+                            <option value="">Select subcategory…</option>
+                            {flattenSubcategories(subcategoryOptions(moveTargetCategory, taxonomyTree)).map((s) => (
+                              <option key={s.id} value={s.id}>{s.path}</option>
+                            ))}
+                          </select>
+                        </label>
+                      </div>
+                      <div className="adm-modal-footer">
+                        <button
+                          type="button"
+                          className="adm-modal-link-btn"
+                          onClick={() => { setMoveModalOpen(false); setNewSubModal({ parentId: moveTargetCategory, label: '' }); }}
                         >
-                          {mainCategories.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
-                        </select>
-                      </label>
-                      <label className="adm-field">
-                        <span className="adm-field-label">Subcategory</span>
-                        <select
-                          value={moveTargetSubcategory}
-                          onChange={(e) => setMoveTargetSubcategory(e.target.value)}
-                          className="adm-field-input"
-                        >
-                          <option value="">Select subcategory…</option>
-                          {flattenSubcategories(subcategoryOptions(moveTargetCategory, taxonomyTree)).map((s) => (
-                            <option key={s.id} value={s.id}>{s.path}</option>
-                          ))}
-                        </select>
-                      </label>
-                      <button
-                        type="button"
-                        className="adm-btn-ghost adm-btn-ghost--inline"
-                        onClick={() => setNewSubModal({ parentId: moveTargetCategory, label: '' })}
-                      >
-                        <FolderPlus size={14} /> Create new subcategory
-                      </button>
-                      <div className="adm-modal-actions">
-                        <button type="button" className="adm-btn-ghost" onClick={() => setMoveModalOpen(false)}>Cancel</button>
-                        <button type="button" className="adm-btn-red" onClick={() => void confirmBulkMove()} disabled={saving === 'bulk-move'}>
-                          {saving === 'bulk-move' ? 'Moving…' : 'Confirm move'}
+                          <FolderPlus size={14} /> New subcategory
                         </button>
+                        <div className="adm-modal-footer__actions">
+                          <button type="button" className="adm-btn-ghost" onClick={() => setMoveModalOpen(false)}>Cancel</button>
+                          <button type="button" className="adm-btn-red" onClick={() => void confirmBulkMove()} disabled={saving === 'bulk-move'}>
+                            {saving === 'bulk-move' ? 'Moving…' : 'Confirm move'}
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -2392,14 +2410,19 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
 
                 {archiveConfirmOpen && (
                   <div className="adm-modal-backdrop" onClick={() => setArchiveConfirmOpen(false)}>
-                    <div className="adm-modal" onClick={(e) => e.stopPropagation()}>
-                      <h3 className="adm-modal-title">Archive {selectedIds.size} product(s)?</h3>
-                      <p className="adm-modal-note">Products will be removed from the active catalogue but are not deleted. You can restore them from the Archive section.</p>
-                      <div className="adm-modal-actions">
-                        <button type="button" className="adm-btn-ghost" onClick={() => setArchiveConfirmOpen(false)}>Cancel</button>
-                        <button type="button" className="adm-btn-red" onClick={() => void confirmBulkArchive()} disabled={saving === 'bulk-archive'}>
-                          {saving === 'bulk-archive' ? 'Archiving…' : 'Archive products'}
-                        </button>
+                    <div className="adm-modal adm-modal--form" onClick={(e) => e.stopPropagation()}>
+                      <div className="adm-modal-header">
+                        <h3 className="adm-modal-title">Archive {selectedIds.size} product{selectedIds.size === 1 ? '' : 's'}?</h3>
+                        <button type="button" className="adm-modal-close" onClick={() => setArchiveConfirmOpen(false)} aria-label="Close"><X size={18} /></button>
+                      </div>
+                      <p className="adm-modal-note">Products leave the active grid but are not deleted. Restore them anytime from Archive.</p>
+                      <div className="adm-modal-footer adm-modal-footer--end">
+                        <div className="adm-modal-footer__actions">
+                          <button type="button" className="adm-btn-ghost" onClick={() => setArchiveConfirmOpen(false)}>Cancel</button>
+                          <button type="button" className="adm-btn-red" onClick={() => void confirmBulkArchive()} disabled={saving === 'bulk-archive'}>
+                            {saving === 'bulk-archive' ? 'Archiving…' : 'Archive'}
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -2407,22 +2430,30 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
 
                 {editTaxonomyModal && (
                   <div className="adm-modal-backdrop" onClick={() => setEditTaxonomyModal(null)}>
-                    <div className="adm-modal" onClick={(e) => e.stopPropagation()}>
-                      <h3 className="adm-modal-title">Edit {editTaxonomyModal.type === 'category' ? 'category' : 'subcategory'} name</h3>
-                      <p className="adm-modal-note">The internal ID stays the same — existing product assignments are preserved and labels update in the database.</p>
-                      <label className="adm-field">
-                        <span className="adm-field-label">Name</span>
-                        <input
-                          value={editTaxonomyModal.label}
-                          onChange={(e) => setEditTaxonomyModal((m) => ({ ...m, label: e.target.value }))}
-                          className="adm-field-input"
-                        />
-                      </label>
-                      <div className="adm-modal-actions">
-                        <button type="button" className="adm-btn-ghost" onClick={() => setEditTaxonomyModal(null)}>Cancel</button>
-                        <button type="button" className="adm-btn-red" onClick={() => void saveTaxonomyRename()} disabled={taxonomySaving}>
-                          {taxonomySaving ? 'Saving…' : 'Save'}
-                        </button>
+                    <div className="adm-modal adm-modal--form" onClick={(e) => e.stopPropagation()}>
+                      <div className="adm-modal-header">
+                        <h3 className="adm-modal-title">Rename {editTaxonomyModal.type === 'category' ? 'category' : 'subcategory'}</h3>
+                        <button type="button" className="adm-modal-close" onClick={() => setEditTaxonomyModal(null)} aria-label="Close"><X size={18} /></button>
+                      </div>
+                      <p className="adm-modal-note">The ID stays the same — only the display name and database labels update.</p>
+                      <div className="adm-modal-body">
+                        <label className="adm-field">
+                          <span className="adm-field-label">Name</span>
+                          <input
+                            value={editTaxonomyModal.label}
+                            onChange={(e) => setEditTaxonomyModal((m) => ({ ...m, label: e.target.value }))}
+                            className="adm-field-input"
+                            autoFocus
+                          />
+                        </label>
+                      </div>
+                      <div className="adm-modal-footer adm-modal-footer--end">
+                        <div className="adm-modal-footer__actions">
+                          <button type="button" className="adm-btn-ghost" onClick={() => setEditTaxonomyModal(null)}>Cancel</button>
+                          <button type="button" className="adm-btn-red" onClick={() => void saveTaxonomyRename()} disabled={taxonomySaving}>
+                            {taxonomySaving ? 'Saving…' : 'Save'}
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -2430,32 +2461,40 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
 
                 {newSubModal && (
                   <div className="adm-modal-backdrop" onClick={() => setNewSubModal(null)}>
-                    <div className="adm-modal" onClick={(e) => e.stopPropagation()}>
-                      <h3 className="adm-modal-title">Create subcategory</h3>
-                      <label className="adm-field">
-                        <span className="adm-field-label">Under category</span>
-                        <select
-                          value={newSubModal.parentId}
-                          onChange={(e) => setNewSubModal((m) => ({ ...m, parentId: e.target.value }))}
-                          className="adm-field-input"
-                        >
-                          {mainCategories.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
-                        </select>
-                      </label>
-                      <label className="adm-field">
-                        <span className="adm-field-label">Subcategory name</span>
-                        <input
-                          value={newSubModal.label}
-                          onChange={(e) => setNewSubModal((m) => ({ ...m, label: e.target.value }))}
-                          className="adm-field-input"
-                          placeholder="e.g. Seasonal Items"
-                        />
-                      </label>
-                      <div className="adm-modal-actions">
-                        <button type="button" className="adm-btn-ghost" onClick={() => setNewSubModal(null)}>Cancel</button>
-                        <button type="button" className="adm-btn-red" onClick={() => void saveNewSubcategory()} disabled={taxonomySaving}>
-                          {taxonomySaving ? 'Creating…' : 'Create'}
-                        </button>
+                    <div className="adm-modal adm-modal--form" onClick={(e) => e.stopPropagation()}>
+                      <div className="adm-modal-header">
+                        <h3 className="adm-modal-title">New subcategory</h3>
+                        <button type="button" className="adm-modal-close" onClick={() => setNewSubModal(null)} aria-label="Close"><X size={18} /></button>
+                      </div>
+                      <div className="adm-modal-body">
+                        <label className="adm-field">
+                          <span className="adm-field-label">Under category</span>
+                          <select
+                            value={newSubModal.parentId}
+                            onChange={(e) => setNewSubModal((m) => ({ ...m, parentId: e.target.value }))}
+                            className="adm-field-input"
+                          >
+                            {mainCategories.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+                          </select>
+                        </label>
+                        <label className="adm-field">
+                          <span className="adm-field-label">Subcategory name</span>
+                          <input
+                            value={newSubModal.label}
+                            onChange={(e) => setNewSubModal((m) => ({ ...m, label: e.target.value }))}
+                            className="adm-field-input"
+                            placeholder="e.g. Seasonal Items"
+                            autoFocus
+                          />
+                        </label>
+                      </div>
+                      <div className="adm-modal-footer adm-modal-footer--end">
+                        <div className="adm-modal-footer__actions">
+                          <button type="button" className="adm-btn-ghost" onClick={() => setNewSubModal(null)}>Cancel</button>
+                          <button type="button" className="adm-btn-red" onClick={() => void saveNewSubcategory()} disabled={taxonomySaving}>
+                            {taxonomySaving ? 'Creating…' : 'Create'}
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </div>
