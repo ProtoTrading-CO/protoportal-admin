@@ -69,6 +69,29 @@ import { fetchPopupSpecial, savePopupSpecial, uploadPopupImage } from '../lib/po
 import CrmContactsModal from '../components/CrmContactsModal';
 import BroadcastCalendar from '../components/BroadcastCalendar';
 import categories from '../data/categories.json';
+import { buildImageCandidates } from '../lib/imageUrl';
+
+// Thumbnail that encodes the image URL and falls back through candidates on
+// error, so reorder-grid images with spaces/special chars in the path display.
+function ReorderThumb({ src, alt }) {
+  const candidates = buildImageCandidates(src);
+  const [idx, setIdx] = useState(0);
+  useEffect(() => { setIdx(0); }, [src]);
+  if (!candidates.length || !candidates[idx]) {
+    return <span className="adm-muted" style={{ fontSize: 10 }}>No image</span>;
+  }
+  return (
+    <img
+      draggable={false}
+      src={candidates[idx]}
+      alt={alt}
+      loading="lazy"
+      decoding="async"
+      onError={() => setIdx((i) => i + 1)}
+      style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', mixBlendMode: 'multiply', pointerEvents: 'none' }}
+    />
+  );
+}
 
 // ─── Reorder sort order — stored in localStorage, applied client-side ─────────
 const SORT_STORE_KEY = 'proto_sort_v1';
@@ -2122,9 +2145,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                                   </button>
                                 </div>
                                 <div className="adm-thumb" style={{ height: 70 }}>
-                                  {product.image
-                                    ? <img draggable={false} src={product.image} alt={product.name} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', mixBlendMode: 'multiply', pointerEvents: 'none' }} />
-                                    : <span className="adm-muted" style={{ fontSize: 10 }}>No image</span>}
+                                  <ReorderThumb src={product.image} alt={product.name} />
                                 </div>
                                 <div style={{ fontWeight: 700, fontSize: 10, marginTop: 4, lineHeight: 1.3, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{product.name}</div>
                                 <div className="adm-muted" style={{ fontSize: 9 }}>{product.code}</div>
