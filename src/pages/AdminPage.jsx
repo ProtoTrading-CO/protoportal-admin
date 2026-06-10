@@ -12,6 +12,7 @@ import {
   ClipboardList,
   Eye,
   FileDown,
+  FolderPlus,
   Globe,
   Grip,
   Image,
@@ -46,12 +47,14 @@ import {
 import * as XLSX from 'xlsx';
 import {
   archiveProduct,
+  bulkArchiveProducts,
+  bulkMoveProducts,
   createProduct,
   deleteProduct,
   fetchAdminProductsPage,
   fetchDistinctCategories,
   fetchDormantProducts,
-  fetchProductsByMainCategory,
+  fetchReorderProducts,
   invalidateAdminCache,
   invalidateProductCache,
   saveSortOrder,
@@ -59,6 +62,14 @@ import {
   uploadDormantImage,
   uploadDormantImageWithBase64,
 } from '../lib/products';
+import {
+  categoryLabelFromTree,
+  createSubcategory,
+  fetchTaxonomy,
+  flattenSubcategories,
+  renameTaxonomyNode,
+  subcategoryOptionsFromTree,
+} from '../lib/taxonomyAdmin';
 import { approveCustomer, deleteCustomer, fetchAllCustomers, fetchCustomersPage, updateCustomerAdmin } from '../lib/customers';
 import { supabase } from '../lib/supabase';
 import { buildOrderNoteSections, createEmailOrderItems, generateOrderPdfBase64 } from '../lib/orderDocuments';
@@ -227,8 +238,6 @@ function generateOrderChecklistHtml(order) {
 </div>
 </body></html>`;
 }
-const CATEGORY_WORK_SIZE = 10000;
-
 const emptyForm = {
   code: '',
   name: '',
@@ -241,16 +250,16 @@ const emptyForm = {
   productType: 'General product',
 };
 
-function categoryLabel(id) {
-  return categories.find((item) => item.id === id)?.label || id;
+function categoryLabel(id, tree = categories) {
+  return categoryLabelFromTree(tree, id);
 }
 
-function subcategoryOptions(categoryId) {
-  return categories.find((item) => item.id === categoryId)?.children || [];
+function subcategoryOptions(categoryId, tree = categories) {
+  return subcategoryOptionsFromTree(tree, categoryId);
 }
 
-function groupBySubcategory(products, mainCategoryId) {
-  const subs = subcategoryOptions(mainCategoryId);
+function groupBySubcategory(products, mainCategoryId, tree = categories) {
+  const subs = subcategoryOptions(mainCategoryId, tree);
   const subLabelMap = new Map(subs.map((s) => [s.id, s.label]));
   const groups = new Map();
   products.forEach((p) => {
@@ -258,11 +267,11 @@ function groupBySubcategory(products, mainCategoryId) {
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(p);
   });
-  return [...groups.entries()].map(([key, prods]) => ({
-    id: key,
-    label: subLabelMap.get(key) || 'Other',
-    products: prods,
-  }));
+  const ordered = subs.map((s) => ({ id: s.id, label: s.label, products: groups.get(s.id) || [] }));
+  if (groups.has('__other__') && groups.get('__other__').length) {
+    ordered.push({ id: '__other__', label: 'Other', products: groups.get('__other__') });
+  }
+  return ordered.filter((g) => g.products.length > 0);
 }
 
 function getProductType(product) {
@@ -377,7 +386,18 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const [priceDelta, setPriceDelta] = useState('-10');
 
   const [reorderCategory, setReorderCategory] = useState(categories[0]?.id || '');
+  const [reorderSubcategory, setReorderSubcategory] = useState('all');
+  const [reorderStatus, setReorderStatus] = useState('active');
   const [reorderProducts, setReorderProducts] = useState([]);
+  const [taxonomyTree, setTaxonomyTree] = useState(categories);
+  const [toast, setToast] = useState(null);
+  const [moveModalOpen, setMoveModalOpen] = useState(false);
+  const [moveTargetCategory, setMoveTargetCategory] = useState('');
+  const [moveTargetSubcategory, setMoveTargetSubcategory] = useState('');
+  const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false);
+  const [editTaxonomyModal, setEditTaxonomyModal] = useState(null);
+  const [newSubModal, setNewSubModal] = useState(null);
+  const [taxonomySaving, setTaxonomySaving] = useState(false);
   const [dragId, setDragId] = useState(null);
   const [dragOverId, setDragOverId] = useState(null);
   const [selectedIds, setSelectedIds] = useState(new Set());
@@ -429,7 +449,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
   const [analyticsError, setAnalyticsError] = useState(null);
 
-  const mainCategories = categories.map((item) => ({ id: item.id, label: item.label }));
+  const mainCategories = taxonomyTree.map((item) => ({ id: item.id, label: item.label }));
 
   const crmBusinessTypeOptions = useMemo(() => (
     [...new Set(crmAllCustomers.map((c) => c.businessType).filter(Boolean))].sort()
@@ -590,11 +610,40 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const loadCategoryWorkingSet = async (categoryId, target) => {
     setLoading(true);
     try {
-      const rows = await fetchProductsByMainCategory(categoryId, { limit: CATEGORY_WORK_SIZE });
-      if (target === 'pricing') setPricingProducts(rows);
-      // Reorder shows the live site order (sort_order from DB) — no localStorage override
-      if (target === 'reorder') setReorderProducts(rows);
+      if (target === 'pricing') {
+        const rows = await fetchReorderProducts({ mainCategory: categoryId, status: 'active' });
+        setPricingProducts(rows);
+      }
+      if (target === 'reorder') {
+        await loadReorderProducts();
+      }
     } finally { setLoading(false); }
+  };
+
+  const loadReorderProducts = async () => {
+    setLoading(true);
+    setLoadingError('');
+    try {
+      const rows = await fetchReorderProducts({
+        mainCategory: reorderCategory,
+        subcategoryId: reorderSubcategory !== 'all' ? reorderSubcategory : null,
+        status: reorderStatus,
+      });
+      setReorderProducts(rows);
+    } catch (err) {
+      setLoadingError(err.message || 'Failed to load products');
+    } finally { setLoading(false); }
+  };
+
+  const showToast = (message, type = 'success') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 4000);
+  };
+
+  const reloadTaxonomy = async () => {
+    const tree = await fetchTaxonomy();
+    setTaxonomyTree(tree);
+    return tree;
   };
 
   const loadOrders = async () => {
@@ -608,7 +657,8 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   useEffect(() => { if (activeSection === 'archive') void loadArchive(); }, [activeSection, archivePage, archiveSearch]);
   useEffect(() => { if (activeSection === 'customers') void loadCustomers(); }, [activeSection, customerPage, customerTab, customerSearch]);
   useEffect(() => { if (activeSection === 'pricing') void loadCategoryWorkingSet(pricingCategory, 'pricing'); }, [activeSection, pricingCategory]);
-  useEffect(() => { if (activeSection === 'reorder') void loadCategoryWorkingSet(reorderCategory, 'reorder'); }, [activeSection, reorderCategory]);
+  useEffect(() => { void reloadTaxonomy(); }, []);
+  useEffect(() => { if (activeSection === 'reorder') void loadReorderProducts(); }, [activeSection, reorderCategory, reorderSubcategory, reorderStatus]);
   useEffect(() => { if (activeSection === 'orders' && orders.length === 0) void loadOrders(); }, [activeSection]);
   useEffect(() => { if (activeSection === 'crm' && !crmAllCustomers.length && !crmLoading) void loadCrmCustomers(1); }, [activeSection]);
   useEffect(() => { if (activeSection === 'analytics' && !analyticsData && !analyticsLoading && !analyticsError) void loadAnalytics(); }, [activeSection]);
@@ -807,7 +857,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     if (activeSection === 'archive') return loadArchive();
     if (activeSection === 'customers') return loadCustomers();
     if (activeSection === 'pricing') return loadCategoryWorkingSet(pricingCategory, 'pricing');
-    if (activeSection === 'reorder') return loadCategoryWorkingSet(reorderCategory, 'reorder');
+    if (activeSection === 'reorder') return loadReorderProducts();
     if (activeSection === 'orders') return loadOrders();
   };
 
@@ -1099,6 +1149,90 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
       XLSX.utils.book_append_sheet(wb, ws, 'Archive 0 Stock');
       XLSX.writeFile(wb, 'proto-archive-products.xlsx');
     } finally { setSaving(''); }
+  };
+
+  const reorderSubcategoryOptions = useMemo(
+    () => flattenSubcategories(subcategoryOptions(reorderCategory, taxonomyTree)),
+    [reorderCategory, taxonomyTree],
+  );
+
+  const visibleReorderProducts = useMemo(() => reorderProducts, [reorderProducts]);
+
+  const toggleSelectAllReorder = () => {
+    const ids = visibleReorderProducts.map((p) => p.id);
+    const allSelected = ids.length > 0 && ids.every((id) => selectedIds.has(id));
+    setSelectedIds(allSelected ? new Set() : new Set(ids));
+  };
+
+  const openMoveModal = () => {
+    setMoveTargetCategory(reorderCategory || mainCategories[0]?.id || '');
+    setMoveTargetSubcategory('');
+    setMoveModalOpen(true);
+  };
+
+  const confirmBulkMove = async () => {
+    if (!selectedIds.size || !moveTargetCategory || !moveTargetSubcategory) {
+      showToast('Choose a main category and subcategory', 'error');
+      return;
+    }
+    setSaving('bulk-move');
+    const count = selectedIds.size;
+    try {
+      await bulkMoveProducts({
+        skus: [...selectedIds],
+        categoryId: moveTargetCategory,
+        subcategoryId: moveTargetSubcategory,
+      });
+      setMoveModalOpen(false);
+      setSelectedIds(new Set());
+      await loadReorderProducts();
+      showToast(`Moved ${count} product(s)`);
+    } catch (err) {
+      showToast(err.message || 'Move failed', 'error');
+    } finally { setSaving(''); }
+  };
+
+  const confirmBulkArchive = async () => {
+    const count = selectedIds.size;
+    setSaving('bulk-archive');
+    try {
+      await bulkArchiveProducts([...selectedIds]);
+      setArchiveConfirmOpen(false);
+      setSelectedIds(new Set());
+      await loadReorderProducts();
+      showToast(`Archived ${count} product(s)`);
+    } catch (err) {
+      showToast(err.message || 'Archive failed', 'error');
+    } finally { setSaving(''); }
+  };
+
+  const saveTaxonomyRename = async () => {
+    if (!editTaxonomyModal?.label?.trim()) return;
+    setTaxonomySaving(true);
+    try {
+      await renameTaxonomyNode(editTaxonomyModal.id, editTaxonomyModal.label.trim());
+      await reloadTaxonomy();
+      invalidateAdminCache();
+      await loadReorderProducts();
+      setEditTaxonomyModal(null);
+      showToast('Category updated');
+    } catch (err) {
+      showToast(err.message || 'Update failed', 'error');
+    } finally { setTaxonomySaving(false); }
+  };
+
+  const saveNewSubcategory = async () => {
+    if (!newSubModal?.label?.trim() || !newSubModal?.parentId) return;
+    setTaxonomySaving(true);
+    try {
+      const json = await createSubcategory(newSubModal.parentId, newSubModal.label.trim());
+      await reloadTaxonomy();
+      if (json.node?.id) setMoveTargetSubcategory(json.node.id);
+      setNewSubModal(null);
+      showToast(json.created ? 'Subcategory created' : 'Subcategory already exists');
+    } catch (err) {
+      showToast(err.message || 'Create failed', 'error');
+    } finally { setTaxonomySaving(false); }
   };
 
   const toggleSelectReorder = (id) => {
@@ -2031,18 +2165,11 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                 <div className="adm-section-head">
                   <div>
                     <h2 className="adm-section-title">Reorder Grid</h2>
-                    <p className="adm-section-note">Drag products to reorder — saves to the database immediately.</p>
+                    <p className="adm-section-note">Select products for bulk actions, or drag to reorder within the grid.</p>
                   </div>
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    {selectedIds.size > 0 && (
-                      <>
-                        <span className="adm-pill">{selectedIds.size} selected</span>
-                        <button onClick={moveSelectedToTop} className="adm-btn-red">Move to top</button>
-                        <button onClick={() => setSelectedIds(new Set())} className="adm-btn-ghost">Clear</button>
-                      </>
-                    )}
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                     <button
-                      onClick={() => { setSelectedIds(new Set()); invalidateAdminCache(); void loadCategoryWorkingSet(reorderCategory, 'reorder'); }}
+                      onClick={() => { setSelectedIds(new Set()); invalidateAdminCache(); void loadReorderProducts(); }}
                       className="adm-btn-ghost"
                     >
                       <RefreshCw size={14} /> Refresh
@@ -2050,23 +2177,93 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                   </div>
                 </div>
 
-                <div className="adm-reorder-layout">
-                  {/* Category sidebar */}
-                  <div className="adm-reorder-cat-sidebar">
-                    <div className="adm-reorder-cat-heading">Categories</div>
-                    {mainCategories.map((cat) => (
-                      <button
-                        key={cat.id}
-                        onClick={() => { setSelectedIds(new Set()); setReorderCategory(cat.id); }}
-                        className={`adm-reorder-cat-item${reorderCategory === cat.id ? ' adm-reorder-cat-item--active' : ''}`}
-                      >
-                        {cat.label}
+                {selectedIds.size > 0 && (
+                  <div className="adm-bulk-bar">
+                    <div className="adm-bulk-bar__left">
+                      <span className="adm-bulk-bar__count">{selectedIds.size} selected</span>
+                      <button type="button" className="adm-bulk-bar__link" onClick={toggleSelectAllReorder}>
+                        {visibleReorderProducts.length > 0 && visibleReorderProducts.every((p) => selectedIds.has(p.id))
+                          ? 'Deselect all'
+                          : `Select all (${visibleReorderProducts.length})`}
                       </button>
+                    </div>
+                    <div className="adm-bulk-bar__actions">
+                      <button type="button" className="adm-btn-red" onClick={openMoveModal} disabled={!!saving}>
+                        <ArrowLeftRight size={16} /> Move to category
+                      </button>
+                      <button type="button" className="adm-btn-ghost adm-btn-ghost--danger" onClick={() => setArchiveConfirmOpen(true)} disabled={!!saving}>
+                        <Archive size={16} /> Archive
+                      </button>
+                      <button type="button" className="adm-btn-ghost" onClick={moveSelectedToTop} disabled={!!saving}>Move to top</button>
+                      <button type="button" className="adm-btn-ghost" onClick={() => setSelectedIds(new Set())}>Clear</button>
+                    </div>
+                  </div>
+                )}
+
+                <div className="adm-reorder-filters">
+                  <label className="adm-field-label">Subcategory</label>
+                  <select
+                    value={reorderSubcategory}
+                    onChange={(e) => { setReorderSubcategory(e.target.value); setSelectedIds(new Set()); }}
+                    className="adm-select"
+                  >
+                    <option value="all">All subcategories</option>
+                    {reorderSubcategoryOptions.map((s) => (
+                      <option key={s.id} value={s.id}>{s.path}</option>
+                    ))}
+                  </select>
+                  <label className="adm-field-label">Status</label>
+                  <select
+                    value={reorderStatus}
+                    onChange={(e) => { setReorderStatus(e.target.value); setSelectedIds(new Set()); }}
+                    className="adm-select"
+                  >
+                    <option value="active">Active only</option>
+                    <option value="archived">Archived only</option>
+                    <option value="all">All</option>
+                  </select>
+                  <span className="adm-pill">{visibleReorderProducts.length} products</span>
+                </div>
+
+                <div className="adm-reorder-layout">
+                  <div className="adm-reorder-cat-sidebar">
+                    <div className="adm-reorder-cat-heading">
+                      <span>Categories</span>
+                      <button
+                        type="button"
+                        className="adm-icon-btn"
+                        title="Add subcategory to selected category"
+                        onClick={() => setNewSubModal({ parentId: reorderCategory, label: '' })}
+                      >
+                        <FolderPlus size={14} />
+                      </button>
+                    </div>
+                    {mainCategories.map((cat) => (
+                      <div key={cat.id} className="adm-reorder-cat-row">
+                        <button
+                          onClick={() => { setSelectedIds(new Set()); setReorderCategory(cat.id); setReorderSubcategory('all'); }}
+                          className={`adm-reorder-cat-item${reorderCategory === cat.id ? ' adm-reorder-cat-item--active' : ''}`}
+                        >
+                          {cat.label}
+                        </button>
+                        <button
+                          type="button"
+                          className="adm-reorder-cat-edit"
+                          title="Edit category name"
+                          onClick={() => setEditTaxonomyModal({ id: cat.id, label: cat.label, type: 'category' })}
+                        >
+                          <Pencil size={12} />
+                        </button>
+                      </div>
                     ))}
                   </div>
 
-                  {/* Product grid */}
                   <div className="adm-reorder-content">
+                    {loading && <div className="adm-loading-inline"><Loader2 size={18} className="spin" /> Loading products…</div>}
+                    {!loading && visibleReorderProducts.length === 0 && (
+                      <div className="adm-empty">No products match these filters.</div>
+                    )}
+
                     <div
                       onDragEnter={(e) => { e.preventDefault(); setDragOverId('__top__'); }}
                       onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
@@ -2078,9 +2275,21 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                     </div>
 
                     <div className="adm-reorder-grid">
-                      {groupBySubcategory(reorderProducts, reorderCategory).map((group) => (
-                        <>
-                          <div key={`hdr-${group.id}`} className="adm-reorder-group-header">{group.label}</div>
+                      {groupBySubcategory(visibleReorderProducts, reorderCategory, taxonomyTree).map((group) => (
+                        <div key={`grp-${group.id}`} className="adm-reorder-group">
+                          <div className="adm-reorder-group-header">
+                            <span>{group.label}</span>
+                            {group.id !== '__other__' && (
+                              <button
+                                type="button"
+                                className="adm-reorder-cat-edit"
+                                title="Edit subcategory name"
+                                onClick={() => setEditTaxonomyModal({ id: group.id, label: group.label, type: 'subcategory' })}
+                              >
+                                <Pencil size={11} />
+                              </button>
+                            )}
+                          </div>
                           {group.products.map((product) => {
                             const isDragging = dragId === product.id;
                             const isOver = dragOverId === product.id && !isDragging;
@@ -2100,42 +2309,161 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                                 onTouchMove={handleTouchMove}
                                 onTouchEnd={handleTouchEnd}
                                 className={`adm-reorder-card${isDragging ? ' adm-reorder-card--dragging' : ''}${isOver ? ' adm-reorder-card--over' : ''}${isSelected ? ' adm-reorder-card--selected' : ''}`}
-                                style={{ padding: '6px', cursor: 'grab' }}
                               >
-                                <div className="adm-reorder-handle" style={{ marginBottom: 4 }}>
+                                <div className="adm-reorder-handle">
                                   <input
                                     type="checkbox"
                                     checked={isSelected}
                                     onChange={() => toggleSelectReorder(product.id)}
                                     onMouseDown={(e) => e.stopPropagation()}
                                     onClick={(e) => e.stopPropagation()}
-                                    style={{ width: 12, height: 12, flexShrink: 0, cursor: 'pointer', accentColor: '#8B1A1A' }}
+                                    className="adm-reorder-checkbox"
+                                    aria-label={`Select ${product.name}`}
                                   />
-                                  <Grip size={11} />
+                                  <Grip size={14} />
                                   <button
                                     onClick={(e) => { e.stopPropagation(); openContentEdit(product); }}
                                     className="adm-icon-btn"
                                     title="Edit image"
-                                    style={{ marginLeft: 'auto', padding: '2px' }}
                                   >
-                                    <ImagePlus size={11} />
+                                    <ImagePlus size={13} />
                                   </button>
                                 </div>
-                                <div className="adm-thumb" style={{ height: 70 }}>
+                                <div className="adm-thumb adm-thumb--reorder">
                                   {product.image
-                                    ? <img draggable={false} src={product.image} alt={product.name} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', mixBlendMode: 'multiply', pointerEvents: 'none' }} />
-                                    : <span className="adm-muted" style={{ fontSize: 10 }}>No image</span>}
+                                    ? <img draggable={false} src={product.image} alt={product.name} />
+                                    : <span className="adm-muted">No image</span>}
                                 </div>
-                                <div style={{ fontWeight: 700, fontSize: 10, marginTop: 4, lineHeight: 1.3, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{product.name}</div>
-                                <div className="adm-muted" style={{ fontSize: 9 }}>{product.code}</div>
+                                <div className="adm-reorder-card-title">{product.name}</div>
+                                <div className="adm-muted adm-reorder-card-code">{product.code}</div>
                               </div>
                             );
                           })}
-                        </>
+                        </div>
                       ))}
                     </div>
                   </div>
                 </div>
+
+                {moveModalOpen && (
+                  <div className="adm-modal-backdrop" onClick={() => setMoveModalOpen(false)}>
+                    <div className="adm-modal" onClick={(e) => e.stopPropagation()}>
+                      <h3 className="adm-modal-title">Move {selectedIds.size} product(s)</h3>
+                      <p className="adm-modal-note">Choose the destination category and subcategory. Product links update in the database.</p>
+                      <label className="adm-field">
+                        <span className="adm-field-label">Main category</span>
+                        <select
+                          value={moveTargetCategory}
+                          onChange={(e) => { setMoveTargetCategory(e.target.value); setMoveTargetSubcategory(''); }}
+                          className="adm-field-input"
+                        >
+                          {mainCategories.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+                        </select>
+                      </label>
+                      <label className="adm-field">
+                        <span className="adm-field-label">Subcategory</span>
+                        <select
+                          value={moveTargetSubcategory}
+                          onChange={(e) => setMoveTargetSubcategory(e.target.value)}
+                          className="adm-field-input"
+                        >
+                          <option value="">Select subcategory…</option>
+                          {flattenSubcategories(subcategoryOptions(moveTargetCategory, taxonomyTree)).map((s) => (
+                            <option key={s.id} value={s.id}>{s.path}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <button
+                        type="button"
+                        className="adm-btn-ghost adm-btn-ghost--inline"
+                        onClick={() => setNewSubModal({ parentId: moveTargetCategory, label: '' })}
+                      >
+                        <FolderPlus size={14} /> Create new subcategory
+                      </button>
+                      <div className="adm-modal-actions">
+                        <button type="button" className="adm-btn-ghost" onClick={() => setMoveModalOpen(false)}>Cancel</button>
+                        <button type="button" className="adm-btn-red" onClick={() => void confirmBulkMove()} disabled={saving === 'bulk-move'}>
+                          {saving === 'bulk-move' ? 'Moving…' : 'Confirm move'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {archiveConfirmOpen && (
+                  <div className="adm-modal-backdrop" onClick={() => setArchiveConfirmOpen(false)}>
+                    <div className="adm-modal" onClick={(e) => e.stopPropagation()}>
+                      <h3 className="adm-modal-title">Archive {selectedIds.size} product(s)?</h3>
+                      <p className="adm-modal-note">Products will be removed from the active catalogue but are not deleted. You can restore them from the Archive section.</p>
+                      <div className="adm-modal-actions">
+                        <button type="button" className="adm-btn-ghost" onClick={() => setArchiveConfirmOpen(false)}>Cancel</button>
+                        <button type="button" className="adm-btn-red" onClick={() => void confirmBulkArchive()} disabled={saving === 'bulk-archive'}>
+                          {saving === 'bulk-archive' ? 'Archiving…' : 'Archive products'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {editTaxonomyModal && (
+                  <div className="adm-modal-backdrop" onClick={() => setEditTaxonomyModal(null)}>
+                    <div className="adm-modal" onClick={(e) => e.stopPropagation()}>
+                      <h3 className="adm-modal-title">Edit {editTaxonomyModal.type === 'category' ? 'category' : 'subcategory'} name</h3>
+                      <p className="adm-modal-note">The internal ID stays the same — existing product assignments are preserved and labels update in the database.</p>
+                      <label className="adm-field">
+                        <span className="adm-field-label">Name</span>
+                        <input
+                          value={editTaxonomyModal.label}
+                          onChange={(e) => setEditTaxonomyModal((m) => ({ ...m, label: e.target.value }))}
+                          className="adm-field-input"
+                        />
+                      </label>
+                      <div className="adm-modal-actions">
+                        <button type="button" className="adm-btn-ghost" onClick={() => setEditTaxonomyModal(null)}>Cancel</button>
+                        <button type="button" className="adm-btn-red" onClick={() => void saveTaxonomyRename()} disabled={taxonomySaving}>
+                          {taxonomySaving ? 'Saving…' : 'Save'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {newSubModal && (
+                  <div className="adm-modal-backdrop" onClick={() => setNewSubModal(null)}>
+                    <div className="adm-modal" onClick={(e) => e.stopPropagation()}>
+                      <h3 className="adm-modal-title">Create subcategory</h3>
+                      <label className="adm-field">
+                        <span className="adm-field-label">Under category</span>
+                        <select
+                          value={newSubModal.parentId}
+                          onChange={(e) => setNewSubModal((m) => ({ ...m, parentId: e.target.value }))}
+                          className="adm-field-input"
+                        >
+                          {mainCategories.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+                        </select>
+                      </label>
+                      <label className="adm-field">
+                        <span className="adm-field-label">Subcategory name</span>
+                        <input
+                          value={newSubModal.label}
+                          onChange={(e) => setNewSubModal((m) => ({ ...m, label: e.target.value }))}
+                          className="adm-field-input"
+                          placeholder="e.g. Seasonal Items"
+                        />
+                      </label>
+                      <div className="adm-modal-actions">
+                        <button type="button" className="adm-btn-ghost" onClick={() => setNewSubModal(null)}>Cancel</button>
+                        <button type="button" className="adm-btn-red" onClick={() => void saveNewSubcategory()} disabled={taxonomySaving}>
+                          {taxonomySaving ? 'Creating…' : 'Create'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {toast && (
+                  <div className={`adm-toast adm-toast--${toast.type}`}>{toast.message}</div>
+                )}
               </div>
             )}
 

@@ -1,0 +1,68 @@
+import bundledCategories from '../data/categories.json';
+import { labelToSlug } from './taxonomy';
+
+export async function fetchTaxonomy() {
+  try {
+    const res = await fetch('/api/taxonomy');
+    if (!res.ok) throw new Error(`Taxonomy ${res.status}`);
+    const json = await res.json();
+    return json.categories || bundledCategories;
+  } catch {
+    return bundledCategories;
+  }
+}
+
+export async function renameTaxonomyNode(id, label) {
+  const res = await fetch('/api/taxonomy', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'rename', id, label }),
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || 'Rename failed');
+  return json;
+}
+
+export async function createSubcategory(parentId, label) {
+  const res = await fetch('/api/taxonomy', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'addSubcategory', parentId, label }),
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || 'Create subcategory failed');
+  return json;
+}
+
+export function findInTree(tree, id) {
+  for (const node of tree) {
+    if (node.id === id) return node;
+    if (node.children?.length) {
+      const hit = findInTree(node.children, id);
+      if (hit) return hit;
+    }
+  }
+  return null;
+}
+
+export function categoryLabelFromTree(tree, id) {
+  return findInTree(tree, id)?.label || id;
+}
+
+export function subcategoryOptionsFromTree(tree, categoryId) {
+  return findInTree(tree, categoryId)?.children || [];
+}
+
+export function flattenSubcategories(nodes, depth = 1, prefix = '') {
+  const out = [];
+  for (const node of nodes || []) {
+    const path = prefix ? `${prefix} › ${node.label}` : node.label;
+    out.push({ id: node.id, label: node.label, depth, path });
+    if (node.children?.length) {
+      out.push(...flattenSubcategories(node.children, depth + 1, path));
+    }
+  }
+  return out;
+}
+
+export { labelToSlug, bundledCategories };

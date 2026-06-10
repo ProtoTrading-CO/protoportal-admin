@@ -1,0 +1,143 @@
+import { readFileSync } from 'fs';
+import { join } from 'path';
+import { readSiteConfigJson, writeSiteConfigJson } from './_site-config.js';
+
+const TAXONOMY_FILE = 'taxonomy/categories.json';
+const BUNDLED_PATH = join(process.cwd(), 'src/data/categories.json');
+
+export function labelToSlug(label) {
+  if (label === null || label === undefined) return '';
+  return String(label)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+}
+
+export function loadBundledTaxonomy() {
+  return JSON.parse(readFileSync(BUNDLED_PATH, 'utf8'));
+}
+
+export async function loadTaxonomy() {
+  try {
+    const stored = await readSiteConfigJson(TAXONOMY_FILE, null);
+    if (Array.isArray(stored)) return stored;
+    if (stored?.categories && Array.isArray(stored.categories)) return stored.categories;
+  } catch { /* fall through */ }
+  return loadBundledTaxonomy();
+}
+
+export async function saveTaxonomy(categories) {
+  await writeSiteConfigJson(TAXONOMY_FILE, { categories });
+  return categories;
+}
+
+export function findNodeContext(tree, id, parent = null, depth = 0, ancestors = []) {
+  for (const node of tree) {
+    if (node.id === id) return { node, parent, depth, ancestors: [...ancestors] };
+    if (node.children?.length) {
+      const hit = findNodeContext(node.children, id, node, depth + 1, [...ancestors, node]);
+      if (hit) return hit;
+    }
+  }
+  return null;
+}
+
+export function findSubPathIds(mainNode, targetId) {
+  function walk(nodes, path) {
+    for (const node of nodes) {
+      const next = [...path, node.id];
+      if (node.id === targetId) return next;
+      if (node.children?.length) {
+        const hit = walk(node.children, next);
+        if (hit) return hit;
+      }
+    }
+    return null;
+  }
+  return walk(mainNode.children || [], []);
+}
+
+export function resolvePathLabels(tree, categoryId, subcategoryIds = []) {
+  const main = tree.find((c) => c.id === categoryId);
+  if (!main) throw new Error('Main category not found');
+
+  const labels = [main.label];
+  let children = main.children || [];
+  for (const subId of subcategoryIds.filter(Boolean)) {
+    const child = children.find((c) => c.id === subId);
+    if (!child) throw new Error(`Subcategory "${subId}" not found under ${main.label}`);
+    labels.push(child.label);
+    children = child.children || [];
+  }
+  return labels;
+}
+
+export function resolveLabelsForSubcategory(tree, categoryId, subcategoryId) {
+  const main = tree.find((c) => c.id === categoryId);
+  if (!main) throw new Error('Main category not found');
+  if (!subcategoryId) throw new Error('Subcategory is required');
+  const pathIds = findSubPathIds(main, subcategoryId);
+  if (!pathIds?.length) throw new Error('Subcategory not found in this category');
+  return resolvePathLabels(tree, categoryId, pathIds);
+}
+
+export function labelsToDbFields(labels) {
+  return {
+    category: labels[0],
+    subcategory_one: labels[1] || labels[0],
+    subcategory_two: labels[2] || null,
+    subcategory_three: labels[3] || null,
+    subcategory_four: labels[4] || null,
+  };
+}
+
+const SUB_COLS = ['subcategory_one', 'subcategory_two', 'subcategory_three', 'subcategory_four'];
+
+export function buildRenameFilter(ctx, oldLabel) {
+  const { depth, ancestors } = ctx;
+  if (depth === 0) {
+    return { column: 'category', filters: { category: oldLabel } };
+  }
+  const col = SUB_COLS[depth - 1];
+  const filters = { category: ancestors[0]?.label };
+  for (let i = 1; i < depth; i++) {
+    filters[SUB_COLS[i - 1]] = ancestors[i]?.label;
+  }
+  filters[col] = oldLabel;
+  return { column: col, filters };
+}
+
+export function addSubcategoryNode(tree, parentId, label) {
+  const trimmed = String(label || '').trim();
+  if (!trimmed) throw new Error('Subcategory name is required');
+  const id = labelToSlug(trimmed);
+  if (!id) throw new Error('Invalid subcategory name');
+
+  const ctx = findNodeContext(tree, parentId);
+  if (!ctx) throw new Error('Parent category not found');
+
+  const siblings = ctx.node.children || [];
+  const existing = siblings.find((c) => c.id === id);
+  if (existing) {
+    if (existing.label !== trimmed) {
+      throw new Error(`Slug collision: "${existing.label}" and "${trimmed}" both map to "${id}"`);
+    }
+    return { tree, node: existing, created: false };
+  }
+
+  const node = { id, label: trimmed, children: [] };
+  ctx.node.children = [...siblings, node];
+  return { tree: [...tree], node, created: true };
+}
+
+export function renameNodeLabel(tree, id, newLabel) {
+  const trimmed = String(newLabel || '').trim();
+  if (!trimmed) throw new Error('Name is required');
+  const ctx = findNodeContext(tree, id);
+  if (!ctx) throw new Error('Category not found');
+  const oldLabel = ctx.node.label;
+  if (oldLabel === trimmed) return { tree, oldLabel, ctx };
+  ctx.node.label = trimmed;
+  return { tree: [...tree], oldLabel, ctx };
+}

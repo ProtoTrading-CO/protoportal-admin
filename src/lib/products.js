@@ -438,6 +438,67 @@ export async function deleteProduct(sku) {
   invalidateProductCache();
 }
 
+export async function fetchReorderProducts({
+  mainCategory,
+  subcategoryId = null,
+  status = 'active',
+} = {}) {
+  let products = [];
+  if (status === 'archived') {
+    products = await loadArchivedFromDB();
+  } else if (status === 'all') {
+    const [live, archived] = await Promise.all([getAllCachedAdmin(), loadArchivedFromDB()]);
+    products = [...live, ...archived];
+  } else {
+    products = await getAllCachedAdmin();
+  }
+
+  if (mainCategory && mainCategory !== 'all') {
+    products = products.filter((p) => p.category === mainCategory);
+  }
+  if (subcategoryId && subcategoryId !== 'all') {
+    products = products.filter((p) =>
+      p.categoryPath?.[1] === subcategoryId
+      || p.categoryPath?.[2] === subcategoryId
+      || p.categoryPath?.[3] === subcategoryId
+    );
+  }
+
+  return products.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export async function bulkMoveProducts({ skus, categoryId, subcategoryId }) {
+  const res = await fetch('/api/bulk-products', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'move', skus, categoryId, subcategoryId }),
+  });
+  const json = await res.json();
+  if (!res.ok && res.status !== 207) throw new Error(json.error || 'Bulk move failed');
+  if (json.failed?.length) {
+    throw new Error(`${json.failed.length} item(s) failed to move`);
+  }
+  invalidateProductCache();
+  invalidateAdminCache();
+  return json;
+}
+
+export async function bulkArchiveProducts(skus) {
+  const res = await fetch('/api/bulk-products', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'archive', skus }),
+  });
+  const json = await res.json();
+  if (!res.ok && res.status !== 207) throw new Error(json.error || 'Bulk archive failed');
+  if (json.failed?.length) {
+    throw new Error(`${json.failed.length} item(s) failed to archive`);
+  }
+  invalidateProductCache();
+  invalidateAdminCache();
+  return json;
+}
+
 export async function saveSortOrder() { /* website_stock has no sort_order column */ }
 export async function setSpecial() { throw new Error('Not supported'); }
 export async function updateSortOrder() { throw new Error('Not supported'); }
