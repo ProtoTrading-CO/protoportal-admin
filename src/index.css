@@ -1543,7 +1543,14 @@ input, select, textarea { font-family: inherit; outline: none; }
   transition: box-shadow 0.15s, border-color 0.15s, transform 0.1s;
   display: flex;
   flex-direction: column;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
 }
+
+.adm-reorder-card * { pointer-events: none; }
+.adm-reorder-card input,
+.adm-reorder-card .adm-icon-btn { pointer-events: auto; }
 
 .adm-reorder-card:hover {
   box-shadow: 0 4px 20px rgba(0,0,0,0.1);

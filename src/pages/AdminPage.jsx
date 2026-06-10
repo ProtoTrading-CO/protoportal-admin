@@ -406,6 +406,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const [dragOverId, setDragOverId] = useState(null);
   const [selectedIds, setSelectedIds] = useState(new Set());
   const touchDragRef = useRef(null);
+  const reorderScrollRef = useRef(null);
 
   const [moveModalOpen, setMoveModalOpen] = useState(false);
   const [moveDept, setMoveDept] = useState('');
@@ -1170,14 +1171,26 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     if (!selectedIds.size || !moveDept) return;
     setMoveSaving(true);
     setMoveError('');
+    const movingIds = new Set(selectedIds);
     try {
       const deptLabel = categories.find((c) => c.id === moveDept)?.label || moveDept;
-      await moveProductsToCategory([...selectedIds], { category: deptLabel, subcategory: moveSub || '' });
+      await moveProductsToCategory([...movingIds], { category: deptLabel, subcategory: moveSub || '' });
+      // Reflect the move immediately rather than waiting for the edge-cached
+      // /api/products to revalidate (which can lag up to a minute).
+      setReorderProducts((prev) => {
+        if (moveDept !== reorderCategory) {
+          // Moved out of the department currently in view — remove them.
+          return prev.filter((p) => !movingIds.has(p.id));
+        }
+        // Same department (possibly new subcategory) — regroup in place.
+        return prev.map((p) => movingIds.has(p.id)
+          ? { ...p, category: moveDept, categoryPath: moveSub ? [moveDept, moveSub] : [moveDept] }
+          : p);
+      });
       setMoveModalOpen(false);
       setSelectedIds(new Set());
       invalidateAdminCache();
       invalidateProductCache();
-      await loadCategoryWorkingSet(reorderCategory, 'reorder');
     } catch (err) {
       setMoveError(err.message || 'Move failed');
     } finally {
@@ -1214,6 +1227,21 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
       return next;
     });
     setDragId(null);
+  };
+
+  // Auto-scroll the reorder list when dragging a card near its top/bottom edge,
+  // so products can be dragged across long lists without manual scrolling.
+  const handleReorderDragScroll = (e) => {
+    const el = reorderScrollRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const EDGE = 60;
+    const y = e.clientY;
+    if (y < rect.top + EDGE) {
+      el.scrollTop -= Math.max(6, (rect.top + EDGE - y) / 3);
+    } else if (y > rect.bottom - EDGE) {
+      el.scrollTop += Math.max(6, (y - (rect.bottom - EDGE)) / 3);
+    }
   };
 
   const handleTouchStart = (e, productId) => {
@@ -2125,7 +2153,11 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                   </div>
 
                   {/* Product grid */}
-                  <div className="adm-reorder-content">
+                  <div
+                    className="adm-reorder-content"
+                    ref={reorderScrollRef}
+                    onDragOver={(e) => { if (dragId) handleReorderDragScroll(e); }}
+                  >
                     <div
                       onDragEnter={(e) => { e.preventDefault(); setDragOverId('__top__'); }}
                       onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
