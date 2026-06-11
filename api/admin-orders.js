@@ -33,16 +33,28 @@ export default async function handler(req, res) {
 
   // PATCH — update an order
   if (req.method === 'PATCH') {
-    const { id, ...patch } = req.body || {};
+    const { id, notes, ...raw } = req.body || {};
     if (!id) return res.status(400).json({ error: 'id required' });
+
+    const patch = { ...raw };
+    if (notes !== undefined) patch.order_change_notes = notes;
 
     if (patch.status === 'viewed' && !patch.viewed_at) patch.viewed_at = new Date().toISOString();
     if (patch.status === 'paid' && !patch.paid_at) patch.paid_at = new Date().toISOString();
     if (patch.status === 'delivered' && !patch.delivered_at) patch.delivered_at = new Date().toISOString();
 
+    const allowed = new Set([
+      'status', 'final_items', 'original_items', 'order_change_notes', 'order_match',
+      'replacement_map', 'viewed_at', 'paid_at', 'delivered_at', 'total_ex_vat',
+    ]);
+    const sanitized = {};
+    for (const [key, value] of Object.entries(patch)) {
+      if (allowed.has(key)) sanitized[key] = value;
+    }
+
     const { data, error } = await supabase
       .from('orders')
-      .update(patch)
+      .update(sanitized)
       .eq('id', id)
       .select('*, customers(name, email, phone, business_name, business_type, city, province, country, tier)')
       .single();
