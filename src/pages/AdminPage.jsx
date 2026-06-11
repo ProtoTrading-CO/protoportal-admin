@@ -31,6 +31,7 @@ import {
   RefreshCw,
   Search,
   Send,
+  Settings,
   Shield,
   ShoppingBag,
   SlidersHorizontal,
@@ -86,6 +87,7 @@ import { fetchPopupSpecial, savePopupSpecial, uploadPopupImage } from '../lib/po
 import CrmContactsModal from '../components/CrmContactsModal';
 import BroadcastCalendar from '../components/BroadcastCalendar';
 import ReorderGrid from '../components/ReorderGrid';
+import FulfillmentSettingsModal from '../components/FulfillmentSettingsModal';
 import categories from '../data/categories.json';
 
 // ─── Reorder sort order — stored in localStorage, applied client-side ─────────
@@ -433,6 +435,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const [orders, setOrders] = useState([]);
   const [orderTab, setOrderTab] = useState('new');
   const [orderSearch, setOrderSearch] = useState('');
+  const [fulfillmentSettingsOpen, setFulfillmentSettingsOpen] = useState(false);
 
   const [specials, setSpecials] = useState([]); // [{productId, productName, productCode, productImage, deal, discountPct, bogoX, bogoY}]
   const [specialsSaving, setSpecialsSaving] = useState(false);
@@ -2832,7 +2835,18 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                     <h2 className="adm-section-title">Order Requests</h2>
                     <p className="adm-section-note">Most recent 150 orders. Click a row to expand details.</p>
                   </div>
-                  <label className="adm-search"><Search size={15} /><input value={orderSearch} onChange={(e) => setOrderSearch(e.target.value)} placeholder="Search orders" className="adm-search-input" /></label>
+                  <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      className="adm-btn-ghost"
+                      onClick={() => setFulfillmentSettingsOpen(true)}
+                      title="Fulfillment team settings"
+                      style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px' }}
+                    >
+                      <Settings size={16} /> Team
+                    </button>
+                    <label className="adm-search"><Search size={15} /><input value={orderSearch} onChange={(e) => setOrderSearch(e.target.value)} placeholder="Search orders" className="adm-search-input" /></label>
+                  </div>
                 </div>
                 <div style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
                   {[
@@ -3715,6 +3729,11 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
         formatJoinStatus={formatJoinStatus}
         formatRelativeDate={formatRelativeDate}
         formatDateTime={formatDateTime}
+      />
+
+      <FulfillmentSettingsModal
+        open={fulfillmentSettingsOpen}
+        onClose={() => setFulfillmentSettingsOpen(false)}
       />
     </div>
   );
