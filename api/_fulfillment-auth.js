@@ -6,3 +6,4 @@ export function isVictorSender({ userId, name } = {}) {
 }
 
 export const CUSTOMER_SEND_FORBIDDEN = 'Only Victor can send orders to customers.';
+export const PAYMENT_RECEIVED_FORBIDDEN = 'Only Victor can mark payment received.';

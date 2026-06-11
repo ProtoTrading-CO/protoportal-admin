@@ -19,6 +19,7 @@ import {
   ImagePlus,
   Layout,
   Loader2,
+  Lock,
   Megaphone,
   Upload,
   LogOut,
@@ -81,8 +82,10 @@ import { approveCustomer, deleteCustomer, fetchAllCustomers, fetchCustomersPage,
 import { supabase } from '../lib/supabase';
 import { buildOrderNoteSections, createEmailOrderItems, generateOrderPdfBase64 } from '../lib/orderDocuments';
 import { deleteOrderAdmin, fetchAllOrdersAdmin, updateOrderAdmin, advanceOrderWorkflow } from '../lib/orders';
-import { orderMatchesTab, getNextManualStatus } from '../lib/orderStatus';
+import { orderMatchesTab, normalizeOrderStatus } from '../lib/orderStatus';
 import OrderWorkflowBadge from '../components/OrderWorkflowBadge';
+import { fetchFulfillmentUsers, loadActiveUserId } from '../lib/fulfillmentUsers';
+import { isVictorSender, PAYMENT_RECEIVED_FORBIDDEN } from '../lib/fulfillmentAuth';
 import { fetchSpecials, saveSpecials } from '../lib/specials';
 import { fetchBanner, saveBanner, uploadBannerImage } from '../lib/banner';
 import { fetchPopupSpecial, savePopupSpecial, uploadPopupImage } from '../lib/popupSpecial';
@@ -433,6 +436,8 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const [orderTab, setOrderTab] = useState('new');
   const [orderSearch, setOrderSearch] = useState('');
   const [fulfillmentSettingsOpen, setFulfillmentSettingsOpen] = useState(false);
+  const [fulfillmentUsers, setFulfillmentUsers] = useState([]);
+  const [activeFulfillmentUserId, setActiveFulfillmentUserId] = useState(loadActiveUserId);
 
   const [specials, setSpecials] = useState([]); // [{productId, productName, productCode, productImage, deal, discountPct, bogoX, bogoY}]
   const [specialsSaving, setSpecialsSaving] = useState(false);
@@ -706,6 +711,12 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     finally { setLoading(false); }
   };
 
+  const activeFulfillmentUser = useMemo(
+    () => fulfillmentUsers.find((u) => u.id === activeFulfillmentUserId) || null,
+    [fulfillmentUsers, activeFulfillmentUserId],
+  );
+  const canVictorAct = isVictorSender(activeFulfillmentUser);
+
   useEffect(() => { if (activeSection === 'new-products') void loadDormant(); }, [activeSection, dormantSearch]);
   useEffect(() => { if (activeSection === 'products') void loadProducts(); }, [activeSection, productPage, productSearchDebounced, productCategory, productSubcategory, productPageSize]);
   useEffect(() => { setProductSelectedIds(new Set()); }, [productPage, productSearchDebounced, productCategory, productSubcategory]);
@@ -725,6 +736,19 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   useEffect(() => { void reloadTaxonomy(); }, []);
   useEffect(() => { if (activeSection === 'reorder') void loadReorderProducts(); }, [activeSection, reorderCategory, reorderSubcategory]);
   useEffect(() => { if (activeSection === 'orders' && orders.length === 0) void loadOrders(); }, [activeSection]);
+  useEffect(() => {
+    if (activeSection !== 'orders') return undefined;
+    fetchFulfillmentUsers()
+      .then((rows) => setFulfillmentUsers(rows))
+      .catch(() => {});
+    const syncUser = () => setActiveFulfillmentUserId(loadActiveUserId());
+    window.addEventListener('storage', syncUser);
+    window.addEventListener('focus', syncUser);
+    return () => {
+      window.removeEventListener('storage', syncUser);
+      window.removeEventListener('focus', syncUser);
+    };
+  }, [activeSection]);
 
   useEffect(() => {
     if (activeSection !== 'orders') return undefined;
@@ -1526,7 +1550,10 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const advanceOrderStatus = async (order, targetStatus) => {
     setSaving(`advance-${order.id}`);
     try {
-      const updated = await advanceOrderWorkflow(order.id, targetStatus);
+      const updated = await advanceOrderWorkflow(order.id, targetStatus, {
+        senderUserId: activeFulfillmentUser?.id,
+        senderName: activeFulfillmentUser?.name,
+      });
       setOrders((prev) => prev.map((item) => item.id === order.id ? updated : item));
     } catch (err) {
       alert(err.message || 'Could not update order status');
@@ -2868,7 +2895,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                     { key: 'new', label: 'New' },
                     { key: 'handed', label: 'Handed Over' },
                     { key: 'progress', label: 'In Progress' },
-                    { key: 'sent', label: 'Sent' },
+                    { key: 'sent', label: 'Pre Sale' },
                     { key: 'paid', label: 'Payment' },
                   ].map(({ key, label }) => {
                     const count = key === 'all'
@@ -2948,28 +2975,50 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                           <div style={{ background: '#f8fafc', borderTop: '1px solid #f1f5f9', padding: '14px 16px' }}>
                             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', marginBottom: 14 }}>
                               <OrderWorkflowBadge order={order} />
-                              {getNextManualStatus(order.status) === 'order sent' && (
-                                <button
-                                  type="button"
-                                  className="adm-btn-red"
-                                  style={{ fontSize: 13, padding: '8px 14px' }}
-                                  disabled={saving === `advance-${order.id}`}
-                                  onClick={() => void advanceOrderStatus(order, 'order sent')}
-                                >
-                                  {saving === `advance-${order.id}` ? 'Updating…' : 'Mark as Order Sent'}
-                                </button>
-                              )}
-                              {getNextManualStatus(order.status) === 'payment received' && (
-                                <button
-                                  type="button"
-                                  className="adm-btn-red"
-                                  style={{ fontSize: 13, padding: '8px 14px', display: 'inline-flex', alignItems: 'center', gap: 6 }}
-                                  disabled={saving === `advance-${order.id}`}
-                                  onClick={() => void advanceOrderStatus(order, 'payment received')}
-                                >
-                                  <Check size={15} />
-                                  {saving === `advance-${order.id}` ? 'Updating…' : 'Mark Payment Received'}
-                                </button>
+                              {normalizeOrderStatus(order.status) === 'order sent' && (
+                                canVictorAct ? (
+                                  <button
+                                    type="button"
+                                    style={{
+                                      fontSize: 13,
+                                      padding: '8px 14px',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: 6,
+                                      fontWeight: 700,
+                                      fontFamily: 'inherit',
+                                      cursor: 'pointer',
+                                      border: 'none',
+                                      borderRadius: 8,
+                                      background: '#15803d',
+                                      color: '#fff',
+                                    }}
+                                    disabled={saving === `advance-${order.id}`}
+                                    onClick={() => void advanceOrderStatus(order, 'payment received')}
+                                  >
+                                    <Check size={15} />
+                                    {saving === `advance-${order.id}` ? 'Updating…' : 'Payment Received'}
+                                  </button>
+                                ) : (
+                                  <span
+                                    title={PAYMENT_RECEIVED_FORBIDDEN}
+                                    style={{
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: 6,
+                                      fontSize: 12,
+                                      fontWeight: 600,
+                                      color: '#64748b',
+                                      padding: '7px 12px',
+                                      borderRadius: 8,
+                                      background: '#f8fafc',
+                                      border: '1.5px dashed #cbd5e1',
+                                    }}
+                                  >
+                                    <Lock size={13} />
+                                    Select <strong style={{ color: '#334155' }}>Victor</strong> for payment
+                                  </span>
+                                )
                               )}
                             </div>
                             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>

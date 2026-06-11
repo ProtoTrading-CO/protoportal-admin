@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { advanceOrderStatus, normalizeOrderStatus } from './_order-status.js';
+import { isVictorSender, PAYMENT_RECEIVED_FORBIDDEN } from './_fulfillment-auth.js';
 
 function getAdminClient() {
   return createClient(
@@ -34,13 +35,16 @@ export default async function handler(req, res) {
 
   // PATCH — update an order
   if (req.method === 'PATCH') {
-    const { id, notes, advanceWorkflow, ...raw } = req.body || {};
+    const { id, notes, advanceWorkflow, senderUserId, senderName, ...raw } = req.body || {};
     if (!id) return res.status(400).json({ error: 'id required' });
 
     if (advanceWorkflow) {
       const target = normalizeOrderStatus(advanceWorkflow);
       if (target !== 'order sent' && target !== 'payment received') {
-        return res.status(400).json({ error: 'Manual advance only supports order sent or payment received' });
+        return res.status(400).json({ error: 'Manual advance only supports Pre Sale or payment received' });
+      }
+      if (target === 'payment received' && !isVictorSender({ userId: senderUserId, name: senderName })) {
+        return res.status(403).json({ error: PAYMENT_RECEIVED_FORBIDDEN });
       }
       try {
         const result = await advanceOrderStatus(supabase, id, target);

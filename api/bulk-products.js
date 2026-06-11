@@ -40,7 +40,7 @@ export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   if (req.method !== 'POST') return res.status(405).end();
 
-  const { action, skus, categoryId, subcategoryId, subcategoryPath = [] } = req.body || {};
+  const { action, skus, categoryId, subcategoryId } = req.body || {};
   const normalizedSkus = [...new Set((skus || []).map((s) => String(s).trim()).filter(Boolean))];
   if (!normalizedSkus.length) return res.status(400).json({ error: 'No products selected' });
 
@@ -50,10 +50,7 @@ export default async function handler(req, res) {
     if (action === 'move') {
       if (!categoryId) return res.status(400).json({ error: 'Main category is required' });
       const tree = await loadTaxonomy();
-      const subIds = subcategoryId
-        ? [subcategoryId, ...subcategoryPath.filter((id) => id && id !== subcategoryId)]
-        : subcategoryPath;
-      const labels = resolvePathLabels(tree, categoryId, subIds);
+      const labels = resolveLabelsForSubcategory(tree, categoryId, subcategoryId);
       if (labels.length < 2) return res.status(400).json({ error: 'Subcategory is required' });
       const dbFields = labelsToDbFields(labels);
 

@@ -1,4 +1,14 @@
+import { createClient } from '@supabase/supabase-js';
 import { isVictorSender, CUSTOMER_SEND_FORBIDDEN } from './_fulfillment-auth.js';
+import { advanceOrderStatus } from './_order-status.js';
+
+function getAdminClient() {
+  return createClient(
+    process.env.VITE_SUPABASE_URL,
+    process.env.SUPABASE_SERVICE_ROLE_KEY,
+    { auth: { autoRefreshToken: false, persistSession: false } },
+  );
+}
 
 function buildEmailHtml({ customerName, orderNumber, orderDate, items, autoNotes, userNotes, assignedTo, total }) {
   const dateStr = orderDate
@@ -112,7 +122,7 @@ function buildEmailHtml({ customerName, orderNumber, orderDate, items, autoNotes
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
 
-  const { to, customerName, orderNumber, orderDate, items = [], autoNotes, userNotes, assignedTo, total, senderUserId, senderName } = req.body || {};
+  const { to, orderId, customerName, orderNumber, orderDate, items = [], autoNotes, userNotes, assignedTo, total, senderUserId, senderName } = req.body || {};
 
   if (!isVictorSender({ userId: senderUserId, name: senderName || assignedTo })) {
     return res.status(403).json({ error: CUSTOMER_SEND_FORBIDDEN });
@@ -144,6 +154,15 @@ export default async function handler(req, res) {
   if (!resp.ok) {
     const body = await resp.json().catch(() => ({}));
     return res.status(502).json({ error: body.message || 'Email could not be sent' });
+  }
+
+  if (orderId) {
+    try {
+      const supabase = getAdminClient();
+      await advanceOrderStatus(supabase, orderId, 'order sent', { force: true });
+    } catch (err) {
+      console.error('send-order-email: failed to advance to Pre Sale:', err.message);
+    }
   }
 
   return res.status(200).json({ ok: true });

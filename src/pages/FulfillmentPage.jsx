@@ -324,6 +324,7 @@ export default function FulfillmentPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          orderId,
           to: order.customers?.email,
           customerName: order.customers?.name,
           orderNumber: order.order_number || order.id?.slice(0, 8),
@@ -411,7 +412,8 @@ export default function FulfillmentPage() {
   if (done) return (
     <div className="ff-center ff-done">
       <Check size={40} color="#15803d" />
-      <h2>Order sent!</h2>
+      <h2>Sent to customer</h2>
+      <p className="ff-done-sub">Order moved to Pre Sale</p>
       <button type="button" onClick={() => window.close()} className="ff-btn-send">Close tab</button>
     </div>
   );
@@ -518,9 +520,10 @@ export default function FulfillmentPage() {
             {sending ? <Loader2 size={15} className="star-spinning" /> : <Send size={15} />} Send to customer
           </button>
         ) : (
-          <button type="button" disabled className="ff-btn-send" title={CUSTOMER_SEND_FORBIDDEN} style={{ opacity: 0.45, cursor: 'not-allowed' }}>
-            <Lock size={15} /> Victor only
-          </button>
+          <div className="ff-btn-victor-gate" title={CUSTOMER_SEND_FORBIDDEN}>
+            <Lock size={15} strokeWidth={2.25} />
+            <span>Select <strong>Victor</strong> to send to customer</span>
+          </div>
         )}
       </div>
     </div>
