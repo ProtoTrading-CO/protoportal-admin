@@ -291,7 +291,7 @@ export default function FulfillmentPage() {
       const res = await fetch('/api/admin-orders', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: orderId, final_items: buildFinalItems(), status: 'order in progress', ...(combinedNotes ? { notes: combinedNotes } : {}) }),
+        body: JSON.stringify({ id: orderId, final_items: buildFinalItems(), ...(combinedNotes ? { notes: combinedNotes } : {}) }),
       });
       if (!res.ok) throw new Error((await res.json()).error || 'Save failed');
       setStatusMsg({ type: 'ok', text: 'Order saved' });
@@ -305,7 +305,7 @@ export default function FulfillmentPage() {
       const saveRes = await fetch('/api/admin-orders', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: orderId, final_items: buildFinalItems(), status: 'order in progress', ...(combinedNotes ? { notes: combinedNotes } : {}) }),
+        body: JSON.stringify({ id: orderId, final_items: buildFinalItems(), ...(combinedNotes ? { notes: combinedNotes } : {}) }),
       });
       if (!saveRes.ok) throw new Error((await saveRes.json()).error || 'Save failed');
 

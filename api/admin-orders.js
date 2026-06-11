@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { advanceOrderStatus, normalizeOrderStatus } from './_order-status.js';
 
 function getAdminClient() {
   return createClient(
@@ -33,8 +34,30 @@ export default async function handler(req, res) {
 
   // PATCH — update an order
   if (req.method === 'PATCH') {
-    const { id, notes, ...raw } = req.body || {};
+    const { id, notes, advanceWorkflow, ...raw } = req.body || {};
     if (!id) return res.status(400).json({ error: 'id required' });
+
+    if (advanceWorkflow) {
+      const target = normalizeOrderStatus(advanceWorkflow);
+      if (target !== 'order sent' && target !== 'payment received') {
+        return res.status(400).json({ error: 'Manual advance only supports order sent or payment received' });
+      }
+      try {
+        const result = await advanceOrderStatus(supabase, id, target);
+        if (!result.ok) {
+          return res.status(409).json({ error: `Cannot advance to "${target}" from "${result.current || 'unknown'}"` });
+        }
+        const { data, error } = await supabase
+          .from('orders')
+          .select('*, customers(name, email, phone, business_name, business_type, city, province, country, tier)')
+          .eq('id', id)
+          .single();
+        if (error) return res.status(400).json({ error: error.message });
+        return res.status(200).json({ row: data });
+      } catch (err) {
+        return res.status(400).json({ error: err.message });
+      }
+    }
 
     const patch = { ...raw };
     if (notes !== undefined) patch.order_change_notes = notes;
@@ -46,6 +69,7 @@ export default async function handler(req, res) {
     const allowed = new Set([
       'status', 'final_items', 'original_items', 'order_change_notes', 'order_match',
       'replacement_map', 'viewed_at', 'paid_at', 'delivered_at', 'total_ex_vat',
+      'handed_over_at', 'order_in_progress_at', 'order_sent_at', 'payment_received_at',
     ]);
     const sanitized = {};
     for (const [key, value] of Object.entries(patch)) {

@@ -1,4 +1,5 @@
-import { readSiteConfigJson, writeSiteConfigJson } from './_site-config.js';
+import { readSiteConfigJson, writeSiteConfigJson, getPortalAdminClient } from './_site-config.js';
+import { advanceOrderStatus } from './_order-status.js';
 
 function progressFile(orderId) {
   return `fulfillment/progress/${orderId}.json`;
@@ -45,6 +46,16 @@ export default async function handler(req, res) {
       base.updatedAt = new Date().toISOString();
 
       await writeSiteConfigJson(file, base);
+
+      if (Boolean(complete)) {
+        try {
+          const supabase = getPortalAdminClient();
+          await advanceOrderStatus(supabase, orderId, 'order in progress');
+        } catch (err) {
+          console.error('fulfillment-progress: status advance failed:', err.message);
+        }
+      }
+
       return res.status(200).json(base);
     } catch (err) {
       return res.status(400).json({ error: err.message || 'Failed to save section' });

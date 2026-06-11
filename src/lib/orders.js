@@ -91,6 +91,17 @@ export async function updateOrderAdmin(id, fields) {
   return json.row;
 }
 
+export async function advanceOrderWorkflow(id, advanceWorkflow) {
+  const res = await fetch('/api/admin-orders', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id, advanceWorkflow }),
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || 'Failed to advance order status');
+  return json.row;
+}
+
 export async function deleteOrderAdmin(id) {
   const res = await fetch('/api/admin-orders', {
     method: 'DELETE',

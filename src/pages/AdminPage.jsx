@@ -80,7 +80,9 @@ import {
 import { approveCustomer, deleteCustomer, fetchAllCustomers, fetchCustomersPage, updateCustomerAdmin } from '../lib/customers';
 import { supabase } from '../lib/supabase';
 import { buildOrderNoteSections, createEmailOrderItems, generateOrderPdfBase64 } from '../lib/orderDocuments';
-import { deleteOrderAdmin, fetchAllOrdersAdmin, updateOrderAdmin } from '../lib/orders';
+import { deleteOrderAdmin, fetchAllOrdersAdmin, updateOrderAdmin, advanceOrderWorkflow } from '../lib/orders';
+import { orderMatchesTab, getNextManualStatus } from '../lib/orderStatus';
+import OrderWorkflowBadge from '../components/OrderWorkflowBadge';
 import { fetchSpecials, saveSpecials } from '../lib/specials';
 import { fetchBanner, saveBanner, uploadBannerImage } from '../lib/banner';
 import { fetchPopupSpecial, savePopupSpecial, uploadPopupImage } from '../lib/popupSpecial';
@@ -131,14 +133,9 @@ const sections = [
   { id: 'orders', label: 'Order Requests', icon: ShoppingBag },
 ];
 
-const orderStatuses = ['pending', 'viewed', 'order in progress', 'awaiting payment', 'paid', 'delivered', 'returned'];
 const productTypes = ['General product', 'Hot seller', 'New stock', 'Clearance stock'];
 const ADMIN_PAGE_SIZE = 50;
 const randFormatter = new Intl.NumberFormat('en-ZA', { style: 'currency', currency: 'ZAR', minimumFractionDigits: 2, maximumFractionDigits: 4 });
-
-function isNewOrderStatus(status) {
-  return !status || status === 'pending' || status === 'viewed';
-}
 
 function formatRandAmount(value) {
   const amount = Number(value || 0);
@@ -728,6 +725,17 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   useEffect(() => { void reloadTaxonomy(); }, []);
   useEffect(() => { if (activeSection === 'reorder') void loadReorderProducts(); }, [activeSection, reorderCategory, reorderSubcategory]);
   useEffect(() => { if (activeSection === 'orders' && orders.length === 0) void loadOrders(); }, [activeSection]);
+
+  useEffect(() => {
+    if (activeSection !== 'orders') return undefined;
+    const refresh = () => { if (document.visibilityState === 'visible') void loadOrders(); };
+    const timer = setInterval(refresh, 30000);
+    window.addEventListener('focus', refresh);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener('focus', refresh);
+    };
+  }, [activeSection]);
   useEffect(() => { if (activeSection === 'crm' && !crmAllCustomers.length && !crmLoading) void loadCrmCustomers(1); }, [activeSection]);
   useEffect(() => { if (activeSection === 'analytics' && !analyticsData && !analyticsLoading && !analyticsError) void loadAnalytics(); }, [activeSection]);
 
@@ -834,12 +842,8 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const orderRows = useMemo(() => {
     const q = orderSearch.trim().toLowerCase();
     const filtered = orders.filter((order) => !q || [order.order_number, order.customers?.name, order.customers?.email, compactItems(order.original_items || order.items || [])].join(' ').toLowerCase().includes(q));
-    if (orderTab === 'new') return filtered.filter((o) => isNewOrderStatus(o.status));
-    if (orderTab === 'sent') return filtered.filter((o) => o.status === 'order in progress' || o.status === 'awaiting payment');
-    if (orderTab === 'paid') return filtered.filter((o) => o.status === 'paid');
-    if (orderTab === 'fulfilled') return filtered.filter((o) => o.status === 'delivered');
-    if (orderTab === 'returned') return filtered.filter((o) => o.status === 'returned');
-    return filtered;
+    if (orderTab === 'all') return filtered;
+    return filtered.filter((o) => orderMatchesTab(o, orderTab));
   }, [orders, orderSearch, orderTab]);
 
   const openNewProduct = () => {
@@ -1519,6 +1523,16 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     } finally { setSaving(''); }
   };
 
+  const advanceOrderStatus = async (order, targetStatus) => {
+    setSaving(`advance-${order.id}`);
+    try {
+      const updated = await advanceOrderWorkflow(order.id, targetStatus);
+      setOrders((prev) => prev.map((item) => item.id === order.id ? updated : item));
+    } catch (err) {
+      alert(err.message || 'Could not update order status');
+    } finally { setSaving(''); }
+  };
+
   const openFulfillment = (order) => {
     const items = (order.original_items || order.items || []).map((item) => ({
       ...item,
@@ -1576,7 +1590,6 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
       const finalItems = fulfillmentItems.map(({ checked, finalQty, ...rest }) => ({ ...rest, qty: finalQty }));
       await updateOrder(fulfillmentOrder, {
         final_items: finalItems,
-        status: 'order in progress',
         order_change_notes: fulfillmentNotes,
       });
       if (andSend) {
@@ -2851,20 +2864,16 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                 </div>
                 <div style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
                   {[
-                    { key: 'new', label: 'New Orders' },
+                    { key: 'all', label: 'All' },
+                    { key: 'new', label: 'New' },
+                    { key: 'handed', label: 'Handed Over' },
+                    { key: 'progress', label: 'In Progress' },
                     { key: 'sent', label: 'Sent' },
-                    { key: 'paid', label: 'Paid' },
-                    { key: 'fulfilled', label: 'Fulfilled' },
-                    { key: 'returned', label: 'Returned' },
+                    { key: 'paid', label: 'Payment' },
                   ].map(({ key, label }) => {
-                    const count = (() => {
-                      if (key === 'new') return orders.filter((o) => isNewOrderStatus(o.status)).length;
-                      if (key === 'sent') return orders.filter((o) => o.status === 'order in progress' || o.status === 'awaiting payment').length;
-                      if (key === 'paid') return orders.filter((o) => o.status === 'paid').length;
-                      if (key === 'fulfilled') return orders.filter((o) => o.status === 'delivered').length;
-                      if (key === 'returned') return orders.filter((o) => o.status === 'returned').length;
-                      return 0;
-                    })();
+                    const count = key === 'all'
+                      ? orders.length
+                      : orders.filter((o) => orderMatchesTab(o, key)).length;
                     return (
                       <button
                         key={key}
@@ -2922,9 +2931,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                             <div className="adm-muted" style={{ fontSize: 11 }}>{timeStr}</div>
                           </div>
                           <div onClick={(e) => e.stopPropagation()}>
-                            <select value={order.status || 'pending'} onChange={(e) => void updateOrder(order, { status: e.target.value })} className="adm-select" style={{ fontSize: 12, padding: '4px 8px', minHeight: 32 }}>
-                              {orderStatuses.map((s) => <option key={s} value={s}>{s}</option>)}
-                            </select>
+                            <OrderWorkflowBadge order={order} />
                           </div>
                           <div style={{ display: 'flex', gap: 6 }} onClick={(e) => e.stopPropagation()}>
                             <button onClick={() => window.open(`/fulfillment?id=${order.id}`, '_blank', 'noopener,noreferrer')} className="adm-icon-btn" title="Fulfil order (opens in new tab)" style={{ color: '#15803d' }}><ClipboardList size={14} /></button>
@@ -2938,9 +2945,37 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                           </div>
                         </div>
                         {isExpanded && (
-                          <div style={{ background: '#f8fafc', borderTop: '1px solid #f1f5f9', padding: '14px 16px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                            <OrderItemsList label="Order placed" items={order.original_items || order.items || []} />
-                            <OrderItemsList label="Order final" items={order.final_items || order.items || []} />
+                          <div style={{ background: '#f8fafc', borderTop: '1px solid #f1f5f9', padding: '14px 16px' }}>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', marginBottom: 14 }}>
+                              <OrderWorkflowBadge order={order} />
+                              {getNextManualStatus(order.status) === 'order sent' && (
+                                <button
+                                  type="button"
+                                  className="adm-btn-red"
+                                  style={{ fontSize: 13, padding: '8px 14px' }}
+                                  disabled={saving === `advance-${order.id}`}
+                                  onClick={() => void advanceOrderStatus(order, 'order sent')}
+                                >
+                                  {saving === `advance-${order.id}` ? 'Updating…' : 'Mark as Order Sent'}
+                                </button>
+                              )}
+                              {getNextManualStatus(order.status) === 'payment received' && (
+                                <button
+                                  type="button"
+                                  className="adm-btn-red"
+                                  style={{ fontSize: 13, padding: '8px 14px', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                                  disabled={saving === `advance-${order.id}`}
+                                  onClick={() => void advanceOrderStatus(order, 'payment received')}
+                                >
+                                  <Check size={15} />
+                                  {saving === `advance-${order.id}` ? 'Updating…' : 'Mark Payment Received'}
+                                </button>
+                              )}
+                            </div>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
+                              <OrderItemsList label="Order placed" items={order.original_items || order.items || []} />
+                              <OrderItemsList label="Order final" items={order.final_items || order.items || []} />
+                            </div>
                           </div>
                         )}
                       </div>
