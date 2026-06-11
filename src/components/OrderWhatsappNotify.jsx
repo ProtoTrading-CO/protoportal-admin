@@ -103,7 +103,8 @@ export default function OrderWhatsappNotify({ orderId }) {
       )}
       {allFailed && !noToken && !noTeam && (
         <p className="oa-wa-notify-msg">
-          WhatsApp failed for all {log.teamSize || 'team'} member(s). Template <code>{log.template || 'proto_orders'}</code> is Marketing — Meta may block delivery unless the recipient has opted in or messaged your business recently.
+          WhatsApp failed for all {log.teamSize || 'team'} member(s) via <code>{log.template || 'proto_order_notis'}</code>
+          {log.templateCategory ? ` (${log.templateCategory})` : ''}. Check the errors below or retry.
         </p>
       )}
       {partial && (
@@ -114,7 +115,7 @@ export default function OrderWhatsappNotify({ orderId }) {
       )}
       {allOk && !blockedStatus && !log.marketingWarning && (
         <p className="oa-wa-notify-msg">
-          All {log.teamSize || log.sent} team member(s) notified via <code>{log.template || 'proto_orders'}</code>.
+          All {log.teamSize || log.sent} team member(s) notified via <code>{log.template || 'proto_order_notis'}</code>.
           {log.statusAdvanced ? ' Order moved to Handed Over.' : ''}
         </p>
       )}
