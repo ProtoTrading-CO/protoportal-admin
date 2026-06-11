@@ -717,6 +717,33 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   );
   const canVictorAct = isVictorSender(activeFulfillmentUser);
 
+  const orderListGridCols = orderTab === 'sent'
+    ? '1.5fr 1.3fr 1.1fr 1.7fr 120px 56px'
+    : '1.6fr 1.4fr 1.2fr 1fr 160px 80px';
+
+  const renderPreSalePaymentAction = (order) => {
+    if (normalizeOrderStatus(order.status) !== 'order sent') return null;
+    if (canVictorAct) {
+      return (
+        <button
+          type="button"
+          className="adm-presale-pay-btn"
+          disabled={saving === `advance-${order.id}`}
+          onClick={() => void advanceOrderStatus(order, 'payment received')}
+        >
+          <Check size={14} strokeWidth={2.5} />
+          {saving === `advance-${order.id}` ? 'Updating…' : 'Payment Received'}
+        </button>
+      );
+    }
+    return (
+      <span className="adm-presale-pay-lock" title={PAYMENT_RECEIVED_FORBIDDEN}>
+        <Lock size={12} />
+        Victor only
+      </span>
+    );
+  };
+
   useEffect(() => { if (activeSection === 'new-products') void loadDormant(); }, [activeSection, dormantSearch]);
   useEffect(() => { if (activeSection === 'products') void loadProducts(); }, [activeSection, productPage, productSearchDebounced, productCategory, productSubcategory, productPageSize]);
   useEffect(() => { setProductSelectedIds(new Set()); }, [productPage, productSearchDebounced, productCategory, productSubcategory]);
@@ -2931,19 +2958,20 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                   })}
                 </div>
                 <div className="adm-list">
-                  <div className="adm-list-head" style={{ gridTemplateColumns: '1.6fr 1.4fr 1.2fr 1fr 160px 80px' }}>
-                    <span>Order</span><span>Customer</span><span>Date & Time</span><span>Status</span><span>Actions</span><span></span>
+                  <div className="adm-list-head" style={{ gridTemplateColumns: orderListGridCols }}>
+                    <span>Order</span><span>Customer</span><span>Date & Time</span><span>{orderTab === 'sent' ? 'Pre Sale' : 'Status'}</span><span>Actions</span><span></span>
                   </div>
                   {orderRows.map((order) => {
                     const isExpanded = expandedOrderId === order.id;
                     const dt = new Date(order.created_at);
                     const dateStr = dt.toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' });
                     const timeStr = dt.toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' });
+                    const isPreSale = normalizeOrderStatus(order.status) === 'order sent';
                     return (
                       <div key={order.id}>
                         <div
                           className="adm-list-row adm-order-row"
-                          style={{ gridTemplateColumns: '1.6fr 1.4fr 1.2fr 1fr 160px 80px', cursor: 'pointer' }}
+                          style={{ gridTemplateColumns: orderListGridCols, cursor: 'pointer' }}
                           onClick={() => setExpandedOrderId(isExpanded ? null : order.id)}
                         >
                           <div>
@@ -2957,8 +2985,15 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                             <div style={{ fontSize: 13, fontWeight: 600 }}>{dateStr}</div>
                             <div className="adm-muted" style={{ fontSize: 11 }}>{timeStr}</div>
                           </div>
-                          <div onClick={(e) => e.stopPropagation()}>
-                            <OrderWorkflowBadge order={order} />
+                          <div onClick={(e) => e.stopPropagation()} className="adm-presale-col">
+                            {orderTab === 'sent' && isPreSale ? (
+                              <>
+                                <span className="adm-presale-label">Pre Sale</span>
+                                {renderPreSalePaymentAction(order)}
+                              </>
+                            ) : (
+                              <OrderWorkflowBadge order={order} />
+                            )}
                           </div>
                           <div style={{ display: 'flex', gap: 6 }} onClick={(e) => e.stopPropagation()}>
                             <button onClick={() => window.open(`/fulfillment?id=${order.id}`, '_blank', 'noopener,noreferrer')} className="adm-icon-btn" title="Fulfil order (opens in new tab)" style={{ color: '#15803d' }}><ClipboardList size={14} /></button>
@@ -2973,53 +3008,8 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                         </div>
                         {isExpanded && (
                           <div style={{ background: '#f8fafc', borderTop: '1px solid #f1f5f9', padding: '14px 16px' }}>
-                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', marginBottom: 14 }}>
+                            <div style={{ marginBottom: 14 }}>
                               <OrderWorkflowBadge order={order} />
-                              {normalizeOrderStatus(order.status) === 'order sent' && (
-                                canVictorAct ? (
-                                  <button
-                                    type="button"
-                                    style={{
-                                      fontSize: 13,
-                                      padding: '8px 14px',
-                                      display: 'inline-flex',
-                                      alignItems: 'center',
-                                      gap: 6,
-                                      fontWeight: 700,
-                                      fontFamily: 'inherit',
-                                      cursor: 'pointer',
-                                      border: 'none',
-                                      borderRadius: 8,
-                                      background: '#15803d',
-                                      color: '#fff',
-                                    }}
-                                    disabled={saving === `advance-${order.id}`}
-                                    onClick={() => void advanceOrderStatus(order, 'payment received')}
-                                  >
-                                    <Check size={15} />
-                                    {saving === `advance-${order.id}` ? 'Updating…' : 'Payment Received'}
-                                  </button>
-                                ) : (
-                                  <span
-                                    title={PAYMENT_RECEIVED_FORBIDDEN}
-                                    style={{
-                                      display: 'inline-flex',
-                                      alignItems: 'center',
-                                      gap: 6,
-                                      fontSize: 12,
-                                      fontWeight: 600,
-                                      color: '#64748b',
-                                      padding: '7px 12px',
-                                      borderRadius: 8,
-                                      background: '#f8fafc',
-                                      border: '1.5px dashed #cbd5e1',
-                                    }}
-                                  >
-                                    <Lock size={13} />
-                                    Select <strong style={{ color: '#334155' }}>Victor</strong> for payment
-                                  </span>
-                                )
-                              )}
                             </div>
                             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
                               <OrderItemsList label="Order placed" items={order.original_items || order.items || []} />
