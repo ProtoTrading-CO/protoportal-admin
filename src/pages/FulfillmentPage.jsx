@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Check, ClipboardList, FileText, Loader2, Lock, Pencil, Search, Send, User, X } from 'lucide-react';
 import { fetchAdminProductsPage } from '../lib/products';
 import {
@@ -12,9 +12,52 @@ import {
   saveActiveUserId,
 } from '../lib/fulfillmentUsers';
 import { isVictorSender, CUSTOMER_SEND_FORBIDDEN } from '../lib/fulfillmentAuth';
+import { getOrderAccessFromUrl } from '../lib/adminKey';
 import categories from '../data/categories.json';
 
 const CATEGORY_LABELS = Object.fromEntries(categories.map((c) => [c.id, c.label]));
+
+/**
+ * Local-state quantity input.
+ *
+ * The parent state only updates on blur / Enter so typing never re-renders the
+ * whole order list. That kills the layout jump people see when tapping into
+ * an input on mobile and stops the value from snapping to 0 the instant they
+ * clear the field (Number('') === 0).
+ */
+const QtyInput = memo(function QtyInput({ value, disabled, changed, onCommit }) {
+  const [draft, setDraft] = useState(String(value ?? ''));
+  const lastValueRef = useRef(value);
+  useEffect(() => {
+    if (lastValueRef.current !== value) {
+      lastValueRef.current = value;
+      setDraft(String(value ?? ''));
+    }
+  }, [value]);
+
+  const commit = useCallback(() => {
+    const num = draft.trim() === '' ? 0 : Math.max(0, Math.floor(Number(draft) || 0));
+    setDraft(String(num));
+    if (num !== value) onCommit(num);
+  }, [draft, onCommit, value]);
+
+  return (
+    <input
+      type="text"
+      inputMode="numeric"
+      pattern="[0-9]*"
+      enterKeyHint="done"
+      autoComplete="off"
+      value={draft}
+      disabled={disabled}
+      onChange={(e) => setDraft(e.target.value.replace(/[^\d]/g, ''))}
+      onFocus={(e) => e.target.select()}
+      onBlur={commit}
+      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur(); } }}
+      className={`ff-qty-input${changed ? ' ff-qty-input--changed' : ''}`}
+    />
+  );
+});
 function generatePdfHtml({ order, items, autoNotes, userNotes, assignedTo, total, hasPrices }) {
   const customerName = order.customers?.name || 'Customer';
   const orderNumber = order.order_number || order.id?.slice(0, 8) || '';
@@ -93,7 +136,7 @@ function serializeSectionItems(sectionItems) {
 }
 
 export default function FulfillmentPage() {
-  const orderId = new URLSearchParams(window.location.search).get('id');
+  const { orderId } = getOrderAccessFromUrl();
 
   const [order, setOrder] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -364,19 +407,16 @@ export default function FulfillmentPage() {
             <div className="ff-item-name">{item.name}</div>
             {!item.removed ? (
               <div className="ff-qty-row">
-                <span>Ordered: <strong>{item.qty}</strong></span>
-                <span className="ff-qty-arrow">→</span>
-                <input
-                  type="number"
-                  min="0"
-                  inputMode="numeric"
+                <span className="ff-qty-label">Ordered <strong>{item.qty}</strong></span>
+                <span className="ff-qty-arrow" aria-hidden>→</span>
+                <QtyInput
                   value={item.finalQty}
                   disabled={!editable}
-                  onChange={(e) => updateItem(idx, { finalQty: Math.max(0, Number(e.target.value)) })}
-                  className={`ff-qty-input${item.finalQty !== item.qty ? ' ff-qty-input--changed' : ''}`}
+                  changed={item.finalQty !== item.qty}
+                  onCommit={(num) => updateItem(idx, { finalQty: num })}
                 />
               </div>
-            ) : <span className="ff-oos">OUT OF STOCK</span>}
+            ) : <span className="ff-oos">Out of stock</span>}
           </div>
           {editable && (
             <div className="ff-item-actions">
@@ -418,45 +458,68 @@ export default function FulfillmentPage() {
     </div>
   );
 
+  const completedCount = categoryGroups.filter((g) => progress.sections?.[g.id]?.complete).length;
+  const totalSections = categoryGroups.length;
+  const completionPct = totalSections ? Math.round((completedCount / totalSections) * 100) : 0;
+  const orderShort = order.order_number || order.id?.slice(0, 8);
+
   return (
     <div className="ff-page">
       <header className="ff-header">
         <div className="ff-header__title">
-          <ClipboardList size={20} />
+          <ClipboardList size={18} />
           <div>
-            <div className="ff-header__main">Order Fulfillment</div>
-            <div className="ff-header__sub">{order.order_number || order.id?.slice(0, 8)} · {new Date(order.created_at).toLocaleDateString('en-ZA', { day: 'numeric', month: 'long', year: 'numeric' })}</div>
+            <div className="ff-header__main">Order #{orderShort}</div>
+            <div className="ff-header__sub">{new Date(order.created_at).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short' })} · {order.customers?.name || 'Customer'}</div>
           </div>
         </div>
-        <button type="button" onClick={() => window.close()} className="ff-close-btn"><X size={16} /> Close</button>
+        <button type="button" onClick={() => window.close()} className="ff-close-btn" aria-label="Close">
+          <X size={18} />
+        </button>
       </header>
 
       <div className="ff-body">
-        <div className="ff-customer">
-          <strong>{order.customers?.name || 'Unknown'}</strong>
-          <span>{order.customers?.email || '—'}</span>
+        <div className="ff-hero">
+          <div className="ff-hero-meta">
+            <div className="ff-hero-customer">{order.customers?.name || 'Customer'}</div>
+            <div className="ff-hero-email">{order.customers?.email || '—'}</div>
+          </div>
+          <div className="ff-hero-progress" aria-label={`${completedCount} of ${totalSections} sections complete`}>
+            <div className="ff-hero-progress__bar"><div className="ff-hero-progress__fill" style={{ width: `${completionPct}%` }} /></div>
+            <div className="ff-hero-progress__text">{completedCount}/{totalSections} sections</div>
+          </div>
         </div>
 
-        <div className="ff-user-row">
-          <span>Working as:</span>
+        <div className="ff-user-card">
+          <div className="ff-user-label">Working as</div>
           <div ref={userPickerRef} className="ff-user-picker">
             <button type="button" className="ff-user-btn" onClick={() => setUserPickerOpen((o) => !o)}>
-              <User size={14} />{activeUser?.name || 'Select user'} ▾
+              <User size={16} />
+              <span>{activeUser?.name || 'Select user'}</span>
+              <span className="ff-user-chevron" aria-hidden>▾</span>
             </button>
             {userPickerOpen && (
-              <div className="ff-user-menu">
+              <div className="ff-user-menu" role="menu">
                 {users.map((u) => (
-                  <button key={u.id} type="button" onClick={() => { setActiveUserId(u.id); saveActiveUserId(u.id); setUserPickerOpen(false); }}>
+                  <button
+                    key={u.id}
+                    type="button"
+                    role="menuitem"
+                    className={u.id === activeUserId ? 'ff-user-menu-item ff-user-menu-item--active' : 'ff-user-menu-item'}
+                    onClick={() => { setActiveUserId(u.id); saveActiveUserId(u.id); setUserPickerOpen(false); }}
+                  >
                     {u.name}
                   </button>
                 ))}
               </div>
             )}
           </div>
-          {activeUser && (
-            <span className="ff-user-cats">
-              {(activeUser.categoryIds || []).map((id) => CATEGORY_LABELS[id] || id).join(' · ')}
-            </span>
+          {activeUser?.categoryIds?.length > 0 && (
+            <div className="ff-user-cats">
+              {activeUser.categoryIds.map((id) => (
+                <span key={id} className="ff-user-cat-pill">{CATEGORY_LABELS[id] || id}</span>
+              ))}
+            </div>
           )}
         </div>
 
@@ -468,13 +531,15 @@ export default function FulfillmentPage() {
           const canSave = canEditCategory(group.id) && activeUser;
 
           return (
-            <section key={group.id} className={`ff-section${isComplete ? ' ff-section--complete' : ''}`}>
+            <section key={group.id} className={`ff-section${isComplete ? ' ff-section--complete' : ''}${!editable ? ' ff-section--locked' : ''}`}>
               <div className="ff-section-head">
-                <div>
+                <div className="ff-section-titles">
                   <h3>{group.label}</h3>
                   {section && (
                     <span className="ff-section-meta">
-                      {isComplete ? `Saved by ${section.userName}` : 'In progress'}
+                      {isComplete
+                        ? <><Check size={11} strokeWidth={3} /> Saved by {section.userName}</>
+                        : 'In progress'}
                       {section.savedAt ? ` · ${new Date(section.savedAt).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })}` : ''}
                     </span>
                   )}
@@ -485,9 +550,9 @@ export default function FulfillmentPage() {
                     className={`ff-section-save${isComplete && section?.userId === activeUserId ? ' ff-section-save--done' : ''}`}
                     disabled={sectionSaving === group.id}
                     onClick={() => void saveCategorySection(group.id, group.items)}
-                    title="Save this section"
+                    aria-label="Save this section"
                   >
-                    {sectionSaving === group.id ? <Loader2 size={18} className="star-spinning" /> : <Check size={18} strokeWidth={3} />}
+                    {sectionSaving === group.id ? <Loader2 size={20} className="star-spinning" /> : <Check size={20} strokeWidth={3} />}
                   </button>
                 )}
               </div>
@@ -500,29 +565,43 @@ export default function FulfillmentPage() {
 
         {hasPrices && (
           <div className="ff-total">
-            <span>Total</span>
+            <span>Order total</span>
             <strong>R {total.toFixed(2)}</strong>
           </div>
         )}
 
-        <textarea className="ff-notes" value={userNotes} onChange={(e) => setUserNotes(e.target.value)} rows={3} placeholder="Additional notes…" />
+        <label className="ff-notes-label">
+          <span>Additional notes</span>
+          <textarea
+            className="ff-notes"
+            value={userNotes}
+            onChange={(e) => setUserNotes(e.target.value)}
+            rows={3}
+            placeholder="Anything the customer should know…"
+          />
+        </label>
 
         {statusMsg && <div className={`ff-status ff-status--${statusMsg.type}`}>{statusMsg.text}</div>}
       </div>
 
       <div className="ff-action-bar">
-        <button type="button" onClick={doSave} disabled={saving || sending} className="ff-btn-secondary">
-          {saving ? <Loader2 size={15} className="star-spinning" /> : <Check size={15} />} Save order
+        <button type="button" onClick={previewPdf} className="ff-btn-secondary" aria-label="Preview PDF">
+          <FileText size={16} />
+          <span>PDF</span>
         </button>
-        <button type="button" onClick={previewPdf} className="ff-btn-preview"><FileText size={15} /> Preview PDF</button>
+        <button type="button" onClick={doSave} disabled={saving || sending} className="ff-btn-secondary">
+          {saving ? <Loader2 size={16} className="star-spinning" /> : <Check size={16} />}
+          <span>Save</span>
+        </button>
         {canSendToCustomer ? (
           <button type="button" onClick={doSend} disabled={saving || sending} className="ff-btn-send">
-            {sending ? <Loader2 size={15} className="star-spinning" /> : <Send size={15} />} Send to customer
+            {sending ? <Loader2 size={16} className="star-spinning" /> : <Send size={16} />}
+            <span>Send to customer</span>
           </button>
         ) : (
           <div className="ff-btn-victor-gate" title={CUSTOMER_SEND_FORBIDDEN}>
-            <Lock size={15} strokeWidth={2.25} />
-            <span>Select <strong>Victor</strong> to send to customer</span>
+            <Lock size={14} strokeWidth={2.25} />
+            <span>Switch to <strong>Victor</strong></span>
           </div>
         )}
       </div>

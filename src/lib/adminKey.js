@@ -21,9 +21,27 @@ export async function verifyAdminKey(key) {
 }
 
 /**
+ * Read the order id + signed token from the current URL.
+ * Supports both the short link (/f/<orderId>/<token>) and the legacy query
+ * form (?id=...&k=... or ?o=...&k=...).
+ */
+export function getOrderAccessFromUrl() {
+  try {
+    const path = window.location.pathname || '';
+    const match = path.match(/^\/f\/([^/]+)\/([^/]+)\/?$/);
+    if (match) return { orderId: decodeURIComponent(match[1]), token: decodeURIComponent(match[2]) };
+    const params = new URLSearchParams(window.location.search);
+    const orderId = params.get('o') || params.get('id') || '';
+    const token = params.get('k') || '';
+    if (orderId && token) return { orderId, token };
+  } catch {}
+  return { orderId: '', token: '' };
+}
+
+/**
  * Patches window.fetch so every same-origin /api/ call carries:
  *  - x-admin-key (dashboard key, when stored)
- *  - x-order-id + x-order-token (fulfillment links: /fulfillment?id=...&k=...)
+ *  - x-order-id + x-order-token (fulfillment short links and legacy ?id=&k=)
  * Call once at startup.
  */
 export function installAuthFetch() {
@@ -41,12 +59,10 @@ export function installAuthFetch() {
     const adminKey = getStoredAdminKey();
     if (adminKey && !headers.has('x-admin-key')) headers.set('x-admin-key', adminKey);
 
-    const params = new URLSearchParams(window.location.search);
-    const orderId = params.get('id');
-    const orderTokenValue = params.get('k');
-    if (orderId && orderTokenValue) {
+    const { orderId, token } = getOrderAccessFromUrl();
+    if (orderId && token) {
       if (!headers.has('x-order-id')) headers.set('x-order-id', orderId);
-      if (!headers.has('x-order-token')) headers.set('x-order-token', orderTokenValue);
+      if (!headers.has('x-order-token')) headers.set('x-order-token', token);
     }
 
     return originalFetch(input, { ...init, headers });

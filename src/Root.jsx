@@ -72,7 +72,9 @@ function LoginGate({ onUnlocked }) {
 }
 
 export default function Root() {
-  const isFulfillment = window.location.pathname === '/fulfillment';
+  // Match both /fulfillment (legacy) and /f/<orderId>/<token> (short link).
+  const path = window.location.pathname;
+  const isFulfillment = path === '/fulfillment' || path === '/f' || path.startsWith('/f/');
   // undefined = checking stored key, false = needs login, true = unlocked
   const [unlocked, setUnlocked] = useState(isFulfillment ? true : undefined);
 

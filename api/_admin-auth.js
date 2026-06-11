@@ -27,17 +27,28 @@ export function hasAdminKey(req) {
   return Boolean(provided) && safeEqual(provided, expected);
 }
 
-export function orderToken(orderId) {
+const TOKEN_LEN = 12;
+const LEGACY_TOKEN_LEN = 32;
+
+function fullOrderDigest(orderId) {
   const secret = process.env.ORDER_NOTIFY_SECRET;
   if (!secret) return '';
-  return createHmac('sha256', secret).update(`order:${String(orderId).trim()}`).digest('hex').slice(0, 32);
+  return createHmac('sha256', secret).update(`order:${String(orderId).trim()}`).digest('hex');
+}
+
+export function orderToken(orderId) {
+  const hex = fullOrderDigest(orderId);
+  return hex ? hex.slice(0, TOKEN_LEN) : '';
 }
 
 export function verifyOrderToken(orderId, token) {
   if (!orderId || !token) return false;
-  const expected = orderToken(orderId);
-  if (!expected) return false;
-  return safeEqual(token, expected);
+  const provided = String(token);
+  const len = provided.length;
+  if (len !== TOKEN_LEN && len !== LEGACY_TOKEN_LEN) return false;
+  const hex = fullOrderDigest(orderId);
+  if (!hex) return false;
+  return safeEqual(provided, hex.slice(0, len));
 }
 
 function extractOrderId(req) {
