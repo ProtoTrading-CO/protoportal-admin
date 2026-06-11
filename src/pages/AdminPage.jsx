@@ -93,6 +93,7 @@ import CrmContactsModal from '../components/CrmContactsModal';
 import BroadcastCalendar from '../components/BroadcastCalendar';
 import ReorderGrid from '../components/ReorderGrid';
 import FulfillmentSettingsModal from '../components/FulfillmentSettingsModal';
+import OrderAnalyticsDashboard from '../components/OrderAnalyticsDashboard';
 import categories from '../data/categories.json';
 
 // ─── Reorder sort order — stored in localStorage, applied client-side ─────────
@@ -121,19 +122,18 @@ function applySavedOrder(products, category) {
 }
 
 const sections = [
-  { id: 'new-products', label: 'New Products', icon: Sparkles },
+  { id: 'orders', label: 'Order Requests', icon: ShoppingBag },
   { id: 'products', label: 'Product Manager', icon: PackagePlus },
-  { id: 'specials', label: "This Week's Specials", icon: Star },
-  { id: 'archive', label: 'Archive', icon: Archive },
-  { id: 'recycle', label: 'Recycle Bin', icon: Trash2 },
-  { id: 'reorder', label: 'Reorder Grid', icon: Grip },
   { id: 'customers', label: 'Customer Management', icon: Users },
+  { id: 'reorder', label: 'Reorder Grid', icon: Grip },
+  { id: 'archive', label: 'Archive', icon: Archive },
+  { id: 'specials', label: "This Week's Specials", icon: Star },
   { id: 'crm', label: 'WhatsApp', icon: MessageCircle },
   { id: 'banner', label: 'Banner Editor', icon: Layout },
   { id: 'popup-specials', label: 'Popup Specials', icon: Megaphone },
-  { id: 'analytics', label: 'Analytics', icon: BarChart2 },
   { id: 'pricing', label: 'Pricing & Returns', icon: SlidersHorizontal },
-  { id: 'orders', label: 'Order Requests', icon: ShoppingBag },
+  { id: 'recycle', label: 'Recycle Bin', icon: Trash2 },
+  { id: 'new-products', label: 'New Products', icon: Sparkles },
 ];
 
 const productTypes = ['General product', 'Hot seller', 'New stock', 'Clearance stock'];
@@ -327,7 +327,7 @@ function productToForm(product) {
 }
 
 export default function AdminPage({ customer, onLogout, onViewPortal }) {
-  const [activeSection, setActiveSection] = useState('new-products');
+  const [activeSection, setActiveSection] = useState('orders');
   const [loading, setLoading] = useState(false);
   const [loadingProgress, setLoadingProgress] = useState(null);
   const [loadingError, setLoadingError] = useState('');
@@ -389,7 +389,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const [recycleTotal, setRecycleTotal] = useState(0);
   const [recycleCatalogTotal, setRecycleCatalogTotal] = useState(0);
 
-  const [customerTab, setCustomerTab] = useState('requests');
+  const [customerTab, setCustomerTab] = useState('regular');
   const [customerSearch, setCustomerSearch] = useState('');
   const [customerPage, setCustomerPage] = useState(1);
   const [customerRows, setCustomerRows] = useState([]);
@@ -434,6 +434,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
 
   const [orders, setOrders] = useState([]);
   const [orderTab, setOrderTab] = useState('new');
+  const [orderSubView, setOrderSubView] = useState('list');
   const [orderSearch, setOrderSearch] = useState('');
   const [fulfillmentSettingsOpen, setFulfillmentSettingsOpen] = useState(false);
   const [fulfillmentUsers, setFulfillmentUsers] = useState([]);
@@ -462,10 +463,6 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const [popupForm, setPopupForm] = useState({ active: false, imageUrl: '', title: '' });
   const [popupSaving, setPopupSaving] = useState(false);
   const [popupUploading, setPopupUploading] = useState(false);
-
-  const [analyticsData, setAnalyticsData] = useState(null);
-  const [analyticsLoading, setAnalyticsLoading] = useState(false);
-  const [analyticsError, setAnalyticsError] = useState(null);
 
   const mainCategories = taxonomyTree.map((item) => ({ id: item.id, label: item.label }));
 
@@ -636,15 +633,15 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
 
   const refreshDashboardStats = async () => {
     try {
-      const [products, archiveCount, customers, orders] = await Promise.all([
+      const [products, archiveCount, customerRes, orders] = await Promise.all([
         fetchAllProductsAdmin(),
         fetchCatalogArchiveCount(),
-        fetchAllCustomers(),
+        fetch('/api/admin-customers?tab=regular&page=1&pageSize=1').then((r) => r.json()),
         fetchAllOrdersAdmin(10000),
       ]);
       setCatalogTotal(products.length);
       setArchiveCatalogTotal(archiveCount);
-      setStatsCustomerTotal(customers.length);
+      setStatsCustomerTotal(customerRes.total || 0);
       setStatsOrderTotal(orders.length);
     } catch {
       // Stats are best-effort; section loads still work if this fails.
@@ -664,6 +661,10 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
       const data = await fetchCustomersPage({ page: customerPage, pageSize: ADMIN_PAGE_SIZE, tab: customerTab, searchQuery: customerSearch });
       setCustomerRows(data.rows);
       setCustomerTotal(data.total);
+    } catch (err) {
+      showToast(err.message || 'Failed to load customers', 'error');
+      setCustomerRows([]);
+      setCustomerTotal(0);
     } finally { setLoading(false); }
   };
 
@@ -788,7 +789,6 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     };
   }, [activeSection]);
   useEffect(() => { if (activeSection === 'crm' && !crmAllCustomers.length && !crmLoading) void loadCrmCustomers(1); }, [activeSection]);
-  useEffect(() => { if (activeSection === 'analytics' && !analyticsData && !analyticsLoading && !analyticsError) void loadAnalytics(); }, [activeSection]);
 
   // Load specials on mount
   useEffect(() => {
@@ -1224,19 +1224,6 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
       setPopupForm((prev) => ({ ...prev, imageUrl: url }));
     } catch (e) { alert(e.message || 'Failed to upload image'); }
     finally { setPopupUploading(false); }
-  };
-
-  const loadAnalytics = async () => {
-    setAnalyticsLoading(true);
-    setAnalyticsError(null);
-    try {
-      const res = await fetch('/api/analytics');
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || `API error ${res.status}`);
-      setAnalyticsData(json);
-    } catch (e) {
-      setAnalyticsError(e.message);
-    } finally { setAnalyticsLoading(false); }
   };
 
   const exportLiveXlsx = async () => {
@@ -2837,6 +2824,9 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                     <div className="adm-list-head" style={{ gridTemplateColumns: '1.2fr 1.2fr 1fr 80px 70px 90px' }}>
                       <span>Name</span><span>Email</span><span>Phone</span><span>WhatsApp</span><span>Orders</span><span></span>
                     </div>
+                    {customerRows.length === 0 && !loading && (
+                      <div className="adm-empty" style={{ padding: '24px 0' }}>No approved customers yet.</div>
+                    )}
                     {customerRows.map((person) => (
                       <div key={person.id} className="adm-list-row" style={{ gridTemplateColumns: '1.2fr 1.2fr 1fr 80px 70px 90px' }}>
                         <span style={{ fontWeight: 700 }}>{person.name || person.business_name || 'Unnamed'}</span>
@@ -2901,21 +2891,40 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                 <div className="adm-section-head">
                   <div>
                     <h2 className="adm-section-title">Order Requests</h2>
-                    <p className="adm-section-note">Most recent 150 orders. Click a row to expand details.</p>
+                    <p className="adm-section-note">
+                      {orderSubView === 'analytics'
+                        ? 'Sales and engagement metrics for the selected time period.'
+                        : 'Most recent 150 orders. Click a row to expand details.'}
+                    </p>
                   </div>
-                  <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-                    <button
-                      type="button"
-                      className="adm-btn-ghost"
-                      onClick={() => setFulfillmentSettingsOpen(true)}
-                      title="Fulfillment team settings"
-                      style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px' }}
-                    >
-                      <Settings size={16} /> Team
-                    </button>
-                    <label className="adm-search"><Search size={15} /><input value={orderSearch} onChange={(e) => setOrderSearch(e.target.value)} placeholder="Search orders" className="adm-search-input" /></label>
-                  </div>
+                  {orderSubView === 'list' && (
+                    <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        className="adm-btn-ghost"
+                        onClick={() => setFulfillmentSettingsOpen(true)}
+                        title="Fulfillment team settings"
+                        style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px' }}
+                      >
+                        <Settings size={16} /> Team
+                      </button>
+                      <label className="adm-search"><Search size={15} /><input value={orderSearch} onChange={(e) => setOrderSearch(e.target.value)} placeholder="Search orders" className="adm-search-input" /></label>
+                    </div>
+                  )}
                 </div>
+
+                <div className="adm-customer-tabs" style={{ marginBottom: 16 }}>
+                  <button type="button" onClick={() => setOrderSubView('list')} className={`adm-tab${orderSubView === 'list' ? ' adm-tab--active' : ''}`}>Orders</button>
+                  <button type="button" onClick={() => setOrderSubView('analytics')} className={`adm-tab${orderSubView === 'analytics' ? ' adm-tab--active' : ''}`}>
+                    <BarChart2 size={14} style={{ marginRight: 6, verticalAlign: -2 }} />
+                    Analytics
+                  </button>
+                </div>
+
+                {orderSubView === 'analytics' ? (
+                  <OrderAnalyticsDashboard />
+                ) : (
+                <>
                 <div style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
                   {[
                     { key: 'all', label: 'All' },
@@ -3021,6 +3030,8 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                     );
                   })}
                 </div>
+                </>
+                )}
               </div>
             )}
 
@@ -3201,59 +3212,6 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
               </div>
             )}
 
-            {/* ANALYTICS */}
-            {activeSection === 'analytics' && (
-              <div className="adm-panel">
-                <div className="adm-section-head">
-                  <div>
-                    <h2 className="adm-section-title">Analytics</h2>
-                    <p className="adm-section-note">Business metrics overview.</p>
-                  </div>
-                  <button onClick={() => void loadAnalytics()} className="adm-btn-ghost"><RefreshCw size={15} /><span className="adm-btn-text">Refresh</span></button>
-                </div>
-                {analyticsLoading && <div className="adm-muted" style={{ padding: '24px 0', fontSize: 13 }}>Loading analytics…</div>}
-                {analyticsError && (
-                  <div style={{ margin: '16px 0', padding: '12px 16px', background: '#fef2f2', border: '1px solid #fecaca', color: '#c40000', fontSize: 13 }}>
-                    Error: {analyticsError}
-                  </div>
-                )}
-                {analyticsData && (
-                  <div className="adm-analytics-grid">
-                    <div className="adm-analytics-card">
-                      <div className="adm-analytics-value">{analyticsData.totalCustomers}</div>
-                      <div className="adm-analytics-label">Total Customers</div>
-                    </div>
-                    <div className="adm-analytics-card adm-analytics-card--accent">
-                      <div className="adm-analytics-value">{analyticsData.newSignups30d}</div>
-                      <div className="adm-analytics-label">New Sign-ups (30d)</div>
-                    </div>
-                    {analyticsData.whatsappCustomers !== null && (
-                      <div className="adm-analytics-card">
-                        <div className="adm-analytics-value">{analyticsData.whatsappCustomers}</div>
-                        <div className="adm-analytics-label">WhatsApp Customers</div>
-                      </div>
-                    )}
-                    <div className="adm-analytics-card">
-                      <div className="adm-analytics-value">{analyticsData.totalOrders}</div>
-                      <div className="adm-analytics-label">Total Orders</div>
-                    </div>
-                    <div className="adm-analytics-card adm-analytics-card--accent">
-                      <div className="adm-analytics-value">R {analyticsData.totalRevenue.toLocaleString('en-ZA', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</div>
-                      <div className="adm-analytics-label">Order Revenue</div>
-                    </div>
-                    <div className="adm-analytics-card">
-                      <div className="adm-analytics-value">R {analyticsData.avgOrderSize.toLocaleString('en-ZA', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</div>
-                      <div className="adm-analytics-label">Avg Order Size</div>
-                    </div>
-                    <div className="adm-analytics-card adm-analytics-card--muted">
-                      <div className="adm-analytics-value" style={{ fontSize: 18, color: '#9ca3af' }}>—</div>
-                      <div className="adm-analytics-label">Website Traffic</div>
-                      <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 4 }}>Connect Vercel Analytics</div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
           </main>
         </div>
       </div>

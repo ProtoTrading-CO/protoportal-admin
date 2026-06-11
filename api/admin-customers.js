@@ -29,8 +29,8 @@ export default async function handler(req, res) {
       query = query.eq('tier', 'premium').eq('is_approved', true);
     } else if (tab === 'requests') {
       query = query.eq('is_approved', false);
-    } else {
-      query = query.neq('tier', 'premium').eq('is_approved', true);
+    } else if (tab === 'regular') {
+      query = query.eq('is_approved', true);
     }
 
     const q = (search || '').trim();

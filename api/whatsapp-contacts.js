@@ -7,6 +7,7 @@ import {
   mapWhatsappContact,
   normalizePhone,
 } from './_wati.js';
+import { loadFulfillmentTeamPhones } from './_fulfillment-team.js';
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -19,12 +20,18 @@ export default async function handler(req, res) {
     const businessTypes = ([]).concat(req.query.businessType || []).filter(Boolean);
     const joinedStatuses = ([]).concat(req.query.joinedStatus || []).filter(Boolean);
 
-    const [watiContacts, customerMap] = await Promise.all([
+    const [watiContacts, customerMap, teamPhones] = await Promise.all([
       fetchAllWatiContacts(),
       fetchCustomerPhoneMap(),
+      loadFulfillmentTeamPhones(),
     ]);
 
-    const mapped = watiContacts.map((contact) => {
+    const mapped = watiContacts
+      .filter((contact) => {
+        const phone = normalizePhone(contact.phone || contact.wAid || contact.waId || contact.rcsPhone || '');
+        return phone && !teamPhones.has(phone);
+      })
+      .map((contact) => {
       const customer = customerMap.get(normalizePhone(contact.phone || contact.wAid || contact.waId || contact.rcsPhone || ''));
       return mapWhatsappContact(contact, customer);
     });
