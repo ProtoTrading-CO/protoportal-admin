@@ -4265,3 +4265,22 @@ html, body { background: #f5f5f5; color: #111827; }
 @media (max-width: 900px) {
   .oa-stat-grid, .oa-split, .oa-peak-grid, .oa-insights-row { grid-template-columns: 1fr; }
 }
+
+.oa-wa-notify {
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  font-size: 13px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+}
+.oa-wa-notify--ok { background: #f0fdf4; border-color: #bbf7d0; color: #14532d; }
+.oa-wa-notify--warn { background: #fffbeb; border-color: #fde68a; color: #92400e; }
+.oa-wa-notify--err { background: #fef2f2; border-color: #fecaca; color: #991b1b; }
+.oa-wa-notify--muted { color: #64748b; display: flex; align-items: center; gap: 8px; }
+.oa-wa-notify--loading { color: #64748b; display: flex; align-items: center; gap: 8px; }
+.oa-wa-notify-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+.oa-wa-notify-meta { font-size: 11px; font-weight: 600; opacity: 0.85; }
+.oa-wa-notify-msg { margin: 0 0 8px; line-height: 1.45; }
+.oa-wa-notify-errors { margin: 0; padding-left: 18px; font-size: 12px; line-height: 1.5; }
+.oa-wa-notify code { font-size: 11px; background: rgba(0,0,0,0.06); padding: 1px 5px; border-radius: 4px; }

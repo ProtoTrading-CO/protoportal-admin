@@ -30,3 +30,14 @@ export async function writeSiteConfigJson(file, payload) {
   if (error) throw error;
   return JSON.parse(body);
 }
+
+function notifyLogFile(orderId) {
+  return `orders/notify/${orderId}.json`;
+}
+
+export async function readOrderNotifyLog(orderId) {
+  if (!orderId) return null;
+  const data = await readSiteConfigJson(notifyLogFile(orderId), null);
+  if (!data) return null;
+  return data.orderId === orderId || data.sent != null ? data : null;
+}

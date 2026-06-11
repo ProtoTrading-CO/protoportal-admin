@@ -93,6 +93,7 @@ import CrmContactsModal from '../components/CrmContactsModal';
 import BroadcastCalendar from '../components/BroadcastCalendar';
 import ReorderGrid from '../components/ReorderGrid';
 import FulfillmentSettingsModal from '../components/FulfillmentSettingsModal';
+import OrderWhatsappNotify from '../components/OrderWhatsappNotify';
 import OrderAnalyticsDashboard from '../components/OrderAnalyticsDashboard';
 import categories from '../data/categories.json';
 
@@ -3020,6 +3021,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                             <div style={{ marginBottom: 14 }}>
                               <OrderWorkflowBadge order={order} />
                             </div>
+                            <OrderWhatsappNotify orderId={order.id} />
                             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
                               <OrderItemsList label="Order placed" items={order.original_items || order.items || []} />
                               <OrderItemsList label="Order final" items={order.final_items || order.items || []} />
