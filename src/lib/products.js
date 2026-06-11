@@ -2,6 +2,17 @@ import { supabaseStock } from './supabaseStock';
 import { fuzzyFilter } from './fuzzySearch';
 import { buildCategoryPath, labelToSlug, slugToLabel } from './taxonomy';
 
+function matchesMainCategory(product, mainCategory) {
+  if (!mainCategory || mainCategory === 'all') return true;
+  const resolvedLabel = slugToLabel(mainCategory);
+  return (
+    product.category === mainCategory
+    || product.categoryLabel === mainCategory
+    || product.categoryLabel === resolvedLabel
+    || labelToSlug(product.categoryLabel || '') === mainCategory
+  );
+}
+
 let _loadPromise = null;
 let _cache = null;
 let _adminLoadPromise = null;
@@ -495,7 +506,7 @@ export async function fetchReorderProducts({
   }
 
   if (mainCategory && mainCategory !== 'all') {
-    products = products.filter((p) => p.category === mainCategory);
+    products = products.filter((p) => matchesMainCategory(p, mainCategory));
   }
   if (subcategoryId && subcategoryId !== 'all') {
     products = products.filter((p) =>

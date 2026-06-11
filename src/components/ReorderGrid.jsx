@@ -10,7 +10,13 @@ function groupBySubcategory(products, mainCategoryId, tree) {
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(p);
   });
+  const knownIds = new Set(subs.map((s) => s.id));
   const ordered = subs.map((s) => ({ id: s.id, label: s.label, products: groups.get(s.id) || [] }));
+  for (const [key, prods] of groups) {
+    if (key !== '__other__' && !knownIds.has(key) && prods.length) {
+      ordered.push({ id: key, label: key.replace(/-/g, ' '), products: prods });
+    }
+  }
   if (groups.has('__other__') && groups.get('__other__').length) {
     ordered.push({ id: '__other__', label: 'Other', products: groups.get('__other__') });
   }
@@ -53,6 +59,7 @@ export default function ReorderGrid({
   onPersistOrder,
 }) {
   const scrollRef = useRef(null);
+  const scrollRafRef = useRef(null);
   const dragIdRef = useRef(null);
   const overIdRef = useRef(null);
   const moveSetRef = useRef(new Set());
