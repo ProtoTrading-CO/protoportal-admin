@@ -51,7 +51,7 @@ function adapt(row) {
     name: row.title,
     title: row.title,
     description: row.original_description || '',
-    price: 0,
+    price: Number(row.price) || 0,
     images,
     image: images[0] || '',
     secondaryImage: images[1] || '',

@@ -19,7 +19,7 @@ let _adminLoadPromise = null;
 let _adminCache = null;
 let _adminCacheGen = 0;
 
-const LS_KEY = 'proto_catalog_v7';
+const LS_KEY = 'proto_catalog_v9';
 const LS_TTL = 15 * 60 * 1000;
 
 function saveToLocalCache(data) {
@@ -96,7 +96,7 @@ function adapt(row, { archived = false } = {}) {
     title: row.title,
     description: row.original_description || '',
     originalDescription: row.original_description || '',
-    price: 0,
+    price: Number(row.price) || 0,
     images,
     image: images[0] || '',
     secondaryImage: images[1] || '',
@@ -443,6 +443,7 @@ export async function createProduct(payload) {
     subcategory_two,
     subcategory_three,
     subcategory_four,
+    price: Number(payload.price) || 0,
   };
 
   const { error } = await supabaseStock.from('website_stock').insert(row);
@@ -452,40 +453,33 @@ export async function createProduct(payload) {
 }
 
 export async function updateProduct(sku, payload) {
-  const hasImageUpdate = ['image', 'secondaryImage', 'imageThree', 'imageFour']
-    .some((key) => payload[key] !== undefined);
-  const contentFields = {};
-  if (hasImageUpdate) {
-    contentFields.image = [
+  const body = { websiteSku: sku };
+
+  if (['image', 'secondaryImage', 'imageThree', 'imageFour'].some((key) => payload[key] !== undefined)) {
+    body.image = [
       payload.image,
       payload.secondaryImage,
       payload.imageThree,
       payload.imageFour,
     ].map((value) => String(value ?? '').trim()).join(',');
   }
-  if (payload.description !== undefined) contentFields.description = payload.description;
+  if (payload.description !== undefined) body.description = payload.description;
+  if (payload.name !== undefined) body.title = payload.name;
+  if (payload.price !== undefined) body.price = Number(payload.price) || 0;
+  if (payload.categoryPath?.length) Object.assign(body, pathToWriteFields(payload.categoryPath));
 
-  if (Object.keys(contentFields).length) {
-    const res = await fetch('/api/update-product', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ websiteSku: sku, ...contentFields }),
-    });
-    const json = await res.json();
-    if (!res.ok) throw new Error(json.error || 'Update failed');
-  }
-
-  const patch = {};
-  if (payload.name !== undefined) patch.title = payload.name;
-  if (payload.categoryPath?.length) Object.assign(patch, pathToWriteFields(payload.categoryPath));
-  if (!Object.keys(patch).length) {
+  if (Object.keys(body).length <= 1) {
     invalidateAdminCache();
     return;
   }
 
-  patch.updated_at = new Date().toISOString();
-  const { error } = await supabaseStock.from('website_stock').update(patch).eq('sku', sku);
-  if (error) throw error;
+  const res = await fetch('/api/update-product', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || 'Update failed');
   invalidateProductCache();
   invalidateAdminCache();
 }

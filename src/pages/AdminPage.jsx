@@ -2108,6 +2108,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                             <span title="Barcode (customer code)">BC: {product.barcode || product.code}</span>
                             {product.websiteSku && <span title="Website SKU" style={{ marginLeft: 8 }}>WSK: {product.websiteSku}</span>}
                             {product.parentSku && <span title="Parent SKU" style={{ marginLeft: 8 }}>PSK: {product.parentSku}</span>}
+                            {product.price > 0 && <span title="Price excl. VAT" style={{ marginLeft: 8, fontWeight: 700, color: '#374151' }}>R{Number(product.price).toFixed(2)}</span>}
                           </div>
                         </div>
                         <div>
@@ -2820,7 +2821,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                     <label key={product.id} className="adm-checkbox-row">
                       <input type="checkbox" checked={selectedPricing.includes(product.id)} onChange={(e) => setSelectedPricing((prev) => e.target.checked ? [...prev, product.id] : prev.filter((id) => id !== product.id))} />
                       <span style={{ fontWeight: 700 }}>{product.name}</span>
-                      <small className="adm-muted">{product.code}</small>
+                      <small className="adm-muted">{product.code}{product.price > 0 ? ` · R${Number(product.price).toFixed(2)}` : ''}</small>
                     </label>
                   ))}
                 </div>
