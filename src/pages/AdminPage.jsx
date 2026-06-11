@@ -79,6 +79,7 @@ import { fetchBanner, saveBanner, uploadBannerImage } from '../lib/banner';
 import { fetchPopupSpecial, savePopupSpecial, uploadPopupImage } from '../lib/popupSpecial';
 import CrmContactsModal from '../components/CrmContactsModal';
 import BroadcastCalendar from '../components/BroadcastCalendar';
+import ReorderGrid from '../components/ReorderGrid';
 import categories from '../data/categories.json';
 
 // ─── Reorder sort order — stored in localStorage, applied client-side ─────────
@@ -238,11 +239,20 @@ function generateOrderChecklistHtml(order) {
 </div>
 </body></html>`;
 }
+const PRODUCT_IMAGE_SLOTS = [
+  { key: 'image', label: 'Image 1 (primary)' },
+  { key: 'secondaryImage', label: 'Image 2' },
+  { key: 'imageThree', label: 'Image 3' },
+  { key: 'imageFour', label: 'Image 4' },
+];
+
 const emptyForm = {
   code: '',
   name: '',
   image: '',
   secondaryImage: '',
+  imageThree: '',
+  imageFour: '',
   price: '0',
   stockOnHand: '1',
   categoryId: categories[0]?.id || '',
@@ -256,22 +266,6 @@ function categoryLabel(id, tree = categories) {
 
 function subcategoryOptions(categoryId, tree = categories) {
   return subcategoryOptionsFromTree(tree, categoryId);
-}
-
-function groupBySubcategory(products, mainCategoryId, tree = categories) {
-  const subs = subcategoryOptions(mainCategoryId, tree);
-  const subLabelMap = new Map(subs.map((s) => [s.id, s.label]));
-  const groups = new Map();
-  products.forEach((p) => {
-    const key = p.categoryPath?.[1] || '__other__';
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(p);
-  });
-  const ordered = subs.map((s) => ({ id: s.id, label: s.label, products: groups.get(s.id) || [] }));
-  if (groups.has('__other__') && groups.get('__other__').length) {
-    ordered.push({ id: '__other__', label: 'Other', products: groups.get('__other__') });
-  }
-  return ordered.filter((g) => g.products.length > 0);
 }
 
 function getProductType(product) {
@@ -311,8 +305,10 @@ function productToForm(product) {
   return {
     code: product.code || '',
     name: product.name || '',
-    image: product.image || '',
+    image: product.image || product.images?.[0] || '',
     secondaryImage: product.secondaryImage || product.images?.[1] || '',
+    imageThree: product.imageThree || product.images?.[2] || '',
+    imageFour: product.imageFour || product.images?.[3] || '',
     price: String(product.price ?? 0),
     stockOnHand: String(product.stockOnHand ?? 1),
     categoryId: product.categoryPath?.[0] || categories[0]?.id || '',
@@ -334,8 +330,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const [editorError, setEditorError] = useState('');
   const [editorImageUploading, setEditorImageUploading] = useState(false);
   const [editorImageDragOver, setEditorImageDragOver] = useState('');
-  const editorPrimaryImageFileInputRef = useRef(null);
-  const editorSecondaryImageFileInputRef = useRef(null);
+  const editorImageFileInputRefs = useRef({});
   const [profileCustomer, setProfileCustomer] = useState(null);
   const [profileOrders, setProfileOrders] = useState([]);
   const [profileOrdersLoading, setProfileOrdersLoading] = useState(false);
@@ -398,10 +393,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const [editTaxonomyModal, setEditTaxonomyModal] = useState(null);
   const [newSubModal, setNewSubModal] = useState(null);
   const [taxonomySaving, setTaxonomySaving] = useState(false);
-  const [dragId, setDragId] = useState(null);
-  const [dragOverId, setDragOverId] = useState(null);
   const [selectedIds, setSelectedIds] = useState(new Set());
-  const touchDragRef = useRef(null);
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
@@ -629,7 +621,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
         subcategoryId: reorderSubcategory !== 'all' ? reorderSubcategory : null,
         status: reorderStatus,
       });
-      setReorderProducts(rows);
+      setReorderProducts(applySavedOrder(rows, reorderCategory));
     } catch (err) {
       setLoadingError(err.message || 'Failed to load products');
     } finally { setLoading(false); }
@@ -739,7 +731,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     }
   };
 
-  const uploadEditorImageFile = async (file, slot = 'primary') => {
+  const uploadEditorImageFile = async (file, slotKey) => {
     if (!file || !file.type.startsWith('image/')) {
       setEditorError('Only image files are supported.');
       return;
@@ -748,11 +740,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     setEditorError('');
     try {
       const url = await uploadDormantImage(file);
-      setProductForm((current) => ({
-        ...current,
-        image: slot === 'primary' ? url : current.image,
-        secondaryImage: slot === 'secondary' ? url : current.secondaryImage,
-      }));
+      setProductForm((current) => ({ ...current, [slotKey]: url }));
     } catch (err) {
       setEditorError(err.message || 'Image upload failed');
     } finally {
@@ -814,12 +802,8 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     }));
   };
 
-  const clearEditorImage = (slot) => {
-    setProductForm((current) => ({
-      ...current,
-      image: slot === 'primary' ? '' : current.image,
-      secondaryImage: slot === 'secondary' ? '' : current.secondaryImage,
-    }));
+  const clearEditorImage = (slotKey) => {
+    setProductForm((current) => ({ ...current, [slotKey]: '' }));
   };
 
   const openContentEdit = (product) => {
@@ -867,6 +851,8 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
       name: productForm.name.trim(),
       image: productForm.image.trim(),
       secondaryImage: productForm.secondaryImage.trim(),
+      imageThree: productForm.imageThree.trim(),
+      imageFour: productForm.imageFour.trim(),
       price: Number(productForm.price || 0),
       stockOnHand: Number(productForm.stockOnHand || 0),
       categoryPath: [productForm.categoryId, productForm.subcategoryId].filter(Boolean),
@@ -930,13 +916,26 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   };
 
   const toggleArchive = async (product) => {
+    const archiving = !product.isArchived;
     setSaving(product.id);
     try {
-      await archiveProduct(product.id, !product.isArchived);
+      await archiveProduct(product.id, archiving);
       invalidateAdminCache();
-      await refreshCurrentSection();
+      invalidateProductCache();
+      if (archiving) {
+        setProductRows((prev) => prev.filter((p) => p.id !== product.id));
+        setProductTotal((t) => Math.max(0, t - 1));
+        setArchiveTotal((t) => t + 1);
+      } else {
+        setArchiveRows((prev) => prev.filter((p) => p.id !== product.id));
+        setArchiveTotal((t) => Math.max(0, t - 1));
+        setProductTotal((t) => t + 1);
+      }
+      if (activeSection === 'products') await loadProducts();
+      else if (activeSection === 'archive') await loadArchive();
     } catch (err) {
       alert(err.message || 'Failed to update archive status');
+      await refreshCurrentSection();
     } finally { setSaving(''); }
   };
 
@@ -1198,8 +1197,12 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     setSaving('bulk-archive');
     try {
       await bulkArchiveProducts([...selectedIds]);
+      invalidateAdminCache();
+      invalidateProductCache();
       setArchiveConfirmOpen(false);
       setSelectedIds(new Set());
+      setProductTotal((t) => Math.max(0, t - count));
+      setArchiveTotal((t) => t + count);
       await loadReorderProducts();
       showToast(`Archived ${count} product(s)`);
     } catch (err) {
@@ -1252,6 +1255,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const persistOrder = (next) => {
     const updates = next.map((p, i) => ({ websiteSku: p.id, sortOrder: i + 1 }));
     saveSortOrder(updates).catch(console.error);
+    saveCategoryOrder(reorderCategory, next.map((p) => p.id));
   };
 
   const moveSelectedToTop = () => {
@@ -1264,63 +1268,6 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
       return next;
     });
     setSelectedIds(new Set());
-  };
-
-  const dropToTop = () => {
-    setDragOverId(null);
-    if (!dragId) return;
-    setReorderProducts((prev) => {
-      const toMove = selectedIds.has(dragId) ? selectedIds : new Set([dragId]);
-      const moving = prev.filter((p) => toMove.has(p.id));
-      const rest = prev.filter((p) => !toMove.has(p.id));
-      const next = [...moving, ...rest];
-      persistOrder(next);
-      return next;
-    });
-    setDragId(null);
-  };
-
-  const swapReorder = (targetId) => {
-    setDragOverId(null);
-    if (!dragId || dragId === targetId) { setDragId(null); return; }
-    setReorderProducts((prev) => {
-      const toMove = selectedIds.has(dragId) ? selectedIds : new Set([dragId]);
-      if (toMove.has(targetId)) return prev;
-      const moving = prev.filter((p) => toMove.has(p.id));
-      const rest = prev.filter((p) => !toMove.has(p.id));
-      const insertAt = rest.findIndex((p) => p.id === targetId);
-      if (insertAt < 0) return prev;
-      const next = [...rest.slice(0, insertAt), ...moving, ...rest.slice(insertAt)];
-      persistOrder(next);
-      return next;
-    });
-    setDragId(null);
-  };
-
-  const handleTouchStart = (e, productId) => {
-    touchDragRef.current = { id: productId };
-    setDragId(productId);
-  };
-
-  const handleTouchMove = (e) => {
-    e.preventDefault();
-    const touch = e.touches[0];
-    const el = document.elementFromPoint(touch.clientX, touch.clientY);
-    const card = el?.closest('[data-reorder-id]');
-    if (card) {
-      const overId = card.dataset.reorderId;
-      if (overId !== touchDragRef.current?.id) setDragOverId(overId);
-    }
-  };
-
-  const handleTouchEnd = () => {
-    if (touchDragRef.current) {
-      if (dragOverId === '__top__') dropToTop();
-      else if (dragOverId) swapReorder(dragOverId);
-    }
-    setDragId(null);
-    setDragOverId(null);
-    touchDragRef.current = null;
   };
 
   const toggleSelectAllPricing = () => {
@@ -2170,7 +2117,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                 <div className="adm-section-head adm-section-head--reorder">
                   <div>
                     <h2 className="adm-section-title">Reorder Grid</h2>
-                    <p className="adm-section-note">Select products for bulk actions, or drag to reorder.</p>
+                    <p className="adm-section-note">Select products for bulk actions, or drag by the grip handle to reorder live.</p>
                   </div>
                   <button
                     onClick={() => { setSelectedIds(new Set()); invalidateAdminCache(); void loadReorderProducts(); }}
@@ -2269,92 +2216,18 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                     ))}
                   </div>
 
-                  <div className="adm-reorder-content">
-                    {loading && <div className="adm-loading-inline"><Loader2 size={18} className="spin" /> Loading products…</div>}
-                    {!loading && visibleReorderProducts.length === 0 && (
-                      <div className="adm-empty">No products match these filters.</div>
-                    )}
-
-                    <div
-                      onDragEnter={(e) => { e.preventDefault(); setDragOverId('__top__'); }}
-                      onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
-                      onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setDragOverId(null); }}
-                      onDrop={(e) => { e.preventDefault(); dropToTop(); }}
-                      className={`adm-reorder-top-zone${dragId ? ' adm-reorder-top-zone--visible' : ''}${dragOverId === '__top__' ? ' adm-reorder-top-zone--over' : ''}`}
-                    >
-                      ↑ Drop here to move to top
-                    </div>
-
-                    <div className="adm-reorder-grid">
-                      {groupBySubcategory(visibleReorderProducts, reorderCategory, taxonomyTree).map((group) => (
-                        <div key={`grp-${group.id}`} className="adm-reorder-group">
-                          <div className="adm-reorder-group-header">
-                            <span>{group.label}</span>
-                            {group.id !== '__other__' && (
-                              <button
-                                type="button"
-                                className="adm-reorder-cat-edit"
-                                title="Edit subcategory name"
-                                onClick={() => setEditTaxonomyModal({ id: group.id, label: group.label, type: 'subcategory' })}
-                              >
-                                <Pencil size={11} />
-                              </button>
-                            )}
-                          </div>
-                          {group.products.map((product) => {
-                            const isDragging = dragId === product.id;
-                            const isOver = dragOverId === product.id && !isDragging;
-                            const isSelected = selectedIds.has(product.id);
-                            return (
-                              <div
-                                key={product.id}
-                                data-reorder-id={product.id}
-                                draggable
-                                onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', product.id); setDragId(product.id); }}
-                                onDragEnd={() => { setDragId(null); setDragOverId(null); }}
-                                onDragEnter={(e) => { e.preventDefault(); if (product.id !== dragId) setDragOverId(product.id); }}
-                                onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
-                                onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setDragOverId(null); }}
-                                onDrop={(e) => { e.preventDefault(); swapReorder(product.id); }}
-                                onTouchStart={(e) => handleTouchStart(e, product.id)}
-                                onTouchMove={handleTouchMove}
-                                onTouchEnd={handleTouchEnd}
-                                className={`adm-reorder-card${isDragging ? ' adm-reorder-card--dragging' : ''}${isOver ? ' adm-reorder-card--over' : ''}${isSelected ? ' adm-reorder-card--selected' : ''}`}
-                              >
-                                <div className="adm-reorder-card__bar">
-                                  <label className="adm-reorder-check-wrap" onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
-                                    <input
-                                      type="checkbox"
-                                      checked={isSelected}
-                                      onChange={() => toggleSelectReorder(product.id)}
-                                      className="adm-reorder-checkbox"
-                                      aria-label={`Select ${product.name}`}
-                                    />
-                                  </label>
-                                  <span className="adm-reorder-drag-hint" aria-hidden="true"><Grip size={13} /></span>
-                                  <button
-                                    type="button"
-                                    onClick={(e) => { e.stopPropagation(); openContentEdit(product); }}
-                                    className="adm-reorder-edit-btn"
-                                    title="Edit image"
-                                  >
-                                    <ImagePlus size={13} />
-                                  </button>
-                                </div>
-                                <div className="adm-thumb adm-thumb--reorder">
-                                  {product.image
-                                    ? <img draggable={false} src={product.image} alt={product.name} />
-                                    : <span className="adm-muted">No image</span>}
-                                </div>
-                                <div className="adm-reorder-card-title">{product.name}</div>
-                                <div className="adm-muted adm-reorder-card-code">{product.code}</div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
+                  <ReorderGrid
+                    products={visibleReorderProducts}
+                    onProductsChange={setReorderProducts}
+                    selectedIds={selectedIds}
+                    onToggleSelect={toggleSelectReorder}
+                    mainCategoryId={reorderCategory}
+                    taxonomyTree={taxonomyTree}
+                    loading={loading}
+                    onEditProduct={openContentEdit}
+                    onEditSubcategory={setEditTaxonomyModal}
+                    onPersistOrder={persistOrder}
+                  />
                 </div>
 
                 {moveModalOpen && (
@@ -3346,29 +3219,20 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
 
             <div style={{ overflowY: 'auto', paddingRight: 4, flex: 1, minHeight: 0 }}>
 
-            <input
-              ref={editorPrimaryImageFileInputRef}
-              type="file"
-              accept="image/*"
-              style={{ display: 'none' }}
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) void uploadEditorImageFile(file, 'primary');
-                e.target.value = '';
-              }}
-            />
-
-            <input
-              ref={editorSecondaryImageFileInputRef}
-              type="file"
-              accept="image/*"
-              style={{ display: 'none' }}
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) void uploadEditorImageFile(file, 'secondary');
-                e.target.value = '';
-              }}
-            />
+            {PRODUCT_IMAGE_SLOTS.map((slot) => (
+              <input
+                key={`file-${slot.key}`}
+                ref={(el) => { editorImageFileInputRefs.current[slot.key] = el; }}
+                type="file"
+                accept="image/*"
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) void uploadEditorImageFile(file, slot.key);
+                  e.target.value = '';
+                }}
+              />
+            ))}
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
               <AdminField label="Product code"><input value={productForm.code} onChange={(e) => setProductForm((p) => ({ ...p, code: e.target.value }))} className="adm-field-input" /></AdminField>
@@ -3379,12 +3243,13 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
               </AdminField>
               <AdminField label="Product name" full><input value={productForm.name} onChange={(e) => setProductForm((p) => ({ ...p, name: e.target.value }))} className="adm-field-input" /></AdminField>
 
-              <AdminField label="Product images" full>
+              <AdminField label="Product images (up to 4)" full>
+                <p className="adm-muted" style={{ fontSize: 12, margin: '0 0 10px' }}>
+                  Best size: 800×800 px square, white background, product centred — matches your resize script and catalog cards.
+                </p>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-                  {[
-                    { key: 'primary', label: 'Primary image', value: productForm.image, ref: editorPrimaryImageFileInputRef },
-                    { key: 'secondary', label: 'Secondary image', value: productForm.secondaryImage, ref: editorSecondaryImageFileInputRef },
-                  ].map((slot) => {
+                  {PRODUCT_IMAGE_SLOTS.map((slot) => {
+                    const value = productForm[slot.key];
                     const isDragOver = editorImageDragOver === slot.key;
                     return (
                       <div key={slot.key} style={{ display: 'grid', gap: 8 }}>
@@ -3397,12 +3262,12 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                               className="adm-btn-ghost"
                               style={{ padding: '6px 10px', fontSize: 12 }}
                             >
-                              Make secondary the primary
+                              Swap 1 ↔ 2
                             </button>
                           )}
                         </div>
                         <div
-                          onClick={() => !editorImageUploading && slot.ref.current?.click()}
+                          onClick={() => !editorImageUploading && editorImageFileInputRefs.current[slot.key]?.click()}
                           onDragEnter={(e) => { e.preventDefault(); setEditorImageDragOver(slot.key); }}
                           onDragOver={(e) => { e.preventDefault(); setEditorImageDragOver(slot.key); }}
                           onDragLeave={(e) => { e.preventDefault(); if (editorImageDragOver === slot.key) setEditorImageDragOver(''); }}
@@ -3416,7 +3281,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                             position: 'relative',
                             minHeight: 160,
                             borderRadius: 16,
-                            border: `2px dashed ${isDragOver ? '#8B1A1A' : slot.value ? '#d1d5db' : '#cbd5e1'}`,
+                            border: `2px dashed ${isDragOver ? '#8B1A1A' : value ? '#d1d5db' : '#cbd5e1'}`,
                             background: isDragOver ? '#fff5f5' : '#f8fafc',
                             display: 'flex',
                             alignItems: 'center',
@@ -3431,9 +3296,9 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                               <Loader2 size={32} className="spin" />
                               <span style={{ fontSize: 13, fontWeight: 600 }}>Uploading image…</span>
                             </div>
-                          ) : slot.value ? (
+                          ) : value ? (
                             <>
-                              <img src={slot.value} alt={`${slot.label} preview`} style={{ maxWidth: '100%', maxHeight: 160, objectFit: 'contain' }} />
+                              <img src={value} alt={`${slot.label} preview`} style={{ maxWidth: '100%', maxHeight: 160, objectFit: 'contain' }} />
                               <div style={{ position: 'absolute', inset: 0, background: 'rgba(15, 23, 42, 0.45)', display: isDragOver ? 'flex' : 'none', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 8, color: '#fff' }}>
                                 <Upload size={28} />
                                 <span style={{ fontSize: 13, fontWeight: 600 }}>Drop to replace image</span>
@@ -3445,18 +3310,18 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                           ) : (
                             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, color: isDragOver ? '#8B1A1A' : '#64748b', pointerEvents: 'none', textAlign: 'center', padding: 20 }}>
                               <Upload size={32} />
-                              <div style={{ fontWeight: 700, fontSize: 15 }}>Drag & drop {slot.key} image here</div>
+                              <div style={{ fontWeight: 700, fontSize: 15 }}>Drag & drop image here</div>
                               <div style={{ fontSize: 12 }}>or click to browse and upload it to Supabase</div>
                             </div>
                           )}
                         </div>
                         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                          <button type="button" onClick={() => slot.ref.current?.click()} className="adm-btn-ghost" style={{ padding: '8px 12px', fontSize: 12 }} disabled={editorImageUploading}>
-                            Upload {slot.key} image
+                          <button type="button" onClick={() => editorImageFileInputRefs.current[slot.key]?.click()} className="adm-btn-ghost" style={{ padding: '8px 12px', fontSize: 12 }} disabled={editorImageUploading}>
+                            Upload
                           </button>
-                          {slot.value && (
+                          {value && (
                             <button type="button" onClick={() => clearEditorImage(slot.key)} className="adm-btn-ghost" style={{ padding: '8px 12px', fontSize: 12 }} disabled={editorImageUploading}>
-                              Remove {slot.key} image
+                              Remove
                             </button>
                           )}
                         </div>
@@ -3466,8 +3331,15 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                 </div>
               </AdminField>
 
-              <AdminField label="Primary image URL" full><input value={productForm.image} onChange={(e) => setProductForm((p) => ({ ...p, image: e.target.value }))} className="adm-field-input" /></AdminField>
-              <AdminField label="Secondary image URL" full><input value={productForm.secondaryImage} onChange={(e) => setProductForm((p) => ({ ...p, secondaryImage: e.target.value }))} className="adm-field-input" /></AdminField>
+              {PRODUCT_IMAGE_SLOTS.map((slot) => (
+                <AdminField key={`url-${slot.key}`} label={`${slot.label} URL`} full>
+                  <input
+                    value={productForm[slot.key]}
+                    onChange={(e) => setProductForm((p) => ({ ...p, [slot.key]: e.target.value }))}
+                    className="adm-field-input"
+                  />
+                </AdminField>
+              ))}
               <AdminField label="Price"><input value={productForm.price} onChange={(e) => setProductForm((p) => ({ ...p, price: e.target.value }))} className="adm-field-input" /></AdminField>
               <AdminField label="Stock on hand"><input value={productForm.stockOnHand} onChange={(e) => setProductForm((p) => ({ ...p, stockOnHand: e.target.value }))} className="adm-field-input" /></AdminField>
               <AdminField label="Main category">

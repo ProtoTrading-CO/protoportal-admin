@@ -21,6 +21,8 @@ export default async function handler(req, res) {
     const images = String(image).split(',').map((url) => url.trim()).filter(Boolean);
     patch.image_url_one = images[0] || null;
     patch.image_url_two = images[1] || null;
+    patch.image_url_three = images[2] || null;
+    patch.image_url_four = images[3] || null;
   }
   if (description !== undefined) patch.original_description = String(description).trim();
   if (!Object.keys(patch).length) return res.status(200).json({ ok: true });

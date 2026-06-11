@@ -6,6 +6,7 @@ let _loadPromise = null;
 let _cache = null;
 let _adminLoadPromise = null;
 let _adminCache = null;
+let _adminCacheGen = 0;
 
 const LS_KEY = 'proto_catalog_v7';
 const LS_TTL = 15 * 60 * 1000;
@@ -54,7 +55,7 @@ async function fetchAllRows(table, selectCols = '*', extraFilter = null, orderBy
 }
 
 function adapt(row, { archived = false } = {}) {
-  const images = [row.image_url_one, row.image_url_two].filter(Boolean);
+  const images = [row.image_url_one, row.image_url_two, row.image_url_three, row.image_url_four].filter(Boolean);
   const subLabels = [row.subcategory_one, row.subcategory_two, row.subcategory_three, row.subcategory_four].filter(Boolean);
   return {
     id: row.sku,
@@ -71,6 +72,8 @@ function adapt(row, { archived = false } = {}) {
     images,
     image: images[0] || '',
     secondaryImage: images[1] || '',
+    imageThree: images[2] || '',
+    imageFour: images[3] || '',
     stockQty: 0,
     stockOnHand: 0,
     colour: '',
@@ -114,8 +117,16 @@ function getAllCachedAdmin(onProgress) {
     return Promise.resolve(_adminCache);
   }
   if (!_adminLoadPromise) {
+    const gen = _adminCacheGen;
     _adminLoadPromise = loadLiveFromDB({ onProgress })
-      .then((all) => { _adminCache = all; return _adminCache; })
+      .then(async (all) => {
+        if (gen !== _adminCacheGen) {
+          _adminLoadPromise = null;
+          return getAllCachedAdmin(onProgress);
+        }
+        _adminCache = all;
+        return _adminCache;
+      })
       .catch((err) => { _adminLoadPromise = null; throw err; });
   }
   return _adminLoadPromise;
@@ -158,6 +169,7 @@ export function invalidateProductCache() {
 }
 
 export function invalidateAdminCache() {
+  _adminCacheGen += 1;
   _adminCache = null;
   _adminLoadPromise = null;
 }
@@ -366,6 +378,8 @@ export async function createProduct(payload) {
     original_description: String(payload.description || title).trim(),
     image_url_one: payload.image?.trim() || null,
     image_url_two: payload.secondaryImage?.trim() || null,
+    image_url_three: payload.imageThree?.trim() || null,
+    image_url_four: payload.imageFour?.trim() || null,
     category,
     subcategory_one,
     subcategory_two,
@@ -380,12 +394,16 @@ export async function createProduct(payload) {
 }
 
 export async function updateProduct(sku, payload) {
+  const hasImageUpdate = ['image', 'secondaryImage', 'imageThree', 'imageFour']
+    .some((key) => payload[key] !== undefined);
   const contentFields = {};
-  if (payload.image !== undefined || payload.secondaryImage !== undefined) {
-    const images = [payload.image, payload.secondaryImage]
-      .map((value) => String(value || '').trim())
-      .filter(Boolean);
-    contentFields.image = images.join(',');
+  if (hasImageUpdate) {
+    contentFields.image = [
+      payload.image,
+      payload.secondaryImage,
+      payload.imageThree,
+      payload.imageFour,
+    ].map((value) => String(value ?? '').trim()).join(',');
   }
   if (payload.description !== undefined) contentFields.description = payload.description;
 

@@ -1539,18 +1539,19 @@ input, select, textarea { font-family: inherit; outline: none; }
   border: 2px solid #e8eaed;
   border-radius: 16px;
   padding: 12px;
-  cursor: grab;
-  transition: box-shadow 0.15s, border-color 0.15s, transform 0.1s;
+  cursor: default;
+  transition: box-shadow 0.15s, border-color 0.15s;
   display: flex;
   flex-direction: column;
   user-select: none;
   -webkit-user-select: none;
-  touch-action: none;
+  position: relative;
 }
 
 .adm-reorder-card * { pointer-events: none; }
 .adm-reorder-card .adm-reorder-check-wrap,
 .adm-reorder-card .adm-reorder-edit-btn,
+.adm-reorder-card .adm-reorder-drag-handle,
 .adm-reorder-card input { pointer-events: auto; }
 
 .adm-reorder-card:hover {
@@ -1559,16 +1560,27 @@ input, select, textarea { font-family: inherit; outline: none; }
 }
 
 .adm-reorder-card--dragging {
-  opacity: 0.35;
+  opacity: 0.4;
   border: 2px dashed #8B1A1A;
-  cursor: grabbing;
-  transform: scale(0.97);
+  pointer-events: none;
+}
+
+.adm-reorder-card--over::before {
+  content: '';
+  position: absolute;
+  top: -3px;
+  left: 8px;
+  right: 8px;
+  height: 3px;
+  background: #dc2626;
+  border-radius: 2px;
+  z-index: 2;
 }
 
 .adm-reorder-card--over {
-  border-color: #dc2626;
-  box-shadow: inset 0 0 0 1px #dc2626;
+  border-color: #fca5a5;
   background: #fff;
+  box-shadow: none;
 }
 
 .adm-reorder-handle {
@@ -2202,13 +2214,38 @@ input, select, textarea { font-family: inherit; outline: none; }
   margin: 0;
 }
 
-.adm-reorder-drag-hint {
+.adm-reorder-drag-hint,
+.adm-reorder-drag-handle {
   color: #d1d5db;
-  display: flex;
+  display: inline-flex;
   align-items: center;
+  justify-content: center;
+  touch-action: none;
+  cursor: grab;
+  padding: 2px 4px;
+  border-radius: 4px;
+  flex-shrink: 0;
 }
 
-.adm-reorder-card:hover .adm-reorder-drag-hint { color: #9ca3af; }
+.adm-reorder-drag-handle:active { cursor: grabbing; }
+
+.adm-reorder-card:hover .adm-reorder-drag-hint,
+.adm-reorder-card:hover .adm-reorder-drag-handle { color: #9ca3af; }
+
+body.adm-is-reorder-dragging {
+  cursor: grabbing !important;
+  user-select: none;
+}
+
+body.adm-is-reorder-dragging .adm-reorder-card {
+  cursor: default;
+}
+
+body.adm-is-reorder-dragging .adm-reorder-card--dragging {
+  opacity: 0.4;
+  pointer-events: none;
+  border-style: dashed;
+}
 
 .adm-reorder-edit-btn {
   margin-left: auto;
@@ -3374,12 +3411,22 @@ html, body { background: #f5f5f5; color: #111827; }
   transition: border-color 0.1s, box-shadow 0.1s;
   user-select: none;
   -webkit-user-select: none;
-  touch-action: none;
-  cursor: grab;
+  cursor: default;
+  position: relative;
 }
 .adm-reorder-card:hover { border-color: #d1d5db; }
-.adm-reorder-card--dragging { opacity: 0.45; border: 1px dashed #dc2626; transform: none; cursor: grabbing; }
-.adm-reorder-card--over { border-color: #dc2626; background: #fff; box-shadow: inset 0 0 0 1px #dc2626; }
+.adm-reorder-card--dragging { opacity: 0.4; border: 1px dashed #dc2626; pointer-events: none; transform: none; }
+.adm-reorder-card--over { border-color: #fca5a5; background: #fff; box-shadow: none; }
+.adm-reorder-card--over::before {
+  content: '';
+  position: absolute;
+  top: -2px;
+  left: 6px;
+  right: 6px;
+  height: 2px;
+  background: #dc2626;
+  z-index: 2;
+}
 .adm-reorder-card--selected { border-color: #dc2626; background: #fff; box-shadow: inset 0 0 0 1px #dc2626; }
 .adm-reorder-top-zone { border: 1px dashed #d1d5db; border-radius: 0; color: #6b7280; }
 .adm-reorder-top-zone--visible { background: #f9fafb; border-color: #d1d5db; }
