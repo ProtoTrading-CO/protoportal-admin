@@ -3547,15 +3547,8 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
             {/* Footer */}
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, flexShrink: 0, flexWrap: 'wrap' }}>
               <button onClick={closeFulfillment} className="adm-btn-ghost"><ChevronLeft size={15} /> Cancel</button>
-              <button onClick={() => void saveFulfillment(false)} className="adm-btn-ghost" disabled={fulfillmentSaving}>
+              <button onClick={() => void saveFulfillment(false)} className="adm-btn-red" disabled={fulfillmentSaving}>
                 {fulfillmentSaving ? 'Saving…' : <><Check size={15} /> Save final order</>}
-              </button>
-              <button
-                onClick={() => void saveFulfillment(true)}
-                disabled={fulfillmentSaving}
-                style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px', background: '#15803d', color: 'white', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 700, cursor: fulfillmentSaving ? 'not-allowed' : 'pointer', opacity: fulfillmentSaving ? 0.7 : 1 }}
-              >
-                <Send size={15} /> Send order to customer
               </button>
             </div>
           </div>

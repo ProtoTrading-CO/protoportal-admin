@@ -11,6 +11,7 @@ import {
   loadActiveUserId,
   saveActiveUserId,
 } from '../lib/fulfillmentUsers';
+import { isVictorSender, CUSTOMER_SEND_FORBIDDEN } from '../lib/fulfillmentAuth';
 import categories from '../data/categories.json';
 
 const CATEGORY_LABELS = Object.fromEntries(categories.map((c) => [c.id, c.label]));
@@ -120,6 +121,8 @@ export default function FulfillmentPage() {
     () => users.find((u) => u.id === activeUserId) || null,
     [users, activeUserId],
   );
+
+  const canSendToCustomer = isVictorSender(activeUser);
 
   const assignedCategorySet = useMemo(
     () => new Set(activeUser?.categoryIds || []),
@@ -300,6 +303,10 @@ export default function FulfillmentPage() {
   };
 
   const doSend = async () => {
+    if (!canSendToCustomer) {
+      setStatusMsg({ type: 'err', text: CUSTOMER_SEND_FORBIDDEN });
+      return;
+    }
     setSending(true);
     try {
       const saveRes = await fetch('/api/admin-orders', {
@@ -325,6 +332,8 @@ export default function FulfillmentPage() {
           autoNotes,
           userNotes,
           assignedTo: activeUser?.name || '',
+          senderUserId: activeUser?.id || '',
+          senderName: activeUser?.name || '',
           total: hasPrices ? total : null,
         }),
       });
@@ -504,9 +513,15 @@ export default function FulfillmentPage() {
           {saving ? <Loader2 size={15} className="star-spinning" /> : <Check size={15} />} Save order
         </button>
         <button type="button" onClick={previewPdf} className="ff-btn-preview"><FileText size={15} /> Preview PDF</button>
-        <button type="button" onClick={doSend} disabled={saving || sending} className="ff-btn-send">
-          {sending ? <Loader2 size={15} className="star-spinning" /> : <Send size={15} />} Send to customer
-        </button>
+        {canSendToCustomer ? (
+          <button type="button" onClick={doSend} disabled={saving || sending} className="ff-btn-send">
+            {sending ? <Loader2 size={15} className="star-spinning" /> : <Send size={15} />} Send to customer
+          </button>
+        ) : (
+          <button type="button" disabled className="ff-btn-send" title={CUSTOMER_SEND_FORBIDDEN} style={{ opacity: 0.45, cursor: 'not-allowed' }}>
+            <Lock size={15} /> Victor only
+          </button>
+        )}
       </div>
     </div>
   );

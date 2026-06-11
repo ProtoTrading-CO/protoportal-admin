@@ -1,3 +1,5 @@
+import { isVictorSender, CUSTOMER_SEND_FORBIDDEN } from './_fulfillment-auth.js';
+
 function buildEmailHtml({ customerName, orderNumber, orderDate, items, autoNotes, userNotes, assignedTo, total }) {
   const dateStr = orderDate
     ? new Date(orderDate).toLocaleDateString('en-ZA', { day: 'numeric', month: 'long', year: 'numeric' })
@@ -110,7 +112,11 @@ function buildEmailHtml({ customerName, orderNumber, orderDate, items, autoNotes
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
 
-  const { to, customerName, orderNumber, orderDate, items = [], autoNotes, userNotes, assignedTo, total } = req.body || {};
+  const { to, customerName, orderNumber, orderDate, items = [], autoNotes, userNotes, assignedTo, total, senderUserId, senderName } = req.body || {};
+
+  if (!isVictorSender({ userId: senderUserId, name: senderName || assignedTo })) {
+    return res.status(403).json({ error: CUSTOMER_SEND_FORBIDDEN });
+  }
 
   if (!to) return res.status(400).json({ error: 'Recipient email (to) is required.' });
 
