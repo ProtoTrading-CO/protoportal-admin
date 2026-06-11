@@ -1,10 +1,25 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Loader2, RefreshCw } from 'lucide-react';
+import { Download, Loader2, RefreshCw } from 'lucide-react';
+import { downloadCsv, downloadExcel } from '../lib/exportReport';
 
 const PERIODS = [7, 30, 90, 120];
 
 function money(n) {
   return `R ${Number(n || 0).toLocaleString('en-ZA', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+}
+
+function PanelHeader({ title, onExport, exportLabel = 'Export Report' }) {
+  return (
+    <div className="oa-panel-head">
+      <h3>{title}</h3>
+      {onExport && (
+        <button type="button" className="oa-export-btn" onClick={onExport}>
+          <Download size={14} />
+          {exportLabel}
+        </button>
+      )}
+    </div>
+  );
 }
 
 function HorizontalBars({ rows, valueKey = 'qty', labelKey = 'name', fallbackLabelKey, max = 10 }) {
@@ -13,11 +28,11 @@ function HorizontalBars({ rows, valueKey = 'qty', labelKey = 'name', fallbackLab
   if (!data.length) return <p className="oa-empty">No data for this period.</p>;
   return (
     <div className="oa-hbars">
-      {data.map((row) => {
+      {data.map((row, i) => {
         const val = Number(row[valueKey] ?? row.views ?? row.qty ?? 0);
         const label = row[labelKey] || row[fallbackLabelKey] || row.label || row.code || '—';
         return (
-          <div key={`${label}-${val}`} className="oa-hbar-row">
+          <div key={`${label}-${i}`} className="oa-hbar-row">
             <span className="oa-hbar-label" title={label}>{label}</span>
             <div className="oa-hbar-track">
               <div className="oa-hbar-fill" style={{ width: `${(val / peak) * 100}%` }} />
@@ -96,6 +111,7 @@ export default function OrderAnalyticsDashboard() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [customerLimit, setCustomerLimit] = useState(5);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -116,6 +132,20 @@ export default function OrderAnalyticsDashboard() {
   useEffect(() => { void load(); }, [load]);
 
   const summary = data?.summary;
+  const periodTag = `${period}d`;
+
+  const topOrderedProducts = useMemo(
+    () => (data?.topOrderedProducts || []).slice(0, 10),
+    [data],
+  );
+  const topViewedProducts = useMemo(
+    () => (data?.topViewedProducts || []).slice(0, 10),
+    [data],
+  );
+  const visibleCustomers = useMemo(
+    () => (data?.topCustomers || []).slice(0, customerLimit),
+    [data, customerLimit],
+  );
 
   const peakDay = useMemo(() => {
     if (!data?.peakByDay?.length) return null;
@@ -126,6 +156,36 @@ export default function OrderAnalyticsDashboard() {
     if (!data?.peakByHour?.length) return null;
     return [...data.peakByHour].sort((a, b) => b.orders - a.orders)[0];
   }, [data]);
+
+  const exportOrderedItems = () => {
+    downloadCsv(`most-ordered-items-${periodTag}.csv`, [
+      { header: 'Code', key: 'code' },
+      { header: 'Product', key: 'name' },
+      { header: 'Category', key: 'category' },
+      { header: 'Qty Ordered', key: 'qty' },
+    ], topOrderedProducts);
+  };
+
+  const exportViewedProducts = () => {
+    downloadCsv(`most-viewed-products-${periodTag}.csv`, [
+      { header: 'Product', key: 'label' },
+      { header: 'Views', key: 'views' },
+    ], topViewedProducts);
+  };
+
+  const exportCustomersExcel = () => {
+    void downloadExcel(
+      `top-customers-${periodTag}.xlsx`,
+      'Top Customers',
+      [
+        { header: 'Customer', key: 'name' },
+        { header: 'Email', key: 'email' },
+        { header: 'Orders', key: 'orders' },
+        { header: 'Spend (ZAR)', value: (r) => Number(r.spend || 0).toFixed(2) },
+      ],
+      visibleCustomers,
+    );
+  };
 
   return (
     <div className="oa-dashboard">
@@ -163,29 +223,29 @@ export default function OrderAnalyticsDashboard() {
           </div>
 
           <section className="oa-panel">
-            <h3>Orders Over Time</h3>
+            <PanelHeader title="Orders Over Time" />
             <TimeBars rows={data.ordersOverTime} valueKey="orders" />
           </section>
 
           <div className="oa-split">
             <section className="oa-panel">
-              <h3>Most Ordered Items</h3>
-              <HorizontalBars rows={data.topOrderedProducts} valueKey="qty" labelKey="name" fallbackLabelKey="code" />
+              <PanelHeader title="Most Ordered Items (Top 10)" onExport={exportOrderedItems} />
+              <HorizontalBars rows={topOrderedProducts} valueKey="qty" labelKey="name" fallbackLabelKey="code" max={10} />
             </section>
             <section className="oa-panel">
-              <h3>Most Ordered Categories</h3>
+              <PanelHeader title="Most Ordered Categories" />
               <DonutChart slices={data.topOrderedCategories?.map((c) => ({ label: c.label, count: c.qty }))} />
             </section>
           </div>
 
           <div className="oa-split">
             <section className="oa-panel">
-              <h3>Most Viewed Products</h3>
+              <PanelHeader title="Most Viewed Products (Top 10)" onExport={exportViewedProducts} />
               {!data.trackingEnabled && <p className="oa-note">Product view tracking activates after the portal migration is applied.</p>}
-              <HorizontalBars rows={data.topViewedProducts} valueKey="views" labelKey="label" />
+              <HorizontalBars rows={topViewedProducts} valueKey="views" labelKey="label" max={10} />
             </section>
             <section className="oa-panel">
-              <h3>Most Viewed Categories</h3>
+              <PanelHeader title="Most Viewed Categories" />
               {!data.trackingEnabled && <p className="oa-note">Category view tracking activates after the portal migration is applied.</p>}
               <DonutChart slices={data.topViewedCategories?.map((c) => ({ label: c.label, count: c.views }))} />
             </section>
@@ -193,11 +253,11 @@ export default function OrderAnalyticsDashboard() {
 
           <div className="oa-split">
             <section className="oa-panel">
-              <h3>Order Status Breakdown</h3>
+              <PanelHeader title="Order Status Breakdown" />
               <DonutChart slices={data.orderStatusBreakdown} />
             </section>
             <section className="oa-panel">
-              <h3>Peak Order Times</h3>
+              <PanelHeader title="Peak Order Times" />
               <div className="oa-peak-grid">
                 <div>
                   <div className="oa-subhead">By day of week</div>
@@ -226,7 +286,7 @@ export default function OrderAnalyticsDashboard() {
           </div>
 
           <section className="oa-panel">
-            <h3>Additional Insights</h3>
+            <PanelHeader title="Additional Insights" />
             <div className="oa-insights-row">
               <div className="oa-insight-card">
                 <div className="oa-insight-val">{summary.repeatCustomerPct}%</div>
@@ -240,8 +300,23 @@ export default function OrderAnalyticsDashboard() {
           </section>
 
           <section className="oa-panel">
-            <h3>Top Customers</h3>
-            {!data.topCustomers?.length ? (
+            <div className="oa-panel-head">
+              <h3>Top Customers</h3>
+              <div className="oa-panel-actions">
+                <label className="oa-select-wrap">
+                  <span>Show</span>
+                  <select value={customerLimit} onChange={(e) => setCustomerLimit(Number(e.target.value))}>
+                    <option value={5}>Top 5</option>
+                    <option value={50}>Top 50</option>
+                  </select>
+                </label>
+                <button type="button" className="oa-export-btn" onClick={exportCustomersExcel} disabled={!visibleCustomers.length}>
+                  <Download size={14} />
+                  Export Excel
+                </button>
+              </div>
+            </div>
+            {!visibleCustomers.length ? (
               <p className="oa-empty">No customer orders in this period.</p>
             ) : (
               <div className="oa-table-wrap">
@@ -250,7 +325,7 @@ export default function OrderAnalyticsDashboard() {
                     <tr><th>Customer</th><th>Email</th><th>Orders</th><th>Spend</th></tr>
                   </thead>
                   <tbody>
-                    {data.topCustomers.map((c) => (
+                    {visibleCustomers.map((c) => (
                       <tr key={c.id}>
                         <td>{c.name}</td>
                         <td>{c.email}</td>

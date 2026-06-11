@@ -22,6 +22,47 @@ function getAdminClient() {
   );
 }
 
+function getStockClient() {
+  const url = process.env.VITE_STOCK_SUPABASE_URL;
+  const key = process.env.VITE_STOCK_SUPABASE_KEY;
+  if (!url || !key) return null;
+  return createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } });
+}
+
+async function buildProductCategoryMap(productKeys) {
+  const supabase = getStockClient();
+  const map = {};
+  if (!supabase) return map;
+
+  const ids = [...new Set(productKeys.map((k) => String(k || '').trim()).filter(Boolean))];
+  for (let i = 0; i < ids.length; i += 100) {
+    const chunk = ids.slice(i, i + 100);
+    const { data, error } = await supabase
+      .from('website_stock')
+      .select('sku, category')
+      .in('sku', chunk);
+    if (error) continue;
+    (data || []).forEach((row) => {
+      const label = String(row.category || '').trim();
+      if (row.sku && label) map[row.sku] = label;
+    });
+  }
+  return map;
+}
+
+function resolveCategoryLabel(item, categoryLabels, productCatMap) {
+  const fromItem = item.mainCategoryLabel
+    || categoryLabels[item.mainCategoryId]
+    || categoryLabels[item.categoryId]
+    || categoryLabels[item.category];
+  if (fromItem) return fromItem;
+
+  const fromStock = productCatMap[item.productId] || productCatMap[item.code];
+  if (fromStock) return fromStock;
+
+  return null;
+}
+
 function loadCategoryLabels() {
   try {
     const tree = JSON.parse(readFileSync(join(process.cwd(), 'src/data/categories.json'), 'utf8'));
@@ -118,6 +159,15 @@ export default async function handler(req, res) {
     .sort((a, b) => a.date.localeCompare(b.date))
     .map((row) => ({ ...row, label: formatBucketLabel(row.date, periodDays) }));
 
+  const productKeys = [];
+  orders.forEach((order) => {
+    orderItems(order).forEach((item) => {
+      if (item.productId) productKeys.push(item.productId);
+      if (item.code) productKeys.push(item.code);
+    });
+  });
+  const productCatMap = await buildProductCategoryMap(productKeys);
+
   const productQty = new Map();
   const categoryQty = new Map();
   orders.forEach((order) => {
@@ -127,12 +177,12 @@ export default async function handler(req, res) {
       const qty = Number(item.qty) || 0;
       if (qty <= 0) return;
       const pKey = code;
-      const pRow = productQty.get(pKey) || { code, name, qty: 0 };
+      const pRow = productQty.get(pKey) || { code, name, qty: 0, category: resolveCategoryLabel(item, categoryLabels, productCatMap) || '' };
       pRow.qty += qty;
+      if (!pRow.category) pRow.category = resolveCategoryLabel(item, categoryLabels, productCatMap) || '';
       productQty.set(pKey, pRow);
 
-      const catId = item.mainCategoryId || item.categoryId || item.category || '';
-      const catLabel = item.mainCategoryLabel || categoryLabels[catId] || catId || 'Uncategorised';
+      const catLabel = resolveCategoryLabel(item, categoryLabels, productCatMap) || 'Uncategorised';
       const cRow = categoryQty.get(catLabel) || { label: catLabel, qty: 0 };
       cRow.qty += qty;
       categoryQty.set(catLabel, cRow);
@@ -145,9 +195,9 @@ export default async function handler(req, res) {
   const viewCounts = (type) => {
     const map = new Map();
     events.filter((e) => e.event_type === type).forEach((e) => {
-      const key = e.entity_id || e.entity_label || 'unknown';
-      const label = e.entity_label || key;
-      const row = map.get(key) || { id: key, label, views: 0 };
+      const label = (e.entity_label || e.entity_id || 'unknown').trim();
+      const key = label.toLowerCase();
+      const row = map.get(key) || { id: e.entity_id || key, label, views: 0 };
       row.views += 1;
       map.set(key, row);
     });
@@ -185,7 +235,7 @@ export default async function handler(req, res) {
     row.spend += Number(o.total_ex_vat) || 0;
     customerSpend.set(o.customer_id, row);
   });
-  const topCustomers = [...customerSpend.values()].sort((a, b) => b.spend - a.spend || b.orders - a.orders).slice(0, 10);
+  const topCustomers = [...customerSpend.values()].sort((a, b) => b.spend - a.spend || b.orders - a.orders).slice(0, 50);
 
   const approvedCustomers = (customersRes.data || []).filter((c) => c.is_approved);
 
