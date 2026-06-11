@@ -1,3 +1,4 @@
+import { requireAdminKey } from './_admin-auth.js';
 import { createClient } from '@supabase/supabase-js';
 
 function getClient() {
@@ -13,6 +14,7 @@ function stripExt(value) {
 }
 
 export default async function handler(req, res) {
+  if (!requireAdminKey(req, res)) return;
   res.setHeader('Cache-Control', 'no-store');
   if (req.method !== 'POST') return res.status(405).end();
 

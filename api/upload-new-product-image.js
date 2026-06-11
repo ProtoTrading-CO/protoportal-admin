@@ -1,3 +1,4 @@
+import { requireAdminKey } from './_admin-auth.js';
 // Dedicated image upload for new/dormant products.
 // Uses the MAIN Supabase project (VITE_SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY)
 // which has a proper JWT service-role key that Storage accepts.
@@ -16,6 +17,7 @@ function getClient() {
 }
 
 export default async function handler(req, res) {
+  if (!requireAdminKey(req, res)) return;
   res.setHeader('Cache-Control', 'no-store');
   if (req.method !== 'POST') return res.status(405).end();
 

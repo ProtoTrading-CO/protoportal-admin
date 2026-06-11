@@ -1,3 +1,4 @@
+import { requireAdminKey } from './_admin-auth.js';
 import { createClient } from '@supabase/supabase-js';
 import { readFileSync } from 'fs';
 import { join } from 'path';
@@ -109,6 +110,7 @@ function formatBucketLabel(key, periodDays) {
 }
 
 export default async function handler(req, res) {
+  if (!requireAdminKey(req, res)) return;
   if (req.method !== 'GET') return res.status(405).end();
   res.setHeader('Cache-Control', 'no-store');
 

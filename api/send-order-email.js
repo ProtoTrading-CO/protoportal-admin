@@ -1,3 +1,4 @@
+import { requireAdminOrOrderToken } from './_admin-auth.js';
 import { createClient } from '@supabase/supabase-js';
 import { isVictorSender, CUSTOMER_SEND_FORBIDDEN } from './_fulfillment-auth.js';
 import { advanceOrderStatus } from './_order-status.js';
@@ -10,6 +11,25 @@ function getAdminClient() {
   );
 }
 
+function escapeHtml(value, fallback = '') {
+  return String(value ?? fallback)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function safeImageUrl(url) {
+  try {
+    const parsed = new URL(String(url || ''));
+    if (parsed.protocol !== 'https:') return '';
+    return escapeHtml(parsed.href);
+  } catch {
+    return '';
+  }
+}
+
 function buildEmailHtml({ customerName, orderNumber, orderDate, items, autoNotes, userNotes, assignedTo, total }) {
   const dateStr = orderDate
     ? new Date(orderDate).toLocaleDateString('en-ZA', { day: 'numeric', month: 'long', year: 'numeric' })
@@ -19,14 +39,15 @@ function buildEmailHtml({ customerName, orderNumber, orderDate, items, autoNotes
   const allNotes = [autoNotes, userNotes].filter(Boolean).join('\n\n');
 
   const itemRows = items.map((item) => {
+    const imgUrl = safeImageUrl(item.image);
     if (item.removed) {
       return `
         <tr style="background:#fff5f5;border-bottom:1px solid #fee2e2;">
           <td style="padding:8px 12px">
-            ${item.image ? `<img src="${item.image}" alt="" style="width:48px;height:48px;object-fit:contain;border-radius:6px;background:#f3f4f6;mix-blend-mode:multiply">` : '<div style="width:48px;height:48px;background:#f3f4f6;border-radius:6px"></div>'}
+            ${imgUrl ? `<img src="${imgUrl}" alt="" style="width:48px;height:48px;object-fit:contain;border-radius:6px;background:#f3f4f6;mix-blend-mode:multiply">` : '<div style="width:48px;height:48px;background:#f3f4f6;border-radius:6px"></div>'}
           </td>
-          <td style="padding:10px 12px;font-weight:700;font-size:12px;color:#94a3b8;text-decoration:line-through">${item.code || '—'}</td>
-          <td style="padding:10px 12px;font-size:13px;color:#94a3b8;text-decoration:line-through">${item.name || '—'}</td>
+          <td style="padding:10px 12px;font-weight:700;font-size:12px;color:#94a3b8;text-decoration:line-through">${escapeHtml(item.code, '—')}</td>
+          <td style="padding:10px 12px;font-size:13px;color:#94a3b8;text-decoration:line-through">${escapeHtml(item.name, '—')}</td>
           <td style="padding:10px 12px;text-align:center;font-size:13px;color:#94a3b8;text-decoration:line-through">${item.originalQty ?? item.qty}</td>
           <td style="padding:10px 12px;text-align:center"><span style="font-size:11px;font-weight:700;color:#dc2626;background:#fee2e2;padding:3px 8px;border-radius:4px">OUT OF STOCK</span></td>
           ${hasPrice ? '<td style="padding:10px 12px;text-align:right;color:#94a3b8">—</td>' : ''}
@@ -37,11 +58,11 @@ function buildEmailHtml({ customerName, orderNumber, orderDate, items, autoNotes
     return `
       <tr style="background:${qtyChanged ? '#fffbeb' : 'transparent'};border-bottom:1px solid #f1f5f9;">
         <td style="padding:8px 12px">
-          ${item.image ? `<img src="${item.image}" alt="" style="width:48px;height:48px;object-fit:contain;border-radius:6px;background:#f3f4f6;mix-blend-mode:multiply">` : '<div style="width:48px;height:48px;background:#f3f4f6;border-radius:6px"></div>'}
+          ${imgUrl ? `<img src="${imgUrl}" alt="" style="width:48px;height:48px;object-fit:contain;border-radius:6px;background:#f3f4f6;mix-blend-mode:multiply">` : '<div style="width:48px;height:48px;background:#f3f4f6;border-radius:6px"></div>'}
         </td>
-        <td style="padding:10px 12px;font-weight:700;font-size:12px;color:#64748b">${item.code || '—'}</td>
+        <td style="padding:10px 12px;font-weight:700;font-size:12px;color:#64748b">${escapeHtml(item.code, '—')}</td>
         <td style="padding:10px 12px;font-size:13px">
-          ${item.name || '—'}
+          ${escapeHtml(item.name, '—')}
           ${item.swapped ? '<span style="margin-left:8px;font-size:10px;font-weight:700;color:#2563eb;background:#dbeafe;padding:2px 6px;border-radius:4px">SUBSTITUTED</span>' : ''}
           ${qtyChanged ? '<span style="margin-left:8px;font-size:10px;font-weight:700;color:#92400e;background:#fef3c7;padding:2px 6px;border-radius:4px">QTY CHANGED</span>' : ''}
         </td>
@@ -56,7 +77,7 @@ function buildEmailHtml({ customerName, orderNumber, orderDate, items, autoNotes
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Order ${orderNumber} — Proto Trading</title>
+<title>Order ${escapeHtml(orderNumber)} — Proto Trading</title>
 </head>
 <body style="margin:0;padding:0;background:#f8fafc;font-family:Arial,Helvetica,sans-serif">
 <div style="max-width:600px;margin:32px auto;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 2px 16px rgba(0,0,0,0.08)">
@@ -64,11 +85,11 @@ function buildEmailHtml({ customerName, orderNumber, orderDate, items, autoNotes
   <div style="background:#0f172a;padding:28px 32px">
     <div style="color:#4ade80;font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;margin-bottom:6px">Proto Trading</div>
     <h1 style="color:#ffffff;margin:0;font-size:22px;font-weight:800">Order Confirmation</h1>
-    <div style="color:#94a3b8;font-size:13px;margin-top:6px">${orderNumber}${dateStr ? ` &nbsp;·&nbsp; ${dateStr}` : ''}</div>
+    <div style="color:#94a3b8;font-size:13px;margin-top:6px">${escapeHtml(orderNumber)}${dateStr ? ` &nbsp;·&nbsp; ${dateStr}` : ''}</div>
   </div>
 
   <div style="padding:28px 32px">
-    <p style="color:#374151;font-size:15px;margin:0 0 20px">Hi <strong>${customerName || 'there'}</strong>,</p>
+    <p style="color:#374151;font-size:15px;margin:0 0 20px">Hi <strong>${escapeHtml(customerName, 'there')}</strong>,</p>
     <p style="color:#374151;font-size:14px;margin:0 0 24px;line-height:1.6">
       Thank you for your order. Please find your confirmed order summary below.
       ${items.some((i) => i.removed) ? '<br><span style="color:#dc2626;font-weight:700">Some items marked OUT OF STOCK are not included in your confirmed order.</span>' : ''}
@@ -98,12 +119,12 @@ function buildEmailHtml({ customerName, orderNumber, orderDate, items, autoNotes
     ${allNotes ? `
     <div style="margin-top:24px;padding:14px 16px;background:#f8fafc;border-radius:8px;border-left:3px solid #0f172a">
       <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px">Order Notes</div>
-      <div style="font-size:13px;color:#374151;line-height:1.6;white-space:pre-wrap">${allNotes}</div>
+      <div style="font-size:13px;color:#374151;line-height:1.6;white-space:pre-wrap">${escapeHtml(allNotes)}</div>
     </div>` : ''}
 
     ${assignedTo ? `
     <div style="margin-top:16px;font-size:12px;color:#94a3b8">
-      Handled by: <strong style="color:#374151">${assignedTo}</strong>
+      Handled by: <strong style="color:#374151">${escapeHtml(assignedTo)}</strong>
     </div>` : ''}
 
     <p style="margin:32px 0 0;font-size:14px;color:#374151;line-height:1.6">
@@ -120,6 +141,7 @@ function buildEmailHtml({ customerName, orderNumber, orderDate, items, autoNotes
 }
 
 export default async function handler(req, res) {
+  if (!requireAdminOrOrderToken(req, res)) return;
   if (req.method !== 'POST') return res.status(405).end();
 
   const { to, orderId, customerName, orderNumber, orderDate, items = [], autoNotes, userNotes, assignedTo, total, senderUserId, senderName } = req.body || {};

@@ -37,4 +37,42 @@ export function buildCategoryPath(category, subLabels = []) {
   return path;
 }
 
+function normalizeLabel(label) {
+  return String(label || '').trim().toLowerCase();
+}
+
+/**
+ * Resolve a product row's labels to the *current* taxonomy node ids.
+ * Taxonomy ids stay stable across rename, but product rows store the live
+ * labels, so we must walk the tree by label match to get the right ids.
+ */
+export function resolveCategoryIdsFromTree(row, tree) {
+  const fallback = () => {
+    const ids = [];
+    if (row.category) ids.push(labelToSlug(row.category));
+    for (const col of ['subcategory_one', 'subcategory_two', 'subcategory_three', 'subcategory_four']) {
+      if (row[col]) ids.push(labelToSlug(row[col])); else break;
+    }
+    return { categoryId: ids[0] || '', categoryPath: ids };
+  };
+
+  if (!Array.isArray(tree) || !tree.length) return fallback();
+
+  const labels = [row.category, row.subcategory_one, row.subcategory_two, row.subcategory_three, row.subcategory_four];
+  const ids = [];
+  let level = tree;
+  for (const rawLabel of labels) {
+    if (!rawLabel) break;
+    const target = normalizeLabel(rawLabel);
+    const node = (level || []).find((n) => normalizeLabel(n.label) === target);
+    if (!node) {
+      ids.push(labelToSlug(rawLabel));
+      break;
+    }
+    ids.push(node.id);
+    level = node.children || [];
+  }
+  return { categoryId: ids[0] || '', categoryPath: ids };
+}
+
 export { categories };

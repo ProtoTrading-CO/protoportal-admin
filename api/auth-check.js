@@ -1,8 +1,9 @@
 import { requireAdminKey } from './_admin-auth.js';
+
+/** Validates the dashboard key supplied at login. */
 export default async function handler(req, res) {
-  if (!requireAdminKey(req, res)) return;
   res.setHeader('Cache-Control', 'no-store');
   if (req.method !== 'POST') return res.status(405).end();
-  // website_stock has no sort_order column — reorder is client-side only
-  return res.status(200).json({ ok: true, skipped: true });
+  if (!requireAdminKey(req, res)) return;
+  return res.status(200).json({ ok: true });
 }

@@ -46,7 +46,7 @@ import {
   X,
   Zap,
 } from 'lucide-react';
-import * as XLSX from 'xlsx';
+// xlsx is loaded on demand in the export handlers — keeps it out of the main bundle
 import {
   archiveProduct,
   bulkArchiveProducts,
@@ -78,7 +78,7 @@ import {
   renameTaxonomyNode,
   subcategoryOptionsFromTree,
 } from '../lib/taxonomyAdmin';
-import { approveCustomer, deleteCustomer, fetchAllCustomers, fetchCustomersPage, updateCustomerAdmin } from '../lib/customers';
+import { approveCustomer, deleteCustomer, fetchCustomersPage } from '../lib/customers';
 import { supabase } from '../lib/supabase';
 import { buildOrderNoteSections, createEmailOrderItems, generateOrderPdfBase64 } from '../lib/orderDocuments';
 import { deleteOrderAdmin, fetchAllOrdersAdmin, updateOrderAdmin, advanceOrderWorkflow } from '../lib/orders';
@@ -1230,6 +1230,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const exportLiveXlsx = async () => {
     setSaving('export-live');
     try {
+      const XLSX = await import('xlsx');
       const data = await fetchAdminProductsPage({ page: 1, pageSize: 999999, searchQuery: '', categoryFilter: 'all' });
       const all = data.rows;
       const wb = XLSX.utils.book_new();
@@ -1288,6 +1289,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const exportArchiveXlsx = async () => {
     setSaving('export-archive');
     try {
+      const XLSX = await import('xlsx');
       const data = await fetchAdminProductsPage({ page: 1, pageSize: 999999, searchQuery: archiveSearch, archived: true });
       const ws = XLSX.utils.json_to_sheet(data.rows.map(toXlsxRow));
       const wb = XLSX.utils.book_new();

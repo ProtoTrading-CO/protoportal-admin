@@ -4282,5 +4282,24 @@ html, body { background: #f5f5f5; color: #111827; }
 .oa-wa-notify-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
 .oa-wa-notify-meta { font-size: 11px; font-weight: 600; opacity: 0.85; }
 .oa-wa-notify-msg { margin: 0 0 8px; line-height: 1.45; }
+.oa-wa-notify-msg--warn { color: #92400e; font-weight: 600; }
 .oa-wa-notify-errors { margin: 0; padding-left: 18px; font-size: 12px; line-height: 1.5; }
 .oa-wa-notify code { font-size: 11px; background: rgba(0,0,0,0.06); padding: 1px 5px; border-radius: 4px; }
+.oa-wa-notify-retry {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border: 1px solid currentColor;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  opacity: 0.85;
+}
+.oa-wa-notify-retry:hover:not(:disabled) { opacity: 1; }
+.oa-wa-notify-retry:disabled { opacity: 0.5; cursor: not-allowed; }
+.oa-wa-notify--muted { flex-wrap: wrap; }

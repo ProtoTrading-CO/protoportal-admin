@@ -1,3 +1,4 @@
+import { requireAdminOrOrderToken } from './_admin-auth.js';
 import { readSiteConfigJson, writeSiteConfigJson, getPortalAdminClient } from './_site-config.js';
 import { advanceOrderStatus } from './_order-status.js';
 
@@ -10,6 +11,7 @@ function emptyProgress(orderId) {
 }
 
 export default async function handler(req, res) {
+  if (!requireAdminOrOrderToken(req, res)) return;
   res.setHeader('Cache-Control', 'no-store');
   const { orderId } = req.method === 'GET' ? req.query : (req.body || {});
 

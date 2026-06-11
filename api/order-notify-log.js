@@ -1,6 +1,8 @@
+import { requireAdminOrOrderToken } from './_admin-auth.js';
 import { readOrderNotifyLog } from './_site-config.js';
 
 export default async function handler(req, res) {
+  if (!requireAdminOrOrderToken(req, res)) return;
   res.setHeader('Cache-Control', 'no-store');
   if (req.method !== 'GET') return res.status(405).end();
 

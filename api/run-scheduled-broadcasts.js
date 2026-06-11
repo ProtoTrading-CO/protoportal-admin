@@ -1,3 +1,4 @@
+import { requireCronOrAdminKey } from './_admin-auth.js';
 import { readSiteConfigJson, writeSiteConfigJson } from './_site-config.js';
 import {
   applyContactFilters,
@@ -54,6 +55,7 @@ async function sendBroadcast({ templateName, broadcastName, businessTypes, joine
 }
 
 export default async function handler(req, res) {
+  if (!requireCronOrAdminKey(req, res)) return;
   res.setHeader('Cache-Control', 'no-store');
   if (req.method !== 'GET' && req.method !== 'POST') return res.status(405).end();
 

@@ -1,3 +1,4 @@
+import { requireAdminKey } from './_admin-auth.js';
 import { createClient } from '@supabase/supabase-js';
 
 function getAdminClient() {
@@ -9,6 +10,7 @@ function getAdminClient() {
 }
 
 export default async function handler(req, res) {
+  if (!requireAdminKey(req, res)) return;
   const supabase = getAdminClient();
 
   // GET — list customers by tab
@@ -66,10 +68,19 @@ export default async function handler(req, res) {
     });
   }
 
-  // PATCH — approve / update customer fields
+  // PATCH — approve / update customer fields (allowlisted columns only)
   if (req.method === 'PATCH') {
-    const { id, ...patch } = req.body || {};
+    const ALLOWED_PATCH_FIELDS = new Set([
+      'is_approved', 'tier', 'name', 'email', 'phone', 'business_name',
+      'business_type', 'company_address', 'delivery_address', 'vat_number',
+      'country', 'province', 'city', 'accept_whatsapp',
+    ]);
+    const { id, ...rawPatch } = req.body || {};
     if (!id) return res.status(400).json({ error: 'id required' });
+    const patch = Object.fromEntries(
+      Object.entries(rawPatch).filter(([key]) => ALLOWED_PATCH_FIELDS.has(key)),
+    );
+    if (!Object.keys(patch).length) return res.status(400).json({ error: 'No valid fields to update' });
     const { data, error } = await supabase
       .from('customers')
       .update(patch)

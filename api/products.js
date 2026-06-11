@@ -1,4 +1,6 @@
+import { requireAdminKey } from './_admin-auth.js';
 import { createClient } from '@supabase/supabase-js';
+import { loadTaxonomy, resolveCategoryIds } from './_taxonomy-utils.js';
 
 const PAGE_SIZE = 1000;
 
@@ -19,28 +21,9 @@ async function fetchAllRows(supabase, table, orderBy = 'title') {
   return rows;
 }
 
-function labelToSlug(label) {
-  if (!label) return '';
-  return String(label)
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '');
-}
-
-function buildCategoryPath(category, subLabels = []) {
-  const catSlug = labelToSlug(category);
-  if (!catSlug) return [];
-  const path = [catSlug];
-  for (const sub of subLabels) {
-    if (sub) path.push(labelToSlug(sub));
-  }
-  return path;
-}
-
-function adapt(row) {
+function adapt(row, tree) {
   const images = [row.image_url_one, row.image_url_two, row.image_url_three, row.image_url_four].filter(Boolean);
-  const subLabels = [row.subcategory_one, row.subcategory_two, row.subcategory_three, row.subcategory_four].filter(Boolean);
+  const { categoryId, categoryPath } = resolveCategoryIds(row, tree);
   return {
     id: row.sku,
     code: row.barcode,
@@ -60,9 +43,9 @@ function adapt(row) {
     stockQty: 0,
     stockOnHand: 0,
     colour: '',
-    category: labelToSlug(row.category),
+    category: categoryId,
     categoryLabel: row.category,
-    categoryPath: buildCategoryPath(row.category, subLabels),
+    categoryPath,
     tags: [],
     badges: [],
     isNew: false,
@@ -82,6 +65,7 @@ function adapt(row) {
 }
 
 export default async function handler(req, res) {
+  if (!requireAdminKey(req, res)) return;
   if (req.method !== 'GET') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
@@ -92,8 +76,11 @@ export default async function handler(req, res) {
       process.env.VITE_STOCK_SUPABASE_KEY,
     );
 
-    const rows = await fetchAllRows(supabase, 'website_stock');
-    const products = rows.map(adapt).filter((p) => p.category);
+    const [rows, tree] = await Promise.all([
+      fetchAllRows(supabase, 'website_stock'),
+      loadTaxonomy().catch(() => []),
+    ]);
+    const products = rows.map((r) => adapt(r, tree)).filter((p) => p.category);
 
     res.setHeader('Cache-Control', 's-maxage=60, stale-while-revalidate=3600');
     res.setHeader('Content-Type', 'application/json');

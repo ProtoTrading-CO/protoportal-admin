@@ -1,6 +1,5 @@
-import { supabaseStock } from './supabaseStock';
 import { adminProductSearch, fuzzyFilter } from './fuzzySearch';
-import { buildCategoryPath, labelToSlug, slugToLabel } from './taxonomy';
+import { labelToSlug, resolveCategoryIdsFromTree, slugToLabel } from './taxonomy';
 
 function matchesMainCategory(product, mainCategory) {
   if (!mainCategory || mainCategory === 'all') return true;
@@ -53,38 +52,21 @@ export const DORMANT_ARCHIVED_BY = 'new-products';
 /** Soft-deleted from Product Manager — restorable from Recycle Bin */
 export const RECYCLE_ARCHIVED_BY = 'recycle-bin';
 
-function isDormantArchive(row) {
-  return row?.archived_by === DORMANT_ARCHIVED_BY;
+async function stockAction(body) {
+  const res = await fetch('/api/stock-actions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json.error || 'Stock action failed');
+  return json;
 }
 
-function isRecycleArchive(row) {
-  return row?.archived_by === RECYCLE_ARCHIVED_BY;
-}
-
-function isCatalogArchive(row) {
-  return !isDormantArchive(row) && !isRecycleArchive(row);
-}
-
-async function fetchAllRows(table, selectCols = '*', extraFilter = null, orderBy = null) {
-  const rows = [];
-  let from = 0;
-  while (true) {
-    let q = supabaseStock.from(table).select(selectCols);
-    if (orderBy) q = q.order(orderBy, { ascending: true });
-    q = q.range(from, from + PAGE_SIZE - 1);
-    if (extraFilter) q = extraFilter(q);
-    const { data, error } = await q;
-    if (error) throw error;
-    rows.push(...(data || []));
-    if ((data || []).length < PAGE_SIZE) break;
-    from += PAGE_SIZE;
-  }
-  return rows;
-}
-
-function adapt(row, { archived = false } = {}) {
+function adapt(row, { archived = false, tree = null } = {}) {
   const images = [row.image_url_one, row.image_url_two, row.image_url_three, row.image_url_four].filter(Boolean);
   const subLabels = [row.subcategory_one, row.subcategory_two, row.subcategory_three, row.subcategory_four].filter(Boolean);
+  const { categoryId, categoryPath } = resolveCategoryIdsFromTree(row, tree);
   return {
     id: row.sku,
     code: row.barcode,
@@ -105,9 +87,9 @@ function adapt(row, { archived = false } = {}) {
     stockQty: 0,
     stockOnHand: 0,
     colour: '',
-    category: labelToSlug(row.category),
+    category: categoryId,
     categoryLabel: row.category,
-    categoryPath: buildCategoryPath(row.category, subLabels),
+    categoryPath,
     subcategoryLabels: subLabels,
     tags: [],
     badges: [],
@@ -129,32 +111,24 @@ function adapt(row, { archived = false } = {}) {
 
 async function loadLiveFromDB({ onProgress } = {}) {
   onProgress?.(10);
-  const rows = await fetchAllRows('website_stock', '*', null, 'title');
+  const { rows, tree } = await stockAction({ action: 'listLive' });
   onProgress?.(100);
-  return rows.map((r) => adapt(r));
+  return (rows || []).map((r) => adapt(r, { tree }));
 }
 
 async function loadArchivedFromDB({ dormantOnly = false, catalogOnly = false, recycleOnly = false } = {}) {
-  let rows;
+  let payload;
   if (recycleOnly) {
-    rows = await fetchAllRows(
-      'archived_products',
-      '*',
-      (q) => q.eq('archived_by', RECYCLE_ARCHIVED_BY),
-      'archived_at',
-    );
+    payload = await stockAction({ action: 'listArchived', archivedBy: RECYCLE_ARCHIVED_BY });
   } else if (dormantOnly) {
-    rows = await fetchAllRows(
-      'archived_products',
-      '*',
-      (q) => q.eq('archived_by', DORMANT_ARCHIVED_BY),
-      'archived_at',
-    );
+    payload = await stockAction({ action: 'listArchived', archivedBy: DORMANT_ARCHIVED_BY });
+  } else if (catalogOnly) {
+    payload = await stockAction({ action: 'listArchived', excludeArchivedBy: [DORMANT_ARCHIVED_BY, RECYCLE_ARCHIVED_BY] });
   } else {
-    rows = await fetchAllRows('archived_products', '*', null, 'archived_at');
-    if (catalogOnly) rows = rows.filter(isCatalogArchive);
+    payload = await stockAction({ action: 'listArchived' });
   }
-  return rows.map((r) => adapt(r, { archived: true }));
+  const { rows, tree } = payload;
+  return (rows || []).map((r) => adapt(r, { archived: true, tree }));
 }
 
 function getAllCachedAdmin(onProgress) {
@@ -446,8 +420,7 @@ export async function createProduct(payload) {
     price: Number(payload.price) || 0,
   };
 
-  const { error } = await supabaseStock.from('website_stock').insert(row);
-  if (error) throw error;
+  await stockAction({ action: 'create', row });
   invalidateProductCache();
   invalidateAdminCache();
 }
@@ -486,11 +459,9 @@ export async function updateProduct(sku, payload) {
 
 export async function archiveProduct(sku, shouldArchive = true) {
   if (shouldArchive) {
-    const { error } = await supabaseStock.rpc('archive_product', { p_sku: sku, p_by: 'product-manager' });
-    if (error) throw error;
+    await stockAction({ action: 'archive', sku, by: 'product-manager' });
   } else {
-    const { error } = await supabaseStock.rpc('unarchive_product', { p_sku: sku });
-    if (error) throw error;
+    await stockAction({ action: 'unarchive', sku });
   }
   invalidateProductCache();
   invalidateAdminCache();
@@ -498,22 +469,16 @@ export async function archiveProduct(sku, shouldArchive = true) {
 
 export async function recycleProduct(sku, { fromArchive = false } = {}) {
   if (fromArchive) {
-    const { error } = await supabaseStock
-      .from('archived_products')
-      .update({ archived_by: RECYCLE_ARCHIVED_BY, archived_at: new Date().toISOString() })
-      .eq('sku', sku);
-    if (error) throw error;
+    await stockAction({ action: 'recycleFromArchive', sku, archivedBy: RECYCLE_ARCHIVED_BY });
   } else {
-    const { error } = await supabaseStock.rpc('archive_product', { p_sku: sku, p_by: RECYCLE_ARCHIVED_BY });
-    if (error) throw error;
+    await stockAction({ action: 'archive', sku, by: RECYCLE_ARCHIVED_BY });
   }
   invalidateProductCache();
   invalidateAdminCache();
 }
 
 export async function restoreRecycledProduct(sku) {
-  const { error } = await supabaseStock.rpc('unarchive_product', { p_sku: sku });
-  if (error) throw error;
+  await stockAction({ action: 'unarchive', sku });
   invalidateProductCache();
   invalidateAdminCache();
 }

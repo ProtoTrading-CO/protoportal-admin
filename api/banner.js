@@ -1,3 +1,4 @@
+import { requireAdminKey } from './_admin-auth.js';
 import { readSiteConfigJson, writeSiteConfigJson } from './_site-config.js';
 
 const FILE = 'banner.json';
@@ -8,6 +9,7 @@ const DEFAULTS = {
 };
 
 export default async function handler(req, res) {
+  if (!requireAdminKey(req, res)) return;
   res.setHeader('Cache-Control', 'no-store');
 
   if (req.method === 'GET') {

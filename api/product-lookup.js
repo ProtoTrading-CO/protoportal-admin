@@ -1,5 +1,6 @@
+import { requireAdminOrOrderToken } from './_admin-auth.js';
 import { createClient } from '@supabase/supabase-js';
-import { labelToSlug } from './_taxonomy-utils.js';
+import { loadTaxonomy, resolveCategoryIds } from './_taxonomy-utils.js';
 
 function getStockClient() {
   return createClient(
@@ -10,6 +11,7 @@ function getStockClient() {
 }
 
 export default async function handler(req, res) {
+  if (!requireAdminOrOrderToken(req, res)) return;
   res.setHeader('Cache-Control', 'no-store');
   if (req.method !== 'POST') return res.status(405).end();
 
@@ -18,16 +20,20 @@ export default async function handler(req, res) {
 
   try {
     const supabase = getStockClient();
-    const { data, error } = await supabase
-      .from('website_stock')
-      .select('sku, category')
-      .in('sku', ids);
+    const [{ data, error }, tree] = await Promise.all([
+      supabase
+        .from('website_stock')
+        .select('sku, category, subcategory_one, subcategory_two, subcategory_three, subcategory_four')
+        .in('sku', ids),
+      loadTaxonomy().catch(() => []),
+    ]);
     if (error) throw error;
 
     const map = {};
     (data || []).forEach((row) => {
+      const { categoryId } = resolveCategoryIds(row, tree);
       map[row.sku] = {
-        category: labelToSlug(row.category),
+        category: categoryId,
         categoryLabel: row.category || 'Other',
       };
     });

@@ -1,3 +1,4 @@
+import { requireAdminOrOrderToken } from './_admin-auth.js';
 import { createClient } from '@supabase/supabase-js';
 import { advanceOrderStatus, normalizeOrderStatus } from './_order-status.js';
 import { isVictorSender, PAYMENT_RECEIVED_FORBIDDEN } from './_fulfillment-auth.js';
@@ -11,6 +12,7 @@ function getAdminClient() {
 }
 
 export default async function handler(req, res) {
+  if (!requireAdminOrOrderToken(req, res)) return;
   const supabase = getAdminClient();
 
   // GET — list orders (service role bypasses RLS)

@@ -92,6 +92,48 @@ export function labelsToDbFields(labels) {
   };
 }
 
+function normalizeLabel(label) {
+  return String(label || '').trim().toLowerCase();
+}
+
+/**
+ * Resolve the current taxonomy ids for a product row's labels.
+ * Taxonomy node ids stay stable across rename, but the labels stored in the
+ * DB rows change. Filtering / URL generation must use the *current* ids, not
+ * a slug derived from the new label.
+ *
+ * Falls back to slug-of-label when a label has no match in the tree (e.g.
+ * a freshly imported product whose category was removed from the taxonomy).
+ */
+export function resolveCategoryIds(row, tree) {
+  if (!Array.isArray(tree) || !tree.length) {
+    // No tree available — fall back to slug-of-label so the catalogue keeps loading
+    const ids = [];
+    if (row.category) ids.push(labelToSlug(row.category));
+    for (const col of SUB_COLS) {
+      if (row[col]) ids.push(labelToSlug(row[col])); else break;
+    }
+    return { categoryId: ids[0] || '', categoryPath: ids };
+  }
+
+  const labels = [row.category, row.subcategory_one, row.subcategory_two, row.subcategory_three, row.subcategory_four];
+  const ids = [];
+  let level = tree;
+  for (const rawLabel of labels) {
+    if (!rawLabel) break;
+    const target = normalizeLabel(rawLabel);
+    const node = (level || []).find((n) => normalizeLabel(n.label) === target);
+    if (!node) {
+      // Couldn't resolve this depth — fall back to slug for remainder
+      ids.push(labelToSlug(rawLabel));
+      break;
+    }
+    ids.push(node.id);
+    level = node.children || [];
+  }
+  return { categoryId: ids[0] || '', categoryPath: ids };
+}
+
 const SUB_COLS = ['subcategory_one', 'subcategory_two', 'subcategory_three', 'subcategory_four'];
 
 export function buildRenameFilter(ctx, oldLabel) {

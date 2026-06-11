@@ -57,7 +57,18 @@ export async function watiRequest(path, { method = 'GET', body } = {}) {
   return json;
 }
 
-export async function fetchAllWatiContacts() {
+// Module-level caches — WATI contact pagination and the full customer scan are
+// expensive; serverless instances are reused under Fluid Compute so a short
+// TTL cache removes most repeat work.
+const CACHE_TTL_MS = 120_000;
+let _contactsCache = null;
+let _contactsCacheAt = 0;
+let _contactsPromise = null;
+let _phoneMapCache = null;
+let _phoneMapCacheAt = 0;
+let _phoneMapPromise = null;
+
+async function loadAllWatiContacts() {
   const contacts = [];
   let pageNumber = 1;
   const pageSize = 100;
@@ -74,7 +85,21 @@ export async function fetchAllWatiContacts() {
   return contacts;
 }
 
-export async function fetchCustomerPhoneMap() {
+export async function fetchAllWatiContacts({ fresh = false } = {}) {
+  if (!fresh && _contactsCache && Date.now() - _contactsCacheAt < CACHE_TTL_MS) return _contactsCache;
+  if (!_contactsPromise) {
+    _contactsPromise = loadAllWatiContacts()
+      .then((contacts) => {
+        _contactsCache = contacts;
+        _contactsCacheAt = Date.now();
+        return contacts;
+      })
+      .finally(() => { _contactsPromise = null; });
+  }
+  return _contactsPromise;
+}
+
+async function loadCustomerPhoneMap() {
   const supabase = getAdminClient();
   const rows = [];
   let from = 0;
@@ -101,6 +126,20 @@ export async function fetchCustomerPhoneMap() {
     map.set(normalized, row);
   }
   return map;
+}
+
+export async function fetchCustomerPhoneMap({ fresh = false } = {}) {
+  if (!fresh && _phoneMapCache && Date.now() - _phoneMapCacheAt < CACHE_TTL_MS) return _phoneMapCache;
+  if (!_phoneMapPromise) {
+    _phoneMapPromise = loadCustomerPhoneMap()
+      .then((map) => {
+        _phoneMapCache = map;
+        _phoneMapCacheAt = Date.now();
+        return map;
+      })
+      .finally(() => { _phoneMapPromise = null; });
+  }
+  return _phoneMapPromise;
 }
 
 function extractBroadcastName(message = {}) {

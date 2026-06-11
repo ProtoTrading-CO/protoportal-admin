@@ -1,3 +1,4 @@
+import { requireAdminOrOrderToken, requireAdminKey } from './_admin-auth.js';
 import { readSiteConfigJson, writeSiteConfigJson } from './_site-config.js';
 import { defaultFulfillmentUsers } from './_fulfillment-defaults.js';
 
@@ -14,6 +15,10 @@ function normalizeUsers(payload) {
 }
 
 export default async function handler(req, res) {
+  // GET (team list) is allowed via fulfillment order links; writes need the dashboard key.
+  if (req.method === 'GET') {
+    if (!requireAdminOrOrderToken(req, res)) return;
+  } else if (!requireAdminKey(req, res)) return;
   res.setHeader('Cache-Control', 'no-store');
 
   if (req.method === 'GET') {
