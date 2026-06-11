@@ -52,11 +52,15 @@ import {
   createProduct,
   deleteProduct,
   fetchAdminProductsPage,
+  fetchAllProductsAdmin,
+  fetchCatalogArchiveCount,
   fetchDistinctCategories,
   fetchDormantProducts,
   fetchReorderProducts,
   invalidateAdminCache,
   invalidateProductCache,
+  recycleProduct,
+  restoreRecycledProduct,
   saveSortOrder,
   updateProduct,
   uploadDormantImage,
@@ -112,6 +116,7 @@ const sections = [
   { id: 'products', label: 'Product Manager', icon: PackagePlus },
   { id: 'specials', label: "This Week's Specials", icon: Star },
   { id: 'archive', label: 'Archive', icon: Archive },
+  { id: 'recycle', label: 'Recycle Bin', icon: Trash2 },
   { id: 'reorder', label: 'Reorder Grid', icon: Grip },
   { id: 'customers', label: 'Customer Management', icon: Users },
   { id: 'crm', label: 'WhatsApp', icon: MessageCircle },
@@ -355,6 +360,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const singleImageRef = useRef(null);
   const folderImageRef = useRef(null);
 
+  const [productSearchInput, setProductSearchInput] = useState('');
   const [productSearch, setProductSearch] = useState('');
   const [productCategory, setProductCategory] = useState('all');
   const [productSubcategory, setProductSubcategory] = useState('all');
@@ -363,10 +369,21 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const [productRows, setProductRows] = useState([]);
   const [productTotal, setProductTotal] = useState(0);
 
+  const [catalogTotal, setCatalogTotal] = useState(0);
+  const [archiveCatalogTotal, setArchiveCatalogTotal] = useState(0);
+  const [statsCustomerTotal, setStatsCustomerTotal] = useState(0);
+  const [statsOrderTotal, setStatsOrderTotal] = useState(0);
+
   const [archiveSearch, setArchiveSearch] = useState('');
   const [archivePage, setArchivePage] = useState(1);
   const [archiveRows, setArchiveRows] = useState([]);
   const [archiveTotal, setArchiveTotal] = useState(0);
+
+  const [recycleSearch, setRecycleSearch] = useState('');
+  const [recyclePage, setRecyclePage] = useState(1);
+  const [recycleRows, setRecycleRows] = useState([]);
+  const [recycleTotal, setRecycleTotal] = useState(0);
+  const [recycleCatalogTotal, setRecycleCatalogTotal] = useState(0);
 
   const [customerTab, setCustomerTab] = useState('requests');
   const [customerSearch, setCustomerSearch] = useState('');
@@ -382,7 +399,6 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
 
   const [reorderCategory, setReorderCategory] = useState(categories[0]?.id || '');
   const [reorderSubcategory, setReorderSubcategory] = useState('all');
-  const [reorderStatus, setReorderStatus] = useState('active');
   const [reorderProducts, setReorderProducts] = useState([]);
   const [taxonomyTree, setTaxonomyTree] = useState(categories);
   const [toast, setToast] = useState(null);
@@ -462,8 +478,15 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     fetchDistinctCategories().then(setLiveCategories).catch(() => {});
   }, []);
 
-  useEffect(() => { setProductPage(1); }, [productSearch, productCategory, productSubcategory, productPageSize]);
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setProductSearch(productSearchInput.trim());
+      setProductPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [productSearchInput]);
   useEffect(() => { setArchivePage(1); }, [archiveSearch]);
+  useEffect(() => { setRecyclePage(1); }, [recycleSearch]);
   useEffect(() => { setCustomerPage(1); }, [customerTab, customerSearch]);
   useEffect(() => { if (activeSection === 'crm') void loadCrmCustomers(1); }, [crmFilters.businessTypes.join('|'), crmFilters.joinedStatuses.join('|'), crmSearch]);
   useEffect(() => { if (activeSection === 'crm' && !crmTemplates.length && !crmTemplatesLoading) void loadCrmTemplates(); }, [activeSection, crmTemplates.length, crmTemplatesLoading]);
@@ -592,6 +615,43 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     } finally { setLoadingProgress(null); }
   };
 
+  const loadRecycle = async () => {
+    setLoadingProgress(0);
+    setLoadingError('');
+    try {
+      const data = await fetchAdminProductsPage({ page: recyclePage, pageSize: ADMIN_PAGE_SIZE, searchQuery: recycleSearch, recycled: true, onProgress: setLoadingProgress });
+      setRecycleRows(data.rows);
+      setRecycleTotal(data.total);
+      setRecycleCatalogTotal(data.total);
+    } catch (err) {
+      setLoadingError(err.message || 'Failed to load recycle bin');
+    } finally { setLoadingProgress(null); }
+  };
+
+  const refreshDashboardStats = async () => {
+    try {
+      const [products, archiveCount, customers, orders] = await Promise.all([
+        fetchAllProductsAdmin(),
+        fetchCatalogArchiveCount(),
+        fetchAllCustomers(),
+        fetchAllOrdersAdmin(10000),
+      ]);
+      setCatalogTotal(products.length);
+      setArchiveCatalogTotal(archiveCount);
+      setStatsCustomerTotal(customers.length);
+      setStatsOrderTotal(orders.length);
+    } catch {
+      // Stats are best-effort; section loads still work if this fails.
+    }
+  };
+
+  const refreshRecycleCatalogCount = async () => {
+    try {
+      const data = await fetchAdminProductsPage({ page: 1, pageSize: 1, recycled: true });
+      setRecycleCatalogTotal(data.total);
+    } catch {}
+  };
+
   const loadCustomers = async () => {
     setLoading(true);
     try {
@@ -605,7 +665,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     setLoading(true);
     try {
       if (target === 'pricing') {
-        const rows = await fetchReorderProducts({ mainCategory: categoryId, status: 'active' });
+        const rows = await fetchReorderProducts({ mainCategory: categoryId });
         setPricingProducts(rows);
       }
       if (target === 'reorder') {
@@ -621,7 +681,6 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
       const rows = await fetchReorderProducts({
         mainCategory: reorderCategory,
         subcategoryId: reorderSubcategory !== 'all' ? reorderSubcategory : null,
-        status: reorderStatus,
       });
       setReorderProducts(applySavedOrder(rows, reorderCategory));
     } catch (err) {
@@ -647,13 +706,23 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   };
 
   useEffect(() => { if (activeSection === 'new-products') void loadDormant(); }, [activeSection, dormantSearch]);
-  useEffect(() => { if (activeSection === 'products') void loadProducts(); }, [activeSection, productPage, productSearch, productCategory, productSubcategory]);
+  useEffect(() => { if (activeSection === 'products') void loadProducts(); }, [activeSection, productPage, productSearch, productCategory, productSubcategory, productPageSize]);
   useEffect(() => { setProductSelectedIds(new Set()); }, [productPage, productSearch, productCategory, productSubcategory]);
   useEffect(() => { if (activeSection === 'archive') void loadArchive(); }, [activeSection, archivePage, archiveSearch]);
+  useEffect(() => { if (activeSection === 'recycle') void loadRecycle(); }, [activeSection, recyclePage, recycleSearch]);
+  useEffect(() => {
+    void refreshDashboardStats();
+    void refreshRecycleCatalogCount();
+  }, []);
+  useEffect(() => {
+    if (activeSection === 'products' || activeSection === 'archive' || activeSection === 'recycle') {
+      window.scrollTo({ top: 0, behavior: 'auto' });
+    }
+  }, [productPage, archivePage, recyclePage, activeSection]);
   useEffect(() => { if (activeSection === 'customers') void loadCustomers(); }, [activeSection, customerPage, customerTab, customerSearch]);
   useEffect(() => { if (activeSection === 'pricing') void loadCategoryWorkingSet(pricingCategory, 'pricing'); }, [activeSection, pricingCategory]);
   useEffect(() => { void reloadTaxonomy(); }, []);
-  useEffect(() => { if (activeSection === 'reorder') void loadReorderProducts(); }, [activeSection, reorderCategory, reorderSubcategory, reorderStatus]);
+  useEffect(() => { if (activeSection === 'reorder') void loadReorderProducts(); }, [activeSection, reorderCategory, reorderSubcategory]);
   useEffect(() => { if (activeSection === 'orders' && orders.length === 0) void loadOrders(); }, [activeSection]);
   useEffect(() => { if (activeSection === 'crm' && !crmAllCustomers.length && !crmLoading) void loadCrmCustomers(1); }, [activeSection]);
   useEffect(() => { if (activeSection === 'analytics' && !analyticsData && !analyticsLoading && !analyticsError) void loadAnalytics(); }, [activeSection]);
@@ -752,12 +821,11 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   };
 
   const stats = useMemo(() => ({
-    products: productTotal,
-    archived: archiveTotal,
-    customers: customerTotal,
-    premiumVisible: customerRows.filter((item) => item.tier === 'premium').length,
-    orders: orders.length,
-  }), [productTotal, archiveTotal, customerTotal, customerRows, orders]);
+    products: catalogTotal,
+    archived: archiveCatalogTotal,
+    customers: statsCustomerTotal,
+    orders: statsOrderTotal,
+  }), [catalogTotal, archiveCatalogTotal, statsCustomerTotal, statsOrderTotal]);
 
   const orderRows = useMemo(() => {
     const q = orderSearch.trim().toLowerCase();
@@ -839,9 +907,10 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   };
 
   const refreshCurrentSection = async () => {
-    if (activeSection === 'products' || activeSection === 'archive') invalidateAdminCache();
+    if (activeSection === 'products' || activeSection === 'archive' || activeSection === 'recycle') invalidateAdminCache();
     if (activeSection === 'products') return loadProducts();
     if (activeSection === 'archive') return loadArchive();
+    if (activeSection === 'recycle') return loadRecycle();
     if (activeSection === 'customers') return loadCustomers();
     if (activeSection === 'pricing') return loadCategoryWorkingSet(pricingCategory, 'pricing');
     if (activeSection === 'reorder') return loadReorderProducts();
@@ -906,13 +975,47 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   };
 
   const removeManagedProduct = async (product) => {
-    if (!window.confirm(`Delete "${product.name}" from Product Manager? This cannot be undone.`)) return;
+    if (!window.confirm(`Move "${product.name}" to the Recycle Bin? You can restore it later or delete permanently from there.`)) return;
     setSaving(`del-live-${product.id}`);
     try {
-      await deleteProduct(product.id);
+      await recycleProduct(product.id);
       await loadProducts();
+      await refreshDashboardStats();
+      await refreshRecycleCatalogCount();
       invalidateProductCache();
       invalidateAdminCache();
+      showToast(`"${product.name}" moved to Recycle Bin`);
+    } catch (err) {
+      alert(err.message || 'Failed to move to Recycle Bin');
+    } finally { setSaving(''); }
+  };
+
+  const restoreFromRecycle = async (product) => {
+    if (!window.confirm(`Restore "${product.name}" to the live catalogue?`)) return;
+    setSaving(product.id);
+    try {
+      await restoreRecycledProduct(product.id);
+      invalidateAdminCache();
+      invalidateProductCache();
+      await loadRecycle();
+      await refreshDashboardStats();
+      await refreshRecycleCatalogCount();
+      showToast(`"${product.name}" restored`);
+    } catch (err) {
+      alert(err.message || 'Failed to restore');
+    } finally { setSaving(''); }
+  };
+
+  const permanentlyDeleteRecycled = async (product) => {
+    if (!window.confirm(`Permanently delete "${product.name}"? This cannot be undone.`)) return;
+    setSaving(`perm-del-${product.id}`);
+    try {
+      await deleteProduct(product.id);
+      await loadRecycle();
+      await refreshRecycleCatalogCount();
+      invalidateProductCache();
+      invalidateAdminCache();
+      showToast(`"${product.name}" permanently deleted`);
     } catch (err) {
       alert(err.message || 'Failed to delete');
     } finally { setSaving(''); }
@@ -925,15 +1028,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
       await archiveProduct(product.id, archiving);
       invalidateAdminCache();
       invalidateProductCache();
-      if (archiving) {
-        setProductRows((prev) => prev.filter((p) => p.id !== product.id));
-        setProductTotal((t) => Math.max(0, t - 1));
-        setArchiveTotal((t) => t + 1);
-      } else {
-        setArchiveRows((prev) => prev.filter((p) => p.id !== product.id));
-        setArchiveTotal((t) => Math.max(0, t - 1));
-        setProductTotal((t) => t + 1);
-      }
+      await refreshDashboardStats();
       if (activeSection === 'products') await loadProducts();
       else if (activeSection === 'archive') await loadArchive();
     } catch (err) {
@@ -1204,8 +1299,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
       invalidateProductCache();
       setArchiveConfirmOpen(false);
       setSelectedIds(new Set());
-      setProductTotal((t) => Math.max(0, t - count));
-      setArchiveTotal((t) => t + count);
+      await refreshDashboardStats();
       await loadReorderProducts();
       showToast(`Archived ${count} product(s)`);
     } catch (err) {
@@ -1280,9 +1374,8 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
       invalidateProductCache();
       setProductArchiveConfirmOpen(false);
       setProductSelectedIds(new Set());
-      setProductRows((prev) => prev.filter((p) => !ids.includes(p.id)));
-      setProductTotal((t) => Math.max(0, t - count));
-      setArchiveTotal((t) => t + count);
+      await refreshDashboardStats();
+      await loadProducts();
       showToast(`Archived ${count} product(s)`);
     } catch (err) {
       showToast(err.message || 'Archive failed', 'error');
@@ -1869,18 +1962,18 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                 </div>
 
                 <div className="adm-toolbar" style={{ gridTemplateColumns: '1fr auto auto auto auto' }}>
-                  <label className="adm-search"><Search size={15} /><input value={productSearch} onChange={(e) => setProductSearch(e.target.value)} placeholder="Search by SKU or product name" className="adm-search-input" /></label>
-                  <select value={productCategory} onChange={(e) => { setProductCategory(e.target.value); setProductSubcategory('all'); }} className="adm-select">
+                  <label className="adm-search"><Search size={15} /><input value={productSearchInput} onChange={(e) => setProductSearchInput(e.target.value)} placeholder="Search by SKU or product name" className="adm-search-input" /></label>
+                  <select value={productCategory} onChange={(e) => { setProductCategory(e.target.value); setProductSubcategory('all'); setProductPage(1); }} className="adm-select">
                     <option value="all">All categories</option>
                     {mainCategories.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
                   </select>
                   {productCategory !== 'all' && (
-                    <select value={productSubcategory} onChange={(e) => setProductSubcategory(e.target.value)} className="adm-select">
+                    <select value={productSubcategory} onChange={(e) => { setProductSubcategory(e.target.value); setProductPage(1); }} className="adm-select">
                       <option value="all">All subcategories</option>
                       {subcategoryOptions(productCategory).map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
                     </select>
                   )}
-                  <select value={productPageSize} onChange={(e) => setProductPageSize(Number(e.target.value))} className="adm-select" style={{ width: 90 }}>
+                  <select value={productPageSize} onChange={(e) => { setProductPageSize(Number(e.target.value)); setProductPage(1); }} className="adm-select" style={{ width: 90 }}>
                     <option value={25}>25 / page</option>
                     <option value={50}>50 / page</option>
                     <option value={100}>100 / page</option>
@@ -1913,7 +2006,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                 )}
 
                 <div className="adm-list">
-                  <div className="adm-list-head" style={{ gridTemplateColumns: '32px 36px 2fr 180px 120px' }}>
+                  <div className="adm-list-head" style={{ gridTemplateColumns: '32px 80px 2fr 180px 120px' }}>
                     <span>
                       <input
                         type="checkbox"
@@ -1934,7 +2027,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                       );
                     }
                     acc.push(
-                      <div key={product.id} className="adm-list-row" style={{ gridTemplateColumns: '32px 36px 2fr 180px 120px' }}>
+                      <div key={product.id} className="adm-list-row" style={{ gridTemplateColumns: '32px 80px 2fr 180px 120px' }}>
                         <div>
                           <input
                             type="checkbox"
@@ -1946,8 +2039,8 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center' }}>
                           {product.image
-                            ? <img src={product.image} alt="" style={{ width: 32, height: 32, objectFit: 'contain', borderRadius: 4, background: '#f3f4f6', mixBlendMode: 'multiply' }} />
-                            : <div style={{ width: 32, height: 32, borderRadius: 4, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, color: '#9ca3af' }}>IMG</div>}
+                            ? <img src={product.image} alt="" className="adm-product-thumb" />
+                            : <div className="adm-product-thumb adm-product-thumb--placeholder">IMG</div>}
                         </div>
                         <div>
                           <div style={{ fontWeight: 800, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -1978,7 +2071,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                           <button
                             onClick={() => void removeManagedProduct(product)}
                             className="adm-icon-btn"
-                            title="Delete product"
+                            title="Move to Recycle Bin"
                             disabled={saving === `del-live-${product.id}`}
                             style={{ color: '#c40000' }}
                           >
@@ -2211,6 +2304,71 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
               </div>
             )}
 
+            {/* RECYCLE BIN */}
+            {activeSection === 'recycle' && (
+              <div className="adm-panel">
+                <div className="adm-section-head">
+                  <div>
+                    <h2 className="adm-section-title">Recycle Bin</h2>
+                    <p className="adm-section-note">Deleted products are kept here until restored or permanently removed.</p>
+                  </div>
+                  <span className="adm-pill" style={{ fontSize: 13, padding: '6px 14px' }}>{recycleCatalogTotal} products</span>
+                </div>
+
+                <div className="adm-toolbar" style={{ gridTemplateColumns: '1fr' }}>
+                  <label className="adm-search"><Search size={15} /><input value={recycleSearch} onChange={(e) => setRecycleSearch(e.target.value)} placeholder="Search recycled products" className="adm-search-input" /></label>
+                </div>
+
+                {recycleRows.length === 0 && loadingProgress === null && (
+                  <div className="adm-empty" style={{ padding: '40px 0', textAlign: 'center', color: '#64748b' }}>
+                    Recycle Bin is empty.
+                  </div>
+                )}
+
+                <div className="adm-list">
+                  {recycleRows.length > 0 && (
+                    <div className="adm-list-head" style={{ gridTemplateColumns: '80px 2fr 180px 140px' }}>
+                      <span></span><span>Product</span><span>Stock</span><span>Actions</span>
+                    </div>
+                  )}
+                  {recycleRows.map((product) => (
+                    <div key={product.id} className="adm-list-row" style={{ gridTemplateColumns: '80px 2fr 180px 140px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center' }}>
+                        {product.image
+                          ? <img src={product.image} alt="" className="adm-product-thumb" />
+                          : <div className="adm-product-thumb adm-product-thumb--placeholder">IMG</div>}
+                      </div>
+                      <div>
+                        <div style={{ fontWeight: 800, fontSize: 14 }}>{product.name}</div>
+                        <div className="adm-muted" style={{ fontSize: 11 }}>
+                          <span title="Barcode">BC: {product.barcode || product.code}</span>
+                          {product.websiteSku && <span title="Website SKU" style={{ marginLeft: 8 }}>WSK: {product.websiteSku}</span>}
+                        </div>
+                      </div>
+                      <div>
+                        <span style={{ fontWeight: 700 }}>{product.stockQty != null ? `${product.stockQty} units` : '—'}</span>
+                      </div>
+                      <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                        <button onClick={() => void restoreFromRecycle(product)} className="adm-icon-btn" title="Restore to live catalogue" disabled={saving === product.id}>
+                          <ArchiveRestore size={14} />
+                        </button>
+                        <button
+                          onClick={() => void permanentlyDeleteRecycled(product)}
+                          className="adm-icon-btn"
+                          title="Delete permanently"
+                          disabled={saving === `perm-del-${product.id}`}
+                          style={{ color: '#c40000' }}
+                        >
+                          {saving === `perm-del-${product.id}` ? '…' : <Trash2 size={14} />}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <Pager page={recyclePage} totalPages={Math.max(1, Math.ceil(recycleTotal / ADMIN_PAGE_SIZE))} onChange={setRecyclePage} />
+              </div>
+            )}
+
             {/* REORDER */}
             {activeSection === 'reorder' && (
               <div className="adm-panel adm-panel--reorder">
@@ -2243,19 +2401,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                         ))}
                       </select>
                     </label>
-                    <label className="adm-filter-field">
-                      <span className="adm-filter-field__label">Status</span>
-                      <select
-                        value={reorderStatus}
-                        onChange={(e) => { setReorderStatus(e.target.value); setSelectedIds(new Set()); }}
-                        className="adm-select adm-select--compact"
-                      >
-                        <option value="active">Active</option>
-                        <option value="archived">Archived</option>
-                        <option value="all">All</option>
-                      </select>
-                    </label>
-                    <span className="adm-reorder-count">{visibleReorderProducts.length} products</span>
+                    <span className="adm-reorder-count">{visibleReorderProducts.length} live products</span>
                   </div>
                 </div>
 

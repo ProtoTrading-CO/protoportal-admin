@@ -2252,25 +2252,39 @@ body.adm-is-reorder-dragging .adm-reorder-card--dragging {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
+  width: 34px;
+  height: 34px;
   padding: 0;
   border: none;
-  background: transparent;
-  color: #9ca3af;
+  border-radius: 6px;
+  background: #8B1A1A;
+  color: #fff;
   cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.15s, color 0.15s, background 0.15s;
-}
-
-.adm-reorder-card:hover .adm-reorder-edit-btn,
-.adm-reorder-card--selected .adm-reorder-edit-btn {
   opacity: 1;
+  transition: background 0.15s, transform 0.15s;
 }
 
 .adm-reorder-edit-btn:hover {
-  color: #dc2626;
-  background: #fef2f2;
+  background: #6d1414;
+  transform: scale(1.04);
+}
+
+.adm-product-thumb {
+  width: 72px;
+  height: 72px;
+  object-fit: contain;
+  border-radius: 6px;
+  background: #f3f4f6;
+  mix-blend-mode: multiply;
+}
+
+.adm-product-thumb--placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  color: #9ca3af;
+  font-weight: 700;
 }
 
 .adm-reorder-card .adm-reorder-check-wrap,

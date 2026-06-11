@@ -291,7 +291,7 @@ export default function ReorderGrid({
                       className="adm-reorder-edit-btn"
                       title="Edit image"
                     >
-                      <ImagePlus size={13} />
+                      <ImagePlus size={16} />
                     </button>
                   </div>
                   <div className="adm-thumb adm-thumb--reorder">

@@ -50,9 +50,19 @@ const PAGE_SIZE = 1000;
 
 /** Archived rows created via New Products upload pipeline only */
 export const DORMANT_ARCHIVED_BY = 'new-products';
+/** Soft-deleted from Product Manager — restorable from Recycle Bin */
+export const RECYCLE_ARCHIVED_BY = 'recycle-bin';
 
 function isDormantArchive(row) {
   return row?.archived_by === DORMANT_ARCHIVED_BY;
+}
+
+function isRecycleArchive(row) {
+  return row?.archived_by === RECYCLE_ARCHIVED_BY;
+}
+
+function isCatalogArchive(row) {
+  return !isDormantArchive(row) && !isRecycleArchive(row);
 }
 
 async function fetchAllRows(table, selectCols = '*', extraFilter = null, orderBy = null) {
@@ -124,9 +134,16 @@ async function loadLiveFromDB({ onProgress } = {}) {
   return rows.map((r) => adapt(r));
 }
 
-async function loadArchivedFromDB({ dormantOnly = false, catalogOnly = false } = {}) {
+async function loadArchivedFromDB({ dormantOnly = false, catalogOnly = false, recycleOnly = false } = {}) {
   let rows;
-  if (dormantOnly) {
+  if (recycleOnly) {
+    rows = await fetchAllRows(
+      'archived_products',
+      '*',
+      (q) => q.eq('archived_by', RECYCLE_ARCHIVED_BY),
+      'archived_at',
+    );
+  } else if (dormantOnly) {
     rows = await fetchAllRows(
       'archived_products',
       '*',
@@ -135,7 +152,7 @@ async function loadArchivedFromDB({ dormantOnly = false, catalogOnly = false } =
     );
   } else {
     rows = await fetchAllRows('archived_products', '*', null, 'archived_at');
-    if (catalogOnly) rows = rows.filter((r) => !isDormantArchive(r));
+    if (catalogOnly) rows = rows.filter(isCatalogArchive);
   }
   return rows.map((r) => adapt(r, { archived: true }));
 }
@@ -215,11 +232,10 @@ function applyPathFilter(products, categoryPath) {
 function applyCategoryFilter(rows, categoryFilter) {
   if (!categoryFilter || categoryFilter === 'all') return rows;
   return rows.filter((p) =>
-    p.category === categoryFilter
+    matchesMainCategory(p, categoryFilter)
     || p.categoryPath?.[1] === categoryFilter
     || p.categoryPath?.[2] === categoryFilter
     || p.categoryPath?.[3] === categoryFilter
-    || p.categoryLabel === categoryFilter
   );
 }
 
@@ -256,19 +272,27 @@ export async function fetchAllProductsAdmin({ onProgress } = {}) {
   return getAllCachedAdmin(onProgress);
 }
 
+export async function fetchCatalogArchiveCount() {
+  const rows = await loadArchivedFromDB({ catalogOnly: true });
+  return rows.length;
+}
+
 export async function fetchAdminProductsPage({
   page = 1,
   pageSize = 50,
   searchQuery = '',
   archived = false,
+  recycled = false,
   zeroStockOnly = false, // legacy alias — treated as archived
   categoryFilter = '',
   onProgress,
 } = {}) {
   const showArchived = archived || zeroStockOnly;
-  let rows = showArchived
-    ? await loadArchivedFromDB({ catalogOnly: true })
-    : await fetchAllProductsAdmin({ onProgress });
+  let rows = recycled
+    ? await loadArchivedFromDB({ recycleOnly: true })
+    : showArchived
+      ? await loadArchivedFromDB({ catalogOnly: true })
+      : await fetchAllProductsAdmin({ onProgress });
   rows = applyCategoryFilter(rows, categoryFilter);
   rows = searchQuery.trim() ? fuzzyFilter(rows, searchQuery) : rows;
   rows = [...rows].sort((a, b) => (a.categoryLabel || '').localeCompare(b.categoryLabel || '') || a.name.localeCompare(b.name));
@@ -475,6 +499,28 @@ export async function archiveProduct(sku, shouldArchive = true) {
   invalidateAdminCache();
 }
 
+export async function recycleProduct(sku, { fromArchive = false } = {}) {
+  if (fromArchive) {
+    const { error } = await supabaseStock
+      .from('archived_products')
+      .update({ archived_by: RECYCLE_ARCHIVED_BY, archived_at: new Date().toISOString() })
+      .eq('sku', sku);
+    if (error) throw error;
+  } else {
+    const { error } = await supabaseStock.rpc('archive_product', { p_sku: sku, p_by: RECYCLE_ARCHIVED_BY });
+    if (error) throw error;
+  }
+  invalidateProductCache();
+  invalidateAdminCache();
+}
+
+export async function restoreRecycledProduct(sku) {
+  const { error } = await supabaseStock.rpc('unarchive_product', { p_sku: sku });
+  if (error) throw error;
+  invalidateProductCache();
+  invalidateAdminCache();
+}
+
 export async function deleteProduct(sku) {
   const res = await fetch('/api/delete-product', {
     method: 'POST',
@@ -490,20 +536,8 @@ export async function deleteProduct(sku) {
 export async function fetchReorderProducts({
   mainCategory,
   subcategoryId = null,
-  status = 'active',
 } = {}) {
-  let products = [];
-  if (status === 'archived') {
-    products = await loadArchivedFromDB({ catalogOnly: true });
-  } else if (status === 'all') {
-    const [live, archived] = await Promise.all([
-      getAllCachedAdmin(),
-      loadArchivedFromDB({ catalogOnly: true }),
-    ]);
-    products = [...live, ...archived];
-  } else {
-    products = await getAllCachedAdmin();
-  }
+  let products = await getAllCachedAdmin();
 
   if (mainCategory && mainCategory !== 'all') {
     products = products.filter((p) => matchesMainCategory(p, mainCategory));
