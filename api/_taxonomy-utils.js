@@ -141,3 +141,40 @@ export function renameNodeLabel(tree, id, newLabel) {
   ctx.node.label = trimmed;
   return { tree: [...tree], oldLabel, ctx };
 }
+
+export function deleteSubcategoryNode(tree, id) {
+  const ctx = findNodeContext(tree, id);
+  if (!ctx) throw new Error('Subcategory not found');
+  if (ctx.depth === 0) throw new Error('Main categories cannot be deleted here');
+  if (!ctx.parent) throw new Error('Parent category not found');
+  if (ctx.node.children?.length) {
+    throw new Error('Remove nested subcategories first');
+  }
+  ctx.parent.children = (ctx.parent.children || []).filter((child) => child.id !== id);
+  return { tree: [...tree], ctx };
+}
+
+export function buildNodeProductFilter(ctx) {
+  const { depth, ancestors, node } = ctx;
+  if (depth === 0) {
+    return { filters: { category: node.label } };
+  }
+  const col = SUB_COLS[depth - 1];
+  const filters = { category: ancestors[0]?.label };
+  for (let i = 1; i < depth; i++) {
+    filters[SUB_COLS[i - 1]] = ancestors[i]?.label;
+  }
+  filters[col] = node.label;
+  return { filters };
+}
+
+export async function countProductsForNode(supabase, ctx) {
+  const { filters } = buildNodeProductFilter(ctx);
+  let q = supabase.from('website_stock').select('sku', { count: 'exact', head: true });
+  for (const [key, val] of Object.entries(filters)) {
+    if (val != null) q = q.eq(key, val);
+  }
+  const { count, error } = await q;
+  if (error) throw error;
+  return count || 0;
+}

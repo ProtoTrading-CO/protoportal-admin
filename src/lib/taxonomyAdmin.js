@@ -34,6 +34,28 @@ export async function createSubcategory(parentId, label) {
   return json;
 }
 
+export async function deleteTaxonomyNode(id) {
+  const res = await fetch('/api/taxonomy', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'deleteSubcategory', id }),
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || 'Delete subcategory failed');
+  return json;
+}
+
+export async function countSubcategoryProducts(id) {
+  const res = await fetch('/api/taxonomy', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'countSubcategoryProducts', id }),
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || 'Count failed');
+  return json.productCount || 0;
+}
+
 export function findInTree(tree, id) {
   for (const node of tree) {
     if (node.id === id) return node;

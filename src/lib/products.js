@@ -1,5 +1,5 @@
 import { supabaseStock } from './supabaseStock';
-import { fuzzyFilter } from './fuzzySearch';
+import { adminProductSearch, fuzzyFilter } from './fuzzySearch';
 import { buildCategoryPath, labelToSlug, slugToLabel } from './taxonomy';
 
 function matchesMainCategory(product, mainCategory) {
@@ -294,8 +294,11 @@ export async function fetchAdminProductsPage({
       ? await loadArchivedFromDB({ catalogOnly: true })
       : await fetchAllProductsAdmin({ onProgress });
   rows = applyCategoryFilter(rows, categoryFilter);
-  rows = searchQuery.trim() ? fuzzyFilter(rows, searchQuery) : rows;
-  rows = [...rows].sort((a, b) => (a.categoryLabel || '').localeCompare(b.categoryLabel || '') || a.name.localeCompare(b.name));
+  const hasSearch = Boolean(searchQuery.trim());
+  rows = hasSearch ? adminProductSearch(rows, searchQuery) : rows;
+  rows = hasSearch
+    ? rows
+    : [...rows].sort((a, b) => (a.categoryLabel || '').localeCompare(b.categoryLabel || '') || a.name.localeCompare(b.name));
   const total = rows.length;
   const from = (page - 1) * pageSize;
   return { rows: rows.slice(from, from + pageSize), total, page, pageSize };

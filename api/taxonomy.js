@@ -2,6 +2,9 @@ import { createClient } from '@supabase/supabase-js';
 import {
   addSubcategoryNode,
   buildRenameFilter,
+  countProductsForNode,
+  deleteSubcategoryNode,
+  findNodeContext,
   loadTaxonomy,
   renameNodeLabel,
   saveTaxonomy,
@@ -70,6 +73,32 @@ export default async function handler(req, res) {
       if (!Array.isArray(categories)) return res.status(400).json({ error: 'categories array required' });
       await saveTaxonomy(categories);
       return res.status(200).json({ ok: true });
+    }
+
+    if (action === 'deleteSubcategory') {
+      const { id } = req.body;
+      if (!id) return res.status(400).json({ error: 'id required' });
+      const ctx = findNodeContext(tree, id);
+      if (!ctx) return res.status(404).json({ error: 'Subcategory not found' });
+      const productCount = await countProductsForNode(supabase, ctx);
+      if (productCount > 0) {
+        return res.status(400).json({
+          error: `Cannot delete — ${productCount} live product(s) still use this subcategory. Move or archive them first.`,
+          productCount,
+        });
+      }
+      const { tree: next } = deleteSubcategoryNode(tree, id);
+      await saveTaxonomy(next);
+      return res.status(200).json({ ok: true, id, productCount: 0 });
+    }
+
+    if (action === 'countSubcategoryProducts') {
+      const { id } = req.body;
+      if (!id) return res.status(400).json({ error: 'id required' });
+      const ctx = findNodeContext(tree, id);
+      if (!ctx) return res.status(404).json({ error: 'Subcategory not found' });
+      const productCount = await countProductsForNode(supabase, ctx);
+      return res.status(200).json({ productCount });
     }
 
     return res.status(400).json({ error: `Unknown action: ${action}` });

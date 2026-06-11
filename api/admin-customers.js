@@ -36,7 +36,7 @@ export default async function handler(req, res) {
     const q = (search || '').trim();
     if (q) {
       const safe = q.replace(/[%',()]/g, ' ').trim();
-      if (safe) query = query.or(`name.ilike.%${safe}%,email.ilike.%${safe}%,phone.ilike.%${safe}%`);
+      if (safe) query = query.or(`name.ilike.%${safe}%,email.ilike.%${safe}%,phone.ilike.%${safe}%,business_name.ilike.%${safe}%`);
     }
 
     const { data, error, count } = await query;

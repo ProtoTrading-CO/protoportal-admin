@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Grip, ImagePlus, Loader2, Pencil } from 'lucide-react';
+import { Grip, ImagePlus, Loader2, Pencil, Trash2 } from 'lucide-react';
 import { subcategoryOptionsFromTree } from '../lib/taxonomyAdmin';
 
 function groupBySubcategory(products, mainCategoryId, tree) {
@@ -56,6 +56,7 @@ export default function ReorderGrid({
   loading,
   onEditProduct,
   onEditSubcategory,
+  onDeleteSubcategory,
   onPersistOrder,
 }) {
   const scrollRef = useRef(null);
@@ -244,14 +245,26 @@ export default function ReorderGrid({
             <div className="adm-reorder-group-header">
               <span>{group.label}</span>
               {group.id !== '__other__' && (
-                <button
-                  type="button"
-                  className="adm-reorder-cat-edit"
-                  title="Edit subcategory name"
-                  onClick={() => onEditSubcategory({ id: group.id, label: group.label, type: 'subcategory' })}
-                >
-                  <Pencil size={11} />
-                </button>
+                <div className="adm-reorder-group-actions">
+                  <button
+                    type="button"
+                    className="adm-reorder-cat-edit"
+                    title="Edit subcategory name"
+                    onClick={() => onEditSubcategory({ id: group.id, label: group.label, type: 'subcategory' })}
+                  >
+                    <Pencil size={11} />
+                  </button>
+                  {onDeleteSubcategory && (
+                    <button
+                      type="button"
+                      className="adm-reorder-cat-edit adm-reorder-cat-edit--danger"
+                      title="Delete subcategory"
+                      onClick={() => onDeleteSubcategory({ id: group.id, label: group.label, type: 'subcategory' })}
+                    >
+                      <Trash2 size={11} />
+                    </button>
+                  )}
+                </div>
               )}
             </div>
             {group.products.map((product) => {

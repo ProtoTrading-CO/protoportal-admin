@@ -195,6 +195,41 @@ export function fuzzyFilter(products, query) {
   return scored.map((item) => item.product);
 }
 
+/** Admin Product Manager — every query token must substring-match name, SKU, or category (no fuzzy typos). */
+export function adminProductSearch(products, query) {
+  const q = normalize(query);
+  if (!q) return products;
+  const tokens = q.split(/\s+/).filter(Boolean);
+  const scored = products
+    .map((product) => {
+      const index = getSearchIndex(product);
+      const haystacks = [
+        index.name,
+        index.nameCompact,
+        index.code,
+        index.codeCompact,
+        index.text,
+        index.textCompact,
+      ];
+      let score = 0;
+      let matched = 0;
+      for (const token of tokens) {
+        const tokenCompact = compact(token);
+        const hit = haystacks.some((h) => h && (h.includes(token) || h.includes(tokenCompact)));
+        if (!hit) return { product, score: 0 };
+        matched += 1;
+        if (index.code === token || index.codeCompact === tokenCompact) score += 200;
+        else if (index.name.includes(token) || index.nameCompact.includes(tokenCompact)) score += 150;
+        else score += 90;
+      }
+      if (matched === tokens.length && tokens.length > 1) score += 40;
+      return { product, score };
+    })
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score);
+  return scored.map((item) => item.product);
+}
+
 export function getSuggestions(products, query, limit = 8) {
   if (!query || !query.trim()) return [];
   return fuzzyFilter(products, query).slice(0, limit);

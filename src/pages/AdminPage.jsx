@@ -12,7 +12,7 @@ import {
   ClipboardList,
   Eye,
   FileDown,
-  FolderPlus,
+  Plus,
   Globe,
   Grip,
   Image,
@@ -68,7 +68,9 @@ import {
 } from '../lib/products';
 import {
   categoryLabelFromTree,
+  countSubcategoryProducts,
   createSubcategory,
+  deleteTaxonomyNode,
   fetchTaxonomy,
   flattenSubcategories,
   renameTaxonomyNode,
@@ -361,7 +363,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const folderImageRef = useRef(null);
 
   const [productSearchInput, setProductSearchInput] = useState('');
-  const [productSearch, setProductSearch] = useState('');
+  const [productSearchDebounced, setProductSearchDebounced] = useState('');
   const [productCategory, setProductCategory] = useState('all');
   const [productSubcategory, setProductSubcategory] = useState('all');
   const [productPageSize, setProductPageSize] = useState(50);
@@ -408,6 +410,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false);
   const [editTaxonomyModal, setEditTaxonomyModal] = useState(null);
   const [newSubModal, setNewSubModal] = useState(null);
+  const [deleteSubModal, setDeleteSubModal] = useState(null);
   const [taxonomySaving, setTaxonomySaving] = useState(false);
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [productSelectedIds, setProductSelectedIds] = useState(new Set());
@@ -479,12 +482,10 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   }, []);
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      setProductSearch(productSearchInput.trim());
-      setProductPage(1);
-    }, 300);
+    const timer = setTimeout(() => setProductSearchDebounced(productSearchInput.trim()), 250);
     return () => clearTimeout(timer);
   }, [productSearchInput]);
+  useEffect(() => { setProductPage(1); }, [productSearchDebounced, productCategory, productSubcategory, productPageSize]);
   useEffect(() => { setArchivePage(1); }, [archiveSearch]);
   useEffect(() => { setRecyclePage(1); }, [recycleSearch]);
   useEffect(() => { setCustomerPage(1); }, [customerTab, customerSearch]);
@@ -595,7 +596,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     setLoadingError('');
     try {
       const catFilter = productSubcategory !== 'all' ? productSubcategory : productCategory;
-      const data = await fetchAdminProductsPage({ page: productPage, pageSize: productPageSize, searchQuery: productSearch, categoryFilter: catFilter, onProgress: setLoadingProgress });
+      const data = await fetchAdminProductsPage({ page: productPage, pageSize: productPageSize, searchQuery: productSearchDebounced, categoryFilter: catFilter, onProgress: setLoadingProgress });
       setProductRows(data.rows);
       setProductTotal(data.total);
     } catch (err) {
@@ -706,8 +707,8 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   };
 
   useEffect(() => { if (activeSection === 'new-products') void loadDormant(); }, [activeSection, dormantSearch]);
-  useEffect(() => { if (activeSection === 'products') void loadProducts(); }, [activeSection, productPage, productSearch, productCategory, productSubcategory, productPageSize]);
-  useEffect(() => { setProductSelectedIds(new Set()); }, [productPage, productSearch, productCategory, productSubcategory]);
+  useEffect(() => { if (activeSection === 'products') void loadProducts(); }, [activeSection, productPage, productSearchDebounced, productCategory, productSubcategory, productPageSize]);
+  useEffect(() => { setProductSelectedIds(new Set()); }, [productPage, productSearchDebounced, productCategory, productSubcategory]);
   useEffect(() => { if (activeSection === 'archive') void loadArchive(); }, [activeSection, archivePage, archiveSearch]);
   useEffect(() => { if (activeSection === 'recycle') void loadRecycle(); }, [activeSection, recyclePage, recycleSearch]);
   useEffect(() => {
@@ -1340,6 +1341,32 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     } finally { setTaxonomySaving(false); }
   };
 
+  const openDeleteSubcategory = async (sub) => {
+    setTaxonomySaving(true);
+    try {
+      const productCount = await countSubcategoryProducts(sub.id);
+      setDeleteSubModal({ ...sub, productCount });
+    } catch (err) {
+      showToast(err.message || 'Could not check subcategory', 'error');
+    } finally { setTaxonomySaving(false); }
+  };
+
+  const confirmDeleteSubcategory = async () => {
+    if (!deleteSubModal?.id) return;
+    setTaxonomySaving(true);
+    try {
+      await deleteTaxonomyNode(deleteSubModal.id);
+      await reloadTaxonomy();
+      if (reorderSubcategory === deleteSubModal.id) setReorderSubcategory('all');
+      invalidateAdminCache();
+      await loadReorderProducts();
+      setDeleteSubModal(null);
+      showToast('Subcategory deleted');
+    } catch (err) {
+      showToast(err.message || 'Delete failed', 'error');
+    } finally { setTaxonomySaving(false); }
+  };
+
   const toggleSelectReorder = (id) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
@@ -1429,10 +1456,27 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
 
   const closeCustomerProfile = () => { setProfileCustomer(null); setProfileOrders([]); };
 
+  const refreshPendingCount = async () => {
+    try {
+      const data = await fetchCustomersPage({ tab: 'requests', pageSize: 1, searchQuery: '' });
+      setPendingCount(data.total || 0);
+    } catch {}
+  };
+
   const approveRequest = async (person) => {
     setSaving(person.id);
-    try { await approveCustomer(person.id, true); await loadCustomers(); closeCustomerProfile(); }
-    finally { setSaving(''); }
+    try {
+      await approveCustomer(person.id, true);
+      await refreshPendingCount();
+      await refreshDashboardStats();
+      setCustomerTab('regular');
+      setCustomerPage(1);
+      await loadCustomers();
+      closeCustomerProfile();
+      showToast(`${person.business_name || person.name || 'Customer'} approved`);
+    } catch (err) {
+      showToast(err.message || 'Approval failed', 'error');
+    } finally { setSaving(''); }
   };
 
   const removeCustomer = async (person) => {
@@ -1963,22 +2007,31 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
 
                 <div className="adm-toolbar" style={{ gridTemplateColumns: '1fr auto auto auto auto' }}>
                   <label className="adm-search"><Search size={15} /><input value={productSearchInput} onChange={(e) => setProductSearchInput(e.target.value)} placeholder="Search by SKU or product name" className="adm-search-input" /></label>
-                  <select value={productCategory} onChange={(e) => { setProductCategory(e.target.value); setProductSubcategory('all'); setProductPage(1); }} className="adm-select">
+                  <select value={productCategory} onChange={(e) => { setProductCategory(e.target.value); setProductSubcategory('all'); }} className="adm-select adm-select--enhanced">
                     <option value="all">All categories</option>
                     {mainCategories.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
                   </select>
                   {productCategory !== 'all' && (
-                    <select value={productSubcategory} onChange={(e) => { setProductSubcategory(e.target.value); setProductPage(1); }} className="adm-select">
+                    <select value={productSubcategory} onChange={(e) => setProductSubcategory(e.target.value)} className="adm-select adm-select--enhanced">
                       <option value="all">All subcategories</option>
                       {subcategoryOptions(productCategory).map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
                     </select>
                   )}
-                  <select value={productPageSize} onChange={(e) => { setProductPageSize(Number(e.target.value)); setProductPage(1); }} className="adm-select" style={{ width: 90 }}>
+                  <select value={productPageSize} onChange={(e) => setProductPageSize(Number(e.target.value))} className="adm-select adm-select--enhanced" style={{ width: 90 }}>
                     <option value={25}>25 / page</option>
                     <option value={50}>50 / page</option>
                     <option value={100}>100 / page</option>
                   </select>
                 </div>
+
+                {productSearchInput.trim() && productSearchInput.trim() !== productSearchDebounced && (
+                  <p className="adm-muted" style={{ fontSize: 12, margin: '0 0 8px' }}>Searching…</p>
+                )}
+                {productSearchDebounced && productRows.length === 0 && loadingProgress === null && (
+                  <div className="adm-empty" style={{ padding: '24px 0', textAlign: 'center' }}>
+                    No products match &ldquo;{productSearchDebounced}&rdquo;.
+                  </div>
+                )}
 
                 {productSelectedIds.size > 0 && (
                   <div className="adm-bulk-bar" role="region" aria-label="Bulk product actions">
@@ -2393,7 +2446,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                       <select
                         value={reorderSubcategory}
                         onChange={(e) => { setReorderSubcategory(e.target.value); setSelectedIds(new Set()); }}
-                        className="adm-select adm-select--compact"
+                        className="adm-select adm-select--compact adm-select--enhanced"
                       >
                         <option value="all">All subcategories</option>
                         {reorderSubcategoryOptions.map((s) => (
@@ -2435,11 +2488,11 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                       <span>Categories</span>
                       <button
                         type="button"
-                        className="adm-icon-btn"
-                        title="Add subcategory to selected category"
+                        className="adm-taxonomy-add-btn"
+                        title="Add subcategory"
                         onClick={() => setNewSubModal({ parentId: reorderCategory, label: '' })}
                       >
-                        <FolderPlus size={14} />
+                        <Plus size={16} strokeWidth={2.5} />
                       </button>
                     </div>
                     {mainCategories.map((cat) => (
@@ -2472,6 +2525,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                     loading={loading}
                     onEditProduct={openContentEdit}
                     onEditSubcategory={setEditTaxonomyModal}
+                    onDeleteSubcategory={(sub) => void openDeleteSubcategory(sub)}
                     onPersistOrder={persistOrder}
                   />
                 </div>
@@ -2490,7 +2544,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                           <select
                             value={moveTargetCategory}
                             onChange={(e) => { setMoveTargetCategory(e.target.value); setMoveTargetSubcategory(''); }}
-                            className="adm-field-input"
+                            className="adm-select adm-select--enhanced"
                           >
                             {mainCategories.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
                           </select>
@@ -2500,7 +2554,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                           <select
                             value={moveTargetSubcategory}
                             onChange={(e) => setMoveTargetSubcategory(e.target.value)}
-                            className="adm-field-input"
+                            className="adm-select adm-select--enhanced"
                           >
                             <option value="">Select subcategory…</option>
                             {flattenSubcategories(subcategoryOptions(moveTargetCategory, taxonomyTree)).map((s) => (
@@ -2512,10 +2566,10 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                       <div className="adm-modal-footer">
                         <button
                           type="button"
-                          className="adm-modal-link-btn"
+                          className="adm-modal-link-btn adm-modal-link-btn--add"
                           onClick={() => { setMoveModalOpen(false); setNewSubModal({ parentId: moveTargetCategory, label: '' }); }}
                         >
-                          <FolderPlus size={14} /> New subcategory
+                          <Plus size={15} strokeWidth={2.5} /> New subcategory
                         </button>
                         <div className="adm-modal-footer__actions">
                           <button type="button" className="adm-btn-ghost" onClick={() => setMoveModalOpen(false)}>Cancel</button>
@@ -2579,6 +2633,36 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                   </div>
                 )}
 
+                {deleteSubModal && (
+                  <div className="adm-modal-backdrop" onClick={() => setDeleteSubModal(null)}>
+                    <div className="adm-modal adm-modal--form" onClick={(e) => e.stopPropagation()}>
+                      <div className="adm-modal-header">
+                        <h3 className="adm-modal-title">Delete subcategory?</h3>
+                        <button type="button" className="adm-modal-close" onClick={() => setDeleteSubModal(null)} aria-label="Close"><X size={18} /></button>
+                      </div>
+                      <p className="adm-modal-note">
+                        Remove <strong>{deleteSubModal.label}</strong> from the catalogue structure.
+                        {deleteSubModal.productCount > 0
+                          ? ` ${deleteSubModal.productCount} product(s) still use this subcategory — move them first.`
+                          : ' No live products are assigned to it.'}
+                      </p>
+                      <div className="adm-modal-footer adm-modal-footer--end">
+                        <div className="adm-modal-footer__actions">
+                          <button type="button" className="adm-btn-ghost" onClick={() => setDeleteSubModal(null)}>Cancel</button>
+                          <button
+                            type="button"
+                            className="adm-btn-red"
+                            onClick={() => void confirmDeleteSubcategory()}
+                            disabled={taxonomySaving || deleteSubModal.productCount > 0}
+                          >
+                            {taxonomySaving ? 'Deleting…' : 'Delete'}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {newSubModal && (
                   <div className="adm-modal-backdrop" onClick={() => setNewSubModal(null)}>
                     <div className="adm-modal adm-modal--form" onClick={(e) => e.stopPropagation()}>
@@ -2632,7 +2716,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                 <div className="adm-section-head">
                   <div>
                     <h2 className="adm-section-title">Customer Management</h2>
-                    <p className="adm-section-note">Trade requests and approved customers.</p>
+                    <p className="adm-section-note">New sign-ups appear in Approved automatically after onboarding. Trade Requests lists accounts still awaiting approval.</p>
                   </div>
                 </div>
 
@@ -2679,14 +2763,17 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                   </div>
                 ) : (
                   <div className="adm-list">
-                    <div className="adm-list-head" style={{ gridTemplateColumns: '1.4fr 1.3fr 1fr 80px 80px' }}>
-                      <span>Name</span><span>Email</span><span>Phone</span><span>Orders</span><span></span>
+                    <div className="adm-list-head" style={{ gridTemplateColumns: '1.2fr 1.2fr 1fr 80px 70px 90px' }}>
+                      <span>Name</span><span>Email</span><span>Phone</span><span>WhatsApp</span><span>Orders</span><span></span>
                     </div>
                     {customerRows.map((person) => (
-                      <div key={person.id} className="adm-list-row" style={{ gridTemplateColumns: '1.4fr 1.3fr 1fr 80px 80px' }}>
-                        <span style={{ fontWeight: 700 }}>{person.name || 'Unnamed'}</span>
+                      <div key={person.id} className="adm-list-row" style={{ gridTemplateColumns: '1.2fr 1.2fr 1fr 80px 70px 90px' }}>
+                        <span style={{ fontWeight: 700 }}>{person.name || person.business_name || 'Unnamed'}</span>
                         <span style={{ fontSize: 13 }}>{person.email}</span>
                         <span style={{ fontSize: 13 }}>{person.phone || '—'}</span>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: person.accept_whatsapp ? '#15803d' : '#6b7280' }}>
+                          {person.accept_whatsapp == null ? '—' : person.accept_whatsapp ? 'Yes' : 'No'}
+                        </span>
                         <span>{person.orderCount}</span>
                         <div style={{ display: 'flex', gap: 5 }}>
                           <button onClick={() => void openCustomerProfile(person)} className="adm-btn-ghost adm-btn-sm" style={{ padding: '4px 9px', fontSize: 11 }}>View Profile</button>
