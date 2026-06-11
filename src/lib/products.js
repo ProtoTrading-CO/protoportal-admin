@@ -37,6 +37,13 @@ async function fetchJsonWithTimeout(url, timeoutMs = 4500) {
 
 const PAGE_SIZE = 1000;
 
+/** Archived rows created via New Products upload pipeline only */
+export const DORMANT_ARCHIVED_BY = 'new-products';
+
+function isDormantArchive(row) {
+  return row?.archived_by === DORMANT_ARCHIVED_BY;
+}
+
 async function fetchAllRows(table, selectCols = '*', extraFilter = null, orderBy = null) {
   const rows = [];
   let from = 0;
@@ -106,8 +113,19 @@ async function loadLiveFromDB({ onProgress } = {}) {
   return rows.map((r) => adapt(r));
 }
 
-async function loadArchivedFromDB() {
-  const rows = await fetchAllRows('archived_products', '*', null, 'archived_at');
+async function loadArchivedFromDB({ dormantOnly = false, catalogOnly = false } = {}) {
+  let rows;
+  if (dormantOnly) {
+    rows = await fetchAllRows(
+      'archived_products',
+      '*',
+      (q) => q.eq('archived_by', DORMANT_ARCHIVED_BY),
+      'archived_at',
+    );
+  } else {
+    rows = await fetchAllRows('archived_products', '*', null, 'archived_at');
+    if (catalogOnly) rows = rows.filter((r) => !isDormantArchive(r));
+  }
   return rows.map((r) => adapt(r, { archived: true }));
 }
 
@@ -237,7 +255,9 @@ export async function fetchAdminProductsPage({
   onProgress,
 } = {}) {
   const showArchived = archived || zeroStockOnly;
-  let rows = showArchived ? await loadArchivedFromDB() : await fetchAllProductsAdmin({ onProgress });
+  let rows = showArchived
+    ? await loadArchivedFromDB({ catalogOnly: true })
+    : await fetchAllProductsAdmin({ onProgress });
   rows = applyCategoryFilter(rows, categoryFilter);
   rows = searchQuery.trim() ? fuzzyFilter(rows, searchQuery) : rows;
   rows = [...rows].sort((a, b) => (a.categoryLabel || '').localeCompare(b.categoryLabel || '') || a.name.localeCompare(b.name));
@@ -255,7 +275,7 @@ export async function fetchProductsByMainCategory(mainCategory, { limit = 10000 
 }
 
 export async function fetchDormantProducts({ searchQuery = '' } = {}) {
-  let dormant = await loadArchivedFromDB();
+  let dormant = await loadArchivedFromDB({ dormantOnly: true });
   dormant = searchQuery.trim() ? fuzzyFilter(dormant, searchQuery) : dormant;
   dormant.sort((a, b) => a.name.localeCompare(b.name));
   return dormant;
@@ -434,7 +454,7 @@ export async function updateProduct(sku, payload) {
 
 export async function archiveProduct(sku, shouldArchive = true) {
   if (shouldArchive) {
-    const { error } = await supabaseStock.rpc('archive_product', { p_sku: sku, p_by: null });
+    const { error } = await supabaseStock.rpc('archive_product', { p_sku: sku, p_by: 'product-manager' });
     if (error) throw error;
   } else {
     const { error } = await supabaseStock.rpc('unarchive_product', { p_sku: sku });
@@ -463,9 +483,12 @@ export async function fetchReorderProducts({
 } = {}) {
   let products = [];
   if (status === 'archived') {
-    products = await loadArchivedFromDB();
+    products = await loadArchivedFromDB({ catalogOnly: true });
   } else if (status === 'all') {
-    const [live, archived] = await Promise.all([getAllCachedAdmin(), loadArchivedFromDB()]);
+    const [live, archived] = await Promise.all([
+      getAllCachedAdmin(),
+      loadArchivedFromDB({ catalogOnly: true }),
+    ]);
     products = [...live, ...archived];
   } else {
     products = await getAllCachedAdmin();

@@ -394,6 +394,8 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const [newSubModal, setNewSubModal] = useState(null);
   const [taxonomySaving, setTaxonomySaving] = useState(false);
   const [selectedIds, setSelectedIds] = useState(new Set());
+  const [productSelectedIds, setProductSelectedIds] = useState(new Set());
+  const [productArchiveConfirmOpen, setProductArchiveConfirmOpen] = useState(false);
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
@@ -646,6 +648,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
 
   useEffect(() => { if (activeSection === 'new-products') void loadDormant(); }, [activeSection, dormantSearch]);
   useEffect(() => { if (activeSection === 'products') void loadProducts(); }, [activeSection, productPage, productSearch, productCategory, productSubcategory]);
+  useEffect(() => { setProductSelectedIds(new Set()); }, [productPage, productSearch, productCategory, productSubcategory]);
   useEffect(() => { if (activeSection === 'archive') void loadArchive(); }, [activeSection, archivePage, archiveSearch]);
   useEffect(() => { if (activeSection === 'customers') void loadCustomers(); }, [activeSection, customerPage, customerTab, customerSearch]);
   useEffect(() => { if (activeSection === 'pricing') void loadCategoryWorkingSet(pricingCategory, 'pricing'); }, [activeSection, pricingCategory]);
@@ -1252,6 +1255,40 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     });
   };
 
+  const toggleSelectProduct = (id) => {
+    setProductSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAllProducts = () => {
+    const ids = productRows.map((p) => p.id);
+    const allSelected = ids.length > 0 && ids.every((id) => productSelectedIds.has(id));
+    setProductSelectedIds(allSelected ? new Set() : new Set(ids));
+  };
+
+  const confirmBulkArchiveProducts = async () => {
+    const count = productSelectedIds.size;
+    const ids = [...productSelectedIds];
+    setSaving('bulk-archive-pm');
+    try {
+      await bulkArchiveProducts(ids);
+      invalidateAdminCache();
+      invalidateProductCache();
+      setProductArchiveConfirmOpen(false);
+      setProductSelectedIds(new Set());
+      setProductRows((prev) => prev.filter((p) => !ids.includes(p.id)));
+      setProductTotal((t) => Math.max(0, t - count));
+      setArchiveTotal((t) => t + count);
+      showToast(`Archived ${count} product(s)`);
+    } catch (err) {
+      showToast(err.message || 'Archive failed', 'error');
+    } finally { setSaving(''); }
+  };
+
   const persistOrder = (next) => {
     const updates = next.map((p, i) => ({ websiteSku: p.id, sortOrder: i + 1 }));
     saveSortOrder(updates).catch(console.error);
@@ -1850,8 +1887,42 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                   </select>
                 </div>
 
+                {productSelectedIds.size > 0 && (
+                  <div className="adm-bulk-bar" role="region" aria-label="Bulk product actions">
+                    <div className="adm-bulk-bar__left">
+                      <span className="adm-bulk-bar__badge">{productSelectedIds.size}</span>
+                      <span className="adm-bulk-bar__count">selected</span>
+                      <button type="button" className="adm-bulk-bar__link" onClick={toggleSelectAllProducts}>
+                        {productRows.length > 0 && productRows.every((p) => productSelectedIds.has(p.id))
+                          ? 'Deselect all'
+                          : `Select all on page (${productRows.length})`}
+                      </button>
+                    </div>
+                    <div className="adm-bulk-bar__actions">
+                      <button
+                        type="button"
+                        className="adm-btn-ghost adm-btn--sm adm-btn-ghost--danger"
+                        onClick={() => setProductArchiveConfirmOpen(true)}
+                        disabled={!!saving}
+                      >
+                        <Archive size={15} /> Archive
+                      </button>
+                      <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => setProductSelectedIds(new Set())}>Clear</button>
+                    </div>
+                  </div>
+                )}
+
                 <div className="adm-list">
-                  <div className="adm-list-head" style={{ gridTemplateColumns: '36px 2fr 180px 120px' }}>
+                  <div className="adm-list-head" style={{ gridTemplateColumns: '32px 36px 2fr 180px 120px' }}>
+                    <span>
+                      <input
+                        type="checkbox"
+                        checked={productRows.length > 0 && productRows.every((p) => productSelectedIds.has(p.id))}
+                        onChange={toggleSelectAllProducts}
+                        style={{ accentColor: '#8B1A1A', cursor: 'pointer' }}
+                        aria-label="Select all products on this page"
+                      />
+                    </span>
                     <span></span><span>Product</span><span>Stock</span><span>Actions</span>
                   </div>
                   {productRows.reduce((acc, product, i) => {
@@ -1863,7 +1934,16 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                       );
                     }
                     acc.push(
-                      <div key={product.id} className="adm-list-row" style={{ gridTemplateColumns: '36px 2fr 180px 120px' }}>
+                      <div key={product.id} className="adm-list-row" style={{ gridTemplateColumns: '32px 36px 2fr 180px 120px' }}>
+                        <div>
+                          <input
+                            type="checkbox"
+                            checked={productSelectedIds.has(product.id)}
+                            onChange={() => toggleSelectProduct(product.id)}
+                            style={{ accentColor: '#8B1A1A', cursor: 'pointer' }}
+                            aria-label={`Select ${product.name}`}
+                          />
+                        </div>
                         <div style={{ display: 'flex', alignItems: 'center' }}>
                           {product.image
                             ? <img src={product.image} alt="" style={{ width: 32, height: 32, objectFit: 'contain', borderRadius: 4, background: '#f3f4f6', mixBlendMode: 'multiply' }} />
@@ -1911,6 +1991,26 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                   }, [])}
                 </div>
                 <Pager page={productPage} totalPages={productPages} onChange={setProductPage} />
+
+                {productArchiveConfirmOpen && (
+                  <div className="adm-modal-backdrop" onClick={() => setProductArchiveConfirmOpen(false)}>
+                    <div className="adm-modal adm-modal--form" onClick={(e) => e.stopPropagation()}>
+                      <div className="adm-modal-header">
+                        <h3 className="adm-modal-title">Archive {productSelectedIds.size} product{productSelectedIds.size === 1 ? '' : 's'}?</h3>
+                        <button type="button" className="adm-modal-close" onClick={() => setProductArchiveConfirmOpen(false)} aria-label="Close"><X size={18} /></button>
+                      </div>
+                      <p className="adm-modal-note">Products leave the live catalogue but are not deleted. Restore them anytime from Archive.</p>
+                      <div className="adm-modal-footer adm-modal-footer--end">
+                        <div className="adm-modal-footer__actions">
+                          <button type="button" className="adm-btn-ghost" onClick={() => setProductArchiveConfirmOpen(false)}>Cancel</button>
+                          <button type="button" className="adm-btn-red" onClick={() => void confirmBulkArchiveProducts()} disabled={saving === 'bulk-archive-pm'}>
+                            {saving === 'bulk-archive-pm' ? 'Archiving…' : 'Archive'}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
