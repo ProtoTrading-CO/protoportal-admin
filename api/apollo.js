@@ -1,83 +1,149 @@
 import { requireAdminKey } from './_admin-auth.js';
-import { buildApolloContext } from './apollo-context.js';
+import { getApolloData } from './apollo-data.js';
+import { parseIntent, classifyWithAi } from './apollo-intent.js';
+import { executeIntent } from './apollo-engine.js';
 
 const MODEL = 'google/gemini-2.5-flash';
+const CONFIDENCE_THRESHOLD = 0.4;
 
-const SYSTEM_PROMPT = `You are Apollo, the AI assistant for Proto Trading's wholesale admin dashboard (protoportal-admin).
+const NARRATE_PROMPT = `You are Apollo for Proto Trading admin. The user asked a question and the system already fetched LIVE DATA as a structured answer.
 
-You have FULL READ-ONLY ACCESS to live admin data injected below on every request:
-- customers.list — all customers (name, email, business, approval status, order counts)
-- orders — recent and 30-day order history with status and totals
-- products — live catalogue counts, stock levels, lowest/highest stock SKUs, category breakdown
-- searchAnalytics — top searches, zero-result terms, search-to-order conversion
+Rewrite the structured answer in clear, friendly prose. Keep all numbers and names exact — do not invent data.
+Preserve any \`\`\`chart blocks exactly as-is (do not modify JSON inside them).
+Use ## headings and bullet points. Be concise.`;
 
-You help the sales team understand and act on orders, customers, product stock, and search trends.
+async function narrateWithAi(structuredReply, userQuery, apiKey) {
+  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': 'https://protoportal-admin.vercel.app',
+      'X-Title': 'Proto Apollo',
+    },
+    body: JSON.stringify({
+      model: MODEL,
+      messages: [
+        { role: 'system', content: NARRATE_PROMPT },
+        { role: 'user', content: `Question: ${userQuery}\n\nStructured answer:\n${structuredReply}` },
+      ],
+      temperature: 0.3,
+      max_tokens: 1500,
+    }),
+  });
 
-Rules:
-- Be concise, practical, and South-Africa aware (ZAR currency, en-ZA dates).
-- Answer directly from the LIVE DATA — you have the customer list and stock levels. Never say data is missing if it is in the snapshot.
-- For "who are my customers", list them from customers.list.
-- For "lowest stock", use products.lowestStock sorted by stockOnHand.
-- When a visual helps, include a chart block using EXACTLY this format (one per chart):
+  const payload = await response.json();
+  if (!response.ok) return structuredReply;
+  return payload.choices?.[0]?.message?.content || structuredReply;
+}
 
-\`\`\`chart
-{"type":"bar","title":"Chart title","labels":["A","B"],"values":[1,2]}
-\`\`\`
+async function freeformWithAi(userQuery, data, apiKey) {
+  const summary = {
+    customers: data.customers.total,
+    products: data.products.liveCount,
+    orders: data.orders.total,
+    topSearches: data.search.topSearches.slice(0, 5),
+    lowestStock: data.products.lowestStock.slice(0, 5),
+  };
 
-Chart types: "bar" only. Max 10 labels. Values must be numbers.
-- For PDF-friendly summaries, use ## headings and bullet points.
-- You cannot modify data — only analyse and recommend actions.`;
+  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': 'https://protoportal-admin.vercel.app',
+      'X-Title': 'Proto Apollo',
+    },
+    body: JSON.stringify({
+      model: MODEL,
+      messages: [
+        {
+          role: 'system',
+          content: `${NARRATE_PROMPT}\n\nContext snapshot:\n${JSON.stringify(summary, null, 2)}`,
+        },
+        { role: 'user', content: userQuery },
+      ],
+      temperature: 0.35,
+      max_tokens: 1500,
+    }),
+  });
+
+  const payload = await response.json();
+  if (!response.ok) throw new Error(payload?.error?.message || 'Apollo request failed');
+  return payload.choices?.[0]?.message?.content || '';
+}
 
 export default async function handler(req, res) {
   if (!requireAdminKey(req, res)) return;
   res.setHeader('Cache-Control', 'no-store');
+
+  if (req.method === 'GET') {
+    try {
+      const data = await getApolloData(req.query?.refresh === '1');
+      return res.status(200).json({
+        ok: true,
+        indexedAt: data.generatedAt,
+        counts: {
+          products: data.products.liveCount,
+          customers: data.customers.total,
+          orders: data.orders.total,
+          indexEntries: data.index.length,
+        },
+      });
+    } catch (err) {
+      return res.status(500).json({ error: err.message || 'Index build failed' });
+    }
+  }
+
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) return res.status(500).json({ error: 'OPENROUTER_API_KEY is not configured' });
 
-  const { messages = [] } = req.body || {};
+  const { messages = [], narrate = false } = req.body || {};
   if (!Array.isArray(messages) || !messages.length) {
     return res.status(400).json({ error: 'messages array required' });
   }
 
+  const lastUser = [...messages].reverse().find((m) => m.role === 'user');
+  const userQuery = String(lastUser?.content || '').trim();
+  if (!userQuery) return res.status(400).json({ error: 'Empty question' });
+
   try {
-    const context = await buildApolloContext();
-    const contextBlock = `\n\nLIVE ADMIN DATA (auto-refreshed ${context.generatedAt}):\n${JSON.stringify(context, null, 2)}`;
+    const data = await getApolloData();
+    let parsed = parseIntent(userQuery);
 
-    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://protoportal-admin.vercel.app',
-        'X-Title': 'Proto Apollo',
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        messages: [
-          { role: 'system', content: SYSTEM_PROMPT + contextBlock },
-          ...messages.slice(-20).map((m) => ({
-            role: m.role === 'assistant' ? 'assistant' : 'user',
-            content: String(m.content || ''),
-          })),
-        ],
-        temperature: 0.35,
-        max_tokens: 3072,
-      }),
-    });
-
-    const payload = await response.json();
-    if (!response.ok) {
-      console.error('apollo openrouter:', payload?.error || response.status);
-      return res.status(502).json({ error: payload?.error?.message || 'Apollo request failed' });
+    if (parsed.confidence < CONFIDENCE_THRESHOLD) {
+      const aiIntent = await classifyWithAi(userQuery, apiKey);
+      if (aiIntent) parsed = aiIntent;
     }
 
-    const reply = payload.choices?.[0]?.message?.content || '';
+    let result = executeIntent(parsed.intent, data, parsed.terms);
+
+    if (!result && parsed.intent !== 'freeform') {
+      result = executeIntent('freeform', data, parsed.terms);
+    }
+
+    let reply;
+    let source;
+    let intent;
+
+    if (result) {
+      source = result.source;
+      intent = result.intent;
+      reply = narrate ? await narrateWithAi(result.reply, userQuery, apiKey) : result.reply;
+    } else {
+      source = 'ai';
+      intent = 'freeform';
+      reply = await freeformWithAi(userQuery, data, apiKey);
+    }
+
     return res.status(200).json({
       reply,
-      model: MODEL,
-      contextGeneratedAt: context.generatedAt,
+      source,
+      intent,
+      indexedAt: data.generatedAt,
+      indexSize: data.index.length,
     });
   } catch (err) {
     console.error('apollo:', err?.message || err);

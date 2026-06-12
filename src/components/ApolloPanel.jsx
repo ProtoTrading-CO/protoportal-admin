@@ -3,11 +3,12 @@ import { jsPDF } from 'jspdf';
 import { Bot, FileDown, Loader2, Send, Sparkles, User } from 'lucide-react';
 
 const STARTERS = [
-  'Summarise order activity this month',
-  'What are customers searching for with no results?',
-  'Show me a bar chart of top searches',
-  'Who are all my customers?',
+  'How many products do we have?',
   'Which products have the lowest stock?',
+  'What items are being ordered the most?',
+  'Who are all my customers?',
+  'What are customers searching with no results?',
+  'Show me a bar chart of top searches',
 ];
 
 function renderInline(text) {
@@ -114,8 +115,9 @@ function ApolloWelcome({ onStarter, busy }) {
       <div className="apollo-welcome-copy">
         <h3>Hi, I'm <span className="apollo-welcome-name">Apollo</span></h3>
         <p>
-          Your Proto admin assistant with live access to customers, orders, product stock,
-          and search analytics — charts and PDF exports included.
+          Ask in plain English — Apollo maps your question to the live index
+          (products, customers, orders, searches) and answers instantly. AI only
+          kicks in when needed.
         </p>
       </div>
       <div className="apollo-welcome-starters">
@@ -143,6 +145,11 @@ function ChatMessage({ msg, index, onExportPdf }) {
       <div className="apollo-msg-stack">
         <div className="apollo-msg-meta">
           <span className="apollo-msg-name">{isUser ? 'You' : 'Apollo'}</span>
+          {!isUser && msg.source && (
+            <span className={`apollo-source apollo-source--${msg.source}`}>
+              {msg.source === 'live-index' ? 'Live index' : msg.source === 'live' ? 'Live data' : 'AI'}
+            </span>
+          )}
         </div>
         <div className={`apollo-msg-body apollo-msg-body--${msg.role}`}>
           {isUser ? <p>{msg.content}</p> : <MessageBody content={msg.content} />}
@@ -197,7 +204,15 @@ export default function ApolloPanel() {
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [indexStatus, setIndexStatus] = useState(null);
   const scrollRef = useRef(null);
+
+  useEffect(() => {
+    void fetch('/api/apollo')
+      .then((r) => r.json())
+      .then((json) => { if (json.ok) setIndexStatus(json); })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
@@ -221,7 +236,12 @@ export default function ApolloPanel() {
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Apollo request failed');
-      setMessages((prev) => [...prev, { role: 'assistant', content: json.reply }]);
+      setMessages((prev) => [...prev, {
+        role: 'assistant',
+        content: json.reply,
+        source: json.source,
+        intent: json.intent,
+      }]);
     } catch (e) {
       setError(e.message);
     } finally {
@@ -239,7 +259,9 @@ export default function ApolloPanel() {
           <div className="apollo-head-icon"><Bot size={20} /></div>
           <div>
             <h2 className="apollo-head-title">Apollo</h2>
-            <p className="apollo-head-sub">AI assistant · orders · customers · search · products</p>
+            <p className="apollo-head-sub">
+              Live keyword index · {indexStatus ? `${indexStatus.counts?.products?.toLocaleString() ?? '—'} products, ${indexStatus.counts?.customers ?? '—'} customers` : 'building…'}
+            </p>
           </div>
         </div>
         {lastAssistant && (
