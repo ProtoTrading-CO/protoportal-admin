@@ -4706,6 +4706,31 @@ html, body { background: #f5f5f5; color: #111827; }
 .adm-oc-send-btn:hover:not(:disabled) { background: #1e293b; }
 .adm-oc-send-btn:disabled { opacity: 0.65; cursor: not-allowed; }
 
+.adm-oc-label--paid { color: #15803d; }
+.adm-pay-toggle {
+  display: inline-flex;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  overflow: hidden;
+}
+.adm-pay-toggle__btn {
+  padding: 5px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  border: none;
+  background: #fff;
+  color: #64748b;
+  cursor: pointer;
+  font-family: inherit;
+}
+.adm-pay-toggle__btn--on {
+  background: #0f172a;
+  color: #fff;
+}
+.adm-pay-toggle__btn + .adm-pay-toggle__btn {
+  border-left: 1px solid #e5e7eb;
+}
+
 @media (max-width: 640px) {
   .adm-order-row { grid-template-columns: 1fr !important; gap: 10px !important; }
   .order-workflow-badge { font-size: 12px; padding: 6px 12px; }

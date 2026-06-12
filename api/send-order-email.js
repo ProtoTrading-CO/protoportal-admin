@@ -1,6 +1,12 @@
 import { requireAdminOrOrderToken } from './_admin-auth.js';
 import { createClient } from '@supabase/supabase-js';
-import { getPortalAdminClient, SITE_CONFIG_BUCKET } from './_site-config.js';
+import { getPortalAdminClient, SITE_CONFIG_BUCKET, writeSiteConfigJson } from './_site-config.js';
+
+async function markConfirmationSent(orderId) {
+  const meta = { orderId, sentAt: new Date().toISOString() };
+  await writeSiteConfigJson(`orders/confirmation/${orderId}.json`, meta);
+  return meta;
+}
 
 function getAdminClient() {
   return createClient(
@@ -240,6 +246,14 @@ export default async function handler(req, res) {
   if (!resp.ok) {
     const body = await resp.json().catch(() => ({}));
     return res.status(502).json({ error: body.message || 'Email could not be sent' });
+  }
+
+  if (orderId) {
+    try {
+      await markConfirmationSent(orderId);
+    } catch (err) {
+      console.error('send-order-email: failed to mark confirmation sent:', err.message);
+    }
   }
 
   return res.status(200).json({

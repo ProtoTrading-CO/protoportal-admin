@@ -84,11 +84,11 @@ import { approveCustomer, deleteCustomer, fetchCustomersPage } from '../lib/cust
 import { supabase } from '../lib/supabase';
 import { buildOrderNoteSections, createEmailOrderItems, generateOrderPdfBase64, buildEmailItemsFromOrder } from '../lib/orderDocuments';
 import { fetchPresaleInvoices, uploadPresaleInvoice } from '../lib/presaleInvoice';
+import { fetchConfirmationSent, markConfirmationSent, fetchPaymentRecords, uploadPop, setPaymentStatus } from '../lib/orderPayment';
 import { deleteOrderAdmin, fetchAllOrdersAdmin, updateOrderAdmin, advanceOrderWorkflow } from '../lib/orders';
 import { orderMatchesTab, normalizeOrderStatus } from '../lib/orderStatus';
 import OrderWorkflowBadge from '../components/OrderWorkflowBadge';
 import { fetchFulfillmentUsers, loadActiveUserId } from '../lib/fulfillmentUsers';
-import { isVictorSender, PAYMENT_RECEIVED_FORBIDDEN } from '../lib/fulfillmentAuth';
 import { fetchSpecials, saveSpecials } from '../lib/specials';
 import { fetchBanner, saveBanner, uploadBannerImage } from '../lib/banner';
 import { fetchPopupSpecial, savePopupSpecial, uploadPopupImage } from '../lib/popupSpecial';
@@ -490,6 +490,9 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const [activeFulfillmentUserId, setActiveFulfillmentUserId] = useState(loadActiveUserId);
   const [presaleInvoices, setPresaleInvoices] = useState({});
   const [presaleUploading, setPresaleUploading] = useState('');
+  const [confirmationSent, setConfirmationSent] = useState({});
+  const [paymentRecords, setPaymentRecords] = useState({});
+  const [popUploading, setPopUploading] = useState('');
 
   const [specials, setSpecials] = useState([]); // [{productId, productName, productCode, productImage, deal, discountPct, bogoX, bogoY}]
   const [specialsSaving, setSpecialsSaving] = useState(false);
@@ -771,14 +774,19 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     () => fulfillmentUsers.find((u) => u.id === activeFulfillmentUserId) || null,
     [fulfillmentUsers, activeFulfillmentUserId],
   );
-  const canVictorAct = isVictorSender(activeFulfillmentUser);
 
-  const orderListGridCols = orderTab === 'sent'
+  const orderListGridCols = orderTab === 'sent' || orderTab === 'paid'
     ? '1.4fr 1.2fr 1fr 2fr 120px 56px'
     : '1.6fr 1.4fr 1.2fr 1fr 160px 80px';
 
+  const confirmationSentIds = useMemo(
+    () => new Set(Object.keys(confirmationSent).filter((id) => confirmationSent[id]?.sentAt)),
+    [confirmationSent],
+  );
+
   const renderOrderConfirmationActions = (order) => {
     if (normalizeOrderStatus(order.status) !== 'order sent') return null;
+    if (confirmationSentIds.has(order.id)) return null;
     const invoice = presaleInvoices[order.id];
     const uploading = presaleUploading === order.id;
     const sending = saving === `send-${order.id}`;
@@ -810,7 +818,63 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
           {sending ? <Loader2 size={13} className="spin" /> : <Send size={13} />}
           {sending ? 'Sending…' : 'Send'}
         </button>
-        {canVictorAct && (
+      </div>
+    );
+  };
+
+  const renderPaymentActions = (order) => {
+    const key = normalizeOrderStatus(order.status);
+    if (key === 'payment received') {
+      const pop = paymentRecords[order.id];
+      return (
+        <div className="adm-oc-col">
+          <span className="adm-oc-label adm-oc-label--paid">Paid</span>
+          {pop?.filename && <span className="adm-oc-uploaded">✓ {pop.filename}</span>}
+        </div>
+      );
+    }
+    if (key !== 'order sent' || !confirmationSentIds.has(order.id)) return null;
+
+    const pop = paymentRecords[order.id];
+    const uploading = popUploading === order.id;
+    const isPaid = pop?.paid === true;
+
+    return (
+      <div className="adm-oc-col">
+        <span className="adm-oc-label">Awaiting payment</span>
+        <div className="adm-pay-toggle">
+          <button
+            type="button"
+            className={`adm-pay-toggle__btn${!isPaid ? ' adm-pay-toggle__btn--on' : ''}`}
+            onClick={() => void handlePaymentStatus(order, false)}
+          >
+            Not paid
+          </button>
+          <button
+            type="button"
+            className={`adm-pay-toggle__btn${isPaid ? ' adm-pay-toggle__btn--on' : ''}`}
+            onClick={() => void handlePaymentStatus(order, true)}
+          >
+            Paid
+          </button>
+        </div>
+        <label className="adm-oc-upload-btn">
+          {uploading ? <Loader2 size={13} className="spin" /> : <Upload size={13} />}
+          {pop?.filename ? 'Replace POP' : 'Upload POP'}
+          <input
+            type="file"
+            accept=".pdf,application/pdf,image/*"
+            hidden
+            disabled={uploading}
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = '';
+              if (file) void handlePopUpload(order, file);
+            }}
+          />
+        </label>
+        {pop?.filename && <span className="adm-oc-uploaded">✓ {pop.filename}</span>}
+        {isPaid && (
           <button
             type="button"
             className="adm-presale-pay-btn"
@@ -818,7 +882,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
             onClick={() => void advanceOrderStatus(order, 'payment received')}
           >
             <Check size={14} strokeWidth={2.5} />
-            {saving === `advance-${order.id}` ? 'Updating…' : 'Payment Received'}
+            {saving === `advance-${order.id}` ? 'Updating…' : 'Confirm payment'}
           </button>
         )}
       </div>
@@ -835,6 +899,28 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
       alert(err.message || 'Upload failed');
     } finally {
       setPresaleUploading('');
+    }
+  };
+
+  const handlePopUpload = async (order, file) => {
+    setPopUploading(order.id);
+    try {
+      const meta = await uploadPop(order.id, file, { paid: paymentRecords[order.id]?.paid !== false });
+      setPaymentRecords((prev) => ({ ...prev, [order.id]: meta }));
+      showToast(`Proof of payment uploaded for ${order.order_number || order.id.slice(0, 8)}`);
+    } catch (err) {
+      alert(err.message || 'Upload failed');
+    } finally {
+      setPopUploading('');
+    }
+  };
+
+  const handlePaymentStatus = async (order, paid) => {
+    try {
+      const meta = await setPaymentStatus(order.id, paid);
+      setPaymentRecords((prev) => ({ ...prev, [order.id]: { ...prev[order.id], ...meta } }));
+    } catch (err) {
+      alert(err.message || 'Failed to update payment status');
     }
   };
 
@@ -884,7 +970,10 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
       });
       const emailData = await emailRes.json();
       if (!emailRes.ok) throw new Error(emailData.error || 'Email send failed');
-      showToast(`Confirmation sent to ${email}${emailData.presaleIncluded ? ' with presale invoice' : ''}`);
+      const sentMeta = await markConfirmationSent(order.id);
+      setConfirmationSent((prev) => ({ ...prev, [order.id]: sentMeta }));
+      setOrderTab('paid');
+      showToast(`Confirmation sent to ${email}${emailData.presaleIncluded ? ' with presale invoice' : ''} — moved to Payment`);
     } catch (err) {
       alert(err.message || 'Could not send order confirmation');
     } finally {
@@ -927,13 +1016,38 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   }, [activeSection]);
 
   useEffect(() => {
-    if (activeSection !== 'orders' || orderTab !== 'sent') return;
+    if (activeSection !== 'orders') return;
+    const ids = orders.filter((o) => normalizeOrderStatus(o.status) === 'order sent').map((o) => o.id);
+    if (!ids.length) return;
+    fetchConfirmationSent(ids)
+      .then((rows) => setConfirmationSent((prev) => ({ ...prev, ...rows })))
+      .catch(() => {});
+  }, [activeSection, orders]);
+
+  useEffect(() => {
     const ids = orders.filter((o) => normalizeOrderStatus(o.status) === 'order sent').map((o) => o.id);
     if (!ids.length) return;
     fetchPresaleInvoices(ids)
       .then((invoices) => setPresaleInvoices((prev) => ({ ...prev, ...invoices })))
       .catch(() => {});
+    fetchConfirmationSent(ids)
+      .then((rows) => setConfirmationSent((prev) => ({ ...prev, ...rows })))
+      .catch(() => {});
   }, [activeSection, orderTab, orders]);
+
+  useEffect(() => {
+    if (activeSection !== 'orders' || orderTab !== 'paid') return;
+    const ids = orders
+      .filter((o) => orderMatchesTab(o, 'paid', { confirmationSentIds }))
+      .map((o) => o.id);
+    if (!ids.length) return;
+    fetchPaymentRecords(ids)
+      .then((rows) => setPaymentRecords((prev) => ({ ...prev, ...rows })))
+      .catch(() => {});
+    fetchConfirmationSent(ids)
+      .then((rows) => setConfirmationSent((prev) => ({ ...prev, ...rows })))
+      .catch(() => {});
+  }, [activeSection, orderTab, orders, confirmationSentIds]);
 
   useEffect(() => {
     if (activeSection !== 'orders') return undefined;
@@ -1051,8 +1165,8 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     const q = orderSearch.trim().toLowerCase();
     const filtered = orders.filter((order) => !q || [order.order_number, order.customers?.name, order.customers?.email, compactItems(order.original_items || order.items || [])].join(' ').toLowerCase().includes(q));
     if (orderTab === 'all') return filtered;
-    return filtered.filter((o) => orderMatchesTab(o, orderTab));
-  }, [orders, orderSearch, orderTab]);
+    return filtered.filter((o) => orderMatchesTab(o, orderTab, { confirmationSentIds }));
+  }, [orders, orderSearch, orderTab, confirmationSentIds]);
 
   const openNewProduct = () => {
     const firstCategory = taxonomyTree[0]?.id || categories[0]?.id || '';
@@ -3324,7 +3438,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                   ].map(({ key, label }) => {
                     const count = key === 'all'
                       ? orders.length
-                      : orders.filter((o) => orderMatchesTab(o, key)).length;
+                      : orders.filter((o) => orderMatchesTab(o, key, { confirmationSentIds })).length;
                     return (
                       <button
                         key={key}
@@ -3356,7 +3470,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                 </div>
                 <div className="adm-list">
                   <div className="adm-list-head" style={{ gridTemplateColumns: orderListGridCols }}>
-                    <span>Order</span><span>Customer</span><span>Date & Time</span><span>{orderTab === 'sent' ? 'Order Confirmation' : 'Status'}</span><span>Actions</span><span></span>
+                    <span>Order</span><span>Customer</span><span>Date & Time</span><span>{orderTab === 'sent' ? 'Order Confirmation' : orderTab === 'paid' ? 'Payment' : 'Status'}</span><span>Actions</span><span></span>
                   </div>
                   {orderRows.map((order) => {
                     const isExpanded = expandedOrderId === order.id;
@@ -3385,6 +3499,8 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                           <div onClick={(e) => e.stopPropagation()} className="adm-presale-col">
                             {orderTab === 'sent' && isPreSale ? (
                               renderOrderConfirmationActions(order)
+                            ) : orderTab === 'paid' ? (
+                              renderPaymentActions(order) || <OrderWorkflowBadge order={order} />
                             ) : (
                               <OrderWorkflowBadge order={order} />
                             )}
