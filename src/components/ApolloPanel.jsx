@@ -8,6 +8,7 @@ const STARTERS = [
   'Give me 5 products with negative stock',
   'Fix images for all products in subcategory games and puzzles',
   'Products with codes ABC123 and XYZ789 resize to 800x800 white background',
+  'Fix all the images on canvases and surfaces — white background, shadows, kids painting on the canvas',
   'Do image gen on all monttaro canvas products — white background, product in view, painting on the canvas',
   'All monttaro canvas with soft shadow on white background',
   'Who are all my customers?',

@@ -1,7 +1,9 @@
+import { getTaxonomySubcategoryLabels } from './_subcategory-match.js';
+
 /** Regex hints only — never used as final routing without AI confirmation. */
 
 const INTENTS = [
-  { id: 'batch_fix_images', weight: 14, patterns: [/fix (the )?images/i, /image fixer/i, /image gen/i, /new products engine/i, /through gemini/i, /gemini new products/i, /put them through/i, /reprocess.*images/i, /white background/i, /remove (the )?background/i, /resize.*800/i, /800\s*[x×]\s*800/i, /products with (the )?(following )?codes/i, /\bshadow\b/i, /generative/i, /canvas/i, /monttaro/i, /mottaro/i, /painting on/i] },
+  { id: 'batch_fix_images', weight: 14, patterns: [/fix (the )?images/i, /fix all.*images/i, /image fixer/i, /image gen/i, /new products engine/i, /through gemini/i, /gemini new products/i, /put them through/i, /reprocess.*images/i, /white background/i, /remove (the )?background/i, /resize.*800/i, /800\s*[x×]\s*800/i, /products with (the )?(following )?codes/i, /\bshadow/i, /generative/i, /canvas/i, /monttaro/i, /mottaro/i, /motarro/i, /painting on/i, /subcategory/i] },
   { id: 'order_top_items', weight: 12, patterns: [/best performing/i, /performing products/i, /ordered the most/i, /top selling/i, /most ordered/i, /based on orders/i, /popular products/i, /barograph/i, /bar chart/i] },
   { id: 'product_count', weight: 10, patterns: [/^how many products/i, /product count/i, /total products/i, /catalogue size/i, /number of products/i] },
   { id: 'product_negative_stock', weight: 12, patterns: [/negative stock/i, /below zero/i, /stock.*negative/i, /negative.*stock/i] },
@@ -51,6 +53,8 @@ export async function classifyIntent(query, apiKey, { rejectIntent = '', regexHi
     ? `\nREJECTED intent "${rejectIntent}" — it produced a wrong answer.${badReply ? ` Wrong reply excerpt: "${String(badReply).slice(0, 160).replace(/\n/g, ' ')}"` : ''} Pick a different intent.`
     : '';
 
+  const subcategoryHints = getTaxonomySubcategoryLabels().slice(0, 80).join(', ');
+
   const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -71,12 +75,17 @@ ${rejectNote}
 Regex hint (may be wrong): ${hint.intent} (${Math.round(hint.confidence * 100)}%)
 
 DISAMBIGUATION — follow strictly:
-• Image editing / image gen / resize / white background / shadow / generative scenes → batch_fix_images
-  - subcategory named → terms = subcategory (e.g. "games and puzzles"), skus = []
-  - product line / keyword in title → terms = keyword phrase (e.g. "monttaro canvas", "mottaro canvas")
+• Image editing / image gen / batch fix by SUBCATEGORY NAME → batch_fix_images
+  - User says "fix all images on/in [subcategory]" → terms = subcategory name ONLY (e.g. "canvases and surfaces", "games and puzzles")
+  - Match against taxonomy labels below — use the closest exact subcategory phrase in terms
+  - product line / keyword in title → terms = keyword phrase (e.g. "monttaro canvas")
   - specific product codes/SKUs listed → skus = ["CODE1","CODE2"], terms = ""
-  - imagePrompt = user's creative/editing instructions verbatim
-  - imageStyle = "shadow" if user wants drop shadow; "generative" if painting on canvas, lifestyle scene, or creative staging; else "standard"
+  - imagePrompt = ALL creative/editing instructions (white bg, shadows, kids painting on canvas, etc.) — copy verbatim from user
+  - imageStyle = "generative" if painting on canvas, kids painting, artwork, or creative scene; "shadow" if only shadow; else "standard"
+  - If user wants BOTH shadow AND painting on canvas → imageStyle = "generative" and imagePrompt must mention both
+
+Known subcategory labels (match terms to these): ${subcategoryHints}
+
 • "fix images / gemini new products / put through new products" for a subcategory → batch_fix_images
 • "best performing / top selling / most ordered / products + orders" → order_top_items (NOT product_count)
 • "how many products / catalogue size / total products" ONLY → product_count
@@ -91,6 +100,8 @@ DISAMBIGUATION — follow strictly:
 • imageStyle = standard | shadow | generative (see above)
 
 Examples:
+"fix all the images on canvases and surfaces subcategory — white background, product clearly in view, with shadows and a kids painting on the canvas" → {"intent":"batch_fix_images","terms":"canvases and surfaces","skus":[],"imagePrompt":"white background with product clearly in view, soft studio shadows, and a colourful kids painting displayed on the canvas","imageStyle":"generative","wantsChart":false}
+"fix all images on games and puzzles subcategory white background with shadow" → {"intent":"batch_fix_images","terms":"games and puzzles","skus":[],"imagePrompt":"white background with soft studio drop shadow, product clearly in view","imageStyle":"shadow","wantsChart":false}
 "do image gen on all monttaro canvas products white background product clearly in view painting on the canvas" → {"intent":"batch_fix_images","terms":"monttaro canvas","skus":[],"imagePrompt":"Place on white background with product clearly in view and a beautiful painting displayed on the canvas","imageStyle":"generative","wantsChart":false}
 "all mottaro canvas with shadow on white background" → {"intent":"batch_fix_images","terms":"mottaro canvas","skus":[],"imagePrompt":"white background with soft studio drop shadow","imageStyle":"shadow","wantsChart":false}
 "products with codes ABC123 and XYZ789 resize them to 800 by 800 remove background white background" → {"intent":"batch_fix_images","terms":"","skus":["ABC123","XYZ789"],"imagePrompt":"resize to 800 by 800 remove the background and make it a white background","wantsChart":false}

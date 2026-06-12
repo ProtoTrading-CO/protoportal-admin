@@ -6,6 +6,21 @@ export const IMAGE_STYLE_OPTIONS = [
   { id: 'generative', label: 'Generative AI', hint: 'Custom creative direction (canvas art, scenes, etc.)' },
 ];
 
+export const IMAGE_GEN_PRESETS = [
+  {
+    id: 'canvas-showcase',
+    label: 'Canvas showcase',
+    style: 'generative',
+    prompt: 'Pure white background. Product clearly in view with a soft studio drop shadow. Display a colourful kids painting on the canvas surface.',
+  },
+  {
+    id: 'white-shadow',
+    label: 'White + shadow',
+    style: 'shadow',
+    prompt: 'Remove background. Pure white background with soft realistic drop shadow. Product centred and clearly visible.',
+  },
+];
+
 export const IMAGE_MODEL_LABEL = 'Gemini 3 Pro Image (OpenRouter)';
 
 export default function ImageGenOptions({
@@ -43,11 +58,26 @@ export default function ImageGenOptions({
           onChange={(e) => onPromptChange(e.target.value)}
           placeholder={
             style === 'generative'
-              ? 'e.g. Place on white background with the product clearly in view and a beautiful landscape painting displayed on the canvas'
+              ? 'e.g. White background, product clearly in view, soft shadow, colourful kids painting on the canvas'
               : 'Optional extra instructions (leave blank for defaults)'
           }
         />
       )}
+      <div className="image-gen-presets">
+        {IMAGE_GEN_PRESETS.map((preset) => (
+          <button
+            key={preset.id}
+            type="button"
+            className="image-gen-preset-btn"
+            onClick={() => {
+              onStyleChange(preset.style);
+              onPromptChange(preset.prompt);
+            }}
+          >
+            {preset.label}
+          </button>
+        ))}
+      </div>
       <p className="image-gen-hint">
         {IMAGE_STYLE_OPTIONS.find((o) => o.id === style)?.hint}
         {' · '}

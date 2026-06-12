@@ -27,13 +27,17 @@ export function resolveImageModel(imageStyle = 'standard') {
 
 export function inferImageStyle(userInstructions = '', userQuery = '') {
   const text = `${userQuery} ${userInstructions}`.toLowerCase();
-  if (/generative|painting on|artwork on|art on the canvas|on the canvas|lifestyle scene|show.*canvas|canvas.*paint|styled scene|creative/i.test(text)) {
+  if (/generative|painting on|kids?['']?s?\s+painting|kid painting|artwork on|art on the canvas|on the canvas|lifestyle scene|show.*canvas|canvas.*paint|styled scene|creative|painting displayed/i.test(text)) {
     return IMAGE_STYLES.generative;
   }
-  if (/\bshadow\b|drop shadow|soft shadow/i.test(text)) {
+  if (/\bshadow\b|drop shadow|soft shadow|with shadows/i.test(text)) {
     return IMAGE_STYLES.shadow;
   }
   return IMAGE_STYLES.standard;
+}
+
+function wantsShadow(text) {
+  return /\bshadow/i.test(String(text || '').toLowerCase());
 }
 
 /** Build prompt for OpenRouter image model from style + admin instructions. */
@@ -45,17 +49,20 @@ export function buildImagePrompt({ style = IMAGE_STYLES.standard, userInstructio
 
   if (style === IMAGE_STYLES.generative) {
     const direction = custom || 'Place the product on a pure white background, clearly in view, professional catalogue quality.';
+    const shadowNote = wantsShadow(`${custom} ${productTitle}`)
+      ? '- Include a soft, realistic studio drop shadow beneath the product on the white background (subtle contact shadow + gentle ambient shadow).\n'
+      : '';
     return `You are an expert product photographer and generative image editor for wholesale e-commerce.${productCtx}
 
 CREATIVE DIRECTION — follow precisely:
 ${direction}
 
 RULES:
-- The source photo is the ground truth for the product itself — preserve identity, branding, and colours.
-- You MAY synthesize scene elements when the direction asks (e.g. a painting displayed on a canvas, props, lighting) as long as the product remains accurate.
+- The source photo is the ground truth for the product itself — preserve identity, branding, colours, and proportions.
+- You MAY synthesize scene elements when the direction asks (e.g. a colourful kids painting displayed on a canvas, props, lighting) as long as the product remains accurate.
 - Professional catalogue hero shot; product must be clearly visible and the hero of the frame.
 - Clean pure white (#FFFFFF) studio background unless the direction explicitly asks for something else.
-- Square 1:1 composition. No watermarks, no garbled text, no distorted logos.`;
+${shadowNote}- Square 1:1 composition. No watermarks, no garbled text, no distorted logos.`;
   }
 
   if (style === IMAGE_STYLES.shadow) {

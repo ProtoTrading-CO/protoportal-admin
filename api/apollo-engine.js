@@ -1,5 +1,5 @@
 import { searchIndex } from './apollo-data.js';
-import { findProductsBySubcategory, findProductsByKeyword, resolveTaxonomyLabels, suggestSubcategories } from './_subcategory-match.js';
+import { findProductsBySubcategory, findProductsByKeyword, resolveTaxonomyLabels, suggestSubcategories, cleanBatchTerms, extractSubcategoryFromQuery } from './_subcategory-match.js';
 import { inferImageStyle } from './_image-pipeline.js';
 
 function chartBlock(title, labels, values) {
@@ -28,6 +28,29 @@ function fmtDate(iso) {
   return new Date(iso).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
+/** Creative instructions after subcategory phrase in natural-language batch requests. */
+function extractCreativePrompt(userQuery) {
+  const q = String(userQuery || '').trim();
+  const splitters = [
+    /\s+subcategory\s*[-—–:]\s+/i,
+    /\s+category\s*[-—–:]\s+/i,
+    /\s+subcategory\s+(?=white|with|place|product|remove|resize|i want)/i,
+    /\s*[-—–:]\s+/,
+  ];
+  for (const re of splitters) {
+    const idx = q.search(re);
+    if (idx > 0) {
+      const tail = q.slice(idx).replace(re, ' ').trim();
+      if (tail.length > 12 && !/^subcategory$/i.test(tail)) return tail;
+    }
+  }
+  if (/\b(white background|with shadow|kids?['']?s?\s+painting|painting on)/i.test(q)) {
+    const m = q.match(/(?:white background|on a white|with shadow|product clearly)[^.]*(?:\.|$)?/i);
+    if (m) return m[0].trim();
+  }
+  return '';
+}
+
 export function executeIntent(intent, data, terms = '', { limit = null, skus = [], imagePrompt = '', imageStyle = '', userQuery = '' } = {}) {
   const { customers, orders, products, search } = data;
 
@@ -42,13 +65,16 @@ export function executeIntent(intent, data, terms = '', { limit = null, skus = [
         matched = products.all.filter((p) => skuSet.has(String(p.sku || '').toUpperCase()) || skuSet.has(String(p.barcode || '').toUpperCase()));
         displayLabel = skuList.length === 1 ? skuList[0] : `${skuList.length} SKUs`;
       } else {
-        const canonical = resolveTaxonomyLabels(terms);
-        displayLabel = canonical[0] || terms;
-        matched = findProductsBySubcategory(products, terms);
-        if (!matched.length) matched = findProductsByKeyword(products, terms);
+        let searchTerms = cleanBatchTerms(terms) || extractSubcategoryFromQuery(userQuery) || terms;
+        searchTerms = cleanBatchTerms(searchTerms);
+        const canonical = resolveTaxonomyLabels(searchTerms);
+        displayLabel = canonical[0] || searchTerms;
+        matched = findProductsBySubcategory(products, searchTerms);
+        if (!matched.length) matched = findProductsByKeyword(products, searchTerms);
       }
 
-      const style = imageStyle || inferImageStyle(imagePrompt, userQuery || terms);
+      const effectivePrompt = imagePrompt || extractCreativePrompt(userQuery);
+      const style = imageStyle || inferImageStyle(effectivePrompt, userQuery || terms);
 
       const withImages = matched.filter((p) => p.imageUrl);
       const missing = matched.length - withImages.length;
@@ -70,8 +96,8 @@ export function executeIntent(intent, data, terms = '', { limit = null, skus = [
       const preview = withImages.slice(0, 8).map((p, i) => `${i + 1}. **${p.title}** (${p.sku})`);
       const more = withImages.length > 8 ? `\n\n_…and ${withImages.length - 8} more._` : '';
       const styleLabel = style === 'generative' ? 'Generative AI' : style === 'shadow' ? 'White + shadow' : 'Standard white bg';
-      const promptNote = imagePrompt
-        ? `\n\n**Your instructions:** ${imagePrompt}`
+      const promptNote = effectivePrompt
+        ? `\n\n**Your instructions:** ${effectivePrompt}`
         : `\n\n_Style: **${styleLabel}**._`;
       const modelNote = '\n\n_Model: **Gemini 3 Pro Image** via OpenRouter._';
       const stayLiveNote = '\n\n_Products **stay live** on the website with their current images. Only **Go live** in New Products will replace the live image._';
@@ -83,7 +109,7 @@ export function executeIntent(intent, data, terms = '', { limit = null, skus = [
         batchAction: {
           type: 'reprocess_to_dormant',
           subcategory: displayLabel,
-          imagePrompt: imagePrompt || '',
+          imagePrompt: effectivePrompt || '',
           imageStyle: style,
           products: withImages.map((p) => ({ sku: p.sku, title: p.title, imageUrl: p.imageUrl })),
         },

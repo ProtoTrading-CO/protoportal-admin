@@ -5366,4 +5366,26 @@ html, body { background: #f5f5f5; color: #111827; }
   color: #64748b;
   line-height: 1.4;
 }
+.image-gen-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+.image-gen-preset-btn {
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  border-radius: 999px;
+  padding: 5px 12px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #374151;
+  cursor: pointer;
+  font-family: inherit;
+}
+.image-gen-preset-btn:hover {
+  border-color: #8B1A1A;
+  color: #8B1A1A;
+  background: #fff5f5;
+}
 

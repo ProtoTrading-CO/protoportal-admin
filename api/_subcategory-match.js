@@ -13,6 +13,39 @@ function flattenNodes(nodes) {
 
 const TAXONOMY_NODES = flattenNodes(loadBundledTaxonomy());
 
+/** All taxonomy labels for Apollo routing hints. */
+export function getTaxonomySubcategoryLabels() {
+  return TAXONOMY_NODES.map((n) => n.label);
+}
+
+/** Strip routing fluff so "fix all images on canvases and surfaces subcategory" → "canvases and surfaces". */
+export function cleanBatchTerms(terms) {
+  let t = String(terms || '').trim();
+  t = t.replace(/^(fix|reprocess|do|run)\s+(all\s+)?(the\s+)?images?\s+(on|in|for|from)\s+(the\s+)?/i, '');
+  t = t.replace(/^(image gen|image generation)\s+(on|for|in)\s+(the\s+)?/i, '');
+  t = t.replace(/\b(subcategory|category)\b/gi, ' ');
+  t = t.replace(/^the\s+/i, '').replace(/\s+(subcategory|category)\s*$/i, '').replace(/\s+/g, ' ').trim();
+  return t;
+}
+
+/** Pull subcategory phrase from a full user sentence when classifier terms are empty or too broad. */
+export function extractSubcategoryFromQuery(query) {
+  const q = String(query || '').trim();
+  const patterns = [
+    /(?:fix|reprocess|do|run)\s+all\s+(?:the\s+)?images?\s+(?:on|in|for|from)\s+(?:the\s+)?(.+?)(?:\s+subcategory|\s+category|\s*[-—–:]\s|\.\s|$)/i,
+    /(?:images?\s+(?:on|in|for|from))\s+(?:the\s+)?(.+?)(?:\s+subcategory|\s+category|\s*[-—–:]\s|$)/i,
+    /(?:subcategory|category)\s+(?:called\s+)?(.+?)(?:\s*[-—–:]\s|$)/i,
+  ];
+  for (const re of patterns) {
+    const m = q.match(re);
+    if (m?.[1]) {
+      const cleaned = cleanBatchTerms(m[1]);
+      if (cleaned.length >= 2) return cleaned;
+    }
+  }
+  return '';
+}
+
 /** Tokenize for fuzzy label match — "Games & Puzzles" and "games and puzzles" → [games, puzzles] */
 export function tokenizeLabel(text) {
   return String(text || '')
