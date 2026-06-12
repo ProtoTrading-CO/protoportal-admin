@@ -63,10 +63,31 @@ async function stockAction(body) {
   return json;
 }
 
+/** Parse a DB numeric stock field; preserves negatives and zero; null if missing/invalid. */
+function readStockField(val) {
+  if (val === null || val === undefined || val === '') return null;
+  const n = Number(val);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** available_stock (SOH) is primary; fall back to stock_qty. Never coerce negatives to 0. */
+export function stockFromRow(row) {
+  const available = readStockField(row?.available_stock);
+  const raw = readStockField(row?.stock_qty);
+  const soh = available !== null ? available : raw;
+  return {
+    stockOnHand: soh,
+    stockQty: soh,
+    rawStockQty: raw,
+    availableStock: available,
+  };
+}
+
 function adapt(row, { archived = false, tree = null } = {}) {
   const images = [row.image_url_one, row.image_url_two, row.image_url_three, row.image_url_four].filter(Boolean);
   const subLabels = [row.subcategory_one, row.subcategory_two, row.subcategory_three, row.subcategory_four].filter(Boolean);
   const { categoryId, categoryPath } = resolveCategoryIdsFromTree(row, tree);
+  const stock = stockFromRow(row);
   return {
     id: row.sku,
     code: row.barcode,
@@ -84,8 +105,10 @@ function adapt(row, { archived = false, tree = null } = {}) {
     secondaryImage: images[1] || '',
     imageThree: images[2] || '',
     imageFour: images[3] || '',
-    stockQty: 0,
-    stockOnHand: 0,
+    stockQty: stock.stockQty,
+    stockOnHand: stock.stockOnHand,
+    rawStockQty: stock.rawStockQty,
+    availableStock: stock.availableStock,
     colour: '',
     category: categoryId,
     categoryLabel: row.category,
@@ -102,7 +125,7 @@ function adapt(row, { archived = false, tree = null } = {}) {
     marginCue: '',
     leadTime: '',
     tradeNote: '',
-    inStock: true,
+    inStock: stock.stockOnHand !== null ? stock.stockOnHand > 0 : true,
     createdAt: row.created_at,
     yearlySales: 0,
     supplier: '',

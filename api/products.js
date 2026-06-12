@@ -21,9 +21,23 @@ async function fetchAllRows(supabase, table, orderBy = 'title') {
   return rows;
 }
 
+function readStockField(val) {
+  if (val === null || val === undefined || val === '') return null;
+  const n = Number(val);
+  return Number.isFinite(n) ? n : null;
+}
+
+function stockFromRow(row) {
+  const available = readStockField(row?.available_stock);
+  const raw = readStockField(row?.stock_qty);
+  const soh = available !== null ? available : raw;
+  return { stockOnHand: soh, stockQty: soh, rawStockQty: raw, availableStock: available };
+}
+
 function adapt(row, tree) {
   const images = [row.image_url_one, row.image_url_two, row.image_url_three, row.image_url_four].filter(Boolean);
   const { categoryId, categoryPath } = resolveCategoryIds(row, tree);
+  const stock = stockFromRow(row);
   return {
     id: row.sku,
     code: row.barcode,
@@ -40,8 +54,8 @@ function adapt(row, tree) {
     secondaryImage: images[1] || '',
     imageThree: images[2] || '',
     imageFour: images[3] || '',
-    stockQty: 0,
-    stockOnHand: 0,
+    stockQty: stock.stockQty,
+    stockOnHand: stock.stockOnHand,
     colour: '',
     category: categoryId,
     categoryLabel: row.category,
@@ -57,7 +71,7 @@ function adapt(row, tree) {
     marginCue: '',
     leadTime: '',
     tradeNote: '',
-    inStock: true,
+    inStock: stock.stockOnHand !== null ? stock.stockOnHand > 0 : true,
     createdAt: row.created_at,
     yearlySales: 0,
     supplier: '',

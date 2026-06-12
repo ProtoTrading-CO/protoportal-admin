@@ -356,6 +356,11 @@ function csvDownload(rows, filename) {
   URL.revokeObjectURL(url);
 }
 
+function formatStockUnits(qty) {
+  if (qty === null || qty === undefined) return '—';
+  return `${qty} units`;
+}
+
 function productToForm(product) {
   return {
     code: product.code || '',
@@ -365,7 +370,7 @@ function productToForm(product) {
     imageThree: product.imageThree || product.images?.[2] || '',
     imageFour: product.imageFour || product.images?.[3] || '',
     price: String(product.price ?? 0),
-    stockOnHand: String(product.stockOnHand ?? 1),
+    stockOnHand: product.stockOnHand != null ? String(product.stockOnHand) : '',
     ...categoryFormFromPath(product.categoryPath, categories),
     productType: getProductType(product),
   };
@@ -2553,7 +2558,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                           </div>
                         </div>
                         <div>
-                          <span style={{ fontWeight: 700 }}>{product.stockQty != null ? `${product.stockQty} units` : '—'}</span>
+                          <span style={{ fontWeight: 700, color: product.stockQty < 0 ? '#b91c1c' : undefined }}>{formatStockUnits(product.stockQty)}</span>
                           {product.supplier && <div className="adm-muted" style={{ fontSize: 11 }}>{product.supplier}</div>}
                         </div>
                         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
@@ -2852,8 +2857,8 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                           </div>
                         </div>
                         <div>
-                          <span style={{ fontWeight: 900, color: '#8B1A1A', fontSize: 15 }}>0</span>
-                          <span className="adm-muted" style={{ fontSize: 11, marginLeft: 4 }}>units</span>
+                          <span style={{ fontWeight: 900, fontSize: 15, color: product.stockQty < 0 ? '#b91c1c' : '#8B1A1A' }}>{product.stockQty != null ? product.stockQty : '—'}</span>
+                          {product.stockQty != null && <span className="adm-muted" style={{ fontSize: 11, marginLeft: 4 }}>units</span>}
                           {product.supplier && <div className="adm-muted" style={{ fontSize: 11 }}>{product.supplier}</div>}
                         </div>
                         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
@@ -2933,7 +2938,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                         </div>
                       </div>
                       <div>
-                        <span style={{ fontWeight: 700 }}>{product.stockQty != null ? `${product.stockQty} units` : '—'}</span>
+                        <span style={{ fontWeight: 700, color: product.stockQty < 0 ? '#b91c1c' : undefined }}>{formatStockUnits(product.stockQty)}</span>
                       </div>
                       <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                         <button onClick={() => void restoreFromRecycle(product)} className="adm-icon-btn" title="Restore to live catalogue" disabled={saving === product.id}>

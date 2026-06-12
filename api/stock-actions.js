@@ -29,6 +29,27 @@ async function fetchAllRows(supabase, table, { filter = null, orderBy = null } =
   return rows;
 }
 
+/** Attach live SOH from public.products (join: products.sku = row.barcode). */
+async function enrichRowsWithProductStock(supabase, rows) {
+  const barcodes = [...new Set(rows.map((r) => r.barcode).filter(Boolean))];
+  if (!barcodes.length) return rows;
+  const stockByBarcode = new Map();
+  for (let i = 0; i < barcodes.length; i += 500) {
+    const chunk = barcodes.slice(i, i + 500);
+    const { data, error } = await supabase
+      .from('products')
+      .select('sku, stock_qty, available_stock')
+      .in('sku', chunk);
+    if (error) throw error;
+    for (const p of data || []) stockByBarcode.set(p.sku, p);
+  }
+  return rows.map((r) => {
+    const p = stockByBarcode.get(r.barcode);
+    if (!p) return r;
+    return { ...r, stock_qty: p.stock_qty, available_stock: p.available_stock };
+  });
+}
+
 /**
  * Server-side stock mutations + raw listings. Replaces direct browser access
  * to the stock Supabase project so its key never ships in the client bundle.
@@ -52,7 +73,7 @@ export default async function handler(req, res) {
 
     if (action === 'listArchived') {
       const { archivedBy = null, excludeArchivedBy = null } = req.body;
-      const [rows, tree] = await Promise.all([
+      const [rawRows, tree] = await Promise.all([
         fetchAllRows(supabase, 'archived_products', {
           orderBy: 'archived_at',
           filter: archivedBy ? (q) => q.eq('archived_by', archivedBy) : null,
@@ -60,9 +81,10 @@ export default async function handler(req, res) {
         loadTaxonomy().catch(() => []),
       ]);
       const filtered = Array.isArray(excludeArchivedBy) && excludeArchivedBy.length
-        ? rows.filter((r) => !excludeArchivedBy.includes(r.archived_by))
-        : rows;
-      return res.status(200).json({ rows: filtered, tree });
+        ? rawRows.filter((r) => !excludeArchivedBy.includes(r.archived_by))
+        : rawRows;
+      const rows = await enrichRowsWithProductStock(supabase, filtered);
+      return res.status(200).json({ rows, tree });
     }
 
     if (action === 'create') {
