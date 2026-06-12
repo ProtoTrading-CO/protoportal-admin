@@ -102,7 +102,7 @@ import { adminProductSearch } from '../lib/fuzzySearch';
 import ReorderGrid from '../components/ReorderGrid';
 import FulfillmentSettingsModal from '../components/FulfillmentSettingsModal';
 import OrderWhatsappNotify from '../components/OrderWhatsappNotify';
-import OrderAnalyticsDashboard from '../components/OrderAnalyticsDashboard';
+import AnalyticsHub from '../components/AnalyticsHub';
 import categories from '../data/categories.json';
 
 // ─── Reorder sort order — stored in localStorage, applied client-side ─────────
@@ -3466,7 +3466,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                 </div>
 
                 {orderSubView === 'analytics' ? (
-                  <OrderAnalyticsDashboard />
+                  <AnalyticsHub />
                 ) : (
                 <>
                 <div style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
