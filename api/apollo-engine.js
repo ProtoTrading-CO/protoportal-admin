@@ -17,6 +17,26 @@ export function executeIntent(intent, data, terms = '') {
   const { customers, orders, products, search } = data;
 
   switch (intent) {
+    case 'product_negative_stock': {
+      const rows = products.all
+        .filter((p) => p.stockOnHand != null && p.stockOnHand < 0)
+        .sort((a, b) => a.stockOnHand - b.stockOnHand)
+        .slice(0, 15);
+      if (!rows.length) {
+        return {
+          source: 'live-index',
+          intent,
+          reply: '## Negative stock\n\nNo products currently show a stock level below zero.',
+        };
+      }
+      const lines = rows.map((p, i) => `${i + 1}. **${p.title}** (${p.sku}) — **${p.stockOnHand}** units · ${p.category}`);
+      return {
+        source: 'live-index',
+        intent,
+        reply: `## Negative stock (${rows.length})\n\n${lines.join('\n')}${chartBlock('Negative stock levels', rows.slice(0, 10).map((p) => p.sku.slice(0, 12)), rows.slice(0, 10).map((p) => p.stockOnHand))}`,
+      };
+    }
+
     case 'product_count':
       return {
         source: 'live-index',

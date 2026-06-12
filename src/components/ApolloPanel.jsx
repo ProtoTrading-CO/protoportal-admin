@@ -1,14 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { jsPDF } from 'jspdf';
-import { Bot, FileDown, Loader2, Send, Sparkles, User } from 'lucide-react';
+import { Bot, FileDown, Loader2, Send, Sparkles, User, Wrench } from 'lucide-react';
 
 const STARTERS = [
-  'How many products do we have?',
+  'What are my best performing products by orders?',
   'Which products have the lowest stock?',
-  'What items are being ordered the most?',
+  'Find items with negative stock levels',
   'Who are all my customers?',
   'What are customers searching with no results?',
-  'Show me a bar chart of top searches',
 ];
 
 function renderInline(text) {
@@ -135,7 +134,7 @@ function ApolloWelcome({ onStarter, busy }) {
   );
 }
 
-function ChatMessage({ msg, index, onExportPdf }) {
+function ChatMessage({ msg, isLastAssistant, onExportPdf, onFix, fixBusy }) {
   const isUser = msg.role === 'user';
   return (
     <div className={`apollo-msg-row apollo-msg-row--${msg.role}`}>
@@ -147,17 +146,25 @@ function ChatMessage({ msg, index, onExportPdf }) {
           <span className="apollo-msg-name">{isUser ? 'You' : 'Apollo'}</span>
           {!isUser && msg.source && (
             <span className={`apollo-source apollo-source--${msg.source}`}>
-              {msg.source === 'live-index' ? 'Live index' : msg.source === 'live' ? 'Live data' : 'AI'}
+              {msg.source === 'live-index' ? 'Live index'
+                : msg.source === 'fixed' ? 'Fixed'
+                  : msg.source === 'live' ? 'Live data'
+                    : 'AI'}
             </span>
           )}
         </div>
         <div className={`apollo-msg-body apollo-msg-body--${msg.role}`}>
           {isUser ? <p>{msg.content}</p> : <MessageBody content={msg.content} />}
         </div>
-        {!isUser && index > 0 && (
-          <button type="button" className="apollo-pdf-link" onClick={() => onExportPdf(msg.content)}>
-            <FileDown size={12} /> Export PDF
-          </button>
+        {isLastAssistant && !isUser && (
+          <div className="apollo-msg-actions">
+            <button type="button" className="apollo-action-btn" onClick={onFix} disabled={fixBusy}>
+              <Wrench size={13} /> {fixBusy ? 'Fixing…' : 'Fix this'}
+            </button>
+            <button type="button" className="apollo-action-btn apollo-action-btn--ghost" onClick={() => onExportPdf(msg.content)}>
+              <FileDown size={13} /> Export PDF
+            </button>
+          </div>
         )}
       </div>
     </div>
@@ -218,38 +225,73 @@ export default function ApolloPanel() {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   }, [messages, busy]);
 
-  const send = useCallback(async (text) => {
+  const send = useCallback(async (text, { fix = false, replaceLast = false } = {}) => {
     const trimmed = String(text || '').trim();
-    if (!trimmed || busy) return;
+    if (!trimmed && !fix) return;
+    if (busy) return;
     setError('');
     setBusy(true);
-    const nextMessages = [...messages, { role: 'user', content: trimmed }];
-    setMessages(nextMessages);
-    setInput('');
+
+    let nextMessages = messages;
+    let badReply = '';
+    let previousIntent = '';
+
+    if (fix) {
+      const last = messages[messages.length - 1];
+      if (last?.role !== 'assistant') {
+        setBusy(false);
+        return;
+      }
+      badReply = last.content;
+      previousIntent = last.intent || '';
+      nextMessages = messages.slice(0, -1);
+      setMessages(nextMessages);
+    } else {
+      nextMessages = [...messages, { role: 'user', content: trimmed }];
+      setMessages(nextMessages);
+      setInput('');
+    }
 
     try {
       const apiMessages = nextMessages.map(({ role, content }) => ({ role, content }));
       const res = await fetch('/api/apollo', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: apiMessages }),
+        body: JSON.stringify({
+          messages: apiMessages,
+          fix,
+          badReply,
+          previousIntent,
+        }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Apollo request failed');
-      setMessages((prev) => [...prev, {
+
+      const assistantMsg = {
         role: 'assistant',
         content: json.reply,
         source: json.source,
         intent: json.intent,
-      }]);
+      };
+
+      if (fix || replaceLast) {
+        setMessages((prev) => [...prev.slice(0, -1), assistantMsg]);
+      } else {
+        setMessages((prev) => [...prev, assistantMsg]);
+      }
     } catch (e) {
       setError(e.message);
+      if (fix) setMessages(messages);
     } finally {
       setBusy(false);
     }
   }, [busy, messages]);
 
-  const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
+  const fixLastReply = useCallback(() => {
+    void send('', { fix: true });
+  }, [send]);
+
+  const lastAssistantIdx = messages.reduce((acc, m, i) => (m.role === 'assistant' ? i : acc), -1);
   const showWelcome = messages.length === 0;
 
   return (
@@ -264,22 +306,20 @@ export default function ApolloPanel() {
             </p>
           </div>
         </div>
-        {lastAssistant && (
-          <button
-            type="button"
-            className="apollo-export-btn"
-            onClick={() => exportMessagePdf(lastAssistant.content)}
-          >
-            <FileDown size={14} /> Export last reply
-          </button>
-        )}
       </div>
 
       <div className="apollo-shell">
         <div className="apollo-chat" ref={scrollRef}>
           {showWelcome && <ApolloWelcome onStarter={send} busy={busy} />}
           {messages.map((msg, i) => (
-            <ChatMessage key={i} msg={msg} index={i} onExportPdf={exportMessagePdf} />
+            <ChatMessage
+              key={i}
+              msg={msg}
+              isLastAssistant={i === lastAssistantIdx && !busy}
+              onExportPdf={exportMessagePdf}
+              onFix={fixLastReply}
+              fixBusy={busy}
+            />
           ))}
           {busy && (
             <div className="apollo-msg-row apollo-msg-row--assistant">

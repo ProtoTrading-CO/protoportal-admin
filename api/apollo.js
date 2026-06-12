@@ -4,13 +4,13 @@ import { parseIntent, classifyWithAi } from './apollo-intent.js';
 import { executeIntent } from './apollo-engine.js';
 
 const MODEL = 'google/gemini-2.5-flash';
-const CONFIDENCE_THRESHOLD = 0.4;
+const CONFIDENCE_THRESHOLD = 0.45;
 
-const NARRATE_PROMPT = `You are Apollo for Proto Trading admin. The user asked a question and the system already fetched LIVE DATA as a structured answer.
+const NARRATE_PROMPT = `You are Apollo for Proto Trading admin. The user asked a question and the system fetched LIVE DATA.
 
-Rewrite the structured answer in clear, friendly prose. Keep all numbers and names exact — do not invent data.
-Preserve any \`\`\`chart blocks exactly as-is (do not modify JSON inside them).
-Use ## headings and bullet points. Be concise.`;
+Rewrite the structured answer clearly. Keep all numbers and product/customer names exact.
+Preserve any \`\`\`chart blocks exactly as-is — do not modify JSON inside them.
+Use ## headings and bullets. Be concise and helpful.`;
 
 async function narrateWithAi(structuredReply, userQuery, apiKey) {
   const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -39,11 +39,13 @@ async function narrateWithAi(structuredReply, userQuery, apiKey) {
 
 async function freeformWithAi(userQuery, data, apiKey) {
   const summary = {
-    customers: data.customers.total,
-    products: data.products.liveCount,
+    customers: data.customers.list.slice(0, 20),
+    productCount: data.products.liveCount,
     orders: data.orders.total,
-    topSearches: data.search.topSearches.slice(0, 5),
-    lowestStock: data.products.lowestStock.slice(0, 5),
+    topOrdered: data.orders.topLineItems.slice(0, 10),
+    topSearches: data.search.topSearches.slice(0, 10),
+    lowestStock: data.products.lowestStock.slice(0, 10),
+    negativeStock: data.products.all.filter((p) => p.stockOnHand != null && p.stockOnHand < 0).slice(0, 10),
   };
 
   const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -59,7 +61,7 @@ async function freeformWithAi(userQuery, data, apiKey) {
       messages: [
         {
           role: 'system',
-          content: `${NARRATE_PROMPT}\n\nContext snapshot:\n${JSON.stringify(summary, null, 2)}`,
+          content: `${NARRATE_PROMPT}\n\nLive data:\n${JSON.stringify(summary, null, 2)}`,
         },
         { role: 'user', content: userQuery },
       ],
@@ -71,6 +73,41 @@ async function freeformWithAi(userQuery, data, apiKey) {
   const payload = await response.json();
   if (!response.ok) throw new Error(payload?.error?.message || 'Apollo request failed');
   return payload.choices?.[0]?.message?.content || '';
+}
+
+async function resolveQuery(userQuery, data, apiKey, { fix = false, badReply = '', previousIntent = '' } = {}) {
+  let parsed = parseIntent(userQuery);
+
+  if (fix || parsed.confidence < CONFIDENCE_THRESHOLD) {
+    const aiIntent = await classifyWithAi(userQuery, apiKey, { badReply, previousIntent });
+    if (aiIntent) parsed = aiIntent;
+  }
+
+  let result = executeIntent(parsed.intent, data, parsed.terms);
+
+  if (!result) {
+    const retry = await classifyWithAi(userQuery, apiKey, { badReply: badReply || 'no result', previousIntent: parsed.intent });
+    if (retry) {
+      parsed = retry;
+      result = executeIntent(parsed.intent, data, parsed.terms);
+    }
+  }
+
+  const shouldNarrate = fix || parsed.wantsChart;
+
+  if (result) {
+    return {
+      reply: shouldNarrate ? await narrateWithAi(result.reply, userQuery, apiKey) : result.reply,
+      source: fix ? 'fixed' : result.source,
+      intent: result.intent,
+    };
+  }
+
+  return {
+    reply: await freeformWithAi(userQuery, data, apiKey),
+    source: fix ? 'fixed' : 'ai',
+    intent: 'freeform',
+  };
 }
 
 export default async function handler(req, res) {
@@ -100,7 +137,7 @@ export default async function handler(req, res) {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) return res.status(500).json({ error: 'OPENROUTER_API_KEY is not configured' });
 
-  const { messages = [], narrate = false } = req.body || {};
+  const { messages = [], fix = false, badReply = '', previousIntent = '' } = req.body || {};
   if (!Array.isArray(messages) || !messages.length) {
     return res.status(400).json({ error: 'messages array required' });
   }
@@ -111,32 +148,11 @@ export default async function handler(req, res) {
 
   try {
     const data = await getApolloData();
-    let parsed = parseIntent(userQuery);
-
-    if (parsed.confidence < CONFIDENCE_THRESHOLD) {
-      const aiIntent = await classifyWithAi(userQuery, apiKey);
-      if (aiIntent) parsed = aiIntent;
-    }
-
-    let result = executeIntent(parsed.intent, data, parsed.terms);
-
-    if (!result && parsed.intent !== 'freeform') {
-      result = executeIntent('freeform', data, parsed.terms);
-    }
-
-    let reply;
-    let source;
-    let intent;
-
-    if (result) {
-      source = result.source;
-      intent = result.intent;
-      reply = narrate ? await narrateWithAi(result.reply, userQuery, apiKey) : result.reply;
-    } else {
-      source = 'ai';
-      intent = 'freeform';
-      reply = await freeformWithAi(userQuery, data, apiKey);
-    }
+    const { reply, source, intent } = await resolveQuery(userQuery, data, apiKey, {
+      fix,
+      badReply,
+      previousIntent,
+    });
 
     return res.status(200).json({
       reply,
@@ -144,6 +160,7 @@ export default async function handler(req, res) {
       intent,
       indexedAt: data.generatedAt,
       indexSize: data.index.length,
+      fixed: Boolean(fix),
     });
   } catch (err) {
     console.error('apollo:', err?.message || err);
