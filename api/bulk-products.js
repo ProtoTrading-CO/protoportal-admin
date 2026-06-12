@@ -37,6 +37,19 @@ async function archiveProduct(supabase, sku) {
   return { sku, ok: true };
 }
 
+/**
+ * Permanently delete a product. Hits both tables because a SKU lives in
+ * `website_stock` OR `archived_products` depending on state — and admins
+ * may bulk-delete from either Product Manager or the Archive view.
+ */
+async function permanentlyDeleteProduct(supabase, sku) {
+  const { error: liveError } = await supabase.from('website_stock').delete().eq('sku', sku);
+  if (liveError) return { sku, ok: false, error: liveError.message };
+  const { error: archError } = await supabase.from('archived_products').delete().eq('sku', sku);
+  if (archError) return { sku, ok: false, error: archError.message };
+  return { sku, ok: true };
+}
+
 export default async function handler(req, res) {
   if (!requireAdminKey(req, res)) return;
   res.setHeader('Cache-Control', 'no-store');
@@ -77,6 +90,19 @@ export default async function handler(req, res) {
       return res.status(failed.length ? 207 : 200).json({
         ok: failed.length === 0,
         archived: results.filter((r) => r.ok).length,
+        failed,
+      });
+    }
+
+    if (action === 'delete') {
+      const results = [];
+      for (const sku of normalizedSkus) {
+        results.push(await permanentlyDeleteProduct(supabase, sku));
+      }
+      const failed = results.filter((r) => !r.ok);
+      return res.status(failed.length ? 207 : 200).json({
+        ok: failed.length === 0,
+        deleted: results.filter((r) => r.ok).length,
         failed,
       });
     }

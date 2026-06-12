@@ -205,12 +205,24 @@ function applyPathFilter(products, categoryPath) {
 
 function applyCategoryFilter(rows, categoryFilter) {
   if (!categoryFilter || categoryFilter === 'all') return rows;
+  // Special bucket for orphans — products with no main category. They never
+  // reach the customer site (the /api/products feed filters them out) but
+  // admins need to surface and fix them.
+  if (categoryFilter === '__uncategorized__') {
+    return rows.filter((p) => !p.category && !p.categoryLabel);
+  }
   return rows.filter((p) =>
     matchesMainCategory(p, categoryFilter)
     || p.categoryPath?.[1] === categoryFilter
     || p.categoryPath?.[2] === categoryFilter
     || p.categoryPath?.[3] === categoryFilter
   );
+}
+
+/** Count products with no main category — for the orphans badge / banner. */
+export async function fetchUncategorizedCount() {
+  const all = await getAllCachedAdmin();
+  return all.filter((p) => !p.category && !p.categoryLabel).length;
 }
 
 // ─── Public read API ──────────────────────────────────────────────────────────
@@ -541,6 +553,28 @@ export async function bulkArchiveProducts(skus) {
   if (!res.ok && res.status !== 207) throw new Error(json.error || 'Bulk archive failed');
   if (json.failed?.length) {
     throw new Error(`${json.failed.length} item(s) failed to archive`);
+  }
+  invalidateProductCache();
+  invalidateAdminCache();
+  return json;
+}
+
+/**
+ * Permanently delete a batch of products from BOTH `website_stock` and
+ * `archived_products`. Used by the bulk-delete UIs in Product Manager and
+ * the Archive section — the action is irreversible, so callers must show
+ * an explicit confirmation modal first.
+ */
+export async function bulkDeleteProducts(skus) {
+  const res = await fetch('/api/bulk-products', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'delete', skus }),
+  });
+  const json = await res.json();
+  if (!res.ok && res.status !== 207) throw new Error(json.error || 'Bulk delete failed');
+  if (json.failed?.length) {
+    throw new Error(`${json.failed.length} item(s) failed to delete`);
   }
   invalidateProductCache();
   invalidateAdminCache();

@@ -50,12 +50,14 @@ import {
 import {
   archiveProduct,
   bulkArchiveProducts,
+  bulkDeleteProducts,
   bulkMoveProducts,
   createProduct,
   deleteProduct,
   fetchAdminProductsPage,
   fetchAllProductsAdmin,
   fetchCatalogArchiveCount,
+  fetchUncategorizedCount,
   fetchDistinctCategories,
   fetchDormantProducts,
   fetchReorderProducts,
@@ -256,6 +258,11 @@ const PRODUCT_IMAGE_SLOTS = [
   { key: 'imageFour', label: 'Image 4' },
 ];
 
+// The product edit form mirrors the four taxonomy levels stored in the DB
+// (category, subcategory_one, subcategory_two, subcategory_three). Every
+// `child*Id` is a slug from the taxonomy tree at that level — empty string
+// means "no value at this level". Saving collapses these into the
+// `categoryPath` array, which the API maps back to the DB columns.
 const emptyForm = {
   code: '',
   name: '',
@@ -266,7 +273,9 @@ const emptyForm = {
   price: '0',
   stockOnHand: '1',
   categoryId: categories[0]?.id || '',
-  subcategoryId: categories[0]?.children?.[0]?.id || '',
+  childOneId: categories[0]?.children?.[0]?.id || '',
+  childTwoId: '',
+  childThreeId: '',
   productType: 'General product',
 };
 
@@ -276,6 +285,39 @@ function categoryLabel(id, tree = categories) {
 
 function subcategoryOptions(categoryId, tree = categories) {
   return subcategoryOptionsFromTree(tree, categoryId);
+}
+
+/** Look up the children of a node by id within an arbitrary tree. */
+function childrenOf(tree, id) {
+  if (!id) return [];
+  const stack = [...(tree || [])];
+  while (stack.length) {
+    const node = stack.shift();
+    if (node.id === id) return node.children || [];
+    if (node.children?.length) stack.push(...node.children);
+  }
+  return [];
+}
+
+/**
+ * If `currentId` is set but not in `options`, prepend a synthetic entry so
+ * the user can still see (and replace) a value that no longer maps to a
+ * live taxonomy node — e.g. a subcategory that was renamed or deleted.
+ */
+function withCurrentOption(options, currentId) {
+  if (!currentId || options.some((o) => o.id === currentId)) return options;
+  return [{ id: currentId, label: `${currentId} (missing)` }, ...options];
+}
+
+/** Build the form's category state from a saved product's categoryPath. */
+function categoryFormFromPath(categoryPath = [], tree = categories) {
+  const categoryId = categoryPath[0] || tree[0]?.id || '';
+  return {
+    categoryId,
+    childOneId: categoryPath[1] || '',
+    childTwoId: categoryPath[2] || '',
+    childThreeId: categoryPath[3] || '',
+  };
 }
 
 function getProductType(product) {
@@ -321,8 +363,7 @@ function productToForm(product) {
     imageFour: product.imageFour || product.images?.[3] || '',
     price: String(product.price ?? 0),
     stockOnHand: String(product.stockOnHand ?? 1),
-    categoryId: product.categoryPath?.[0] || categories[0]?.id || '',
-    subcategoryId: product.categoryPath?.[1] || subcategoryOptions(product.categoryPath?.[0] || categories[0]?.id || '')[0]?.id || '',
+    ...categoryFormFromPath(product.categoryPath, categories),
     productType: getProductType(product),
   };
 }
@@ -376,6 +417,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
 
   const [catalogTotal, setCatalogTotal] = useState(0);
   const [archiveCatalogTotal, setArchiveCatalogTotal] = useState(0);
+  const [uncategorizedCount, setUncategorizedCount] = useState(0);
   const [statsCustomerTotal, setStatsCustomerTotal] = useState(0);
   const [statsOrderTotal, setStatsOrderTotal] = useState(0);
 
@@ -418,6 +460,9 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [productSelectedIds, setProductSelectedIds] = useState(new Set());
   const [productArchiveConfirmOpen, setProductArchiveConfirmOpen] = useState(false);
+  const [productDeleteConfirmOpen, setProductDeleteConfirmOpen] = useState(false);
+  const [archiveSelectedIds, setArchiveSelectedIds] = useState(new Set());
+  const [archiveDeleteConfirmOpen, setArchiveDeleteConfirmOpen] = useState(false);
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
@@ -634,16 +679,18 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
 
   const refreshDashboardStats = async () => {
     try {
-      const [products, archiveCount, customerRes, orders] = await Promise.all([
+      const [products, archiveCount, customerRes, orders, orphanCount] = await Promise.all([
         fetchAllProductsAdmin(),
         fetchCatalogArchiveCount(),
         fetch('/api/admin-customers?tab=regular&page=1&pageSize=1').then((r) => r.json()),
         fetchAllOrdersAdmin(10000),
+        fetchUncategorizedCount().catch(() => 0),
       ]);
       setCatalogTotal(products.length);
       setArchiveCatalogTotal(archiveCount);
       setStatsCustomerTotal(customerRes.total || 0);
       setStatsOrderTotal(orders.length);
+      setUncategorizedCount(orphanCount);
     } catch {
       // Stats are best-effort; section loads still work if this fails.
     }
@@ -750,6 +797,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   useEffect(() => { if (activeSection === 'products') void loadProducts(); }, [activeSection, productPage, productSearchDebounced, productCategory, productSubcategory, productPageSize]);
   useEffect(() => { setProductSelectedIds(new Set()); }, [productPage, productSearchDebounced, productCategory, productSubcategory]);
   useEffect(() => { if (activeSection === 'archive') void loadArchive(); }, [activeSection, archivePage, archiveSearch]);
+  useEffect(() => { setArchiveSelectedIds(new Set()); }, [archivePage, archiveSearch, activeSection]);
   useEffect(() => { if (activeSection === 'recycle') void loadRecycle(); }, [activeSection, recyclePage, recycleSearch]);
   useEffect(() => {
     void refreshDashboardStats();
@@ -899,9 +947,16 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   }, [orders, orderSearch, orderTab]);
 
   const openNewProduct = () => {
-    const firstCategory = categories[0]?.id || '';
+    const firstCategory = taxonomyTree[0]?.id || categories[0]?.id || '';
+    const firstChild = subcategoryOptions(firstCategory, taxonomyTree)[0]?.id || '';
     setEditingProduct(null);
-    setProductForm({ ...emptyForm, categoryId: firstCategory, subcategoryId: subcategoryOptions(firstCategory)[0]?.id || '' });
+    setProductForm({
+      ...emptyForm,
+      categoryId: firstCategory,
+      childOneId: firstChild,
+      childTwoId: '',
+      childThreeId: '',
+    });
     setEditorError('');
     setEditorImageUploading(false);
     setEditorImageDragOver('');
@@ -978,6 +1033,18 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   };
 
   const saveProduct = async () => {
+    const categoryPath = [
+      productForm.categoryId,
+      productForm.childOneId,
+      productForm.childTwoId,
+      productForm.childThreeId,
+    ].filter(Boolean);
+
+    if (!categoryPath.length) {
+      setEditorError('Pick a main category before saving — every product needs a category.');
+      return;
+    }
+
     const payload = {
       code: productForm.code.trim(),
       name: productForm.name.trim(),
@@ -987,7 +1054,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
       imageFour: productForm.imageFour.trim(),
       price: Number(productForm.price || 0),
       stockOnHand: Number(productForm.stockOnHand || 0),
-      categoryPath: [productForm.categoryId, productForm.subcategoryId].filter(Boolean),
+      categoryPath,
       ...typePatch(productForm.productType, editingProduct || {}),
     };
     setSaving(editingProduct?.id || 'new-product');
@@ -995,6 +1062,8 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
       await (editingProduct ? updateProduct(editingProduct.id, payload) : createProduct(payload));
       closeEditor();
       await loadProducts();
+    } catch (err) {
+      setEditorError(err.message || 'Save failed');
     } finally { setSaving(''); }
   };
 
@@ -1454,6 +1523,65 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
       showToast(`Archived ${count} product(s)`);
     } catch (err) {
       showToast(err.message || 'Archive failed', 'error');
+    } finally { setSaving(''); }
+  };
+
+  // Permanently delete the products selected in Product Manager. Unlike
+  // archive/recycle this skips the Recycle Bin and removes rows from both
+  // `website_stock` and `archived_products`, so we gate it behind an
+  // explicit confirmation modal.
+  const confirmBulkDeleteProducts = async () => {
+    const count = productSelectedIds.size;
+    const ids = [...productSelectedIds];
+    setSaving('bulk-delete-pm');
+    try {
+      await bulkDeleteProducts(ids);
+      invalidateAdminCache();
+      invalidateProductCache();
+      setProductDeleteConfirmOpen(false);
+      setProductSelectedIds(new Set());
+      await refreshDashboardStats();
+      await refreshRecycleCatalogCount();
+      await loadProducts();
+      showToast(`Deleted ${count} product(s)`);
+    } catch (err) {
+      showToast(err.message || 'Delete failed', 'error');
+    } finally { setSaving(''); }
+  };
+
+  // Archive bulk-select handlers — mirror the Product Manager bulk bar so
+  // admins can multi-select archived rows and either restore or permanently
+  // delete them in one click.
+  const toggleSelectArchive = (id) => {
+    setArchiveSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAllArchive = () => {
+    const ids = archiveRows.map((p) => p.id);
+    const allSelected = ids.length > 0 && ids.every((id) => archiveSelectedIds.has(id));
+    setArchiveSelectedIds(allSelected ? new Set() : new Set(ids));
+  };
+
+  const confirmBulkDeleteArchive = async () => {
+    const count = archiveSelectedIds.size;
+    const ids = [...archiveSelectedIds];
+    setSaving('bulk-delete-archive');
+    try {
+      await bulkDeleteProducts(ids);
+      invalidateAdminCache();
+      invalidateProductCache();
+      setArchiveDeleteConfirmOpen(false);
+      setArchiveSelectedIds(new Set());
+      await refreshDashboardStats();
+      await loadArchive();
+      showToast(`Deleted ${count} archived product(s)`);
+    } catch (err) {
+      showToast(err.message || 'Delete failed', 'error');
     } finally { setSaving(''); }
   };
 
@@ -2069,9 +2197,12 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                   <label className="adm-search"><Search size={15} /><input value={productSearchInput} onChange={(e) => setProductSearchInput(e.target.value)} placeholder="Search by SKU or product name" className="adm-search-input" /></label>
                   <select value={productCategory} onChange={(e) => { setProductCategory(e.target.value); setProductSubcategory('all'); }} className="adm-select adm-select--enhanced">
                     <option value="all">All categories</option>
+                    <option value="__uncategorized__">
+                      ⚠️ Uncategorized{uncategorizedCount > 0 ? ` (${uncategorizedCount})` : ''}
+                    </option>
                     {mainCategories.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
                   </select>
-                  {productCategory !== 'all' && (
+                  {productCategory !== 'all' && productCategory !== '__uncategorized__' && (
                     <select value={productSubcategory} onChange={(e) => setProductSubcategory(e.target.value)} className="adm-select adm-select--enhanced">
                       <option value="all">All subcategories</option>
                       {subcategoryOptions(productCategory).map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
@@ -2083,6 +2214,34 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                     <option value={100}>100 / page</option>
                   </select>
                 </div>
+
+                {/*
+                  Orphaned-products banner — products with no main category
+                  are filtered out by the customer-facing /api/products feed,
+                  so they never appear on the live site. Surface them here
+                  so admins can fix them in bulk.
+                */}
+                {uncategorizedCount > 0 && productCategory !== '__uncategorized__' && (
+                  <div
+                    role="alert"
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 12,
+                      padding: '10px 14px', margin: '0 0 12px',
+                      background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 8,
+                      fontSize: 13, color: '#9a3412',
+                    }}
+                  >
+                    <span style={{ fontWeight: 700 }}>⚠️ {uncategorizedCount} product{uncategorizedCount === 1 ? '' : 's'} have no category.</span>
+                    <span style={{ flex: 1 }}>They are hidden from the live website until a main category is assigned.</span>
+                    <button
+                      type="button"
+                      className="adm-btn-ghost adm-btn--sm"
+                      onClick={() => { setProductCategory('__uncategorized__'); setProductSubcategory('all'); }}
+                    >
+                      Show them
+                    </button>
+                  </div>
+                )}
 
                 {productSearchInput.trim() && productSearchInput.trim() !== productSearchDebounced && (
                   <p className="adm-muted" style={{ fontSize: 12, margin: '0 0 8px' }}>Searching…</p>
@@ -2112,6 +2271,15 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                         disabled={!!saving}
                       >
                         <Archive size={15} /> Archive
+                      </button>
+                      <button
+                        type="button"
+                        className="adm-btn-ghost adm-btn--sm adm-btn-ghost--danger"
+                        onClick={() => setProductDeleteConfirmOpen(true)}
+                        disabled={!!saving}
+                        style={{ color: '#c40000', borderColor: '#fecaca' }}
+                      >
+                        <Trash2 size={15} /> Delete Selected
                       </button>
                       <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => setProductSelectedIds(new Set())}>Clear</button>
                     </div>
@@ -2212,6 +2380,28 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                           <button type="button" className="adm-btn-ghost" onClick={() => setProductArchiveConfirmOpen(false)}>Cancel</button>
                           <button type="button" className="adm-btn-red" onClick={() => void confirmBulkArchiveProducts()} disabled={saving === 'bulk-archive-pm'}>
                             {saving === 'bulk-archive-pm' ? 'Archiving…' : 'Archive'}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {productDeleteConfirmOpen && (
+                  <div className="adm-modal-backdrop" onClick={() => setProductDeleteConfirmOpen(false)}>
+                    <div className="adm-modal adm-modal--form" onClick={(e) => e.stopPropagation()}>
+                      <div className="adm-modal-header">
+                        <h3 className="adm-modal-title">Permanently delete {productSelectedIds.size} product{productSelectedIds.size === 1 ? '' : 's'}?</h3>
+                        <button type="button" className="adm-modal-close" onClick={() => setProductDeleteConfirmOpen(false)} aria-label="Close"><X size={18} /></button>
+                      </div>
+                      <p className="adm-modal-note" style={{ color: '#7f1d1d' }}>
+                        This removes them from the live catalogue AND from the archive. The action cannot be undone — there is no Recycle Bin step.
+                      </p>
+                      <div className="adm-modal-footer adm-modal-footer--end">
+                        <div className="adm-modal-footer__actions">
+                          <button type="button" className="adm-btn-ghost" onClick={() => setProductDeleteConfirmOpen(false)}>Cancel</button>
+                          <button type="button" className="adm-btn-red" onClick={() => void confirmBulkDeleteProducts()} disabled={saving === 'bulk-delete-pm'}>
+                            {saving === 'bulk-delete-pm' ? 'Deleting…' : <><Trash2 size={14} /> Delete permanently</>}
                           </button>
                         </div>
                       </div>
@@ -2370,9 +2560,45 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                   </div>
                 )}
 
+                {/* Archive bulk action bar — only renders when at least one row is selected. */}
+                {archiveSelectedIds.size > 0 && (
+                  <div className="adm-bulk-bar" role="region" aria-label="Bulk archive actions">
+                    <div className="adm-bulk-bar__left">
+                      <span className="adm-bulk-bar__badge">{archiveSelectedIds.size}</span>
+                      <span className="adm-bulk-bar__count">selected</span>
+                      <button type="button" className="adm-bulk-bar__link" onClick={toggleSelectAllArchive}>
+                        {archiveRows.length > 0 && archiveRows.every((p) => archiveSelectedIds.has(p.id))
+                          ? 'Deselect all'
+                          : `Select all on page (${archiveRows.length})`}
+                      </button>
+                    </div>
+                    <div className="adm-bulk-bar__actions">
+                      <button
+                        type="button"
+                        className="adm-btn-ghost adm-btn--sm adm-btn-ghost--danger"
+                        onClick={() => setArchiveDeleteConfirmOpen(true)}
+                        disabled={!!saving}
+                        style={{ color: '#c40000', borderColor: '#fecaca' }}
+                      >
+                        <Trash2 size={15} /> Delete Selected
+                      </button>
+                      <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => setArchiveSelectedIds(new Set())}>Clear</button>
+                    </div>
+                  </div>
+                )}
+
                 <div className="adm-list">
                   {archiveRows.length > 0 && (
-                    <div className="adm-list-head" style={{ gridTemplateColumns: '36px 2fr 180px 120px' }}>
+                    <div className="adm-list-head" style={{ gridTemplateColumns: '32px 36px 2fr 180px 120px' }}>
+                      <span>
+                        <input
+                          type="checkbox"
+                          checked={archiveRows.length > 0 && archiveRows.every((p) => archiveSelectedIds.has(p.id))}
+                          onChange={toggleSelectAllArchive}
+                          style={{ accentColor: '#8B1A1A', cursor: 'pointer' }}
+                          aria-label="Select all archived products on this page"
+                        />
+                      </span>
                       <span></span><span>Product</span><span>Stock</span><span>Actions</span>
                     </div>
                   )}
@@ -2383,7 +2609,16 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                       acc.push(<div key={`cat-${cat}`} className="adm-category-header">{categoryLabel(cat) || cat}</div>);
                     }
                     acc.push(
-                      <div key={product.id} className="adm-list-row" style={{ gridTemplateColumns: '36px 2fr 180px 120px' }}>
+                      <div key={product.id} className="adm-list-row" style={{ gridTemplateColumns: '32px 36px 2fr 180px 120px' }}>
+                        <div>
+                          <input
+                            type="checkbox"
+                            checked={archiveSelectedIds.has(product.id)}
+                            onChange={() => toggleSelectArchive(product.id)}
+                            style={{ accentColor: '#8B1A1A', cursor: 'pointer' }}
+                            aria-label={`Select ${product.name}`}
+                          />
+                        </div>
                         <div style={{ display: 'flex', alignItems: 'center' }}>
                           {product.image
                             ? <img src={product.image} alt="" style={{ width: 32, height: 32, objectFit: 'contain', borderRadius: 4, background: '#f3f4f6', mixBlendMode: 'multiply' }} />
@@ -2415,6 +2650,28 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                   }, [])}
                 </div>
                 <Pager page={archivePage} totalPages={Math.max(1, Math.ceil(archiveTotal / ADMIN_PAGE_SIZE))} onChange={setArchivePage} />
+
+                {archiveDeleteConfirmOpen && (
+                  <div className="adm-modal-backdrop" onClick={() => setArchiveDeleteConfirmOpen(false)}>
+                    <div className="adm-modal adm-modal--form" onClick={(e) => e.stopPropagation()}>
+                      <div className="adm-modal-header">
+                        <h3 className="adm-modal-title">Permanently delete {archiveSelectedIds.size} archived product{archiveSelectedIds.size === 1 ? '' : 's'}?</h3>
+                        <button type="button" className="adm-modal-close" onClick={() => setArchiveDeleteConfirmOpen(false)} aria-label="Close"><X size={18} /></button>
+                      </div>
+                      <p className="adm-modal-note" style={{ color: '#7f1d1d' }}>
+                        These rows will be removed from `archived_products` (and `website_stock` if still present). This cannot be undone.
+                      </p>
+                      <div className="adm-modal-footer adm-modal-footer--end">
+                        <div className="adm-modal-footer__actions">
+                          <button type="button" className="adm-btn-ghost" onClick={() => setArchiveDeleteConfirmOpen(false)}>Cancel</button>
+                          <button type="button" className="adm-btn-red" onClick={() => void confirmBulkDeleteArchive()} disabled={saving === 'bulk-delete-archive'}>
+                            {saving === 'bulk-delete-archive' ? 'Deleting…' : <><Trash2 size={14} /> Delete permanently</>}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -3719,16 +3976,95 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
               ))}
               <AdminField label="Price"><input value={productForm.price} onChange={(e) => setProductForm((p) => ({ ...p, price: e.target.value }))} className="adm-field-input" /></AdminField>
               <AdminField label="Stock on hand"><input value={productForm.stockOnHand} onChange={(e) => setProductForm((p) => ({ ...p, stockOnHand: e.target.value }))} className="adm-field-input" /></AdminField>
-              <AdminField label="Main category">
-                <select value={productForm.categoryId} onChange={(e) => setProductForm((p) => ({ ...p, categoryId: e.target.value, subcategoryId: subcategoryOptions(e.target.value)[0]?.id || '' }))} className="adm-field-input">
+              {/*
+                Cascading category pickers — Main → Child 1 → Child 2 → Child 3.
+                Each deeper level only shows up when its parent has children
+                in the live taxonomy. We always reset deeper levels when a
+                shallower one changes so the saved categoryPath stays
+                consistent with the tree.
+              */}
+              <AdminField label="Main category" full>
+                <select
+                  value={productForm.categoryId}
+                  onChange={(e) => {
+                    const nextId = e.target.value;
+                    const firstChild = subcategoryOptions(nextId, taxonomyTree)[0]?.id || '';
+                    setProductForm((p) => ({
+                      ...p,
+                      categoryId: nextId,
+                      childOneId: firstChild,
+                      childTwoId: '',
+                      childThreeId: '',
+                    }));
+                  }}
+                  className="adm-field-input"
+                >
                   {mainCategories.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
                 </select>
               </AdminField>
-              <AdminField label="Subcategory">
-                <select value={productForm.subcategoryId} onChange={(e) => setProductForm((p) => ({ ...p, subcategoryId: e.target.value }))} className="adm-field-input">
-                  {subcategoryOptions(productForm.categoryId).map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
-                </select>
-              </AdminField>
+
+              {(() => {
+                const rawOptions = subcategoryOptions(productForm.categoryId, taxonomyTree);
+                const childOneOptions = withCurrentOption(rawOptions, productForm.childOneId);
+                if (!childOneOptions.length) return null;
+                return (
+                  <AdminField label="Child category 1">
+                    <select
+                      value={productForm.childOneId}
+                      onChange={(e) => setProductForm((p) => ({
+                        ...p,
+                        childOneId: e.target.value,
+                        childTwoId: '',
+                        childThreeId: '',
+                      }))}
+                      className="adm-field-input"
+                    >
+                      <option value="">— None —</option>
+                      {childOneOptions.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+                    </select>
+                  </AdminField>
+                );
+              })()}
+
+              {(() => {
+                const rawOptions = childrenOf(taxonomyTree, productForm.childOneId);
+                const childTwoOptions = withCurrentOption(rawOptions, productForm.childTwoId);
+                if (!productForm.childOneId || !childTwoOptions.length) return null;
+                return (
+                  <AdminField label="Child category 2">
+                    <select
+                      value={productForm.childTwoId}
+                      onChange={(e) => setProductForm((p) => ({
+                        ...p,
+                        childTwoId: e.target.value,
+                        childThreeId: '',
+                      }))}
+                      className="adm-field-input"
+                    >
+                      <option value="">— None —</option>
+                      {childTwoOptions.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+                    </select>
+                  </AdminField>
+                );
+              })()}
+
+              {(() => {
+                const rawOptions = childrenOf(taxonomyTree, productForm.childTwoId);
+                const childThreeOptions = withCurrentOption(rawOptions, productForm.childThreeId);
+                if (!productForm.childTwoId || !childThreeOptions.length) return null;
+                return (
+                  <AdminField label="Child category 3">
+                    <select
+                      value={productForm.childThreeId}
+                      onChange={(e) => setProductForm((p) => ({ ...p, childThreeId: e.target.value }))}
+                      className="adm-field-input"
+                    >
+                      <option value="">— None —</option>
+                      {childThreeOptions.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+                    </select>
+                  </AdminField>
+                );
+              })()}
             </div>
             </div>
             {editorError && (
