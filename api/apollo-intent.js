@@ -77,7 +77,8 @@ Regex hint (may be wrong): ${hint.intent} (${Math.round(hint.confidence * 100)}%
 DISAMBIGUATION — follow strictly:
 • Image editing / image gen / batch fix by SUBCATEGORY NAME → batch_fix_images
   - User says "fix all images on/in [subcategory]" → terms = subcategory name ONLY (e.g. "canvases and surfaces", "games and puzzles")
-  - Match against taxonomy labels below — use the closest exact subcategory phrase in terms
+  - User lists multiple subcategories → terms = comma-separated names (e.g. "canvases, spray paint") — NOT merged into one name
+  - Match against taxonomy labels below — use the closest exact subcategory phrase(s) in terms
   - product line / keyword in title → terms = keyword phrase (e.g. "monttaro canvas")
   - specific product codes/SKUs listed → skus = ["CODE1","CODE2"], terms = ""
   - imagePrompt = ALL creative/editing instructions (white bg, shadows, kids painting on canvas, etc.) — copy verbatim from user
@@ -100,6 +101,7 @@ Known subcategory labels (match terms to these): ${subcategoryHints}
 • imageStyle = standard | shadow | generative (see above)
 
 Examples:
+"fix all images on canvases, spray paint subcategory white background with shadow" → {"intent":"batch_fix_images","terms":"canvases, spray paint","skus":[],"imagePrompt":"white background with soft studio shadow, product clearly in view","imageStyle":"shadow","wantsChart":false}
 "fix all the images on canvases and surfaces subcategory — white background, product clearly in view, with shadows and a kids painting on the canvas" → {"intent":"batch_fix_images","terms":"canvases and surfaces","skus":[],"imagePrompt":"white background with product clearly in view, soft studio shadows, and a colourful kids painting displayed on the canvas","imageStyle":"generative","wantsChart":false}
 "fix all images on games and puzzles subcategory white background with shadow" → {"intent":"batch_fix_images","terms":"games and puzzles","skus":[],"imagePrompt":"white background with soft studio drop shadow, product clearly in view","imageStyle":"shadow","wantsChart":false}
 "do image gen on all monttaro canvas products white background product clearly in view painting on the canvas" → {"intent":"batch_fix_images","terms":"monttaro canvas","skus":[],"imagePrompt":"Place on white background with product clearly in view and a beautiful painting displayed on the canvas","imageStyle":"generative","wantsChart":false}

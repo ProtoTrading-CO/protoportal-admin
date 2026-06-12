@@ -1,5 +1,5 @@
 import { searchIndex } from './apollo-data.js';
-import { findProductsBySubcategory, findProductsByKeyword, resolveTaxonomyLabels, suggestSubcategories, cleanBatchTerms, extractSubcategoryFromQuery } from './_subcategory-match.js';
+import { findProductsBySubcategory, findProductsByKeyword, resolveTaxonomyLabelsMulti, suggestSubcategories, cleanBatchTerms, extractSubcategoryFromQuery, splitBatchTermPhrases } from './_subcategory-match.js';
 import { inferImageStyle } from './_image-pipeline.js';
 
 function chartBlock(title, labels, values) {
@@ -58,6 +58,7 @@ export function executeIntent(intent, data, terms = '', { limit = null, skus = [
     case 'batch_fix_images': {
       let matched = [];
       let displayLabel = '';
+      let searchTerms = cleanBatchTerms(terms) || extractSubcategoryFromQuery(userQuery) || terms;
 
       const skuList = Array.isArray(skus) ? skus.map((s) => String(s).trim()).filter(Boolean) : [];
       if (skuList.length) {
@@ -65,10 +66,12 @@ export function executeIntent(intent, data, terms = '', { limit = null, skus = [
         matched = products.all.filter((p) => skuSet.has(String(p.sku || '').toUpperCase()) || skuSet.has(String(p.barcode || '').toUpperCase()));
         displayLabel = skuList.length === 1 ? skuList[0] : `${skuList.length} SKUs`;
       } else {
-        let searchTerms = cleanBatchTerms(terms) || extractSubcategoryFromQuery(userQuery) || terms;
         searchTerms = cleanBatchTerms(searchTerms);
-        const canonical = resolveTaxonomyLabels(searchTerms);
-        displayLabel = canonical[0] || searchTerms;
+        const phrases = splitBatchTermPhrases(searchTerms);
+        const canonical = resolveTaxonomyLabelsMulti(searchTerms);
+        displayLabel = canonical.length
+          ? canonical.join(' + ')
+          : (phrases.length > 1 ? phrases.join(' + ') : searchTerms);
         matched = findProductsBySubcategory(products, searchTerms);
         if (!matched.length) matched = findProductsByKeyword(products, searchTerms);
       }
@@ -81,15 +84,16 @@ export function executeIntent(intent, data, terms = '', { limit = null, skus = [
       const notFound = skuList.length ? skuList.filter((code) => !matched.some((p) => p.sku.toUpperCase() === code.toUpperCase() || String(p.barcode || '').toUpperCase() === code.toUpperCase())) : [];
 
       if (!matched.length) {
-        const suggestions = !skuList.length ? suggestSubcategories(terms) : [];
+        const suggestions = !skuList.length ? suggestSubcategories(searchTerms || terms) : [];
         const hint = suggestions.length
           ? `\n\nDid you mean: ${suggestions.map((s) => `**${s}**`).join(', ')}?`
           : '';
         const skuHint = notFound.length ? `\n\nCodes not found: ${notFound.map((s) => `**${s}**`).join(', ')}` : '';
+        const tried = displayLabel || terms || '—';
         return {
           source: 'live-index',
           intent,
-          reply: `## Image fix\n\nNo products matched${skuList.length ? ` codes **${skuList.join(', ')}**` : ` **"${terms || '—'}"**`}.${skuHint}${hint}\n\nTry exact SKUs or a subcategory name e.g. **Games & Puzzles**.`,
+          reply: `## Image fix\n\nNo products matched **${tried}**.${skuHint}${hint}\n\nTip: use one subcategory name, or several separated by commas — e.g. **Canvases, Spray Paint** or **Canvases & Surfaces**.`,
         };
       }
 

@@ -28,6 +28,28 @@ export function cleanBatchTerms(terms) {
   return t;
 }
 
+/**
+ * Split "Canvases, Spray Paint" or "canvases and spray paint" into separate subcategory phrases.
+ * Does NOT split "games and puzzles" when it's a single taxonomy label (no comma).
+ */
+export function splitBatchTermPhrases(terms) {
+  const cleaned = cleanBatchTerms(terms);
+  if (!cleaned) return [];
+
+  if (/[,;]/.test(cleaned)) {
+    return cleaned.split(/\s*[,;]\s*/).map((p) => p.trim()).filter(Boolean);
+  }
+
+  // "canvases and spray paint" as two distinct subcategories (both resolve in taxonomy)
+  const andParts = cleaned.split(/\s+and\s+/i).map((p) => p.trim()).filter(Boolean);
+  if (andParts.length > 1) {
+    const resolvedCount = andParts.filter((p) => resolveTaxonomyLabels(p).length > 0).length;
+    if (resolvedCount > 1) return andParts;
+  }
+
+  return [cleaned];
+}
+
 /** Pull subcategory phrase from a full user sentence when classifier terms are empty or too broad. */
 export function extractSubcategoryFromQuery(query) {
   const q = String(query || '').trim();
@@ -64,10 +86,12 @@ function tokensMatch(needle, haystack) {
 
 /** Resolve free-text to taxonomy node labels (e.g. "games and puzzles" → "Games & Puzzles"). */
 export function resolveTaxonomyLabels(terms) {
-  const needle = tokenizeLabel(terms);
+  const raw = String(terms || '').trim();
+  const needle = tokenizeLabel(raw);
   if (!needle.length) return [];
 
   const hits = TAXONOMY_NODES.filter((node) => {
+    if (node.label.toLowerCase() === raw.toLowerCase()) return true;
     const fromLabel = tokenizeLabel(node.label);
     const fromId = tokenizeLabel(node.id.replace(/-/g, ' '));
     return tokensMatch(needle, fromLabel) || tokensMatch(needle, fromId);
@@ -76,8 +100,16 @@ export function resolveTaxonomyLabels(terms) {
   return [...new Set(hits.map((n) => n.label))];
 }
 
+/** Resolve labels for one or more comma-separated subcategory phrases. */
+export function resolveTaxonomyLabelsMulti(terms) {
+  const phrases = splitBatchTermPhrases(terms);
+  const labels = phrases.flatMap((p) => resolveTaxonomyLabels(p));
+  return [...new Set(labels)];
+}
+
 export function suggestSubcategories(terms, limit = 5) {
-  const needle = tokenizeLabel(terms);
+  const phrases = splitBatchTermPhrases(terms);
+  const needle = tokenizeLabel(phrases.join(' '));
   if (!needle.length) return [];
 
   return TAXONOMY_NODES
@@ -96,38 +128,75 @@ function productSubcategories(p) {
   return [p.subcategory_one, p.subcategory_two, p.subcategory_three, p.subcategory_four].filter(Boolean);
 }
 
-function labelMatchesSearch(label, needleTokens, canonicalLabels) {
+function labelMatchesPhrase(label, phrase) {
+  const needleTokens = tokenizeLabel(phrase);
+  if (!needleTokens.length) return false;
+
   const labelTokens = tokenizeLabel(label);
+  const canonicalLabels = resolveTaxonomyLabels(phrase);
+
   if (tokensMatch(needleTokens, labelTokens)) return true;
-  return canonicalLabels.some((canonical) => tokensMatch(tokenizeLabel(canonical), labelTokens));
+  if (canonicalLabels.some((canonical) => tokensMatch(tokenizeLabel(canonical), labelTokens))) return true;
+
+  // Case-insensitive exact label match on DB value
+  if (label.trim().toLowerCase() === phrase.trim().toLowerCase()) return true;
+
+  return false;
+}
+
+function findProductsBySubcategoryPhrase(products, phrase) {
+  if (!phrase?.trim()) return [];
+  return products.all.filter((p) => {
+    const labels = productSubcategories(p);
+    return labels.some((label) => labelMatchesPhrase(label, phrase));
+  });
 }
 
 export function findProductsBySubcategory(products, terms) {
-  const needleTokens = tokenizeLabel(terms);
-  if (!needleTokens.length) return [];
+  const phrases = splitBatchTermPhrases(terms);
+  if (!phrases.length) return [];
 
-  const canonicalLabels = resolveTaxonomyLabels(terms);
+  const seen = new Set();
+  const results = [];
 
-  return products.all.filter((p) => {
-    const labels = [...productSubcategories(p), p.category];
-    return labels.some((label) => labelMatchesSearch(label, needleTokens, canonicalLabels));
-  });
+  for (const phrase of phrases) {
+    for (const p of findProductsBySubcategoryPhrase(products, phrase)) {
+      if (!seen.has(p.sku)) {
+        seen.add(p.sku);
+        results.push(p);
+      }
+    }
+  }
+
+  return results;
 }
 
 /** Match products by title, SKU, barcode, or category keywords (e.g. "monttaro canvas"). */
 export function findProductsByKeyword(products, terms) {
-  const needleTokens = tokenizeLabel(terms);
-  if (!needleTokens.length) return [];
+  const phrases = splitBatchTermPhrases(terms);
+  const seen = new Set();
+  const results = [];
 
-  return products.all.filter((p) => {
-    const hay = tokenizeLabel([
-      p.title,
-      p.sku,
-      p.barcode,
-      p.category,
-      p.subcategory_one,
-      p.subcategory_two,
-    ].filter(Boolean).join(' '));
-    return tokensMatch(needleTokens, hay);
-  });
+  for (const phrase of phrases) {
+    const needleTokens = tokenizeLabel(phrase);
+    if (!needleTokens.length) continue;
+
+    for (const p of products.all) {
+      if (seen.has(p.sku)) continue;
+      const hay = tokenizeLabel([
+        p.title,
+        p.sku,
+        p.barcode,
+        p.category,
+        p.subcategory_one,
+        p.subcategory_two,
+      ].filter(Boolean).join(' '));
+      if (tokensMatch(needleTokens, hay)) {
+        seen.add(p.sku);
+        results.push(p);
+      }
+    }
+  }
+
+  return results;
 }
