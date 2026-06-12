@@ -359,7 +359,8 @@ function csvDownload(rows, filename) {
   URL.revokeObjectURL(url);
 }
 
-function formatStockUnits(qty) {
+function formatStockUnits(qty, keepLive = false) {
+  if (keepLive && (qty === null || qty === undefined || qty <= 0)) return 'Available';
   if (qty === null || qty === undefined) return '—';
   return `${qty} units`;
 }
@@ -2575,7 +2576,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                           </div>
                         </div>
                         <div>
-                          <span style={{ fontWeight: 700, color: product.stockQty < 0 ? '#b91c1c' : undefined }}>{formatStockUnits(product.stockQty)}</span>
+                          <span style={{ fontWeight: 700, color: !product.keepLiveWhenOos && product.stockQty < 0 ? '#b91c1c' : undefined }}>{formatStockUnits(product.stockQty, product.keepLiveWhenOos)}</span>
                           {product.supplier && <div className="adm-muted" style={{ fontSize: 11 }}>{product.supplier}</div>}
                         </div>
                         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
@@ -2883,8 +2884,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                           </div>
                         </div>
                         <div>
-                          <span style={{ fontWeight: 900, fontSize: 15, color: product.stockQty < 0 ? '#b91c1c' : '#8B1A1A' }}>{product.stockQty != null ? product.stockQty : '—'}</span>
-                          {product.stockQty != null && <span className="adm-muted" style={{ fontSize: 11, marginLeft: 4 }}>units</span>}
+                          <span style={{ fontWeight: 900, fontSize: 15, color: !product.keepLiveWhenOos && product.stockQty < 0 ? '#b91c1c' : '#8B1A1A' }}>{formatStockUnits(product.stockQty, product.keepLiveWhenOos)}</span>
                           {product.supplier && <div className="adm-muted" style={{ fontSize: 11 }}>{product.supplier}</div>}
                         </div>
                         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
@@ -2973,7 +2973,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                         </div>
                       </div>
                       <div>
-                        <span style={{ fontWeight: 700, color: product.stockQty < 0 ? '#b91c1c' : undefined }}>{formatStockUnits(product.stockQty)}</span>
+                        <span style={{ fontWeight: 700, color: !product.keepLiveWhenOos && product.stockQty < 0 ? '#b91c1c' : undefined }}>{formatStockUnits(product.stockQty, product.keepLiveWhenOos)}</span>
                       </div>
                       <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                         <button onClick={() => void restoreFromRecycle(product)} className="adm-icon-btn" title="Restore to live catalogue" disabled={saving === product.id}>
