@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Download, Loader2, RefreshCw } from 'lucide-react';
+import { Download, Loader2, RefreshCw, Trash2, X } from 'lucide-react';
 import { downloadCsv, downloadExcel } from '../lib/exportReport';
 
 const PERIODS = [7, 30, 90, 120];
@@ -112,6 +112,8 @@ export default function OrderAnalyticsDashboard() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [customerLimit, setCustomerLimit] = useState(5);
+  const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
+  const [clearing, setClearing] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -202,11 +204,64 @@ export default function OrderAnalyticsDashboard() {
             </button>
           ))}
         </div>
-        <button type="button" className="adm-btn-ghost" onClick={() => void load()} disabled={loading}>
-          {loading ? <Loader2 size={15} className="star-spinning" /> : <RefreshCw size={15} />}
-          Refresh
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button type="button" className="adm-btn-ghost" onClick={() => void load()} disabled={loading}>
+            {loading ? <Loader2 size={15} className="star-spinning" /> : <RefreshCw size={15} />}
+            Refresh
+          </button>
+          <button
+            type="button"
+            className="adm-btn-ghost adm-btn-ghost--danger"
+            onClick={() => setClearConfirmOpen(true)}
+            disabled={loading || clearing}
+          >
+            <Trash2 size={15} />
+            Clear analytics
+          </button>
+        </div>
       </div>
+
+      {clearConfirmOpen && (
+        <div className="adm-modal-backdrop" onClick={() => setClearConfirmOpen(false)}>
+          <div className="adm-modal adm-modal--form" onClick={(e) => e.stopPropagation()}>
+            <div className="adm-modal-header">
+              <h3 className="adm-modal-title">Clear all analytics?</h3>
+              <button type="button" className="adm-modal-close" onClick={() => setClearConfirmOpen(false)} aria-label="Close"><X size={18} /></button>
+            </div>
+            <p className="adm-modal-note">
+              This permanently deletes all tracked product and category view events.
+              Order history is not affected — order totals and revenue come from the
+              orders themselves. This cannot be undone.
+            </p>
+            <div className="adm-modal-footer adm-modal-footer--end">
+              <div className="adm-modal-footer__actions">
+                <button type="button" className="adm-btn-ghost" onClick={() => setClearConfirmOpen(false)}>Cancel</button>
+                <button
+                  type="button"
+                  className="adm-btn-red"
+                  disabled={clearing}
+                  onClick={async () => {
+                    setClearing(true);
+                    try {
+                      const res = await fetch('/api/order-analytics', { method: 'DELETE' });
+                      const json = await res.json().catch(() => ({}));
+                      if (!res.ok) throw new Error(json.error || 'Failed to clear analytics');
+                      setClearConfirmOpen(false);
+                      await load();
+                    } catch (e) {
+                      setError(e.message);
+                    } finally {
+                      setClearing(false);
+                    }
+                  }}
+                >
+                  {clearing ? 'Clearing…' : 'Clear analytics'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {error && <div className="oa-error">{error}</div>}
       {loading && !data && (

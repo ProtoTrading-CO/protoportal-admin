@@ -111,8 +111,24 @@ function formatBucketLabel(key, periodDays) {
 
 export default async function handler(req, res) {
   if (!requireAdminKey(req, res)) return;
-  if (req.method !== 'GET') return res.status(405).end();
   res.setHeader('Cache-Control', 'no-store');
+
+  // DELETE — clear all tracked analytics events (product/category views).
+  // Order-derived metrics are computed live from the orders table, so they
+  // are intentionally untouched here; deleting orders is a separate action.
+  if (req.method === 'DELETE') {
+    const supabase = getAdminClient();
+    const { error } = await supabase
+      .from('analytics_events')
+      .delete()
+      .gte('created_at', '1970-01-01');
+    if (error && !/does not exist/i.test(error.message)) {
+      return res.status(400).json({ error: error.message });
+    }
+    return res.status(200).json({ ok: true });
+  }
+
+  if (req.method !== 'GET') return res.status(405).end();
 
   const periodDays = parsePeriod(req.query.period);
   const cutoff = new Date(Date.now() - periodDays * 24 * 60 * 60 * 1000);

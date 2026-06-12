@@ -54,6 +54,7 @@ export default function ReorderGrid({
   mainCategoryId,
   taxonomyTree,
   loading,
+  dragDisabled = false,
   onEditProduct,
   onEditSubcategory,
   onDeleteSubcategory,
@@ -190,6 +191,7 @@ export default function ReorderGrid({
   const onPointerUp = useCallback(() => endDrag(), [endDrag]);
 
   const startDrag = useCallback((productId, e) => {
+    if (dragDisabled) return;
     if (e.button !== 0) return;
     e.preventDefault();
     e.stopPropagation();
@@ -217,7 +219,7 @@ export default function ReorderGrid({
       window.removeEventListener('pointerup', up);
       window.removeEventListener('pointercancel', up);
     };
-  }, [getMoveSet, onPointerMove, onPointerUp]);
+  }, [dragDisabled, getMoveSet, onPointerMove, onPointerUp]);
 
   useEffect(() => () => endDrag(), [endDrag]);
 
@@ -291,13 +293,15 @@ export default function ReorderGrid({
                         aria-label={`Select ${product.name}`}
                       />
                     </label>
-                    <span
-                      className="adm-reorder-drag-handle"
-                      aria-label={`Drag ${product.name}`}
-                      onPointerDown={(e) => startDrag(product.id, e)}
-                    >
-                      <Grip size={13} />
-                    </span>
+                    {!dragDisabled && (
+                      <span
+                        className="adm-reorder-drag-handle"
+                        aria-label={`Drag ${product.name}`}
+                        onPointerDown={(e) => startDrag(product.id, e)}
+                      >
+                        <Grip size={13} />
+                      </span>
+                    )}
                     <button
                       type="button"
                       onClick={(e) => { e.stopPropagation(); onEditProduct(product); }}

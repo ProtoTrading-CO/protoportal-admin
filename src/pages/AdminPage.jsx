@@ -92,7 +92,8 @@ import { fetchSpecials, saveSpecials } from '../lib/specials';
 import { fetchBanner, saveBanner, uploadBannerImage } from '../lib/banner';
 import { fetchPopupSpecial, savePopupSpecial, uploadPopupImage } from '../lib/popupSpecial';
 import CrmContactsModal from '../components/CrmContactsModal';
-import BroadcastCalendar from '../components/BroadcastCalendar';
+import WhatsappPanel from '../components/WhatsappPanel';
+import { adminProductSearch } from '../lib/fuzzySearch';
 import ReorderGrid from '../components/ReorderGrid';
 import FulfillmentSettingsModal from '../components/FulfillmentSettingsModal';
 import OrderWhatsappNotify from '../components/OrderWhatsappNotify';
@@ -446,6 +447,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
 
   const [reorderCategory, setReorderCategory] = useState(categories[0]?.id || '');
   const [reorderSubcategory, setReorderSubcategory] = useState('all');
+  const [reorderSearch, setReorderSearch] = useState('');
   const [reorderProducts, setReorderProducts] = useState([]);
   const [taxonomyTree, setTaxonomyTree] = useState(categories);
   const [toast, setToast] = useState(null);
@@ -733,9 +735,11 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     setLoading(true);
     setLoadingError('');
     try {
+      // Always load the full main category; subcategory + search filter client-side
+      // so search spans every subcategory in the category.
       const rows = await fetchReorderProducts({
         mainCategory: reorderCategory,
-        subcategoryId: reorderSubcategory !== 'all' ? reorderSubcategory : null,
+        subcategoryId: null,
       });
       setReorderProducts(applySavedOrder(rows, reorderCategory));
     } catch (err) {
@@ -1372,7 +1376,24 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     [reorderCategory, taxonomyTree],
   );
 
-  const visibleReorderProducts = useMemo(() => reorderProducts, [reorderProducts]);
+  // Search filters the grid in place (original order preserved so the grouping
+  // stays stable). Drag-reorder is disabled while a search is active because
+  // persisting a filtered subset would drop the hidden products from the order.
+  const visibleReorderProducts = useMemo(() => {
+    let rows = reorderProducts;
+    const q = reorderSearch.trim();
+    if (q) {
+      rows = adminProductSearch(rows, q);
+    } else if (reorderSubcategory !== 'all') {
+      rows = rows.filter((p) =>
+        p.categoryPath?.[1] === reorderSubcategory
+        || p.categoryPath?.[2] === reorderSubcategory
+        || p.categoryPath?.[3] === reorderSubcategory
+      );
+    }
+    return rows;
+  }, [reorderProducts, reorderSearch, reorderSubcategory]);
+  const reorderSearchActive = reorderSearch.trim().length > 0;
 
   const toggleSelectAllReorder = () => {
     const ids = visibleReorderProducts.map((p) => p.id);
@@ -1681,6 +1702,10 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     try {
       await deleteOrderAdmin(order.id);
       setOrders((prev) => prev.filter((o) => o.id !== order.id));
+      // Keep the top stats bar in sync — drop the count immediately, then
+      // reconcile with the server in the background.
+      setStatsOrderTotal((n) => Math.max(0, n - 1));
+      void refreshDashboardStats();
     } finally { setSaving(''); }
   };
 
@@ -2759,6 +2784,26 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
 
                 <div className="adm-reorder-toolbar">
                   <div className="adm-reorder-toolbar__filters">
+                    <label className="adm-search" style={{ minWidth: 220 }}>
+                      <Search size={14} />
+                      <input
+                        value={reorderSearch}
+                        onChange={(e) => setReorderSearch(e.target.value)}
+                        placeholder="Search name, code, barcode…"
+                        className="adm-search-input"
+                      />
+                      {reorderSearchActive && (
+                        <button
+                          type="button"
+                          className="adm-icon-btn"
+                          onClick={() => setReorderSearch('')}
+                          title="Clear search"
+                          style={{ padding: 2 }}
+                        >
+                          <X size={13} />
+                        </button>
+                      )}
+                    </label>
                     <label className="adm-filter-field">
                       <span className="adm-filter-field__label">Subcategory</span>
                       <select
@@ -2772,7 +2817,14 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                         ))}
                       </select>
                     </label>
-                    <span className="adm-reorder-count">{visibleReorderProducts.length} live products</span>
+                    <span className="adm-reorder-count">
+                      {visibleReorderProducts.length} {reorderSearchActive ? `match${visibleReorderProducts.length === 1 ? '' : 'es'}` : 'live products'}
+                    </span>
+                    {reorderSearchActive && (
+                      <span className="adm-muted" style={{ fontSize: 12 }}>
+                        Drag-reorder is paused while searching
+                      </span>
+                    )}
                   </div>
                 </div>
 
@@ -2816,7 +2868,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                     {mainCategories.map((cat) => (
                       <div key={cat.id} className="adm-reorder-cat-row">
                         <button
-                          onClick={() => { setSelectedIds(new Set()); setReorderCategory(cat.id); setReorderSubcategory('all'); }}
+                          onClick={() => { setSelectedIds(new Set()); setReorderCategory(cat.id); setReorderSubcategory('all'); setReorderSearch(''); }}
                           className={`adm-reorder-cat-item${reorderCategory === cat.id ? ' adm-reorder-cat-item--active' : ''}`}
                         >
                           {cat.label}
@@ -2841,6 +2893,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                     mainCategoryId={reorderCategory}
                     taxonomyTree={taxonomyTree}
                     loading={loading}
+                    dragDisabled={reorderSearchActive}
                     onEditProduct={openContentEdit}
                     onEditSubcategory={setEditTaxonomyModal}
                     onDeleteSubcategory={(sub) => void openDeleteSubcategory(sub)}
@@ -3302,93 +3355,30 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                 <div className="adm-section-head">
                   <div>
                     <h2 className="adm-section-title">WhatsApp</h2>
-                    <p className="adm-section-note">View contacts, plan broadcasts on the calendar, and target customer groups from onboarding.</p>
-                  </div>
-                  <button onClick={() => { void loadCrmCustomers(crmMeta.page || 1); void loadCrmTemplates(); }} className="adm-btn-ghost"><RefreshCw size={15} /><span className="adm-btn-text">Refresh</span></button>
-                </div>
-
-                {crmMeta.summary && (
-                  <div className="adm-analytics-grid" style={{ marginBottom: 18 }}>
-                    <div className="adm-analytics-card" style={{ position: 'relative' }}>
-                      <div className="adm-analytics-value">{crmMeta.summary.totalContacts}</div>
-                      <div className="adm-analytics-label">Total WhatsApp Contacts</div>
-                      <button type="button" className="adm-btn-ghost" style={{ marginTop: 8, fontSize: 12, padding: '4px 10px' }} onClick={() => setCrmContactsOpen(true)}>
-                        <Eye size={13} /> View
-                      </button>
-                    </div>
-                    <div className="adm-analytics-card adm-analytics-card--accent"><div className="adm-analytics-value">{crmMeta.summary.joinedCount}</div><div className="adm-analytics-label">Joined</div></div>
-                    <div className="adm-analytics-card"><div className="adm-analytics-value">{crmMeta.summary.notJoinedCount}</div><div className="adm-analytics-label">No Thanks</div></div>
-                    <div className="adm-analytics-card adm-analytics-card--accent"><div className="adm-analytics-value">{crmMeta.summary.engaged30d}</div><div className="adm-analytics-label">Engaged (30d)</div></div>
-                    <div className="adm-analytics-card"><div className="adm-analytics-value">{crmMeta.summary.broadcastReadyCount}</div><div className="adm-analytics-label">Broadcast Ready</div></div>
-                  </div>
-                )}
-
-                <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 18, alignItems: 'start' }}>
-                  <div className="adm-crm-filters">
-                    <label className="adm-search" style={{ marginBottom: 14 }}><Search size={14} /><input value={crmSearch} onChange={(e) => setCrmSearch(e.target.value)} placeholder="Search contact, phone, email…" className="adm-search-input" /></label>
-
-                    <div style={{ fontWeight: 700, fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10, color: '#6b7280' }}>Business Type</div>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', cursor: 'pointer', fontSize: 13, borderBottom: '1px solid #f3f4f6', fontWeight: 700 }}>
-                      <input type="checkbox" checked={crmFilters.businessTypes.length === 0} onChange={() => setCrmFilters((prev) => ({ ...prev, businessTypes: [] }))} style={{ accentColor: '#dc2626' }} />
-                      <span style={{ flex: 1 }}>All business types</span>
-                    </label>
-                    {crmBusinessTypeOptions.map((type) => (
-                      <label key={type} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', cursor: 'pointer', fontSize: 13, borderBottom: '1px solid #f3f4f6' }}>
-                        <input
-                          type="checkbox"
-                          checked={crmFilters.businessTypes.includes(type)}
-                          onChange={(e) => setCrmFilters((prev) => ({
-                            ...prev,
-                            businessTypes: e.target.checked ? [...prev.businessTypes, type] : prev.businessTypes.filter((t) => t !== type),
-                          }))}
-                          style={{ accentColor: '#dc2626' }}
-                        />
-                        <span style={{ flex: 1 }}>{type}</span>
-                      </label>
-                    ))}
-
-                    <div style={{ fontWeight: 700, fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.06em', margin: '18px 0 10px', color: '#6b7280' }}>Joined Status</div>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', cursor: 'pointer', fontSize: 13, borderBottom: '1px solid #f3f4f6', fontWeight: 700 }}>
-                      <input type="checkbox" checked={crmFilters.joinedStatuses.length === 0} onChange={() => setCrmFilters((prev) => ({ ...prev, joinedStatuses: [] }))} style={{ accentColor: '#dc2626' }} />
-                      <span style={{ flex: 1 }}>All statuses</span>
-                    </label>
-                    {crmJoinStatusOptions.map((status) => (
-                      <label key={status} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', cursor: 'pointer', fontSize: 13, borderBottom: '1px solid #f3f4f6' }}>
-                        <input
-                          type="checkbox"
-                          checked={crmFilters.joinedStatuses.includes(status)}
-                          onChange={(e) => setCrmFilters((prev) => ({
-                            ...prev,
-                            joinedStatuses: e.target.checked ? [...prev.joinedStatuses, status] : prev.joinedStatuses.filter((t) => t !== status),
-                          }))}
-                          style={{ accentColor: '#dc2626' }}
-                        />
-                        <span style={{ flex: 1 }}>{formatJoinStatus(status)}</span>
-                      </label>
-                    ))}
-
-                    <div style={{ marginTop: 16, padding: '10px 14px', background: crmMeta.totalFiltered ? '#f0fdf4' : '#f9fafb', border: `1px solid ${crmMeta.totalFiltered ? '#d1fae5' : '#e5e7eb'}` }}>
-                      <strong style={{ color: crmMeta.totalFiltered ? '#15803d' : '#6b7280', fontSize: 20 }}>{crmMeta.totalFiltered}</strong>
-                      <span className="adm-muted" style={{ fontSize: 13, marginLeft: 6 }}>contacts matched</span>
-                    </div>
-                  </div>
-
-                  <div style={{ display: 'grid', gap: 18 }}>
-                    {crmSentCount !== null && (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', background: '#f0fdf4', border: '1px solid #d1fae5', fontSize: 13 }}>
-                        <Check size={14} style={{ color: '#15803d', flexShrink: 0 }} />
-                        <span>Broadcast <strong>{crmLastSentTemplate}</strong> sent to <strong>{crmSentCount}</strong> contacts</span>
-                      </div>
-                    )}
-                    <BroadcastCalendar
-                      templates={crmTemplates}
-                      templatesLoading={crmTemplatesLoading}
-                      filters={crmFilters}
-                      onSendNow={(overrides) => void sendCrmEmail(overrides)}
-                      sending={crmSending}
-                    />
+                    <p className="adm-section-note">Pick a template, preview the message, filter your audience, and send.</p>
                   </div>
                 </div>
+
+                <WhatsappPanel
+                  summary={crmMeta.summary}
+                  totalFiltered={crmMeta.totalFiltered}
+                  search={crmSearch}
+                  onSearchChange={setCrmSearch}
+                  filters={crmFilters}
+                  onFiltersChange={setCrmFilters}
+                  businessTypeOptions={crmBusinessTypeOptions}
+                  joinStatusOptions={crmJoinStatusOptions}
+                  templates={crmTemplates}
+                  templatesLoading={crmTemplatesLoading}
+                  selectedTemplate={crmSelectedTemplate}
+                  onSelectTemplate={setCrmSelectedTemplate}
+                  onSend={(overrides) => void sendCrmEmail(overrides)}
+                  sending={crmSending}
+                  sentCount={crmSentCount}
+                  lastSentTemplate={crmLastSentTemplate}
+                  onViewContacts={() => setCrmContactsOpen(true)}
+                  onRefresh={() => { void loadCrmCustomers(crmMeta.page || 1); void loadCrmTemplates(); }}
+                />
               </div>
             )}
 

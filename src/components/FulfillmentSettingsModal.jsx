@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Loader2, Plus, Trash2, X } from 'lucide-react';
+import { Check, Crown, Loader2, MessageCircle, Plus, Trash2, X } from 'lucide-react';
 import categories from '../data/categories.json';
 import { fetchFulfillmentUsers, saveFulfillmentUsers } from '../lib/fulfillmentUsers';
 
@@ -9,8 +9,22 @@ function slugify(name) {
   return String(name || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || `user-${Date.now()}`;
 }
 
+/** Mirror of the server-side WATI normalisation so the user sees the saved shape live. */
+function toWatiPhone(raw) {
+  const digits = String(raw || '').replace(/\D/g, '');
+  if (!digits) return '';
+  if (digits.startsWith('00')) return `+${digits.slice(2)}`;
+  if (digits.startsWith('0')) return `+27${digits.slice(1)}`;
+  return `+${digits}`;
+}
+
+function isValidWatiPhone(raw) {
+  const digits = toWatiPhone(raw).replace(/\D/g, '');
+  return digits.length >= 10 && digits.length <= 15;
+}
+
 function emptyUser() {
-  return { id: `user-${Date.now()}`, name: '', whatsapp: '', categoryIds: ['', ''] };
+  return { id: `user-${Date.now()}`, name: '', whatsapp: '', isAdmin: false, categoryIds: [] };
 }
 
 export default function FulfillmentSettingsModal({ open, onClose }) {
@@ -18,12 +32,15 @@ export default function FulfillmentSettingsModal({ open, onClose }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState(null);
 
   useEffect(() => {
     fetchFulfillmentUsers()
       .then((rows) => setUsers(rows.map((u) => ({
         ...u,
-        categoryIds: [u.categoryIds?.[0] || '', u.categoryIds?.[1] || ''],
+        isAdmin: Boolean(u.isAdmin),
+        categoryIds: Array.isArray(u.categoryIds) ? u.categoryIds.filter(Boolean) : [],
       }))))
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
@@ -33,12 +50,16 @@ export default function FulfillmentSettingsModal({ open, onClose }) {
     setUsers((prev) => prev.map((u, i) => (i === idx ? { ...u, ...patch } : u)));
   };
 
-  const updateCategory = (userIdx, catIdx, value) => {
+  const toggleCategory = (idx, catId) => {
     setUsers((prev) => prev.map((u, i) => {
-      if (i !== userIdx) return u;
-      const categoryIds = [...(u.categoryIds || ['', ''])];
-      categoryIds[catIdx] = value;
-      return { ...u, categoryIds };
+      if (i !== idx) return u;
+      const has = (u.categoryIds || []).includes(catId);
+      return {
+        ...u,
+        categoryIds: has
+          ? u.categoryIds.filter((id) => id !== catId)
+          : [...(u.categoryIds || []), catId],
+      };
     }));
   };
 
@@ -53,22 +74,41 @@ export default function FulfillmentSettingsModal({ open, onClose }) {
       const payload = users.map((u) => ({
         id: u.id || slugify(u.name),
         name: u.name.trim(),
-        whatsapp: u.whatsapp.trim(),
-        categoryIds: (u.categoryIds || []).filter(Boolean).slice(0, 2),
+        whatsapp: toWatiPhone(u.whatsapp),
+        isAdmin: Boolean(u.isAdmin),
+        categoryIds: (u.categoryIds || []).filter(Boolean),
       }));
-      if (payload.some((u) => !u.name)) throw new Error('Every user needs a name.');
-      if (payload.some((u) => !u.whatsapp)) throw new Error('Every user needs a WhatsApp number.');
-      if (payload.some((u) => u.categoryIds.length < 2)) throw new Error('Each user must have 2 categories assigned.');
+      if (payload.some((u) => !u.name)) throw new Error('Every team member needs a name.');
+      const badPhone = payload.find((u) => !isValidWatiPhone(u.whatsapp));
+      if (badPhone) throw new Error(`"${badPhone.name}" needs a valid WhatsApp number (e.g. 071 729 2861 or +27717292861).`);
+      const noCats = payload.find((u) => !u.isAdmin && u.categoryIds.length === 0);
+      if (noCats) throw new Error(`"${noCats.name}" needs at least one category (or make them a team admin).`);
       const saved = await saveFulfillmentUsers(payload);
       setUsers(saved.map((u) => ({
         ...u,
-        categoryIds: [u.categoryIds?.[0] || '', u.categoryIds?.[1] || ''],
+        isAdmin: Boolean(u.isAdmin),
+        categoryIds: Array.isArray(u.categoryIds) ? u.categoryIds.filter(Boolean) : [],
       })));
       onClose(true);
     } catch (e) {
       setError(e.message);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleTest = async () => {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const res = await fetch('/api/team-whatsapp-test', { method: 'POST' });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || 'Test failed');
+      setTestResult(json);
+    } catch (e) {
+      setTestResult({ error: e.message });
+    } finally {
+      setTesting(false);
     }
   };
 
@@ -81,7 +121,10 @@ export default function FulfillmentSettingsModal({ open, onClose }) {
           <h3 className="adm-modal-title">Fulfillment team</h3>
           <button type="button" className="adm-modal-close" onClick={() => onClose(false)} aria-label="Close"><X size={18} /></button>
         </div>
-        <p className="adm-modal-note">Manage fulfillment users, WhatsApp numbers, and category assignments (2 per user).</p>
+        <p className="adm-modal-note">
+          Tap categories to assign them. Team admins can tick items in <strong>every</strong> category on the fulfillment page.
+          Numbers are saved in WhatsApp format automatically.
+        </p>
 
         <div className="adm-modal-body adm-ff-settings">
           {loading && (
@@ -89,59 +132,119 @@ export default function FulfillmentSettingsModal({ open, onClose }) {
               <Loader2 size={24} className="star-spinning" />
             </div>
           )}
-          {!loading && users.map((user, idx) => (
-            <div key={user.id || idx} className="adm-ff-user-card">
-              <div className="adm-ff-user-card__head">
-                <strong>User {idx + 1}</strong>
-                <button type="button" className="adm-icon-btn" onClick={() => removeUser(idx)} title="Remove user" style={{ color: '#c40000' }}>
-                  <Trash2 size={14} />
-                </button>
-              </div>
-              <div className="adm-ff-user-grid">
-                <label className="adm-field">
-                  <span className="adm-field-label">Name</span>
-                  <input
-                    className="adm-field-input"
-                    value={user.name}
-                    onChange={(e) => updateUser(idx, { name: e.target.value, id: user.id || slugify(e.target.value) })}
-                    placeholder="e.g. Victor"
-                  />
-                </label>
-                <label className="adm-field">
+          {!loading && users.map((user, idx) => {
+            const normalized = toWatiPhone(user.whatsapp);
+            const phoneOk = !user.whatsapp || isValidWatiPhone(user.whatsapp);
+            return (
+              <div key={user.id || idx} className={`adm-ff-card${user.isAdmin ? ' adm-ff-card--admin' : ''}`}>
+                <div className="adm-ff-card__head">
+                  <div className="adm-ff-card__identity">
+                    <input
+                      className="adm-ff-card__name"
+                      value={user.name}
+                      onChange={(e) => updateUser(idx, { name: e.target.value, id: user.id || slugify(e.target.value) })}
+                      placeholder="Name"
+                    />
+                    {user.isAdmin && <span className="adm-ff-admin-badge"><Crown size={11} /> Team admin</span>}
+                  </div>
+                  <div className="adm-ff-card__head-actions">
+                    <button
+                      type="button"
+                      className={`adm-ff-admin-toggle${user.isAdmin ? ' adm-ff-admin-toggle--on' : ''}`}
+                      onClick={() => updateUser(idx, { isAdmin: !user.isAdmin })}
+                      title="Team admins can tick items in any category"
+                    >
+                      <Crown size={13} />
+                      {user.isAdmin ? 'Admin' : 'Make admin'}
+                    </button>
+                    <button type="button" className="adm-icon-btn" onClick={() => removeUser(idx)} title="Remove user" style={{ color: '#c40000' }}>
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="adm-ff-card__phone">
                   <span className="adm-field-label">WhatsApp</span>
                   <input
-                    className="adm-field-input"
+                    className={`adm-field-input${!phoneOk ? ' adm-field-input--error' : ''}`}
                     value={user.whatsapp}
                     onChange={(e) => updateUser(idx, { whatsapp: e.target.value })}
-                    placeholder="+27..."
+                    placeholder="071 729 2861 or +27717292861"
+                    inputMode="tel"
                   />
-                </label>
-                <label className="adm-field">
-                  <span className="adm-field-label">Category 1</span>
-                  <select className="adm-select adm-select--enhanced" value={user.categoryIds?.[0] || ''} onChange={(e) => updateCategory(idx, 0, e.target.value)}>
-                    <option value="">Select…</option>
-                    {MAIN_CATEGORIES.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
-                  </select>
-                </label>
-                <label className="adm-field">
-                  <span className="adm-field-label">Category 2</span>
-                  <select className="adm-select adm-select--enhanced" value={user.categoryIds?.[1] || ''} onChange={(e) => updateCategory(idx, 1, e.target.value)}>
-                    <option value="">Select…</option>
-                    {MAIN_CATEGORIES.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
-                  </select>
-                </label>
+                  {user.whatsapp && normalized && (
+                    <span className={`adm-ff-phone-preview${phoneOk ? '' : ' adm-ff-phone-preview--bad'}`}>
+                      {phoneOk ? <>Saved as <strong>{normalized}</strong></> : 'Number looks too short — include the area code'}
+                    </span>
+                  )}
+                </div>
+
+                <div className="adm-ff-card__cats">
+                  <span className="adm-field-label">
+                    Categories {user.isAdmin && <em className="adm-muted" style={{ fontWeight: 400 }}>(admins can tick all categories regardless)</em>}
+                  </span>
+                  <div className="adm-ff-chip-grid">
+                    {MAIN_CATEGORIES.map((cat) => {
+                      const active = (user.categoryIds || []).includes(cat.id);
+                      return (
+                        <button
+                          key={cat.id}
+                          type="button"
+                          className={`adm-ff-chip${active ? ' adm-ff-chip--on' : ''}`}
+                          onClick={() => toggleCategory(idx, cat.id)}
+                        >
+                          {active && <Check size={12} strokeWidth={3} />}
+                          {cat.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
           {!loading && (
             <button type="button" className="adm-btn-ghost adm-ff-add-user" onClick={addUser}>
-              <Plus size={15} /> Add user
+              <Plus size={15} /> Add team member
             </button>
           )}
           {error && <p style={{ color: '#c40000', fontSize: 13, margin: '8px 0 0' }}>{error}</p>}
+
+          {testResult && (
+            <div className={`adm-ff-test-result${testResult.error || testResult.failed > 0 ? ' adm-ff-test-result--err' : ''}`}>
+              {testResult.error ? (
+                <p>{testResult.error}</p>
+              ) : (
+                <>
+                  <p style={{ margin: 0, fontWeight: 700 }}>
+                    Test sent to {testResult.sent}/{testResult.teamSize} member(s) via <code>{testResult.template}</code>
+                  </p>
+                  <ul>
+                    {(testResult.results || []).map((r) => (
+                      <li key={r.phone}>
+                        <strong>{r.name}</strong> ({r.phone}): template {r.template?.ok ? '✓' : `✗ ${r.template?.error || ''}`}
+                        {' · '}session {r.session?.ok ? '✓' : `✗ ${r.session?.error || ''}`}
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="adm-modal-footer adm-modal-footer--end">
+          <button
+            type="button"
+            className="adm-btn-ghost"
+            onClick={() => void handleTest()}
+            disabled={testing || loading}
+            title="Sends a test order notification to every saved team member"
+            style={{ marginRight: 'auto' }}
+          >
+            {testing ? <Loader2 size={14} className="star-spinning" /> : <MessageCircle size={14} />}
+            {testing ? 'Sending test…' : 'Send test WhatsApp'}
+          </button>
           <div className="adm-modal-footer__actions">
             <button type="button" className="adm-btn-ghost" onClick={() => onClose(false)}>Cancel</button>
             <button type="button" className="adm-btn-red" onClick={() => void handleSave()} disabled={saving || loading}>

@@ -261,7 +261,9 @@ export default function FulfillmentPage() {
     setItems((prev) => prev.map((it, i) => (i === idx ? { ...it, ...patch } : it)));
   };
 
-  const canEditCategory = (categoryId) => assignedCategorySet.has(categoryId);
+  const canEditCategory = (categoryId) => (
+    Boolean(activeUser?.isAdmin) || assignedCategorySet.has(categoryId)
+  );
 
   const saveCategorySection = async (categoryId, sectionItems) => {
     if (!activeUser || !orderId) return;

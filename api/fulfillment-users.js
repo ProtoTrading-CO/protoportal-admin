@@ -1,15 +1,23 @@
 import { requireAdminOrOrderToken, requireAdminKey } from './_admin-auth.js';
 import { readSiteConfigJson, writeSiteConfigJson } from './_site-config.js';
 import { defaultFulfillmentUsers } from './_fulfillment-defaults.js';
+import { normalizePhone } from './_wati.js';
 
 const USERS_FILE = 'fulfillment/users.json';
+
+/** Store numbers in the exact shape WATI accepts: +<countrycode><number>. */
+function toWatiPhone(raw) {
+  const digits = normalizePhone(raw);
+  return digits ? `+${digits}` : '';
+}
 
 function normalizeUsers(payload) {
   const users = (payload?.users || []).map((u, i) => ({
     id: String(u.id || `user-${i + 1}`).trim(),
     name: String(u.name || '').trim(),
-    whatsapp: String(u.whatsapp || '').trim(),
-    categoryIds: Array.isArray(u.categoryIds) ? u.categoryIds.filter(Boolean).slice(0, 2) : [],
+    whatsapp: toWatiPhone(u.whatsapp),
+    isAdmin: Boolean(u.isAdmin),
+    categoryIds: Array.isArray(u.categoryIds) ? [...new Set(u.categoryIds.filter(Boolean))] : [],
   })).filter((u) => u.name);
   return { users };
 }
