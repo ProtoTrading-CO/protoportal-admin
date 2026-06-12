@@ -12,6 +12,7 @@ import {
   saveActiveUserId,
 } from '../lib/fulfillmentUsers';
 import { generateOrderPdfBase64, createEmailOrderItems } from '../lib/orderDocuments';
+import { displayOrderNumber, buildFulfillmentUrl } from '../lib/orderNumber';
 import { getOrderAccessFromUrl } from '../lib/adminKey';
 import categories from '../data/categories.json';
 
@@ -327,6 +328,7 @@ export default function FulfillmentPage() {
         assignedTo: activeUser?.name,
         total: hasPrices ? total : null,
         hasPrices,
+        fulfillmentUrl: buildFulfillmentUrl(order?.id),
       });
       const blob = await fetch(`data:application/pdf;base64,${pdfBase64}`).then((r) => r.blob());
       const url = URL.createObjectURL(blob);
@@ -390,13 +392,14 @@ export default function FulfillmentPage() {
     );
   };
 
-  if (loading) return <div className="ff-center"><Loader2 size={36} className="star-spinning" style={{ color: '#15803d' }} /></div>;
+  if (loading) return <div className="ff-center"><Loader2 size={36} className="star-spinning" style={{ color: '#4ade80' }} /></div>;
   if (error) return <div className="ff-center"><p style={{ color: '#c40000', fontWeight: 700 }}>{error}</p></div>;
 
   const completedCount = categoryGroups.filter((g) => progress.sections?.[g.id]?.complete).length;
   const totalSections = categoryGroups.length;
   const completionPct = totalSections ? Math.round((completedCount / totalSections) * 100) : 0;
-  const orderShort = order.order_number || order.id?.slice(0, 8);
+  const orderRef = displayOrderNumber(order);
+  const fulfillmentLink = buildFulfillmentUrl(order?.id);
 
   return (
     <div className="ff-page">
@@ -404,7 +407,7 @@ export default function FulfillmentPage() {
         <div className="ff-header__title">
           <ClipboardList size={18} />
           <div>
-            <div className="ff-header__main">Order #{orderShort}</div>
+            <div className="ff-header__main">Order {orderRef}</div>
             <div className="ff-header__sub">{new Date(order.created_at).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short' })} · {order.customers?.name || 'Customer'}</div>
           </div>
         </div>
@@ -414,6 +417,17 @@ export default function FulfillmentPage() {
       </header>
 
       <div className="ff-body">
+        <div className="ff-order-id-card">
+          <div className="ff-order-id-label">Order ID</div>
+          <div className="ff-order-id-value">{orderRef}</div>
+          <p className="ff-order-id-note">
+            Bookmark or save this link to reopen this order in the fulfilment tab anytime.
+          </p>
+          <a className="ff-order-id-link" href={fulfillmentLink} target="_blank" rel="noopener noreferrer">
+            {fulfillmentLink}
+          </a>
+        </div>
+
         <div className="ff-hero">
           <div className="ff-hero-meta">
             <div className="ff-hero-customer">{order.customers?.name || 'Customer'}</div>

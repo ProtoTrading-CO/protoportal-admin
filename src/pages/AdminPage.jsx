@@ -83,6 +83,7 @@ import {
 import { approveCustomer, deleteCustomer, fetchCustomersPage } from '../lib/customers';
 import { supabase } from '../lib/supabase';
 import { buildOrderNoteSections, createEmailOrderItems, generateOrderPdfBase64, buildEmailItemsFromOrder } from '../lib/orderDocuments';
+import { displayOrderNumber, buildFulfillmentUrl } from '../lib/orderNumber';
 import { fetchPresaleInvoices, uploadPresaleInvoice } from '../lib/presaleInvoice';
 import { fetchConfirmationSent, markConfirmationSent, fetchPaymentRecords, uploadPop, setPaymentStatus } from '../lib/orderPayment';
 import { deleteOrderAdmin, fetchAllOrdersAdmin, updateOrderAdmin, advanceOrderWorkflow } from '../lib/orders';
@@ -950,6 +951,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
         assignedTo: activeFulfillmentUser?.name || '',
         total,
         hasPrices,
+        fulfillmentUrl: buildFulfillmentUrl(order.id),
       });
       const emailRes = await fetch('/api/send-order-email', {
         method: 'POST',
@@ -958,14 +960,14 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
           orderId: order.id,
           to: email,
           customerName: order.customers?.name,
-          orderNumber: order.order_number || order.id?.slice(0, 8),
+          orderNumber: displayOrderNumber(order),
           orderDate: order.created_at,
           items: emailItems,
           userNotes: order.order_change_notes || '',
           assignedTo: activeFulfillmentUser?.name || '',
           total,
           pdfBase64,
-          pdfFilename: `proto-order-confirmation-${order.order_number || order.id.slice(0, 8)}.pdf`,
+          pdfFilename: `proto-order-confirmation-${displayOrderNumber(order)}.pdf`,
         }),
       });
       const emailData = await emailRes.json();
@@ -3486,7 +3488,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                           onClick={() => setExpandedOrderId(isExpanded ? null : order.id)}
                         >
                           <div>
-                            <div style={{ fontWeight: 800, fontSize: 13 }}>{order.order_number || order.id.slice(0, 8)}</div>
+                            <div style={{ fontWeight: 800, fontSize: 13 }}>{displayOrderNumber(order)}</div>
                           </div>
                           <div>
                             <div style={{ fontWeight: 600, fontSize: 13 }}>{order.customers?.name || 'Unknown'}</div>

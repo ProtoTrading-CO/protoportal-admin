@@ -33,7 +33,8 @@ export function getOrderAccessFromUrl() {
     const params = new URLSearchParams(window.location.search);
     const orderId = params.get('o') || params.get('id') || '';
     const token = params.get('k') || '';
-    if (orderId && token) return { orderId, token };
+    // Dashboard opens /fulfillment?id=<uuid> with admin-key auth — token is optional.
+    if (orderId) return { orderId, token };
   } catch {}
   return { orderId: '', token: '' };
 }
@@ -60,10 +61,8 @@ export function installAuthFetch() {
     if (adminKey && !headers.has('x-admin-key')) headers.set('x-admin-key', adminKey);
 
     const { orderId, token } = getOrderAccessFromUrl();
-    if (orderId && token) {
-      if (!headers.has('x-order-id')) headers.set('x-order-id', orderId);
-      if (!headers.has('x-order-token')) headers.set('x-order-token', token);
-    }
+    if (orderId && !headers.has('x-order-id')) headers.set('x-order-id', orderId);
+    if (token && !headers.has('x-order-token')) headers.set('x-order-token', token);
 
     return originalFetch(input, { ...init, headers });
   };
