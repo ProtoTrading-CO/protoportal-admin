@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { jsPDF } from 'jspdf';
-import { Bot, FileDown, Loader2, Send, Sparkles } from 'lucide-react';
+import { Bot, FileDown, Loader2, Send, Sparkles, User } from 'lucide-react';
 
 const STARTERS = [
   'Summarise order activity this month',
@@ -8,6 +8,29 @@ const STARTERS = [
   'Show me a bar chart of top searches',
   'Any customers waiting for approval?',
 ];
+
+function renderInline(text) {
+  if (!text) return null;
+  const nodes = [];
+  const re = /(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`)/g;
+  let last = 0;
+  let match;
+  let key = 0;
+  while ((match = re.exec(text)) !== null) {
+    if (match.index > last) nodes.push(text.slice(last, match.index));
+    const token = match[0];
+    if (token.startsWith('**')) {
+      nodes.push(<strong key={key++}>{token.slice(2, -2)}</strong>);
+    } else if (token.startsWith('`')) {
+      nodes.push(<code key={key++} className="apollo-inline-code">{token.slice(1, -1)}</code>);
+    } else {
+      nodes.push(<em key={key++}>{token.slice(1, -1)}</em>);
+    }
+    last = match.index + token.length;
+  }
+  if (last < text.length) nodes.push(text.slice(last));
+  return nodes;
+}
 
 function parseMessageContent(text) {
   const parts = [];
@@ -35,11 +58,12 @@ function SimpleMarkdown({ text }) {
   return (
     <div className="apollo-md">
       {lines.map((line, i) => {
-        if (line.startsWith('## ')) return <h3 key={i}>{line.slice(3)}</h3>;
-        if (line.startsWith('### ')) return <h4 key={i}>{line.slice(4)}</h4>;
-        if (line.startsWith('- ')) return <p key={i} className="apollo-md-bullet">• {line.slice(2)}</p>;
-        if (/^\d+\.\s/.test(line)) return <p key={i} className="apollo-md-bullet">{line}</p>;
-        return line ? <p key={i}>{line}</p> : <br key={i} />;
+        const trimmed = line.trim();
+        if (trimmed.startsWith('## ')) return <h3 key={i}>{renderInline(trimmed.slice(3))}</h3>;
+        if (trimmed.startsWith('### ')) return <h4 key={i}>{renderInline(trimmed.slice(4))}</h4>;
+        if (trimmed.startsWith('- ')) return <p key={i} className="apollo-md-bullet"><span className="apollo-md-dot">•</span>{renderInline(trimmed.slice(2))}</p>;
+        if (/^\d+\.\s/.test(trimmed)) return <p key={i} className="apollo-md-bullet">{renderInline(trimmed)}</p>;
+        return trimmed ? <p key={i}>{renderInline(trimmed)}</p> : null;
       })}
     </div>
   );
@@ -56,7 +80,9 @@ function BarChart({ chart }) {
         {labels.map((label, i) => (
           <div key={`${label}-${i}`} className="apollo-chart-col" title={`${label}: ${values[i]}`}>
             <div className="apollo-chart-val">{values[i]}</div>
-            <div className="apollo-chart-fill" style={{ height: `${(values[i] / peak) * 100}%` }} />
+            <div className="apollo-chart-track">
+              <div className="apollo-chart-fill" style={{ height: `${(values[i] / peak) * 100}%` }} />
+            </div>
             <div className="apollo-chart-label">{label}</div>
           </div>
         ))}
@@ -78,6 +104,58 @@ function MessageBody({ content }) {
   );
 }
 
+function ApolloWelcome({ onStarter, busy }) {
+  return (
+    <div className="apollo-welcome">
+      <div className="apollo-welcome-badge">
+        <Bot size={22} strokeWidth={2.2} />
+      </div>
+      <div className="apollo-welcome-copy">
+        <h3>Hi, I'm <span className="apollo-welcome-name">Apollo</span></h3>
+        <p>
+          Your Proto admin assistant. I can analyse orders, customers, search trends,
+          and products — and produce charts or PDF summaries when you need them.
+        </p>
+      </div>
+      <div className="apollo-welcome-starters">
+        <span className="apollo-welcome-hint">Try asking</span>
+        <div className="apollo-starters">
+          {STARTERS.map((s) => (
+            <button key={s} type="button" className="apollo-starter" onClick={() => onStarter(s)} disabled={busy}>
+              <Sparkles size={13} />
+              <span>{s}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ChatMessage({ msg, index, onExportPdf }) {
+  const isUser = msg.role === 'user';
+  return (
+    <div className={`apollo-msg-row apollo-msg-row--${msg.role}`}>
+      <div className={`apollo-avatar apollo-avatar--${msg.role}`} aria-hidden="true">
+        {isUser ? <User size={15} /> : <Bot size={15} />}
+      </div>
+      <div className="apollo-msg-stack">
+        <div className="apollo-msg-meta">
+          <span className="apollo-msg-name">{isUser ? 'You' : 'Apollo'}</span>
+        </div>
+        <div className={`apollo-msg-body apollo-msg-body--${msg.role}`}>
+          {isUser ? <p>{msg.content}</p> : <MessageBody content={msg.content} />}
+        </div>
+        {!isUser && index > 0 && (
+          <button type="button" className="apollo-pdf-link" onClick={() => onExportPdf(msg.content)}>
+            <FileDown size={12} /> Export PDF
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function exportMessagePdf(content, title = 'Apollo Report') {
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
   const margin = 48;
@@ -96,7 +174,11 @@ function exportMessagePdf(content, title = 'Apollo Report') {
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(10);
   doc.setTextColor(55, 65, 81);
-  const plain = content.replace(/```chart[\s\S]*?```/g, '[Chart included in dashboard view]');
+  const plain = content
+    .replace(/```chart[\s\S]*?```/g, '[Chart included in dashboard view]')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/\*([^*]+)\*/g, '$1')
+    .replace(/`([^`]+)`/g, '$1');
   const lines = doc.splitTextToSize(plain, doc.internal.pageSize.getWidth() - margin * 2);
   lines.forEach((line) => {
     if (y > doc.internal.pageSize.getHeight() - margin) {
@@ -110,12 +192,7 @@ function exportMessagePdf(content, title = 'Apollo Report') {
 }
 
 export default function ApolloPanel() {
-  const [messages, setMessages] = useState([
-    {
-      role: 'assistant',
-      content: 'Hi — I\'m **Apollo**, your Proto admin assistant. I can analyse orders, customers, search trends, and products. Ask me anything, or pick a starter below.',
-    },
-  ]);
+  const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -135,11 +212,7 @@ export default function ApolloPanel() {
     setInput('');
 
     try {
-      const apiMessages = nextMessages
-        .filter((m) => m.role === 'user' || m.role === 'assistant')
-        .slice(1)
-        .map(({ role, content }) => ({ role, content }));
-
+      const apiMessages = nextMessages.map(({ role, content }) => ({ role, content }));
       const res = await fetch('/api/apollo', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -156,82 +229,73 @@ export default function ApolloPanel() {
   }, [busy, messages]);
 
   const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
+  const showWelcome = messages.length === 0;
 
   return (
     <div className="apollo-panel">
       <div className="apollo-head">
-        <div>
-          <h2 className="adm-section-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Bot size={22} style={{ color: '#c40000' }} />
-            Apollo
-          </h2>
-          <p className="adm-section-note">
-            AI assistant with live access to orders, customers, search analytics, and catalogue data.
-          </p>
+        <div className="apollo-head-brand">
+          <div className="apollo-head-icon"><Bot size={20} /></div>
+          <div>
+            <h2 className="apollo-head-title">Apollo</h2>
+            <p className="apollo-head-sub">AI assistant · orders · customers · search · products</p>
+          </div>
         </div>
         {lastAssistant && (
           <button
             type="button"
-            className="adm-btn-ghost"
+            className="apollo-export-btn"
             onClick={() => exportMessagePdf(lastAssistant.content)}
           >
-            <FileDown size={14} /> Export last reply as PDF
+            <FileDown size={14} /> Export last reply
           </button>
         )}
       </div>
 
-      <div className="apollo-starters">
-        {STARTERS.map((s) => (
-          <button key={s} type="button" className="apollo-starter" onClick={() => void send(s)} disabled={busy}>
-            <Sparkles size={12} /> {s}
-          </button>
-        ))}
-      </div>
-
-      <div className="apollo-chat" ref={scrollRef}>
-        {messages.map((msg, i) => (
-          <div key={i} className={`apollo-msg apollo-msg--${msg.role}`}>
-            <div className="apollo-msg-label">{msg.role === 'user' ? 'You' : 'Apollo'}</div>
-            <div className="apollo-msg-body">
-              {msg.role === 'assistant' ? <MessageBody content={msg.content} /> : <p>{msg.content}</p>}
+      <div className="apollo-shell">
+        <div className="apollo-chat" ref={scrollRef}>
+          {showWelcome && <ApolloWelcome onStarter={send} busy={busy} />}
+          {messages.map((msg, i) => (
+            <ChatMessage key={i} msg={msg} index={i} onExportPdf={exportMessagePdf} />
+          ))}
+          {busy && (
+            <div className="apollo-msg-row apollo-msg-row--assistant">
+              <div className="apollo-avatar apollo-avatar--assistant" aria-hidden="true">
+                <Bot size={15} />
+              </div>
+              <div className="apollo-msg-stack">
+                <div className="apollo-msg-meta"><span className="apollo-msg-name">Apollo</span></div>
+                <div className="apollo-msg-body apollo-msg-body--assistant apollo-thinking">
+                  <Loader2 size={15} className="spin" />
+                  <span>Analysing your data…</span>
+                </div>
+              </div>
             </div>
-            {msg.role === 'assistant' && i > 0 && (
-              <button type="button" className="apollo-pdf-link" onClick={() => exportMessagePdf(msg.content)}>
-                <FileDown size={12} /> PDF
-              </button>
-            )}
-          </div>
-        ))}
-        {busy && (
-          <div className="apollo-msg apollo-msg--assistant">
-            <div className="apollo-msg-label">Apollo</div>
-            <div className="apollo-msg-body apollo-thinking">
-              <Loader2 size={16} className="spin" /> Thinking…
-            </div>
-          </div>
-        )}
+          )}
+        </div>
+
+        <div className="apollo-composer">
+          {error && <p className="apollo-error">{error}</p>}
+          <form
+            className="apollo-input-row"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void send(input);
+            }}
+          >
+            <input
+              className="apollo-input"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder="Ask about orders, searches, customers, or products…"
+              disabled={busy}
+            />
+            <button type="submit" className="apollo-send-btn" disabled={busy || !input.trim()} aria-label="Send">
+              {busy ? <Loader2 size={18} className="spin" /> : <Send size={18} />}
+            </button>
+          </form>
+        </div>
       </div>
-
-      {error && <p className="oa-error">{error}</p>}
-
-      <form
-        className="apollo-input-row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          void send(input);
-        }}
-      >
-        <input
-          className="apollo-input"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder="Ask Apollo about orders, searches, customers, products…"
-          disabled={busy}
-        />
-        <button type="submit" className="adm-btn-red" disabled={busy || !input.trim()}>
-          <Send size={16} /> Send
-        </button>
-      </form>
     </div>
   );
 }
