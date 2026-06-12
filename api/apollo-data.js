@@ -67,18 +67,28 @@ async function enrichStockLevels(stock, rows) {
     for (const p of data || []) stockByBarcode.set(p.sku, p);
   }
   return rows.map((row) => {
-    const p = stockByBarcode.get(row.barcode);
-    const available = readStock(p?.available_stock);
-    const raw = readStock(p?.stock_qty);
-    const soh = available !== null ? available : raw;
+    const localAvailable = readStock(row.available_stock);
+    const localRaw = readStock(row.stock_qty);
+    let soh = localAvailable !== null ? localAvailable : localRaw;
+    if (soh === null && row.barcode) {
+      const p = stockByBarcode.get(row.barcode);
+      const available = readStock(p?.available_stock);
+      const raw = readStock(p?.stock_qty);
+      soh = available !== null ? available : raw;
+    }
     return {
       sku: row.sku,
       title: row.title || row.sku,
       category: row.category || 'Uncategorised',
+      subcategory_one: row.subcategory_one || null,
+      subcategory_two: row.subcategory_two || null,
+      subcategory_three: row.subcategory_three || null,
+      subcategory_four: row.subcategory_four || null,
       barcode: row.barcode,
       price: row.price,
+      imageUrl: String(row.image_url_one || '').split(',')[0].trim() || null,
       stockOnHand: soh,
-      tokens: tokenize(`${row.sku} ${row.title} ${row.category} ${row.barcode}`),
+      tokens: tokenize(`${row.sku} ${row.title} ${row.category} ${row.subcategory_one} ${row.subcategory_two} ${row.barcode}`),
     };
   });
 }
@@ -87,7 +97,7 @@ async function loadProducts(stock) {
   const websiteRows = await fetchAllPages(
     stock,
     'website_stock',
-    'sku, title, category, barcode, price',
+    'sku, title, category, subcategory_one, subcategory_two, subcategory_three, subcategory_four, barcode, price, available_stock, stock_qty, image_url_one',
   );
   const all = await enrichStockLevels(stock, websiteRows);
 
@@ -105,13 +115,19 @@ async function loadProducts(stock) {
     byCategory[p.category] = (byCategory[p.category] || 0) + 1;
   }
 
+  const negativeStock = withStock
+    .filter((p) => p.stockOnHand < 0)
+    .sort((a, b) => a.stockOnHand - b.stockOnHand);
+
   return {
     liveCount: all.length,
     archivedCount,
     zeroStockCount: withStock.filter((p) => p.stockOnHand === 0).length,
+    stockLinkedCount: withStock.length,
     all,
     lowestStock: [...withStock].sort((a, b) => a.stockOnHand - b.stockOnHand).slice(0, 25),
     highestStock: [...withStock].sort((a, b) => b.stockOnHand - a.stockOnHand).slice(0, 10),
+    negativeStock,
     byCategory: Object.entries(byCategory)
       .sort((a, b) => b[1] - a[1])
       .map(([category, count]) => ({ category, count })),
@@ -286,9 +302,11 @@ async function loadFreshData() {
     liveCount: 0,
     archivedCount: null,
     zeroStockCount: 0,
+    stockLinkedCount: 0,
     all: [],
     lowestStock: [],
     highestStock: [],
+    negativeStock: [],
     byCategory: [],
     error: stock ? null : 'Stock database not configured',
   };

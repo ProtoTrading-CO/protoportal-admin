@@ -1,51 +1,104 @@
 import { requireAdminKey } from './_admin-auth.js';
 import { getApolloData } from './apollo-data.js';
-import { parseIntent, classifyWithAi } from './apollo-intent.js';
-import { executeIntent } from './apollo-engine.js';
+import { parseIntentHint, classifyIntent } from './apollo-intent.js';
+import { validateIntent, validateAnswer } from './apollo-validate.js';
+import { executeIntent, parseLimit } from './apollo-engine.js';
 
 const MODEL = 'google/gemini-2.5-flash';
-const CONFIDENCE_THRESHOLD = 0.45;
 
-const NARRATE_PROMPT = `You are Apollo for Proto Trading admin. The user asked a question and the system fetched LIVE DATA.
-
-Rewrite the structured answer clearly. Keep all numbers and product/customer names exact.
-Preserve any \`\`\`chart blocks exactly as-is — do not modify JSON inside them.
-Use ## headings and bullets. Be concise and helpful.`;
-
-async function narrateWithAi(structuredReply, userQuery, apiKey) {
-  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-      'HTTP-Referer': 'https://protoportal-admin.vercel.app',
-      'X-Title': 'Proto Apollo',
-    },
-    body: JSON.stringify({
-      model: MODEL,
-      messages: [
-        { role: 'system', content: NARRATE_PROMPT },
-        { role: 'user', content: `Question: ${userQuery}\n\nStructured answer:\n${structuredReply}` },
-      ],
-      temperature: 0.3,
-      max_tokens: 1500,
-    }),
-  });
-
-  const payload = await response.json();
-  if (!response.ok) return structuredReply;
-  return payload.choices?.[0]?.message?.content || structuredReply;
+function appendChart(reply, title, labels, values) {
+  if (!labels.length) return reply;
+  return `${reply}\n\`\`\`chart\n${JSON.stringify({ type: 'bar', title, labels, values })}\n\`\`\``;
 }
 
-async function freeformWithAi(userQuery, data, apiKey) {
-  const summary = {
-    customers: data.customers.list.slice(0, 20),
+function ensureChart(intent, reply, data) {
+  const { orders, products, search } = data;
+
+  if (intent === 'product_negative_stock') {
+    const rows = products.negativeStock?.slice(0, 10) || [];
+    if (!rows.length) return reply;
+    return appendChart(reply, 'Negative stock levels', rows.map((p) => p.sku.slice(0, 12)), rows.map((p) => p.stockOnHand));
+  }
+  if (intent === 'order_top_items') {
+    const top = orders.topLineItems.slice(0, 10);
+    if (!top.length) return reply;
+    return appendChart(reply, 'Top ordered items', top.map((t) => t.code.slice(0, 12)), top.map((t) => t.totalQty));
+  }
+  if (intent === 'product_low_stock') {
+    const rows = products.lowestStock.slice(0, 10);
+    if (!rows.length) return reply;
+    return appendChart(reply, 'Lowest stock', rows.map((p) => p.sku.slice(0, 12)), rows.map((p) => p.stockOnHand));
+  }
+  if (intent === 'search_top') {
+    const top = search.topSearches.slice(0, 10);
+    if (!top.length) return reply;
+    return appendChart(reply, 'Top searches', top.map((r) => r.normalized_search_term.slice(0, 14)), top.map((r) => Number(r.searches)));
+  }
+  return reply;
+}
+
+function answerFromData(data, parsed, userQuery) {
+  const limit = parseLimit(userQuery);
+  const result = executeIntent(parsed.intent, data, parsed.terms, { limit });
+  if (!result) return null;
+
+  if (parsed.wantsChart && result.reply && !result.reply.includes('```chart')) {
+    result.reply = ensureChart(parsed.intent, result.reply, data);
+  }
+
+  return result;
+}
+
+async function resolveQuery(userQuery, data, apiKey, { rejectIntent = '', badReply = '' } = {}) {
+  const hint = parseIntentHint(userQuery);
+
+  let parsed = await classifyIntent(userQuery, apiKey, { rejectIntent, badReply, regexHint: hint });
+  if (!parsed) {
+    parsed = {
+      intent: !rejectIntent && hint.confidence >= 0.85 ? hint.intent : 'freeform',
+      terms: '',
+      wantsChart: hint.wantsChart,
+    };
+  }
+
+  if (!validateIntent(userQuery, parsed)) {
+    const retry = await classifyIntent(userQuery, apiKey, { rejectIntent: parsed.intent, badReply, regexHint: hint });
+    if (retry && validateIntent(userQuery, retry)) parsed = retry;
+  }
+
+  let result = parsed.intent === 'freeform' ? null : answerFromData(data, parsed, userQuery);
+
+  if (!validateAnswer(userQuery, parsed, result)) {
+    const retry = await classifyIntent(userQuery, apiKey, { rejectIntent: parsed.intent, badReply, regexHint: hint });
+    if (retry && validateIntent(userQuery, retry)) {
+      parsed = retry;
+      result = parsed.intent === 'freeform' ? null : answerFromData(data, parsed, userQuery);
+    }
+  }
+
+  if (result && validateAnswer(userQuery, parsed, result)) {
+    return {
+      reply: result.reply,
+      source: 'live-index',
+      intent: result.intent,
+      batchAction: result.batchAction || null,
+    };
+  }
+
+  return fallbackAnswer(userQuery, data, apiKey);
+}
+
+async function fallbackAnswer(userQuery, data, apiKey) {
+  const ctx = {
     productCount: data.products.liveCount,
-    orders: data.orders.total,
-    topOrdered: data.orders.topLineItems.slice(0, 10),
-    topSearches: data.search.topSearches.slice(0, 10),
+    archived: data.products.archivedCount,
+    customers: data.customers.list,
+    topOrdered: data.orders.topLineItems.slice(0, 15),
     lowestStock: data.products.lowestStock.slice(0, 10),
-    negativeStock: data.products.all.filter((p) => p.stockOnHand != null && p.stockOnHand < 0).slice(0, 10),
+    negativeStock: data.products.negativeStock?.slice(0, 10) || [],
+    topSearches: data.search.topSearches.slice(0, 10),
+    zeroSearches: data.search.zeroResultTerms.slice(0, 10),
+    recentOrders: data.orders.recent.slice(0, 8),
   };
 
   const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -61,51 +114,29 @@ async function freeformWithAi(userQuery, data, apiKey) {
       messages: [
         {
           role: 'system',
-          content: `${NARRATE_PROMPT}\n\nLive data:\n${JSON.stringify(summary, null, 2)}`,
+          content: `You are Apollo for Proto Trading admin. Answer ONLY from the live data below. Never invent numbers.
+Use ## headings, bullets, and include a chart block when helpful:
+\`\`\`chart
+{"type":"bar","title":"...","labels":["A"],"values":[1]}
+\`\`\`
+Max 10 chart labels. ZAR currency. Be direct.`,
         },
-        { role: 'user', content: userQuery },
+        {
+          role: 'user',
+          content: `Question: ${userQuery}\n\nLive data:\n${JSON.stringify(ctx, null, 2)}`,
+        },
       ],
-      temperature: 0.35,
+      temperature: 0.2,
       max_tokens: 1500,
     }),
   });
 
   const payload = await response.json();
   if (!response.ok) throw new Error(payload?.error?.message || 'Apollo request failed');
-  return payload.choices?.[0]?.message?.content || '';
-}
-
-async function resolveQuery(userQuery, data, apiKey, { fix = false, badReply = '', previousIntent = '' } = {}) {
-  let parsed = parseIntent(userQuery);
-
-  if (fix || parsed.confidence < CONFIDENCE_THRESHOLD) {
-    const aiIntent = await classifyWithAi(userQuery, apiKey, { badReply, previousIntent });
-    if (aiIntent) parsed = aiIntent;
-  }
-
-  let result = executeIntent(parsed.intent, data, parsed.terms);
-
-  if (!result) {
-    const retry = await classifyWithAi(userQuery, apiKey, { badReply: badReply || 'no result', previousIntent: parsed.intent });
-    if (retry) {
-      parsed = retry;
-      result = executeIntent(parsed.intent, data, parsed.terms);
-    }
-  }
-
-  const shouldNarrate = fix || parsed.wantsChart;
-
-  if (result) {
-    return {
-      reply: shouldNarrate ? await narrateWithAi(result.reply, userQuery, apiKey) : result.reply,
-      source: fix ? 'fixed' : result.source,
-      intent: result.intent,
-    };
-  }
 
   return {
-    reply: await freeformWithAi(userQuery, data, apiKey),
-    source: fix ? 'fixed' : 'ai',
+    reply: payload.choices?.[0]?.message?.content || 'I could not find an answer in the live data.',
+    source: 'ai',
     intent: 'freeform',
   };
 }
@@ -148,19 +179,19 @@ export default async function handler(req, res) {
 
   try {
     const data = await getApolloData();
-    const { reply, source, intent } = await resolveQuery(userQuery, data, apiKey, {
-      fix,
-      badReply,
-      previousIntent,
+    const rejectIntent = fix ? (previousIntent || '') : '';
+    const { reply, source, intent, batchAction } = await resolveQuery(userQuery, data, apiKey, {
+      rejectIntent,
+      badReply: fix ? badReply : '',
     });
 
     return res.status(200).json({
       reply,
-      source,
+      source: fix ? 'fixed' : source,
       intent,
+      batchAction,
       indexedAt: data.generatedAt,
       indexSize: data.index.length,
-      fixed: Boolean(fix),
     });
   } catch (err) {
     console.error('apollo:', err?.message || err);

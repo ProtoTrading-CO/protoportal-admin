@@ -1,7 +1,21 @@
 import { searchIndex } from './apollo-data.js';
+import { findProductsBySubcategory, resolveTaxonomyLabels, suggestSubcategories } from './_subcategory-match.js';
 
 function chartBlock(title, labels, values) {
   return `\n\`\`\`chart\n${JSON.stringify({ type: 'bar', title, labels: labels.slice(0, 10), values: values.slice(0, 10) })}\n\`\`\``;
+}
+
+export function parseLimit(query) {
+  const q = String(query || '');
+  const patterns = [
+    /(?:give me |show me |list |top )?(\d+)\s+(?:products?|items?)/i,
+    /(\d+)\s+(?:products?|items?).*(?:negative|stock|low)/i,
+  ];
+  for (const re of patterns) {
+    const m = q.match(re);
+    if (m) return Math.min(50, Math.max(1, parseInt(m[1], 10)));
+  }
+  return null;
 }
 
 function money(n) {
@@ -13,36 +27,86 @@ function fmtDate(iso) {
   return new Date(iso).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
-export function executeIntent(intent, data, terms = '') {
+export function executeIntent(intent, data, terms = '', { limit = null } = {}) {
   const { customers, orders, products, search } = data;
 
   switch (intent) {
-    case 'product_negative_stock': {
-      const rows = products.all
-        .filter((p) => p.stockOnHand != null && p.stockOnHand < 0)
-        .sort((a, b) => a.stockOnHand - b.stockOnHand)
-        .slice(0, 15);
-      if (!rows.length) {
+    case 'batch_fix_images': {
+      const canonical = resolveTaxonomyLabels(terms);
+      const displayLabel = canonical[0] || terms;
+      const matched = findProductsBySubcategory(products, terms);
+      const withImages = matched.filter((p) => p.imageUrl);
+      const missing = matched.length - withImages.length;
+
+      if (!matched.length) {
+        const suggestions = suggestSubcategories(terms);
+        const hint = suggestions.length
+          ? `\n\nDid you mean: ${suggestions.map((s) => `**${s}**`).join(', ')}?`
+          : '';
         return {
           source: 'live-index',
           intent,
-          reply: '## Negative stock\n\nNo products currently show a stock level below zero.',
+          reply: `## Image fix\n\nNo products matched **"${terms || '—'}"**.${hint}\n\nPick the subcategory from Product Manager, or try the exact label e.g. **Games & Puzzles**.`,
         };
       }
-      const lines = rows.map((p, i) => `${i + 1}. **${p.title}** (${p.sku}) — **${p.stockOnHand}** units · ${p.category}`);
+
+      const preview = withImages.slice(0, 8).map((p, i) => `${i + 1}. **${p.title}** (${p.sku})`);
+      const more = withImages.length > 8 ? `\n\n_…and ${withImages.length - 8} more._` : '';
+
       return {
         source: 'live-index',
         intent,
-        reply: `## Negative stock (${rows.length})\n\n${lines.join('\n')}${chartBlock('Negative stock levels', rows.slice(0, 10).map((p) => p.sku.slice(0, 12)), rows.slice(0, 10).map((p) => p.stockOnHand))}`,
+        reply: `## Image fix — ${displayLabel}\n\nFound **${withImages.length}** products${missing ? ` (${missing} skipped — no image)` : ''}.\n\nSending to **New Products** for Gemini processing (800×800 white background). Open the New Products tab to watch the live feed…\n\n${preview.join('\n')}${more}`,
+        batchAction: {
+          type: 'reprocess_to_dormant',
+          subcategory: displayLabel,
+          products: withImages.map((p) => ({ sku: p.sku, title: p.title, imageUrl: p.imageUrl })),
+        },
       };
     }
 
-    case 'product_count':
+    case 'product_negative_stock': {
+      const allNegative = products.negativeStock?.length
+        ? products.negativeStock
+        : products.all.filter((p) => p.stockOnHand != null && p.stockOnHand < 0)
+            .sort((a, b) => a.stockOnHand - b.stockOnHand);
+      const cap = limit || 15;
+      const rows = allNegative.slice(0, cap);
+      if (!rows.length) {
+        const note = products.stockLinkedCount === 0 && products.liveCount
+          ? `\n\n_${products.liveCount} products in catalogue; stock levels not linked yet._`
+          : '';
+        return {
+          source: 'live-index',
+          intent,
+          reply: `## Negative stock\n\nNo products currently show a stock level below zero.${note}`,
+        };
+      }
+      const lines = rows.map((p, i) => `${i + 1}. **${p.title}** (${p.sku}) — **${p.stockOnHand}** units · ${p.category}`);
+      const limitNote = limit && allNegative.length > rows.length
+        ? `\n\n_Showing ${rows.length} of ${allNegative.length} negative-stock products._`
+        : limit && allNegative.length < limit
+          ? `\n\n_Only ${allNegative.length} product${allNegative.length === 1 ? '' : 's'} currently have negative stock (you asked for ${limit})._`
+          : '';
       return {
         source: 'live-index',
         intent,
-        reply: `## Product catalogue\n\n- **Live products:** ${products.liveCount}\n- **Archived:** ${products.archivedCount ?? '—'}\n- **Zero stock:** ${products.zeroStockCount}\n- **Categories:** ${products.byCategory.length}${products.error ? `\n\n_Stock detail note: ${products.error}_` : ''}`,
+        reply: `## Negative stock (${rows.length})\n\n${lines.join('\n')}${limitNote}${chartBlock('Negative stock levels', rows.slice(0, 10).map((p) => p.sku.slice(0, 12)), rows.slice(0, 10).map((p) => p.stockOnHand))}`,
       };
+    }
+
+    case 'product_count': {
+      const stockNote = products.stockLinkedCount > 0
+        ? `- **With stock data:** ${products.stockLinkedCount}`
+        : products.liveCount
+          ? '- **Stock levels:** not linked for all SKUs yet'
+          : '';
+      return {
+        source: 'live-index',
+        intent,
+        reply: `## Product catalogue\n\n- **Live products:** ${products.liveCount}\n- **Archived:** ${products.archivedCount ?? '—'}\n- **Zero stock:** ${products.zeroStockCount}\n- **Categories:** ${products.byCategory.length}${stockNote ? `\n${stockNote}` : ''}`,
+      };
+    }
 
     case 'product_low_stock': {
       const rows = products.lowestStock.slice(0, 10);

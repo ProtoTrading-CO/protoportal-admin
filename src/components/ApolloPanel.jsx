@@ -5,9 +5,9 @@ import { Bot, FileDown, Loader2, Send, Sparkles, User, Wrench } from 'lucide-rea
 const STARTERS = [
   'What are my best performing products by orders?',
   'Which products have the lowest stock?',
-  'Find items with negative stock levels',
+  'Give me 5 products with negative stock',
+  'Fix images for all products in subcategory games and puzzles',
   'Who are all my customers?',
-  'What are customers searching with no results?',
 ];
 
 function renderInline(text) {
@@ -114,9 +114,9 @@ function ApolloWelcome({ onStarter, busy }) {
       <div className="apollo-welcome-copy">
         <h3>Hi, I'm <span className="apollo-welcome-name">Apollo</span></h3>
         <p>
-          Ask in plain English — Apollo maps your question to the live index
-          (products, customers, orders, searches) and answers instantly. AI only
-          kicks in when needed.
+          Ask in plain English — every question is routed through live data first
+          (products, customers, orders, searches). Answers come from your index,
+          not guesswork.
         </p>
       </div>
       <div className="apollo-welcome-starters">
@@ -134,8 +134,24 @@ function ApolloWelcome({ onStarter, busy }) {
   );
 }
 
+function ImageFixProgress({ progress }) {
+  if (!progress) return null;
+  const pct = progress.total ? Math.round(((progress.index + (progress.status === 'done' || progress.status === 'error' ? 1 : 0)) / progress.total) * 100) : 0;
+  return (
+    <div className="apollo-batch-progress">
+      <div className="apollo-batch-progress-head">
+        <Loader2 size={14} className="spin" />
+        <span>Fixing images — {progress.done + progress.failed}/{progress.total}</span>
+      </div>
+      <div className="apollo-batch-progress-bar"><div style={{ width: `${pct}%` }} /></div>
+      <p className="apollo-batch-progress-item">{progress.title || progress.sku}</p>
+    </div>
+  );
+}
+
 function ChatMessage({ msg, isLastAssistant, onExportPdf, onFix, fixBusy }) {
   const isUser = msg.role === 'user';
+  const showFix = isLastAssistant && !isUser && msg.source !== 'live-index';
   return (
     <div className={`apollo-msg-row apollo-msg-row--${msg.role}`}>
       <div className={`apollo-avatar apollo-avatar--${msg.role}`} aria-hidden="true">
@@ -155,12 +171,23 @@ function ChatMessage({ msg, isLastAssistant, onExportPdf, onFix, fixBusy }) {
         </div>
         <div className={`apollo-msg-body apollo-msg-body--${msg.role}`}>
           {isUser ? <p>{msg.content}</p> : <MessageBody content={msg.content} />}
+          {!isUser && msg.batchProgress && <ImageFixProgress progress={msg.batchProgress} />}
+          {!isUser && msg.batchComplete && (
+            <p className="apollo-batch-done">{renderInline(msg.batchComplete)}</p>
+          )}
         </div>
-        {isLastAssistant && !isUser && (
+        {showFix && (
           <div className="apollo-msg-actions">
             <button type="button" className="apollo-action-btn" onClick={onFix} disabled={fixBusy}>
               <Wrench size={13} /> {fixBusy ? 'Fixing…' : 'Fix this'}
             </button>
+            <button type="button" className="apollo-action-btn apollo-action-btn--ghost" onClick={() => onExportPdf(msg.content)}>
+              <FileDown size={13} /> Export PDF
+            </button>
+          </div>
+        )}
+        {isLastAssistant && !isUser && !showFix && (
+          <div className="apollo-msg-actions">
             <button type="button" className="apollo-action-btn apollo-action-btn--ghost" onClick={() => onExportPdf(msg.content)}>
               <FileDown size={13} /> Export PDF
             </button>
@@ -206,8 +233,21 @@ function exportMessagePdf(content, title = 'Apollo Report') {
   doc.save(`apollo-${new Date().toISOString().slice(0, 10)}.pdf`);
 }
 
-export default function ApolloPanel() {
-  const [messages, setMessages] = useState([]);
+const APOLLO_STORAGE_KEY = 'proto_apollo_chat_v1';
+
+function loadApolloMessages() {
+  try {
+    const raw = sessionStorage.getItem(APOLLO_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export default function ApolloPanel({ onReprocessBatch }) {
+  const [messages, setMessages] = useState(loadApolloMessages);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -224,6 +264,17 @@ export default function ApolloPanel() {
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   }, [messages, busy]);
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(APOLLO_STORAGE_KEY, JSON.stringify(messages));
+    } catch { /* quota */ }
+  }, [messages]);
+
+  const clearChat = useCallback(() => {
+    setMessages([]);
+    try { sessionStorage.removeItem(APOLLO_STORAGE_KEY); } catch {}
+  }, []);
 
   const send = useCallback(async (text, { fix = false, replaceLast = false } = {}) => {
     const trimmed = String(text || '').trim();
@@ -272,12 +323,26 @@ export default function ApolloPanel() {
         content: json.reply,
         source: json.source,
         intent: json.intent,
+        batchAction: json.batchAction || null,
       };
 
-      if (fix || replaceLast) {
-        setMessages((prev) => [...prev.slice(0, -1), assistantMsg]);
-      } else {
-        setMessages((prev) => [...prev, assistantMsg]);
+      let batchIndex = -1;
+      setMessages((prev) => {
+        const next = fix || replaceLast ? [...prev.slice(0, -1), assistantMsg] : [...prev, assistantMsg];
+        batchIndex = next.length - 1;
+        return next;
+      });
+
+      if (json.batchAction?.type === 'reprocess_to_dormant' && onReprocessBatch) {
+        const label = json.batchAction.subcategory || '';
+        void onReprocessBatch(json.batchAction.products, { label, switchTab: true, skipConfirm: true });
+        if (batchIndex >= 0) {
+          setMessages((prev) => prev.map((m, i) => (
+            i === batchIndex
+              ? { ...m, batchComplete: `✓ Sent **${json.batchAction.products.length}** products to New Products — switch to the **New Products** tab to watch the live feed.` }
+              : m
+          )));
+        }
       }
     } catch (e) {
       setError(e.message);
@@ -285,7 +350,7 @@ export default function ApolloPanel() {
     } finally {
       setBusy(false);
     }
-  }, [busy, messages]);
+  }, [busy, messages, onReprocessBatch]);
 
   const fixLastReply = useCallback(() => {
     void send('', { fix: true });
@@ -306,6 +371,11 @@ export default function ApolloPanel() {
             </p>
           </div>
         </div>
+        {messages.length > 0 && (
+          <button type="button" className="apollo-action-btn apollo-action-btn--ghost" onClick={clearChat} disabled={busy}>
+            Clear chat
+          </button>
+        )}
       </div>
 
       <div className="apollo-shell">
@@ -350,7 +420,7 @@ export default function ApolloPanel() {
               className="apollo-input"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="Ask about orders, searches, customers, or products…"
+              placeholder="Ask about orders, stock, customers — or fix images by subcategory…"
               disabled={busy}
             />
             <button type="submit" className="apollo-send-btn" disabled={busy || !input.trim()} aria-label="Send">

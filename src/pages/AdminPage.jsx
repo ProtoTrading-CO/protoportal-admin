@@ -105,6 +105,8 @@ import FulfillmentSettingsModal from '../components/FulfillmentSettingsModal';
 import OrderWhatsappNotify from '../components/OrderWhatsappNotify';
 import AnalyticsHub from '../components/AnalyticsHub';
 import ApolloPanel from '../components/ApolloPanel';
+import ReprocessLiveFeed from '../components/ReprocessLiveFeed';
+import { runReprocessBatch } from '../lib/reprocessQueue';
 import categories from '../data/categories.json';
 
 // ─── Reorder sort order — stored in localStorage, applied client-side ─────────
@@ -413,7 +415,8 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const [dormantSearch, setDormantSearch] = useState('');
   const [dormantSelected, setDormantSelected] = useState(new Set());
   const [imageViewUrl, setImageViewUrl] = useState('');
-  const [uploadQueue, setUploadQueue] = useState([]); // [{name, status, message, cost}]
+  const [uploadQueue, setUploadQueue] = useState([]); // [{name, sku?, status, message, cost, thumbUrl?, previewUrl?}]
+  const [reprocessBusy, setReprocessBusy] = useState(false);
   const [costLog, setCostLog] = useState(() => {
     try { return JSON.parse(localStorage.getItem('proto_image_gen_costs') || '[]'); } catch { return []; }
   });
@@ -647,6 +650,50 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
 
     invalidateAdminCache();
     void loadDormant();
+  };
+
+  const processReprocessBatch = async (products, { label = '', switchTab = true, skipConfirm = false } = {}) => {
+    const rows = products.filter((p) => p?.sku);
+    if (!rows.length) {
+      showToast('No products with images to reprocess', 'error');
+      return;
+    }
+    if (!skipConfirm && !window.confirm(`Send ${rows.length} product${rows.length === 1 ? '' : 's'}${label ? ` from ${label}` : ''} through Gemini (800×800 white bg) and move to New Products? They will leave the live catalogue until you set them live again.`)) {
+      return;
+    }
+
+    if (switchTab) setActiveSection('new-products');
+    setReprocessBusy(true);
+
+    const initial = rows.map((p) => ({
+      sku: p.sku,
+      name: p.title || p.name || p.sku,
+      thumbUrl: p.imageUrl || p.image || p.images?.[0] || null,
+      previewUrl: null,
+      status: 'pending',
+      message: 'Queued…',
+      cost: null,
+    }));
+    setUploadQueue(initial);
+
+    try {
+      const results = await runReprocessBatch(rows, {
+        onItemUpdate: (index, patch) => {
+          setUploadQueue((prev) => prev.map((item, idx) => (idx === index ? { ...item, ...patch } : item)));
+          if (patch.status === 'done') void loadDormant();
+        },
+      });
+      invalidateAdminCache();
+      invalidateProductCache();
+      await loadDormant();
+      await loadProducts();
+      await refreshDashboardStats();
+      showToast(`Reprocess complete — ${results.done} moved to New Products, ${results.failed} failed`);
+    } catch (err) {
+      showToast(err.message || 'Reprocess batch failed', 'error');
+    } finally {
+      setReprocessBusy(false);
+    }
   };
 
   const loadDormant = async () => {
@@ -1815,6 +1862,30 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     } finally { setSaving(''); }
   };
 
+  const productsWithImages = (rows) => rows
+    .filter((p) => p.image || p.images?.[0])
+    .map((p) => ({ sku: p.id, title: p.name, imageUrl: p.image || p.images?.[0] }));
+
+  const runFilteredImageFix = async () => {
+    const catFilter = productSubcategory !== 'all'
+      ? productSubcategory
+      : (productCategory !== 'all' && productCategory !== '__uncategorized__' ? productCategory : null);
+    if (!catFilter) {
+      showToast('Select a category or subcategory first', 'error');
+      return;
+    }
+    const label = productSubcategory !== 'all'
+      ? subcategoryOptions(productCategory).find((s) => s.id === productSubcategory)?.label || productSubcategory
+      : mainCategories.find((c) => c.id === productCategory)?.label || productCategory;
+    const data = await fetchAdminProductsPage({ page: 1, pageSize: 999999, categoryFilter: catFilter });
+    await processReprocessBatch(productsWithImages(data.rows), { label, switchTab: true });
+  };
+
+  const runSelectedImageFix = async () => {
+    const selected = productRows.filter((p) => productSelectedIds.has(p.id));
+    await processReprocessBatch(productsWithImages(selected), { switchTab: true });
+  };
+
   // Archive bulk-select handlers — mirror the Product Manager bulk bar so
   // admins can multi-select archived rows and either restore or permanently
   // delete them in one click.
@@ -2106,9 +2177,10 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
             )}
 
             {/* NEW PRODUCTS */}
-            {activeSection === 'apollo' && (
-              <ApolloPanel />
-            )}
+            {/* Apollo — keep mounted so chat survives tab switches */}
+            <div style={{ display: activeSection === 'apollo' ? 'block' : 'none' }}>
+              <ApolloPanel onReprocessBatch={processReprocessBatch} />
+            </div>
 
             {activeSection === 'new-products' && (
               <div className="adm-panel">
@@ -2185,18 +2257,44 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                 {uploadQueue.length > 0 && (
                   <div style={{ marginBottom: 20, border: '1px solid #e5e7eb', borderRadius: 10, overflow: 'hidden' }}>
                     <div style={{ padding: '10px 16px', background: '#f8fafc', borderBottom: '1px solid #e5e7eb', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span style={{ fontWeight: 700, fontSize: 13 }}>Upload progress</span>
-                      <button onClick={() => setUploadQueue([])} className="adm-icon-btn"><X size={13} /></button>
+                      <span style={{ fontWeight: 700, fontSize: 13 }}>
+                        {reprocessBusy ? 'Live reprocess feed' : 'Processing complete'} · {uploadQueue.filter((q) => q.status === 'done').length}/{uploadQueue.length}
+                      </span>
+                      <button type="button" onClick={() => setUploadQueue([])} className="adm-icon-btn" disabled={reprocessBusy}><X size={13} /></button>
                     </div>
-                    <div style={{ maxHeight: 220, overflowY: 'auto' }}>
+                    <div style={{ maxHeight: 320, overflowY: 'auto' }}>
                       {uploadQueue.map((item, i) => (
-                        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 16px', borderBottom: i < uploadQueue.length - 1 ? '1px solid #f1f5f9' : 'none' }}>
+                        <div key={`${item.sku || item.name}-${i}`} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', borderBottom: i < uploadQueue.length - 1 ? '1px solid #f1f5f9' : 'none' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                            <div title="Before" style={{ width: 52, height: 52, borderRadius: 8, border: '1px solid #e5e7eb', background: '#fff', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                              {item.thumbUrl ? (
+                                <img src={item.thumbUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                              ) : (
+                                <Image size={18} color="#cbd5e1" />
+                              )}
+                            </div>
+                            <span style={{ color: '#94a3b8', fontSize: 14 }}>→</span>
+                            <div title="After (800×800 white)" style={{ width: 52, height: 52, borderRadius: 8, border: item.previewUrl ? '2px solid #16a34a' : '1px solid #e5e7eb', background: '#fff', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                              {item.previewUrl ? (
+                                <img src={item.previewUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                              ) : item.status === 'transforming' ? (
+                                <Loader2 size={18} color="#f59e0b" className="spin" />
+                              ) : (
+                                <Image size={18} color="#cbd5e1" />
+                              )}
+                            </div>
+                          </div>
                           <span style={{
                             width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
                             background: item.status === 'done' ? '#16a34a' : item.status === 'error' ? '#dc2626' : item.status === 'pending' ? '#d1d5db' : '#f59e0b',
                           }} />
-                          <span style={{ fontWeight: 700, fontSize: 12, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.name}</span>
-                          <span style={{ fontSize: 11, color: item.status === 'error' ? '#dc2626' : '#64748b', whiteSpace: 'nowrap' }}>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontWeight: 700, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.name}</div>
+                            {item.sku && item.sku !== item.name && (
+                              <div style={{ fontSize: 10, color: '#94a3b8', fontWeight: 600 }}>{item.sku}</div>
+                            )}
+                          </div>
+                          <span style={{ fontSize: 11, color: item.status === 'error' ? '#dc2626' : '#64748b', whiteSpace: 'nowrap', maxWidth: '42%', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                             {item.status === 'pending' ? 'Waiting…' : item.message}
                           </span>
                         </div>
@@ -2434,6 +2532,16 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                   </div>
                   <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                     <button onClick={openNewProduct} className="adm-btn-red"><PackagePlus size={15} /> Add product</button>
+                    {(productSubcategory !== 'all' || (productCategory !== 'all' && productCategory !== '__uncategorized__')) && (
+                      <button
+                        type="button"
+                        onClick={() => void runFilteredImageFix()}
+                        className="adm-btn-ghost"
+                        disabled={reprocessBusy || !!saving}
+                      >
+                        <Sparkles size={15} /> {reprocessBusy ? 'Processing…' : 'Send to New Products (Gemini)'}
+                      </button>
+                    )}
                     <button onClick={() => void exportLiveXlsx()} className="adm-btn-ghost">{saving === 'export-live' ? 'Exporting…' : 'Export Excel'}</button>
                   </div>
                 </div>
@@ -2509,6 +2617,14 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                       </button>
                     </div>
                     <div className="adm-bulk-bar__actions">
+                      <button
+                        type="button"
+                        className="adm-btn-ghost adm-btn--sm"
+                        onClick={() => void runSelectedImageFix()}
+                        disabled={reprocessBusy || !!saving}
+                      >
+                        <Sparkles size={15} /> Send to New Products
+                      </button>
                       <button
                         type="button"
                         className="adm-btn-ghost adm-btn--sm adm-btn-ghost--danger"
@@ -4327,6 +4443,15 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
         open={fulfillmentSettingsOpen}
         onClose={() => setFulfillmentSettingsOpen(false)}
       />
+
+      {(reprocessBusy || uploadQueue.some((q) => q.status === 'transforming' || q.status === 'pending')) && uploadQueue.length > 0 && (
+        <ReprocessLiveFeed
+          queue={uploadQueue}
+          busy={reprocessBusy}
+          onDismiss={() => setUploadQueue([])}
+          onOpenNewProducts={() => setActiveSection('new-products')}
+        />
+      )}
     </div>
   );
 }

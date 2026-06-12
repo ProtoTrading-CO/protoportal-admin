@@ -1,173 +1,54 @@
+/** Regex hints only — never used as final routing without AI confirmation. */
+
 const INTENTS = [
-  {
-    id: 'order_top_items',
-    weight: 12,
-    patterns: [
-      /ordered the most/i,
-      /top selling/i,
-      /best selling/i,
-      /most ordered/i,
-      /popular products/i,
-      /what items are being ordered/i,
-      /best performing/i,
-      /performing products/i,
-      /top products/i,
-      /based on orders/i,
-      /products.*orders/i,
-      /orders.*products/i,
-      /barograph/i,
-      /bar chart/i,
-      /bar graph/i,
-    ],
-    noTerms: true,
-  },
-  {
-    id: 'product_count',
-    weight: 10,
-    patterns: [/how many products/i, /product count/i, /total products/i, /catalogue size/i, /number of products/i],
-    noTerms: true,
-  },
-  {
-    id: 'product_negative_stock',
-    weight: 12,
-    patterns: [/negative stock/i, /below zero/i, /less than zero/i, /stock.*negative/i, /negative.*stock/i, /minus stock/i],
-    noTerms: true,
-  },
-  {
-    id: 'product_low_stock',
-    weight: 10,
-    patterns: [/least stock/i, /lowest stock/i, /low stock/i, /running out/i, /minimum stock/i],
-    noTerms: true,
-  },
-  {
-    id: 'product_high_stock',
-    weight: 8,
-    patterns: [/highest stock/i, /most stock/i, /best stocked/i],
-    noTerms: true,
-  },
-  {
-    id: 'product_by_category',
-    weight: 8,
-    patterns: [/products by category/i, /category breakdown/i, /categories do we have/i],
-    noTerms: true,
-  },
-  {
-    id: 'customer_list',
-    weight: 10,
-    patterns: [/who are (my|our) customers/i, /list (all )?customers/i, /all customers/i, /my customers/i, /show customers/i],
-    noTerms: true,
-  },
-  {
-    id: 'customer_pending',
-    weight: 10,
-    patterns: [/pending approval/i, /awaiting approval/i, /customers to approve/i, /unapproved customers/i],
-    noTerms: true,
-  },
-  {
-    id: 'order_summary',
-    weight: 9,
-    patterns: [/order activity/i, /recent orders/i, /how many orders/i, /order summary/i, /orders this month/i],
-    noTerms: true,
-  },
-  {
-    id: 'search_top',
-    weight: 9,
-    patterns: [/top searches/i, /what are (customers|people) searching/i, /popular searches/i],
-    noTerms: true,
-  },
-  {
-    id: 'search_zero',
-    weight: 9,
-    patterns: [/no results/i, /zero results/i, /couldn't find/i, /could not find/i, /failed searches/i],
-    noTerms: true,
-  },
-  {
-    id: 'search_to_orders',
-    weight: 8,
-    patterns: [/search.*order/i, /searches leading to orders/i, /search conversion/i],
-    noTerms: true,
-  },
-  {
-    id: 'product_search',
-    weight: 5,
-    patterns: [/find product/i, /search product/i, /look up sku/i],
-    keywords: ['sku'],
-  },
-  {
-    id: 'customer_search',
-    weight: 5,
-    patterns: [/find customer/i, /customer named/i, /customer called/i],
-    keywords: ['customer', 'client'],
-  },
+  { id: 'batch_fix_images', weight: 14, patterns: [/fix (the )?images/i, /image fixer/i, /new products engine/i, /through gemini/i, /gemini new products/i, /put them through/i, /reprocess.*images/i] },
+  { id: 'order_top_items', weight: 12, patterns: [/best performing/i, /performing products/i, /ordered the most/i, /top selling/i, /most ordered/i, /based on orders/i, /popular products/i, /barograph/i, /bar chart/i] },
+  { id: 'product_count', weight: 10, patterns: [/^how many products/i, /product count/i, /total products/i, /catalogue size/i, /number of products/i] },
+  { id: 'product_negative_stock', weight: 12, patterns: [/negative stock/i, /below zero/i, /stock.*negative/i, /negative.*stock/i] },
+  { id: 'product_low_stock', weight: 10, patterns: [/least stock/i, /lowest stock/i, /low stock/i, /running out/i] },
+  { id: 'product_high_stock', weight: 8, patterns: [/highest stock/i, /most stock/i] },
+  { id: 'product_by_category', weight: 8, patterns: [/by category/i, /category breakdown/i] },
+  { id: 'customer_list', weight: 10, patterns: [/who are (my|our) customers/i, /list customers/i, /all customers/i, /my customers/i] },
+  { id: 'customer_pending', weight: 10, patterns: [/pending approval/i, /awaiting approval/i] },
+  { id: 'order_summary', weight: 9, patterns: [/order activity/i, /recent orders/i, /how many orders/i] },
+  { id: 'search_top', weight: 9, patterns: [/top searches/i, /what are.*searching/i] },
+  { id: 'search_zero', weight: 9, patterns: [/no results/i, /zero results/i, /couldn't find/i] },
+  { id: 'search_to_orders', weight: 8, patterns: [/search.*order/i, /search conversion/i] },
+  { id: 'product_search', weight: 4, patterns: [/find product/i, /look up sku/i] },
+  { id: 'customer_search', weight: 4, patterns: [/find customer/i, /customer named/i] },
 ];
 
-const NO_TERMS = new Set(INTENTS.filter((i) => i.noTerms).map((i) => i.id));
+const VALID_INTENTS = new Set([
+  'order_top_items', 'product_count', 'product_negative_stock', 'product_low_stock',
+  'product_high_stock', 'product_by_category', 'product_search', 'customer_list',
+  'customer_pending', 'customer_search', 'order_summary', 'search_top',
+  'search_zero', 'search_to_orders', 'batch_fix_images', 'freeform',
+]);
 
-function scoreIntent(intent, query) {
-  let score = 0;
-  for (const p of intent.patterns) {
-    if (p.test(query)) score += intent.weight;
-  }
-  if (intent.keywords) {
-    const lower = query.toLowerCase();
-    for (const kw of intent.keywords) {
-      if (lower.includes(kw)) score += 3;
-    }
-  }
-  return score;
-}
-
-function extractSearchTerms(query) {
-  const cleaned = query
-    .replace(/find|search|show|list|look up|tell me about|which|what|items?|products?|have|with|the|a|an|my|our|some|of|do|please/gi, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  const tokens = cleaned.split(' ').filter((w) => w.length > 2);
-  return tokens.slice(0, 4).join(' ') || query.slice(0, 40);
-}
-
-export function parseIntent(query) {
+export function parseIntentHint(query) {
   const q = String(query || '').trim();
-  if (!q) return { intent: 'unknown', confidence: 0, terms: '', wantsChart: false };
-
   const wantsChart = /chart|barograph|bar graph|bar chart|graph|visual/i.test(q);
 
-  let best = { id: 'unknown', score: 0 };
+  let best = { id: 'freeform', score: 0 };
   for (const intent of INTENTS) {
-    const score = scoreIntent(intent, q);
+    let score = 0;
+    for (const p of intent.patterns) {
+      if (p.test(q)) score += intent.weight;
+    }
     if (score > best.score) best = { id: intent.id, score };
   }
 
-  const confidence = Math.min(1, best.score / 12);
-  const terms = NO_TERMS.has(best.id) ? '' : extractSearchTerms(q);
-
-  if (best.score >= 5) {
-    return { intent: best.id, confidence, terms, wantsChart };
-  }
-
-  const lower = q.toLowerCase();
-  if (/order|selling|ordered|performing/.test(lower)) {
-    return { intent: 'order_top_items', confidence: 0.55, terms: '', wantsChart };
-  }
-  if (/negative|below zero/.test(lower) && /stock/.test(lower)) {
-    return { intent: 'product_negative_stock', confidence: 0.7, terms: '', wantsChart };
-  }
-  if (/how many products|total products|catalogue size/.test(lower)) {
-    return { intent: 'product_count', confidence: 0.6, terms: '', wantsChart };
-  }
-  if (/customer|client/.test(lower)) {
-    return { intent: 'customer_list', confidence: 0.45, terms: extractSearchTerms(q), wantsChart };
-  }
-  if (/search/.test(lower)) {
-    return { intent: 'search_top', confidence: 0.4, terms: '', wantsChart };
-  }
-
-  return { intent: 'freeform', confidence: 0, terms: q, wantsChart };
+  return {
+    intent: best.id,
+    confidence: Math.min(1, best.score / 12),
+    wantsChart,
+  };
 }
 
-export async function classifyWithAi(query, apiKey, { badReply = '', previousIntent = '' } = {}) {
-  const fixContext = badReply
-    ? `\nThe previous answer was wrong or unhelpful:\n"""${String(badReply).slice(0, 600)}"""\nPrevious intent tried: ${previousIntent || 'unknown'}\nPick the CORRECT intent for the user's question.`
+export async function classifyIntent(query, apiKey, { rejectIntent = '', regexHint = null, badReply = '' } = {}) {
+  const hint = regexHint || parseIntentHint(query);
+  const rejectNote = rejectIntent
+    ? `\nREJECTED intent "${rejectIntent}" — it produced a wrong answer.${badReply ? ` Wrong reply excerpt: "${String(badReply).slice(0, 160).replace(/\n/g, ' ')}"` : ''} Pick a different intent.`
     : '';
 
   const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -183,49 +64,54 @@ export async function classifyWithAi(query, apiKey, { badReply = '', previousInt
       messages: [
         {
           role: 'system',
-          content: `Classify the Proto admin dashboard question. Reply ONLY valid JSON:
-{"intent":"<id>","terms":"<search terms or empty>","wantsChart":true|false}
-${fixContext}
-Intent ids:
-- order_top_items — best/most ordered/top selling/performing products by order volume
-- product_count — how many products in catalogue
-- product_negative_stock — items with stock below zero
-- product_low_stock — lowest stock levels
-- product_high_stock — highest stock
-- product_by_category — category breakdown
-- product_search — find specific product by name/sku keyword (terms required)
-- customer_list — list all customers
-- customer_pending — customers awaiting approval
-- customer_search — find a customer by name/email
-- order_summary — order counts and recent orders
-- search_top — top search terms
-- search_zero — searches with no results
-- search_to_orders — search conversion
-- freeform`,
+          content: `You route Proto Trading admin questions to exactly ONE data query. Reply ONLY JSON:
+{"intent":"<id>","terms":"<subcategory name, sku keyword, or empty>","wantsChart":true|false}
+${rejectNote}
+
+Regex hint (may be wrong): ${hint.intent} (${Math.round(hint.confidence * 100)}%)
+
+DISAMBIGUATION — follow strictly:
+• "fix images / gemini new products / put through new products" for a subcategory → batch_fix_images (terms = subcategory name, e.g. "games and puzzles")
+• "best performing / top selling / most ordered / products + orders" → order_top_items (NOT product_count)
+• "how many products / catalogue size / total products" ONLY → product_count
+• "negative stock / below zero / give me N products with negative stock" → product_negative_stock (NOT product_search)
+• "lowest / least stock" → product_low_stock
+• "who are customers / list customers" → customer_list
+• "pending approval" → customer_pending
+• product_search ONLY when user names a specific SKU or product keyword (terms = that keyword)
+• terms must be empty for all intents except product_search, customer_search, and batch_fix_images
+
+Examples:
+"fix images for games and puzzles subcategory" → {"intent":"batch_fix_images","terms":"games and puzzles","wantsChart":false}
+"all products in subcategory games and puzzles put through gemini new products" → {"intent":"batch_fix_images","terms":"games and puzzles","wantsChart":false}
+"best performing products bar chart" → {"intent":"order_top_items","terms":"","wantsChart":true}
+"give me 5 products with negative stock" → {"intent":"product_negative_stock","terms":"","wantsChart":false}
+"how many products do we have" → {"intent":"product_count","terms":"","wantsChart":false}
+"find items with negative stock" → {"intent":"product_negative_stock","terms":"","wantsChart":false}
+"who are my customers" → {"intent":"customer_list","terms":"","wantsChart":false}
+"search for drill" → {"intent":"product_search","terms":"drill","wantsChart":false}
+
+Valid intents: order_top_items, product_count, product_negative_stock, product_low_stock, product_high_stock, product_by_category, product_search, customer_list, customer_pending, customer_search, order_summary, search_top, search_zero, search_to_orders, batch_fix_images, freeform`,
         },
         { role: 'user', content: query },
       ],
       temperature: 0,
-      max_tokens: 100,
+      max_tokens: 120,
     }),
   });
 
   const payload = await response.json();
   if (!response.ok) return null;
 
-  const raw = payload.choices?.[0]?.message?.content || '';
   try {
-    const json = JSON.parse(raw.replace(/```json?\s*|\s*```/g, '').trim());
-    if (json.intent) {
-      return {
-        intent: json.intent,
-        confidence: 0.85,
-        terms: json.terms || '',
-        wantsChart: Boolean(json.wantsChart),
-      };
-    }
+    const json = JSON.parse((payload.choices?.[0]?.message?.content || '').replace(/```json?\s*|\s*```/g, '').trim());
+    if (!json.intent || !VALID_INTENTS.has(json.intent)) return null;
+    return {
+      intent: json.intent,
+      terms: String(json.terms || '').trim().slice(0, 80),
+      wantsChart: Boolean(json.wantsChart) || hint.wantsChart,
+    };
   } catch {
     return null;
   }
-  return null;
 }
