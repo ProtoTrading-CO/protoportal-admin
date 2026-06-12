@@ -40,31 +40,6 @@ export default async function handler(req, res) {
     const { id, notes, advanceWorkflow, senderUserId, senderName, ...raw } = req.body || {};
     if (!id) return res.status(400).json({ error: 'id required' });
 
-    if (advanceWorkflow) {
-      const target = normalizeOrderStatus(advanceWorkflow);
-      if (target !== 'order sent' && target !== 'payment received') {
-        return res.status(400).json({ error: 'Manual advance only supports Pre Sale or payment received' });
-      }
-      if (target === 'payment received' && !isVictorSender({ userId: senderUserId, name: senderName })) {
-        return res.status(403).json({ error: PAYMENT_RECEIVED_FORBIDDEN });
-      }
-      try {
-        const result = await advanceOrderStatus(supabase, id, target);
-        if (!result.ok) {
-          return res.status(409).json({ error: `Cannot advance to "${target}" from "${result.current || 'unknown'}"` });
-        }
-        const { data, error } = await supabase
-          .from('orders')
-          .select('*, customers(name, email, phone, business_name, business_type, city, province, country, tier)')
-          .eq('id', id)
-          .single();
-        if (error) return res.status(400).json({ error: error.message });
-        return res.status(200).json({ row: data });
-      } catch (err) {
-        return res.status(400).json({ error: err.message });
-      }
-    }
-
     const patch = { ...raw };
     if (notes !== undefined) patch.order_change_notes = notes;
 
@@ -82,11 +57,33 @@ export default async function handler(req, res) {
       if (allowed.has(key)) sanitized[key] = value;
     }
 
+    if (Object.keys(sanitized).length) {
+      const { error: patchError } = await supabase.from('orders').update(sanitized).eq('id', id);
+      if (patchError) return res.status(400).json({ error: patchError.message });
+    }
+
+    if (advanceWorkflow) {
+      const target = normalizeOrderStatus(advanceWorkflow);
+      if (target !== 'order sent' && target !== 'payment received') {
+        return res.status(400).json({ error: 'Manual advance only supports Order Confirmation or payment received' });
+      }
+      if (target === 'payment received' && !isVictorSender({ userId: senderUserId, name: senderName })) {
+        return res.status(403).json({ error: PAYMENT_RECEIVED_FORBIDDEN });
+      }
+      try {
+        const result = await advanceOrderStatus(supabase, id, target);
+        if (!result.ok) {
+          return res.status(409).json({ error: `Cannot advance to "${target}" from "${result.current || 'unknown'}"` });
+        }
+      } catch (err) {
+        return res.status(400).json({ error: err.message });
+      }
+    }
+
     const { data, error } = await supabase
       .from('orders')
-      .update(sanitized)
-      .eq('id', id)
       .select('*, customers(name, email, phone, business_name, business_type, city, province, country, tier)')
+      .eq('id', id)
       .single();
 
     if (error) return res.status(400).json({ error: error.message });

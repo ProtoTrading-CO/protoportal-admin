@@ -82,7 +82,8 @@ import {
 } from '../lib/taxonomyAdmin';
 import { approveCustomer, deleteCustomer, fetchCustomersPage } from '../lib/customers';
 import { supabase } from '../lib/supabase';
-import { buildOrderNoteSections, createEmailOrderItems, generateOrderPdfBase64 } from '../lib/orderDocuments';
+import { buildOrderNoteSections, createEmailOrderItems, generateOrderPdfBase64, buildEmailItemsFromOrder } from '../lib/orderDocuments';
+import { fetchPresaleInvoices, uploadPresaleInvoice } from '../lib/presaleInvoice';
 import { deleteOrderAdmin, fetchAllOrdersAdmin, updateOrderAdmin, advanceOrderWorkflow } from '../lib/orders';
 import { orderMatchesTab, normalizeOrderStatus } from '../lib/orderStatus';
 import OrderWorkflowBadge from '../components/OrderWorkflowBadge';
@@ -487,6 +488,8 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const [fulfillmentSettingsOpen, setFulfillmentSettingsOpen] = useState(false);
   const [fulfillmentUsers, setFulfillmentUsers] = useState([]);
   const [activeFulfillmentUserId, setActiveFulfillmentUserId] = useState(loadActiveUserId);
+  const [presaleInvoices, setPresaleInvoices] = useState({});
+  const [presaleUploading, setPresaleUploading] = useState('');
 
   const [specials, setSpecials] = useState([]); // [{productId, productName, productCode, productImage, deal, discountPct, bogoX, bogoY}]
   const [specialsSaving, setSpecialsSaving] = useState(false);
@@ -771,30 +774,122 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const canVictorAct = isVictorSender(activeFulfillmentUser);
 
   const orderListGridCols = orderTab === 'sent'
-    ? '1.5fr 1.3fr 1.1fr 1.7fr 120px 56px'
+    ? '1.4fr 1.2fr 1fr 2fr 120px 56px'
     : '1.6fr 1.4fr 1.2fr 1fr 160px 80px';
 
-  const renderPreSalePaymentAction = (order) => {
+  const renderOrderConfirmationActions = (order) => {
     if (normalizeOrderStatus(order.status) !== 'order sent') return null;
-    if (canVictorAct) {
-      return (
+    const invoice = presaleInvoices[order.id];
+    const uploading = presaleUploading === order.id;
+    const sending = saving === `send-${order.id}`;
+    return (
+      <div className="adm-oc-col">
+        <span className="adm-oc-label">Order Confirmation</span>
+        <label className="adm-oc-upload-btn">
+          {uploading ? <Loader2 size={13} className="spin" /> : <Upload size={13} />}
+          {invoice ? 'Replace invoice' : 'Upload invoice'}
+          <input
+            type="file"
+            accept=".pdf,application/pdf,image/*"
+            hidden
+            disabled={uploading}
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = '';
+              if (file) void handlePresaleUpload(order, file);
+            }}
+          />
+        </label>
+        {invoice && <span className="adm-oc-uploaded">✓ {invoice.filename || 'Invoice uploaded'}</span>}
         <button
           type="button"
-          className="adm-presale-pay-btn"
-          disabled={saving === `advance-${order.id}`}
-          onClick={() => void advanceOrderStatus(order, 'payment received')}
+          className="adm-oc-send-btn"
+          disabled={sending}
+          onClick={() => void sendOrderConfirmation(order)}
         >
-          <Check size={14} strokeWidth={2.5} />
-          {saving === `advance-${order.id}` ? 'Updating…' : 'Payment Received'}
+          {sending ? <Loader2 size={13} className="spin" /> : <Send size={13} />}
+          {sending ? 'Sending…' : 'Send'}
         </button>
-      );
-    }
-    return (
-      <span className="adm-presale-pay-lock" title={PAYMENT_RECEIVED_FORBIDDEN}>
-        <Lock size={12} />
-        Victor only
-      </span>
+        {canVictorAct && (
+          <button
+            type="button"
+            className="adm-presale-pay-btn"
+            disabled={saving === `advance-${order.id}`}
+            onClick={() => void advanceOrderStatus(order, 'payment received')}
+          >
+            <Check size={14} strokeWidth={2.5} />
+            {saving === `advance-${order.id}` ? 'Updating…' : 'Payment Received'}
+          </button>
+        )}
+      </div>
     );
+  };
+
+  const handlePresaleUpload = async (order, file) => {
+    setPresaleUploading(order.id);
+    try {
+      const meta = await uploadPresaleInvoice(order.id, file);
+      setPresaleInvoices((prev) => ({ ...prev, [order.id]: meta }));
+      showToast(`Presale invoice uploaded for ${order.order_number || order.id.slice(0, 8)}`);
+    } catch (err) {
+      alert(err.message || 'Upload failed');
+    } finally {
+      setPresaleUploading('');
+    }
+  };
+
+  const sendOrderConfirmation = async (order) => {
+    const email = order.customers?.email;
+    if (!email) {
+      alert('This customer has no email address on file.');
+      return;
+    }
+    const invoiceAttached = Boolean(presaleInvoices[order.id]);
+    const confirmMsg = invoiceAttached
+      ? `Send order confirmation + presale invoice to ${email}?`
+      : `Send order confirmation to ${email}? (No presale invoice uploaded yet)`;
+    if (!window.confirm(confirmMsg)) return;
+
+    setSaving(`send-${order.id}`);
+    try {
+      const emailItems = buildEmailItemsFromOrder(order);
+      const hasPrices = emailItems.some((item) => item.unitPrice || item.price);
+      const total = hasPrices
+        ? emailItems.filter((item) => !item.removed).reduce((sum, item) => sum + ((item.unitPrice || item.price || 0) * (item.qty || 0)), 0)
+        : null;
+      const pdfBase64 = await generateOrderPdfBase64({
+        order,
+        items: emailItems,
+        userNotes: order.order_change_notes || '',
+        assignedTo: activeFulfillmentUser?.name || '',
+        total,
+        hasPrices,
+      });
+      const emailRes = await fetch('/api/send-order-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orderId: order.id,
+          to: email,
+          customerName: order.customers?.name,
+          orderNumber: order.order_number || order.id?.slice(0, 8),
+          orderDate: order.created_at,
+          items: emailItems,
+          userNotes: order.order_change_notes || '',
+          assignedTo: activeFulfillmentUser?.name || '',
+          total,
+          pdfBase64,
+          pdfFilename: `proto-order-confirmation-${order.order_number || order.id.slice(0, 8)}.pdf`,
+        }),
+      });
+      const emailData = await emailRes.json();
+      if (!emailRes.ok) throw new Error(emailData.error || 'Email send failed');
+      showToast(`Confirmation sent to ${email}${emailData.presaleIncluded ? ' with presale invoice' : ''}`);
+    } catch (err) {
+      alert(err.message || 'Could not send order confirmation');
+    } finally {
+      setSaving('');
+    }
   };
 
   useEffect(() => { if (activeSection === 'new-products') void loadDormant(); }, [activeSection, dormantSearch]);
@@ -830,6 +925,15 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
       window.removeEventListener('focus', syncUser);
     };
   }, [activeSection]);
+
+  useEffect(() => {
+    if (activeSection !== 'orders' || orderTab !== 'sent') return;
+    const ids = orders.filter((o) => normalizeOrderStatus(o.status) === 'order sent').map((o) => o.id);
+    if (!ids.length) return;
+    fetchPresaleInvoices(ids)
+      .then((invoices) => setPresaleInvoices((prev) => ({ ...prev, ...invoices })))
+      .catch(() => {});
+  }, [activeSection, orderTab, orders]);
 
   useEffect(() => {
     if (activeSection !== 'orders') return undefined;
@@ -1780,7 +1884,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     setProductSwapResults([]);
   };
 
-  const saveFulfillment = async (andSend = false) => {
+  const saveFulfillment = async () => {
     if (!fulfillmentOrder) return;
     setFulfillmentSaving(true);
     try {
@@ -1789,37 +1893,8 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
         final_items: finalItems,
         order_change_notes: fulfillmentNotes,
       });
-      if (andSend) {
-        const emailItems = createEmailOrderItems(fulfillmentItems);
-        const pdfBase64 = await generateOrderPdfBase64({
-          order: fulfillmentOrder,
-          items: emailItems,
-          autoNotes: '',
-          userNotes: fulfillmentNotes,
-          assignedTo: '',
-          total: emailItems.some((item) => item.unitPrice || item.price)
-            ? emailItems.filter((item) => !item.removed).reduce((sum, item) => sum + ((item.unitPrice || item.price || 0) * (item.qty || 0)), 0)
-            : null,
-          hasPrices: emailItems.some((item) => item.unitPrice || item.price),
-        });
-        const emailRes = await fetch('/api/send-order-email', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            to: fulfillmentOrder.customers?.email,
-            customerName: fulfillmentOrder.customers?.name,
-            orderNumber: fulfillmentOrder.order_number || fulfillmentOrder.id?.slice(0, 8),
-            orderDate: fulfillmentOrder.created_at,
-            items: emailItems,
-            userNotes: fulfillmentNotes,
-            pdfBase64,
-            pdfFilename: `proto-order-${fulfillmentOrder.order_number || fulfillmentOrder.id?.slice(0, 8) || 'order'}.pdf`,
-          }),
-        });
-        const emailData = await emailRes.json();
-        if (!emailRes.ok) throw new Error(emailData.error || 'Email send failed');
-      }
       closeFulfillment();
+      showToast('Order saved');
     } finally { setFulfillmentSaving(false); }
   };
 
@@ -3244,7 +3319,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                     { key: 'new', label: 'New' },
                     { key: 'handed', label: 'Handed Over' },
                     { key: 'progress', label: 'In Progress' },
-                    { key: 'sent', label: 'Pre Sale' },
+                    { key: 'sent', label: 'Order Confirmation' },
                     { key: 'paid', label: 'Payment' },
                   ].map(({ key, label }) => {
                     const count = key === 'all'
@@ -3281,7 +3356,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                 </div>
                 <div className="adm-list">
                   <div className="adm-list-head" style={{ gridTemplateColumns: orderListGridCols }}>
-                    <span>Order</span><span>Customer</span><span>Date & Time</span><span>{orderTab === 'sent' ? 'Pre Sale' : 'Status'}</span><span>Actions</span><span></span>
+                    <span>Order</span><span>Customer</span><span>Date & Time</span><span>{orderTab === 'sent' ? 'Order Confirmation' : 'Status'}</span><span>Actions</span><span></span>
                   </div>
                   {orderRows.map((order) => {
                     const isExpanded = expandedOrderId === order.id;
@@ -3309,10 +3384,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                           </div>
                           <div onClick={(e) => e.stopPropagation()} className="adm-presale-col">
                             {orderTab === 'sent' && isPreSale ? (
-                              <>
-                                <span className="adm-presale-label">Pre Sale</span>
-                                {renderPreSalePaymentAction(order)}
-                              </>
+                              renderOrderConfirmationActions(order)
                             ) : (
                               <OrderWorkflowBadge order={order} />
                             )}
@@ -3795,8 +3867,8 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
             {/* Footer */}
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, flexShrink: 0, flexWrap: 'wrap' }}>
               <button onClick={closeFulfillment} className="adm-btn-ghost"><ChevronLeft size={15} /> Cancel</button>
-              <button onClick={() => void saveFulfillment(false)} className="adm-btn-red" disabled={fulfillmentSaving}>
-                {fulfillmentSaving ? 'Saving…' : <><Check size={15} /> Save final order</>}
+              <button onClick={() => void saveFulfillment()} className="adm-btn-red" disabled={fulfillmentSaving}>
+                {fulfillmentSaving ? 'Saving…' : <><Check size={15} /> Save order</>}
               </button>
             </div>
           </div>

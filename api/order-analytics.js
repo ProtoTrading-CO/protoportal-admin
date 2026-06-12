@@ -8,7 +8,7 @@ const STATUS_LABELS = {
   pending: 'New',
   'handed over': 'Handed Over',
   'order in progress': 'In Progress',
-  'order sent': 'Pre Sale',
+  'order sent': 'Order Confirmation',
   'payment received': 'Payment Received',
 };
 

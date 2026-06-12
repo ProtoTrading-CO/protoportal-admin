@@ -30,7 +30,7 @@ export const WORKFLOW_META = {
   pending: { label: 'New', color: '#64748b', bg: '#f1f5f9', step: 0 },
   'handed over': { label: 'Handed Over', color: '#2563eb', bg: '#dbeafe', step: 1 },
   'order in progress': { label: 'Order In Progress', color: '#d97706', bg: '#fef3c7', step: 2 },
-  'order sent': { label: 'Pre Sale', color: '#16a34a', bg: '#dcfce7', step: 3 },
+  'order sent': { label: 'Order Confirmation', color: '#16a34a', bg: '#dcfce7', step: 3 },
   'payment received': { label: 'Payment Received', color: '#15803d', bg: '#bbf7d0', step: 4 },
 };
 

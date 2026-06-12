@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Check, ClipboardList, FileText, Loader2, Lock, Pencil, Search, Send, User, X } from 'lucide-react';
+import { Check, ClipboardList, FileText, Loader2, Lock, Pencil, Search, User, X } from 'lucide-react';
 import { fetchAdminProductsPage } from '../lib/products';
 import {
   fetchFulfillmentProgress,
@@ -11,7 +11,7 @@ import {
   loadActiveUserId,
   saveActiveUserId,
 } from '../lib/fulfillmentUsers';
-import { isVictorSender, CUSTOMER_SEND_FORBIDDEN } from '../lib/fulfillmentAuth';
+import { generateOrderPdfBase64, createEmailOrderItems } from '../lib/orderDocuments';
 import { getOrderAccessFromUrl } from '../lib/adminKey';
 import categories from '../data/categories.json';
 
@@ -58,44 +58,6 @@ const QtyInput = memo(function QtyInput({ value, disabled, changed, onCommit }) 
     />
   );
 });
-function generatePdfHtml({ order, items, autoNotes, userNotes, assignedTo, total, hasPrices }) {
-  const customerName = order.customers?.name || 'Customer';
-  const orderNumber = order.order_number || order.id?.slice(0, 8) || '';
-  const dateStr = new Date(order.created_at).toLocaleDateString('en-ZA', { day: 'numeric', month: 'long', year: 'numeric' });
-
-  const itemRows = items.map((item) => {
-    const price = item.unitPrice || item.price || 0;
-    const qtyChanged = !item.removed && item.finalQty !== item.qty;
-    const lineTotal = price && !item.removed ? (item.finalQty * price).toFixed(2) : null;
-    if (item.removed) {
-      return `<tr style="background:#fff5f5;border-bottom:1px solid #fee2e2">
-        <td style="padding:8px 12px">${item.image ? `<img src="${item.image}" alt="" style="width:48px;height:48px;object-fit:contain">` : ''}</td>
-        <td style="padding:10px 12px;font-size:12px;text-decoration:line-through">${item.code || ''}</td>
-        <td style="padding:10px 12px;font-size:13px;text-decoration:line-through">${item.name || ''}</td>
-        <td style="padding:10px 12px;text-align:center;text-decoration:line-through">${item.qty}</td>
-        <td style="padding:10px 12px;text-align:center"><span style="color:#dc2626;font-weight:700">OUT OF STOCK</span></td>
-        ${hasPrices ? '<td></td>' : ''}
-      </tr>`;
-    }
-    return `<tr style="border-bottom:1px solid #f1f5f9">
-      <td style="padding:8px 12px">${item.image ? `<img src="${item.image}" alt="" style="width:48px;height:48px;object-fit:contain">` : ''}</td>
-      <td style="padding:10px 12px;font-size:12px">${item.code || ''}</td>
-      <td style="padding:10px 12px;font-size:13px">${item.name || ''}</td>
-      <td style="padding:10px 12px;text-align:center">${item.qty}</td>
-      <td style="padding:10px 12px;text-align:center;font-weight:700">${item.finalQty}</td>
-      ${hasPrices ? `<td style="padding:10px 12px;text-align:right">${lineTotal ? `R${lineTotal}` : '—'}</td>` : ''}
-    </tr>`;
-  }).join('');
-
-  const allNotes = [autoNotes, userNotes].filter(Boolean).join('\n\n');
-  return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Order ${orderNumber}</title></head><body style="font-family:Arial,sans-serif;padding:24px">
-<h1>Order ${orderNumber}</h1><p>${dateStr} · ${customerName}${assignedTo ? ` · ${assignedTo}` : ''}</p>
-<table style="width:100%;border-collapse:collapse">${itemRows}</table>
-${hasPrices && total ? `<p style="text-align:right;font-size:20px;font-weight:800">R ${total.toFixed(2)}</p>` : ''}
-${allNotes ? `<pre style="white-space:pre-wrap">${allNotes}</pre>` : ''}
-</body></html>`;
-}
-
 function applyProgress(items, sections = {}) {
   if (!sections || !Object.keys(sections).length) return items;
   const savedByKey = new Map();
@@ -147,10 +109,9 @@ export default function FulfillmentPage() {
   const [activeUserId, setActiveUserId] = useState(loadActiveUserId);
   const [userNotes, setUserNotes] = useState('');
   const [saving, setSaving] = useState(false);
-  const [sending, setSending] = useState(false);
+  const [previewing, setPreviewing] = useState(false);
   const [sectionSaving, setSectionSaving] = useState('');
   const [statusMsg, setStatusMsg] = useState(null);
-  const [done, setDone] = useState(false);
 
   const [editingItemIdx, setEditingItemIdx] = useState(null);
   const [swapSearch, setSwapSearch] = useState('');
@@ -164,8 +125,6 @@ export default function FulfillmentPage() {
     () => users.find((u) => u.id === activeUserId) || null,
     [users, activeUserId],
   );
-
-  const canSendToCustomer = isVictorSender(activeUser);
 
   const assignedCategorySet = useMemo(
     () => new Set(activeUser?.categoryIds || []),
@@ -335,65 +294,47 @@ export default function FulfillmentPage() {
 
   const doSave = async () => {
     setSaving(true);
+    setStatusMsg(null);
     try {
       const res = await fetch('/api/admin-orders', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: orderId, final_items: buildFinalItems(), ...(combinedNotes ? { notes: combinedNotes } : {}) }),
+        body: JSON.stringify({
+          id: orderId,
+          final_items: buildFinalItems(),
+          ...(combinedNotes ? { notes: combinedNotes } : {}),
+          advanceWorkflow: 'order sent',
+          senderUserId: activeUser?.id || '',
+          senderName: activeUser?.name || '',
+        }),
       });
-      if (!res.ok) throw new Error((await res.json()).error || 'Save failed');
-      setStatusMsg({ type: 'ok', text: 'Order saved' });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Save failed');
+      setStatusMsg({ type: 'ok', text: 'Order saved — find it under Order Confirmation to upload invoice and send to customer.' });
     } catch (e) { setStatusMsg({ type: 'err', text: e.message }); }
     finally { setSaving(false); }
   };
 
-  const doSend = async () => {
-    if (!canSendToCustomer) {
-      setStatusMsg({ type: 'err', text: CUSTOMER_SEND_FORBIDDEN });
-      return;
-    }
-    setSending(true);
+  const previewPdf = async () => {
+    setPreviewing(true);
     try {
-      const saveRes = await fetch('/api/admin-orders', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: orderId, final_items: buildFinalItems(), ...(combinedNotes ? { notes: combinedNotes } : {}) }),
+      const emailItems = createEmailOrderItems(items);
+      const pdfBase64 = await generateOrderPdfBase64({
+        order,
+        items: emailItems,
+        autoNotes,
+        userNotes,
+        assignedTo: activeUser?.name,
+        total: hasPrices ? total : null,
+        hasPrices,
       });
-      if (!saveRes.ok) throw new Error((await saveRes.json()).error || 'Save failed');
-
-      const emailItems = items.map(({ finalQty, qty, removed, swapped, originalCode, originalName, idx, mainCategoryId, mainCategoryLabel, ...rest }) => ({
-        ...rest, qty: removed ? qty : finalQty, originalQty: qty, removed: removed || false, swapped: swapped || false, originalCode, originalName,
-      }));
-
-      const emailRes = await fetch('/api/send-order-email', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          orderId,
-          to: order.customers?.email,
-          customerName: order.customers?.name,
-          orderNumber: order.order_number || order.id?.slice(0, 8),
-          orderDate: order.created_at,
-          items: emailItems,
-          autoNotes,
-          userNotes,
-          assignedTo: activeUser?.name || '',
-          senderUserId: activeUser?.id || '',
-          senderName: activeUser?.name || '',
-          total: hasPrices ? total : null,
-        }),
-      });
-      if (!emailRes.ok) throw new Error((await emailRes.json()).error || 'Email failed');
-      setDone(true);
-    } catch (e) { setStatusMsg({ type: 'err', text: e.message }); }
-    finally { setSending(false); }
-  };
-
-  const previewPdf = () => {
-    const html = generatePdfHtml({ order, items, autoNotes, userNotes, assignedTo: activeUser?.name, total, hasPrices });
-    const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
-    window.open(url, '_blank');
-    setTimeout(() => URL.revokeObjectURL(url), 30000);
+      const blob = await fetch(`data:application/pdf;base64,${pdfBase64}`).then((r) => r.blob());
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank');
+      setTimeout(() => URL.revokeObjectURL(url), 30000);
+    } catch (e) {
+      setStatusMsg({ type: 'err', text: e.message || 'Could not generate PDF preview' });
+    } finally { setPreviewing(false); }
   };
 
   const renderItemRow = (item, editable) => {
@@ -451,14 +392,6 @@ export default function FulfillmentPage() {
 
   if (loading) return <div className="ff-center"><Loader2 size={36} className="star-spinning" style={{ color: '#15803d' }} /></div>;
   if (error) return <div className="ff-center"><p style={{ color: '#c40000', fontWeight: 700 }}>{error}</p></div>;
-  if (done) return (
-    <div className="ff-center ff-done">
-      <Check size={40} color="#15803d" />
-      <h2>Sent to customer</h2>
-      <p className="ff-done-sub">Order moved to Pre Sale</p>
-      <button type="button" onClick={() => window.close()} className="ff-btn-send">Close tab</button>
-    </div>
-  );
 
   const completedCount = categoryGroups.filter((g) => progress.sections?.[g.id]?.complete).length;
   const totalSections = categoryGroups.length;
@@ -587,25 +520,14 @@ export default function FulfillmentPage() {
       </div>
 
       <div className="ff-action-bar">
-        <button type="button" onClick={previewPdf} className="ff-btn-secondary" aria-label="Preview PDF">
-          <FileText size={16} />
-          <span>PDF</span>
+        <button type="button" onClick={() => void previewPdf()} disabled={previewing || saving} className="ff-btn-secondary" aria-label="Preview PDF">
+          {previewing ? <Loader2 size={16} className="star-spinning" /> : <FileText size={16} />}
+          <span>{previewing ? 'PDF…' : 'Preview PDF'}</span>
         </button>
-        <button type="button" onClick={doSave} disabled={saving || sending} className="ff-btn-secondary">
+        <button type="button" onClick={() => void doSave()} disabled={saving || previewing} className="ff-btn-send">
           {saving ? <Loader2 size={16} className="star-spinning" /> : <Check size={16} />}
-          <span>Save</span>
+          <span>{saving ? 'Saving…' : 'Save order'}</span>
         </button>
-        {canSendToCustomer ? (
-          <button type="button" onClick={doSend} disabled={saving || sending} className="ff-btn-send">
-            {sending ? <Loader2 size={16} className="star-spinning" /> : <Send size={16} />}
-            <span>Send to customer</span>
-          </button>
-        ) : (
-          <div className="ff-btn-victor-gate" title={CUSTOMER_SEND_FORBIDDEN}>
-            <Lock size={14} strokeWidth={2.25} />
-            <span>Switch to <strong>Victor</strong></span>
-          </div>
-        )}
       </div>
     </div>
   );
