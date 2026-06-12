@@ -1,10 +1,10 @@
-/** Reprocess live catalogue products → Gemini → staged preview in New Products (live row unchanged). */
+/** Reprocess live catalogue products → Gemini image gen → staged preview in New Products. */
 
-export async function reprocessOneToDormant(sku, { prompt } = {}) {
+export async function reprocessOneToDormant(sku, { prompt, imageStyle } = {}) {
   const res = await fetch('/api/reprocess-live-to-dormant', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sku, prompt: prompt || undefined }),
+    body: JSON.stringify({ sku, prompt: prompt || undefined, imageStyle: imageStyle || undefined }),
   });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(json.error || `Reprocess failed (${res.status})`);
@@ -13,9 +13,9 @@ export async function reprocessOneToDormant(sku, { prompt } = {}) {
 
 /**
  * @param {{ sku: string, title?: string, imageUrl?: string }[]} products
- * @param {{ prompt?: string, onItemUpdate?: (index: number, patch: object) => void, signal?: AbortSignal }} opts
+ * @param {{ prompt?: string, imageStyle?: string, onItemUpdate?: (index: number, patch: object) => void, signal?: AbortSignal }} opts
  */
-export async function runReprocessBatch(products, { prompt, onItemUpdate, signal } = {}) {
+export async function runReprocessBatch(products, { prompt, imageStyle, onItemUpdate, signal } = {}) {
   const queue = products.filter((p) => p?.sku);
   const results = { done: 0, failed: 0, items: [] };
 
@@ -25,16 +25,16 @@ export async function runReprocessBatch(products, { prompt, onItemUpdate, signal
 
     onItemUpdate?.(i, {
       status: 'transforming',
-      message: 'Gemini processing…',
+      message: imageStyle === 'generative' ? 'Generative AI (Gemini 3 Pro)…' : imageStyle === 'shadow' ? 'White + shadow (Gemini 3 Pro)…' : 'Gemini 3 Pro processing…',
     });
 
     try {
-      const json = await reprocessOneToDormant(item.sku, { prompt });
+      const json = await reprocessOneToDormant(item.sku, { prompt, imageStyle });
       results.done += 1;
-      results.items.push({ sku: item.sku, ok: true, imageUrl: json.imageUrl });
+      results.items.push({ sku: item.sku, ok: true, imageUrl: json.imageUrl, model: json.model });
       onItemUpdate?.(i, {
         status: 'done',
-        message: json.stillLive ? 'Preview ready — still live on site ✓' : 'Moved to New Products ✓',
+        message: json.stillLive ? 'Preview ready — still live on site ✓' : 'Staged in New Products ✓',
         previewUrl: json.imageUrl,
         sourceUrl: json.sourceUrl,
       });

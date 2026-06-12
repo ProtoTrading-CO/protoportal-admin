@@ -1,5 +1,6 @@
 import { searchIndex } from './apollo-data.js';
-import { findProductsBySubcategory, resolveTaxonomyLabels, suggestSubcategories } from './_subcategory-match.js';
+import { findProductsBySubcategory, findProductsByKeyword, resolveTaxonomyLabels, suggestSubcategories } from './_subcategory-match.js';
+import { inferImageStyle } from './_image-pipeline.js';
 
 function chartBlock(title, labels, values) {
   return `\n\`\`\`chart\n${JSON.stringify({ type: 'bar', title, labels: labels.slice(0, 10), values: values.slice(0, 10) })}\n\`\`\``;
@@ -27,7 +28,7 @@ function fmtDate(iso) {
   return new Date(iso).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
-export function executeIntent(intent, data, terms = '', { limit = null, skus = [], imagePrompt = '' } = {}) {
+export function executeIntent(intent, data, terms = '', { limit = null, skus = [], imagePrompt = '', imageStyle = '', userQuery = '' } = {}) {
   const { customers, orders, products, search } = data;
 
   switch (intent) {
@@ -44,7 +45,10 @@ export function executeIntent(intent, data, terms = '', { limit = null, skus = [
         const canonical = resolveTaxonomyLabels(terms);
         displayLabel = canonical[0] || terms;
         matched = findProductsBySubcategory(products, terms);
+        if (!matched.length) matched = findProductsByKeyword(products, terms);
       }
+
+      const style = imageStyle || inferImageStyle(imagePrompt, userQuery || terms);
 
       const withImages = matched.filter((p) => p.imageUrl);
       const missing = matched.length - withImages.length;
@@ -65,19 +69,22 @@ export function executeIntent(intent, data, terms = '', { limit = null, skus = [
 
       const preview = withImages.slice(0, 8).map((p, i) => `${i + 1}. **${p.title}** (${p.sku})`);
       const more = withImages.length > 8 ? `\n\n_…and ${withImages.length - 8} more._` : '';
+      const styleLabel = style === 'generative' ? 'Generative AI' : style === 'shadow' ? 'White + shadow' : 'Standard white bg';
       const promptNote = imagePrompt
         ? `\n\n**Your instructions:** ${imagePrompt}`
-        : '\n\n_Default: 800×800 white background, background removed._';
+        : `\n\n_Style: **${styleLabel}**._`;
+      const modelNote = '\n\n_Model: **Gemini 3 Pro Image** via OpenRouter._';
       const stayLiveNote = '\n\n_Products **stay live** on the website with their current images. Only **Go live** in New Products will replace the live image._';
 
       return {
         source: 'live-index',
         intent,
-        reply: `## Image fix — ${displayLabel}\n\nFound **${withImages.length}** products${missing ? ` (${missing} skipped — no image)` : ''}${notFound.length ? ` · ${notFound.length} code(s) not found` : ''}.${promptNote}${stayLiveNote}\n\nSending to **New Products** for processing. Open that tab to watch the live feed…\n\n${preview.join('\n')}${more}`,
+        reply: `## Image generation — ${displayLabel}\n\nFound **${withImages.length}** products${missing ? ` (${missing} skipped — no image)` : ''}${notFound.length ? ` · ${notFound.length} code(s) not found` : ''}.${promptNote}${modelNote}${stayLiveNote}\n\nStaging in **New Products** — open that tab to watch the live feed…\n\n${preview.join('\n')}${more}`,
         batchAction: {
           type: 'reprocess_to_dormant',
           subcategory: displayLabel,
           imagePrompt: imagePrompt || '',
+          imageStyle: style,
           products: withImages.map((p) => ({ sku: p.sku, title: p.title, imageUrl: p.imageUrl })),
         },
       };

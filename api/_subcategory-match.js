@@ -80,3 +80,21 @@ export function findProductsBySubcategory(products, terms) {
     return labels.some((label) => labelMatchesSearch(label, needleTokens, canonicalLabels));
   });
 }
+
+/** Match products by title, SKU, barcode, or category keywords (e.g. "monttaro canvas"). */
+export function findProductsByKeyword(products, terms) {
+  const needleTokens = tokenizeLabel(terms);
+  if (!needleTokens.length) return [];
+
+  return products.all.filter((p) => {
+    const hay = tokenizeLabel([
+      p.title,
+      p.sku,
+      p.barcode,
+      p.category,
+      p.subcategory_one,
+      p.subcategory_two,
+    ].filter(Boolean).join(' '));
+    return tokensMatch(needleTokens, hay);
+  });
+}

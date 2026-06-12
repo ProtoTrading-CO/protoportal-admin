@@ -10,7 +10,7 @@ export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   if (req.method !== 'POST') return res.status(405).end();
 
-  const { filename, contentType, base64 } = req.body || {};
+  const { filename, contentType, base64, prompt, imageStyle } = req.body || {};
   if (!filename || !contentType || !base64) {
     return res.status(400).json({ error: 'filename, contentType, and base64 are required' });
   }
@@ -20,17 +20,21 @@ export default async function handler(req, res) {
 
   try {
     const t0 = Date.now();
-    const result = await fixImageFromBase64(base64, contentType, filename);
+    const result = await fixImageFromBase64(base64, contentType, filename, {
+      userInstructions: prompt,
+      imageStyle: imageStyle || 'standard',
+    });
     return res.status(200).json({
       url: result.url,
       base64: result.base64,
       model: result.model,
       tokensIn: result.tokensIn,
       tokensOut: result.tokensOut,
+      imageStyle: result.imageStyle,
       processingMs: Date.now() - t0,
     });
   } catch (error) {
     console.error('transform-product-image:', error?.message || error);
-    return res.status(500).json({ error: error.message || 'Gemini image fix failed' });
+    return res.status(500).json({ error: error.message || 'Gemini image generation failed' });
   }
 }

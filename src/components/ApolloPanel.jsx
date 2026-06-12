@@ -8,6 +8,8 @@ const STARTERS = [
   'Give me 5 products with negative stock',
   'Fix images for all products in subcategory games and puzzles',
   'Products with codes ABC123 and XYZ789 resize to 800x800 white background',
+  'Do image gen on all monttaro canvas products — white background, product in view, painting on the canvas',
+  'All monttaro canvas with soft shadow on white background',
   'Who are all my customers?',
 ];
 
@@ -337,7 +339,13 @@ export default function ApolloPanel({ onReprocessBatch }) {
       if (json.batchAction?.type === 'reprocess_to_dormant' && onReprocessBatch) {
         const label = json.batchAction.subcategory || '';
         const imagePrompt = json.batchAction.imagePrompt || '';
-        void onReprocessBatch(json.batchAction.products, { label, switchTab: true, skipConfirm: true, imagePrompt });
+        void onReprocessBatch(json.batchAction.products, {
+          label,
+          switchTab: true,
+          skipConfirm: true,
+          imagePrompt: json.batchAction.imagePrompt || '',
+          imageStyle: json.batchAction.imageStyle || '',
+        });
         if (batchIndex >= 0) {
           setMessages((prev) => prev.map((m, i) => (
             i === batchIndex

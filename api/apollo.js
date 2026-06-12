@@ -43,6 +43,8 @@ function answerFromData(data, parsed, userQuery) {
     limit,
     skus: parsed.skus || [],
     imagePrompt: parsed.imagePrompt || '',
+    imageStyle: parsed.imageStyle || '',
+    userQuery,
   });
   if (!result) return null;
 
@@ -63,6 +65,7 @@ async function resolveQuery(userQuery, data, apiKey, { rejectIntent = '', badRep
       terms: '',
       skus: [],
       imagePrompt: '',
+      imageStyle: '',
       wantsChart: hint.wantsChart,
     };
   }

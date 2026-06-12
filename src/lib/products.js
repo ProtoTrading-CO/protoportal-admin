@@ -377,7 +377,7 @@ export function compressImage(file) {
   });
 }
 
-export async function uploadDormantImageWithBase64(file) {
+export async function uploadDormantImageWithBase64(file, { prompt, imageStyle } = {}) {
   const compressed = await compressImage(file);
   const base64 = await new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -389,7 +389,13 @@ export async function uploadDormantImageWithBase64(file) {
   const res = await fetch('/api/transform-product-image', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ filename: file.name, contentType: 'image/jpeg', base64 }),
+    body: JSON.stringify({
+      filename: file.name,
+      contentType: 'image/jpeg',
+      base64,
+      prompt: prompt || undefined,
+      imageStyle: imageStyle || 'standard',
+    }),
   });
 
   let json;

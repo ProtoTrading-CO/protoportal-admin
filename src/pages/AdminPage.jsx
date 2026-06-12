@@ -107,6 +107,7 @@ import OrderWhatsappNotify from '../components/OrderWhatsappNotify';
 import AnalyticsHub from '../components/AnalyticsHub';
 import ApolloPanel from '../components/ApolloPanel';
 import ReprocessLiveFeed from '../components/ReprocessLiveFeed';
+import ImageGenOptions from '../components/ImageGenOptions';
 import { runReprocessBatch } from '../lib/reprocessQueue';
 import categories from '../data/categories.json';
 
@@ -418,6 +419,12 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const [imageViewUrl, setImageViewUrl] = useState('');
   const [uploadQueue, setUploadQueue] = useState([]); // [{name, sku?, status, message, cost, thumbUrl?, previewUrl?}]
   const [reprocessBusy, setReprocessBusy] = useState(false);
+  const [imageGenStyle, setImageGenStyle] = useState(() => {
+    try { return localStorage.getItem('proto_image_style') || 'standard'; } catch { return 'standard'; }
+  });
+  const [imageGenPrompt, setImageGenPrompt] = useState(() => {
+    try { return localStorage.getItem('proto_image_prompt') || ''; } catch { return ''; }
+  });
   const [costLog, setCostLog] = useState(() => {
     try { return JSON.parse(localStorage.getItem('proto_image_gen_costs') || '[]'); } catch { return []; }
   });
@@ -567,6 +574,13 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   useEffect(() => { if (activeSection === 'banner') void loadBannerEditor(); }, [activeSection]);
   useEffect(() => { if (activeSection === 'popup-specials') void loadPopupEditor(); }, [activeSection]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem('proto_image_style', imageGenStyle);
+      localStorage.setItem('proto_image_prompt', imageGenPrompt);
+    } catch { /* quota */ }
+  }, [imageGenStyle, imageGenPrompt]);
+
   const processUploadFiles = async (files) => {
     const imageFiles = Array.from(files).filter((f) => f.type.startsWith('image/'));
     if (!imageFiles.length) return;
@@ -585,7 +599,10 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
       let imageUrl = '', uploadedBase64 = '';
       try {
         // compressImage returns a Blob; we need both the URL and the base64 for Gemini
-        const { url, base64 } = await uploadDormantImageWithBase64(file);
+        const { url, base64 } = await uploadDormantImageWithBase64(file, {
+          prompt: imageGenPrompt,
+          imageStyle: imageGenStyle,
+        });
         imageUrl = url;
         uploadedBase64 = base64;
       } catch (err) {
@@ -653,14 +670,17 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     void loadDormant();
   };
 
-  const processReprocessBatch = async (products, { label = '', switchTab = true, skipConfirm = false, imagePrompt = '' } = {}) => {
+  const processReprocessBatch = async (products, { label = '', switchTab = true, skipConfirm = false, imagePrompt = '', imageStyle = '' } = {}) => {
     const rows = products.filter((p) => p?.sku);
     if (!rows.length) {
       showToast('No products with images to reprocess', 'error');
       return;
     }
-    const promptNote = imagePrompt ? `\n\nInstructions: ${imagePrompt}` : '';
-    if (!skipConfirm && !window.confirm(`Process ${rows.length} product${rows.length === 1 ? '' : 's'}${label ? ` from ${label}` : ''} through Gemini and stage in New Products?${promptNote}\n\nProducts stay live on the website until you click Go live.`)) {
+    const style = imageStyle || imageGenStyle;
+    const prompt = imagePrompt || imageGenPrompt;
+    const styleLabel = style === 'generative' ? 'Generative AI' : style === 'shadow' ? 'White + shadow' : 'Standard';
+    const promptNote = prompt ? `\n\nInstructions: ${prompt}` : '';
+    if (!skipConfirm && !window.confirm(`Process ${rows.length} product${rows.length === 1 ? '' : 's'}${label ? ` from ${label}` : ''}?\n\nStyle: ${styleLabel} (Gemini 3 Pro Image)${promptNote}\n\nProducts stay live on the website until you click Go live.`)) {
       return;
     }
 
@@ -680,7 +700,8 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
 
     try {
       const results = await runReprocessBatch(rows, {
-        prompt: imagePrompt,
+        prompt,
+        imageStyle: style,
         onItemUpdate: (index, patch) => {
           setUploadQueue((prev) => prev.map((item, idx) => (idx === index ? { ...item, ...patch } : item)));
           if (patch.status === 'done') void loadDormant();
@@ -1889,12 +1910,12 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
       ? subcategoryOptions(productCategory).find((s) => s.id === productSubcategory)?.label || productSubcategory
       : mainCategories.find((c) => c.id === productCategory)?.label || productCategory;
     const data = await fetchAdminProductsPage({ page: 1, pageSize: 999999, categoryFilter: catFilter });
-    await processReprocessBatch(productsWithImages(data.rows), { label, switchTab: true });
+    await processReprocessBatch(productsWithImages(data.rows), { label, switchTab: true, imageStyle: imageGenStyle, imagePrompt: imageGenPrompt });
   };
 
   const runSelectedImageFix = async () => {
     const selected = productRows.filter((p) => productSelectedIds.has(p.id));
-    await processReprocessBatch(productsWithImages(selected), { switchTab: true });
+    await processReprocessBatch(productsWithImages(selected), { switchTab: true, imageStyle: imageGenStyle, imagePrompt: imageGenPrompt });
   };
 
   // Archive bulk-select handlers — mirror the Product Manager bulk bar so
@@ -2219,7 +2240,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                     <h2 className="adm-section-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <Sparkles size={20} style={{ color: '#8B1A1A' }} /> New Products
                     </h2>
-                    <p className="adm-section-note">Upload new images or reprocess live products. Staged products stay on the website until you click <strong>Go live</strong> to replace the live image.</p>
+                    <p className="adm-section-note">Upload new images or reprocess live products. Uses <strong>Gemini 3 Pro Image</strong> — standard, shadow, or generative AI. Staged products stay on the website until <strong>Go live</strong>.</p>
                   </div>
                   <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                     <button onClick={() => singleImageRef.current?.click()} className="adm-btn-red">
@@ -2263,6 +2284,13 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                     )}
                   </div>
                 </div>
+
+                <ImageGenOptions
+                  style={imageGenStyle}
+                  onStyleChange={setImageGenStyle}
+                  prompt={imageGenPrompt}
+                  onPromptChange={setImageGenPrompt}
+                />
 
                 {/* Upload progress */}
                 {uploadQueue.length > 0 && (
@@ -2559,6 +2587,14 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                     <button onClick={() => void exportLiveXlsx()} className="adm-btn-ghost">{saving === 'export-live' ? 'Exporting…' : 'Export Excel'}</button>
                   </div>
                 </div>
+
+                <ImageGenOptions
+                  style={imageGenStyle}
+                  onStyleChange={setImageGenStyle}
+                  prompt={imageGenPrompt}
+                  onPromptChange={setImageGenPrompt}
+                  compact
+                />
 
                 <div className="adm-toolbar" style={{ gridTemplateColumns: '1fr auto auto auto auto' }}>
                   <label className="adm-search"><Search size={15} /><input value={productSearchInput} onChange={(e) => setProductSearchInput(e.target.value)} placeholder="Search by SKU or product name" className="adm-search-input" /></label>

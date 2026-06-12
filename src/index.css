@@ -5314,3 +5314,56 @@ html, body { background: #f5f5f5; color: #111827; }
   transition: width 0.35s ease;
 }
 
+/* ── Image gen options ──────────────────────────────────────────────────── */
+.image-gen-options {
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+}
+.image-gen-options--compact { margin-bottom: 12px; padding: 10px 12px; }
+.image-gen-options-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.image-gen-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #374151;
+}
+.image-gen-select { min-width: 160px; height: 36px; font-size: 13px; }
+.image-gen-model-tag {
+  font-size: 11px;
+  font-weight: 600;
+  color: #8B1A1A;
+  background: #fff5f5;
+  border: 1px solid #fecaca;
+  border-radius: 999px;
+  padding: 4px 10px;
+}
+.image-gen-prompt {
+  width: 100%;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.45;
+  resize: vertical;
+  min-height: 56px;
+  box-sizing: border-box;
+}
+.image-gen-hint {
+  margin: 8px 0 0;
+  font-size: 11px;
+  color: #64748b;
+  line-height: 1.4;
+}
+

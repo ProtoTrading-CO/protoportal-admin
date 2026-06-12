@@ -1,7 +1,7 @@
 /** Regex hints only — never used as final routing without AI confirmation. */
 
 const INTENTS = [
-  { id: 'batch_fix_images', weight: 14, patterns: [/fix (the )?images/i, /image fixer/i, /new products engine/i, /through gemini/i, /gemini new products/i, /put them through/i, /reprocess.*images/i, /white background/i, /remove (the )?background/i, /resize.*800/i, /800\s*[x×]\s*800/i, /products with (the )?(following )?codes/i] },
+  { id: 'batch_fix_images', weight: 14, patterns: [/fix (the )?images/i, /image fixer/i, /image gen/i, /new products engine/i, /through gemini/i, /gemini new products/i, /put them through/i, /reprocess.*images/i, /white background/i, /remove (the )?background/i, /resize.*800/i, /800\s*[x×]\s*800/i, /products with (the )?(following )?codes/i, /\bshadow\b/i, /generative/i, /canvas/i, /monttaro/i, /mottaro/i, /painting on/i] },
   { id: 'order_top_items', weight: 12, patterns: [/best performing/i, /performing products/i, /ordered the most/i, /top selling/i, /most ordered/i, /based on orders/i, /popular products/i, /barograph/i, /bar chart/i] },
   { id: 'product_count', weight: 10, patterns: [/^how many products/i, /product count/i, /total products/i, /catalogue size/i, /number of products/i] },
   { id: 'product_negative_stock', weight: 12, patterns: [/negative stock/i, /below zero/i, /stock.*negative/i, /negative.*stock/i] },
@@ -65,16 +65,18 @@ export async function classifyIntent(query, apiKey, { rejectIntent = '', regexHi
         {
           role: 'system',
           content: `You route Proto Trading admin questions to exactly ONE data query. Reply ONLY JSON:
-{"intent":"<id>","terms":"<subcategory name or empty>","skus":["SKU1","SKU2"],"imagePrompt":"<image editing instructions or empty>","wantsChart":true|false}
+{"intent":"<id>","terms":"<subcategory or product keyword filter>","skus":["SKU1","SKU2"],"imagePrompt":"<creative/editing instructions>","imageStyle":"standard|shadow|generative","wantsChart":true|false}
 ${rejectNote}
 
 Regex hint (may be wrong): ${hint.intent} (${Math.round(hint.confidence * 100)}%)
 
 DISAMBIGUATION — follow strictly:
-• Image editing / resize / white background / remove background for products → batch_fix_images
+• Image editing / image gen / resize / white background / shadow / generative scenes → batch_fix_images
   - subcategory named → terms = subcategory (e.g. "games and puzzles"), skus = []
+  - product line / keyword in title → terms = keyword phrase (e.g. "monttaro canvas", "mottaro canvas")
   - specific product codes/SKUs listed → skus = ["CODE1","CODE2"], terms = ""
-  - imagePrompt = the user's image instructions verbatim (e.g. "resize to 800x800 remove background white background")
+  - imagePrompt = user's creative/editing instructions verbatim
+  - imageStyle = "shadow" if user wants drop shadow; "generative" if painting on canvas, lifestyle scene, or creative staging; else "standard"
 • "fix images / gemini new products / put through new products" for a subcategory → batch_fix_images
 • "best performing / top selling / most ordered / products + orders" → order_top_items (NOT product_count)
 • "how many products / catalogue size / total products" ONLY → product_count
@@ -85,9 +87,12 @@ DISAMBIGUATION — follow strictly:
 • product_search ONLY when user names a specific SKU or product keyword for lookup (NOT image editing) (terms = that keyword)
 • terms = subcategory when batch_fix_images by category; empty when batch_fix_images by skus array
 • skus = array of product codes when user lists codes for image work; empty array otherwise
-• imagePrompt = copy user's image editing instructions; empty string if they only said "fix images" with no extra detail
+• imagePrompt = copy user's image editing/creative instructions; empty if only "fix images"
+• imageStyle = standard | shadow | generative (see above)
 
 Examples:
+"do image gen on all monttaro canvas products white background product clearly in view painting on the canvas" → {"intent":"batch_fix_images","terms":"monttaro canvas","skus":[],"imagePrompt":"Place on white background with product clearly in view and a beautiful painting displayed on the canvas","imageStyle":"generative","wantsChart":false}
+"all mottaro canvas with shadow on white background" → {"intent":"batch_fix_images","terms":"mottaro canvas","skus":[],"imagePrompt":"white background with soft studio drop shadow","imageStyle":"shadow","wantsChart":false}
 "products with codes ABC123 and XYZ789 resize them to 800 by 800 remove background white background" → {"intent":"batch_fix_images","terms":"","skus":["ABC123","XYZ789"],"imagePrompt":"resize to 800 by 800 remove the background and make it a white background","wantsChart":false}
 "fix images for games and puzzles subcategory" → {"intent":"batch_fix_images","terms":"games and puzzles","skus":[],"imagePrompt":"","wantsChart":false}
 "all products in subcategory games and puzzles put through gemini new products" → {"intent":"batch_fix_images","terms":"games and puzzles","skus":[],"imagePrompt":"","wantsChart":false}
@@ -117,7 +122,8 @@ Valid intents: order_top_items, product_count, product_negative_stock, product_l
       intent: json.intent,
       terms: String(json.terms || '').trim().slice(0, 80),
       skus: Array.isArray(json.skus) ? json.skus.map((s) => String(s).trim()).filter(Boolean).slice(0, 50) : [],
-      imagePrompt: String(json.imagePrompt || '').trim().slice(0, 500),
+      imagePrompt: String(json.imagePrompt || '').trim().slice(0, 2000),
+      imageStyle: ['standard', 'shadow', 'generative'].includes(json.imageStyle) ? json.imageStyle : '',
       wantsChart: Boolean(json.wantsChart) || hint.wantsChart,
     };
   } catch {

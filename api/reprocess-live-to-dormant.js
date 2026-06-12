@@ -1,6 +1,6 @@
 import { requireAdminKey } from './_admin-auth.js';
 import { createClient } from '@supabase/supabase-js';
-import { fixImageFromUrl, buildImagePrompt } from './_image-pipeline.js';
+import { fixImageFromUrl, IMAGE_STYLES } from './_image-pipeline.js';
 import { stageDormantPreview } from './_stage-dormant.js';
 
 const LIVE_SELECT = `
@@ -23,9 +23,11 @@ export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   if (req.method !== 'POST') return res.status(405).end();
 
-  const { sku, prompt: userPrompt } = req.body || {};
+  const { sku, prompt: userPrompt, imageStyle } = req.body || {};
   const cleanSku = String(sku || '').trim();
   if (!cleanSku) return res.status(400).json({ error: 'sku is required' });
+
+  const style = Object.values(IMAGE_STYLES).includes(imageStyle) ? imageStyle : IMAGE_STYLES.standard;
 
   const sb = getClient();
   const { data: row, error: lookupError } = await sb
@@ -44,10 +46,11 @@ export default async function handler(req, res) {
 
   try {
     const t0 = Date.now();
-    const imagePrompt = buildImagePrompt(userPrompt);
     const { url: imageUrl, model, tokensIn, tokensOut } = await fixImageFromUrl(sourceUrl, {
       sku: cleanSku,
-      prompt: imagePrompt,
+      imageStyle: style,
+      userInstructions: userPrompt,
+      productTitle: row.title,
     });
 
     const { stillLive } = await stageDormantPreview(sb, row, imageUrl);
@@ -60,6 +63,7 @@ export default async function handler(req, res) {
       sourceUrl,
       category: row.category,
       stillLive,
+      imageStyle: style,
       model,
       tokensIn,
       tokensOut,
