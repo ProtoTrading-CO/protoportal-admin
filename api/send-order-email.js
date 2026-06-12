@@ -91,8 +91,8 @@ function buildEmailHtml({
         <td style="padding:8px 12px">
           ${imgUrl ? `<img src="${imgUrl}" alt="" style="width:48px;height:48px;object-fit:contain;border-radius:6px;background:#f3f4f6">` : '<div style="width:48px;height:48px;background:#f3f4f6;border-radius:6px"></div>'}
         </td>
-        <td style="padding:10px 12px;font-weight:700;font-size:12px;color:#64748b">${escapeHtml(item.code, '—')}</td>
-        <td style="padding:10px 12px;font-size:13px">
+        <td style="padding:10px 12px;font-weight:700;font-size:12px;color:#666666">${escapeHtml(item.code, '—')}</td>
+        <td style="padding:10px 12px;font-size:14px;color:#111111;font-weight:600">
           ${escapeHtml(item.name, '—')}
           ${item.swapped ? '<span style="margin-left:8px;font-size:10px;font-weight:700;color:#2563eb;background:#dbeafe;padding:2px 6px;border-radius:4px">SUBSTITUTED</span>' : ''}
           ${qtyChanged ? '<span style="margin-left:8px;font-size:10px;font-weight:700;color:#92400e;background:#fef3c7;padding:2px 6px;border-radius:4px">QTY CHANGED</span>' : ''}
@@ -113,15 +113,17 @@ function buildEmailHtml({
 <body style="margin:0;padding:0;background:#f8fafc;font-family:Arial,Helvetica,sans-serif">
 <div style="max-width:600px;margin:32px auto;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 2px 16px rgba(0,0,0,0.08)">
 
-  <div style="background:#0f172a;padding:28px 32px">
-    <div style="color:#4ade80;font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;margin-bottom:6px">Proto Trading</div>
-    <h1 style="color:#ffffff;margin:0;font-size:22px;font-weight:800">Order Confirmation</h1>
-    <div style="color:#94a3b8;font-size:13px;margin-top:6px">${escapeHtml(orderNumber)}${dateStr ? ` &nbsp;·&nbsp; ${dateStr}` : ''}</div>
+  <div style="background:#ffffff;padding:0;border-bottom:4px solid #c40000">
+    <div style="padding:28px 32px 24px">
+      <div style="color:#c40000;font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;margin-bottom:6px">Proto Trading</div>
+      <h1 style="color:#111111;margin:0;font-size:24px;font-weight:800">Order Confirmation</h1>
+      <div style="color:#666666;font-size:13px;margin-top:8px">${escapeHtml(orderNumber)}${dateStr ? ` &nbsp;·&nbsp; ${dateStr}` : ''}</div>
+    </div>
   </div>
 
-  <div style="padding:28px 32px">
-    <p style="color:#374151;font-size:15px;margin:0 0 20px">Hi <strong>${escapeHtml(customerName, 'there')}</strong>,</p>
-    <p style="color:#374151;font-size:14px;margin:0 0 24px;line-height:1.6">
+  <div style="padding:28px 32px;background:#ffffff">
+    <p style="color:#111111;font-size:15px;margin:0 0 20px">Hi <strong>${escapeHtml(customerName, 'there')}</strong>,</p>
+    <p style="color:#333333;font-size:14px;margin:0 0 24px;line-height:1.6">
       Thank you for your order. Your confirmed order summary is below, and we have attached your
       <strong>order confirmation PDF</strong>${hasPresaleInvoice ? ' together with your <strong>presale invoice</strong>' : ''}.
       ${items.some((i) => i.removed) ? '<br><span style="color:#dc2626;font-weight:700">Items marked OUT OF STOCK are not included in your confirmed order.</span>' : ''}
@@ -130,22 +132,22 @@ function buildEmailHtml({
 
     <table style="width:100%;border-collapse:collapse;font-family:Arial,sans-serif">
       <thead>
-        <tr style="background:#f8fafc;border-bottom:2px solid #e2e8f0">
-          <th style="padding:8px 12px;text-align:left;font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.05em;width:60px">Img</th>
-          <th style="padding:10px 12px;text-align:left;font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.05em">Code</th>
-          <th style="padding:10px 12px;text-align:left;font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.05em">Product</th>
-          <th style="padding:10px 12px;text-align:center;font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.05em">Ordered</th>
-          <th style="padding:10px 12px;text-align:center;font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.05em">Confirmed</th>
-          ${hasPrice ? '<th style="padding:10px 12px;text-align:right;font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.05em">Total</th>' : ''}
+        <tr style="background:#ffffff;border-bottom:1px solid #eeeeee">
+          <th style="padding:10px 12px;text-align:left;font-size:11px;font-weight:700;color:#ffffff;text-transform:uppercase;letter-spacing:0.05em;width:60px;background:#111111">Img</th>
+          <th style="padding:10px 12px;text-align:left;font-size:11px;font-weight:700;color:#ffffff;text-transform:uppercase;letter-spacing:0.05em;background:#111111">Code</th>
+          <th style="padding:10px 12px;text-align:left;font-size:11px;font-weight:700;color:#ffffff;text-transform:uppercase;letter-spacing:0.05em;background:#111111">Product</th>
+          <th style="padding:10px 12px;text-align:center;font-size:11px;font-weight:700;color:#ffffff;text-transform:uppercase;letter-spacing:0.05em;background:#111111">Ordered</th>
+          <th style="padding:10px 12px;text-align:center;font-size:11px;font-weight:700;color:#ffffff;text-transform:uppercase;letter-spacing:0.05em;background:#c40000">Confirmed</th>
+          ${hasPrice ? '<th style="padding:10px 12px;text-align:right;font-size:11px;font-weight:700;color:#ffffff;text-transform:uppercase;letter-spacing:0.05em;background:#111111">Total</th>' : ''}
         </tr>
       </thead>
       <tbody>${itemRows}</tbody>
     </table>
 
     ${total != null ? `
-    <div style="margin-top:16px;padding:14px 12px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:center">
-      <span style="font-size:14px;font-weight:700;color:#374151">Total (excl. VAT)</span>
-      <span style="font-size:20px;font-weight:900;color:#0f172a">R ${Number(total).toFixed(2)}</span>
+    <div style="margin-top:16px;padding:14px 12px;background:#fafafa;border-radius:8px;border:1px solid #e5e5e5;border-left:4px solid #c40000;display:flex;justify-content:space-between;align-items:center">
+      <span style="font-size:14px;font-weight:700;color:#111111">Total (excl. VAT)</span>
+      <span style="font-size:20px;font-weight:900;color:#c40000">R ${Number(total).toFixed(2)}</span>
     </div>` : ''}
 
     ${allNotes ? `
@@ -159,7 +161,7 @@ function buildEmailHtml({
       Handled by: <strong style="color:#374151">${escapeHtml(assignedTo)}</strong>
     </div>` : ''}
 
-    <div style="margin-top:24px;padding:14px 16px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;font-size:13px;color:#166534;line-height:1.5">
+    <div style="margin-top:24px;padding:14px 16px;background:#fff5f5;border:1px solid #fecaca;border-radius:8px;font-size:13px;color:#7f1d1d;line-height:1.5">
       <strong>Attachments</strong><br>
       • Order confirmation (PDF)${hasPresaleInvoice ? '<br>• Presale invoice' : ''}
     </div>
@@ -169,8 +171,9 @@ function buildEmailHtml({
     </p>
   </div>
 
-  <div style="padding:20px 32px;background:#f8fafc;border-top:1px solid #e2e8f0;text-align:center">
-    <div style="font-size:12px;color:#94a3b8">Proto Trading · South Africa</div>
+  <div style="padding:20px 32px;background:#111111;text-align:center">
+    <div style="font-size:12px;color:#ffffff;font-weight:600">Proto Trading · South Africa</div>
+    <div style="font-size:11px;color:#999999;margin-top:4px">online@proto.co.za</div>
   </div>
 </div>
 </body>

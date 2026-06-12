@@ -143,26 +143,30 @@ export async function generateOrderPdfBase64({
   });
   const linkUrl = fulfillmentUrl || buildFulfillmentUrl(order?.id);
 
-  // ── Header band ───────────────────────────────────────────────────────
-  doc.setFillColor(15, 23, 42);
-  doc.rect(0, 0, pageWidth, 108, 'F');
-  doc.setTextColor(74, 222, 128);
+  // ── Header band (Proto white / red / black) ───────────────────────────
+  doc.setFillColor(255, 255, 255);
+  doc.rect(0, 0, pageWidth, 112, 'F');
+  doc.setFillColor(196, 0, 0);
+  doc.rect(0, 0, pageWidth, 5, 'F');
+  doc.setDrawColor(229, 229, 229);
+  doc.line(0, 112, pageWidth, 112);
+  doc.setTextColor(196, 0, 0);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(11);
-  doc.text('PROTO TRADING', margin, 28);
+  doc.text('PROTO TRADING', margin, 30);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8);
-  doc.setTextColor(148, 163, 184);
-  doc.text('Wholesale you can count on — since 1987', margin, 42);
-  doc.setTextColor(255, 255, 255);
+  doc.setTextColor(100, 100, 100);
+  doc.text('Wholesale you can count on — since 1987', margin, 44);
+  doc.setTextColor(17, 17, 17);
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(20);
-  doc.text('Order Confirmation', margin, 66);
+  doc.setFontSize(22);
+  doc.text('Order Confirmation', margin, 70);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(10);
-  doc.setTextColor(203, 213, 225);
-  doc.text(`${orderNumber}  ·  ${dateStr}`, margin, 84);
-  y = 124;
+  doc.setTextColor(80, 80, 80);
+  doc.text(`${orderNumber}  ·  ${dateStr}`, margin, 88);
+  y = 128;
 
   // ── Customer ──────────────────────────────────────────────────────────
   doc.setTextColor(15, 23, 42);
@@ -179,11 +183,13 @@ export async function generateOrderPdfBase64({
 
   // ── Table header ──────────────────────────────────────────────────────
   ensureSpace(30);
-  doc.setFillColor(248, 250, 252);
+  doc.setFillColor(17, 17, 17);
   doc.rect(margin, y, contentWidth, 22, 'F');
+  doc.setFillColor(196, 0, 0);
+  doc.rect(COL.conf.x - 4, y, COL.conf.w + 8, 22, 'F');
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8);
-  doc.setTextColor(100, 116, 139);
+  doc.setTextColor(255, 255, 255);
   doc.text('IMG', COL.img.x + 4, y + 14);
   doc.text('CODE', COL.code.x, y + 14);
   doc.text('PRODUCT', COL.name.x, y + 14);
@@ -275,12 +281,17 @@ export async function generateOrderPdfBase64({
   if (hasPrices && total != null) {
     ensureSpace(36);
     y += 8;
-    doc.setFillColor(248, 250, 252);
+    doc.setFillColor(255, 255, 255);
     doc.rect(margin, y, contentWidth, 28, 'F');
+    doc.setDrawColor(229, 229, 229);
+    doc.rect(margin, y, contentWidth, 28, 'S');
+    doc.setFillColor(196, 0, 0);
+    doc.rect(margin, y, 4, 28, 'F');
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(12);
-    doc.setTextColor(15, 23, 42);
+    doc.setTextColor(17, 17, 17);
     doc.text('Order total (excl. VAT)', margin + 12, y + 18);
+    doc.setTextColor(196, 0, 0);
     doc.text(money(total), margin + contentWidth - 12, y + 18, { align: 'right' });
     y += 40;
   }
@@ -347,4 +358,24 @@ export async function generateOrderPdfBase64({
   doc.text('Wholesale you can count on — since 1987', margin, pageHeight - margin);
 
   return doc.output('datauristring').split(',')[1];
+}
+
+/** Open a base64 PDF in a new tab (avoids blocked data: URL fetches). */
+export function openPdfBase64Preview(pdfBase64, filename = 'proto-order-preview.pdf') {
+  const binary = atob(pdfBase64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  const blob = new Blob([bytes], { type: 'application/pdf' });
+  const url = URL.createObjectURL(blob);
+  const opened = window.open(url, '_blank', 'noopener,noreferrer');
+  if (!opened) {
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.rel = 'noopener';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
