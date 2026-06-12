@@ -6,7 +6,8 @@ const STARTERS = [
   'Summarise order activity this month',
   'What are customers searching for with no results?',
   'Show me a bar chart of top searches',
-  'Any customers waiting for approval?',
+  'Who are all my customers?',
+  'Which products have the lowest stock?',
 ];
 
 function renderInline(text) {
@@ -113,8 +114,8 @@ function ApolloWelcome({ onStarter, busy }) {
       <div className="apollo-welcome-copy">
         <h3>Hi, I'm <span className="apollo-welcome-name">Apollo</span></h3>
         <p>
-          Your Proto admin assistant. I can analyse orders, customers, search trends,
-          and products — and produce charts or PDF summaries when you need them.
+          Your Proto admin assistant with live access to customers, orders, product stock,
+          and search analytics — charts and PDF exports included.
         </p>
       </div>
       <div className="apollo-welcome-starters">
