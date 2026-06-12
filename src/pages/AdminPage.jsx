@@ -12,6 +12,8 @@ import {
   ClipboardList,
   Eye,
   FileDown,
+  Pin,
+  PinOff,
   Plus,
   Globe,
   Grip,
@@ -66,6 +68,7 @@ import {
   recycleProduct,
   restoreRecycledProduct,
   saveSortOrder,
+  setKeepLiveWhenOos,
   updateProduct,
   uploadDormantImage,
   uploadDormantImageWithBase64,
@@ -1395,6 +1398,20 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     } finally { setSaving(''); }
   };
 
+  const toggleKeepLiveWhenOos = async (product) => {
+    const next = !product.keepLiveWhenOos;
+    setSaving(`keep-${product.id}`);
+    try {
+      await setKeepLiveWhenOos(product.id, next);
+      await refreshDashboardStats();
+      if (activeSection === 'products') await loadProducts();
+      else if (activeSection === 'archive') await loadArchive();
+      showToast(next ? 'Product will stay on site when out of stock' : 'Product will auto-archive when out of stock');
+    } catch (err) {
+      showToast(err.message || 'Could not update keep-live setting', 'error');
+    } finally { setSaving(''); }
+  };
+
   const toXlsxRow = (p) => ({
     Name: p.name,
     Barcode: p.barcode || p.code,
@@ -2406,7 +2423,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                 <div className="adm-section-head">
                   <div>
                     <h2 className="adm-section-title">Product Manager</h2>
-                    <p className="adm-section-note">Server-side paging — search and category filters load only what you need.</p>
+                    <p className="adm-section-note">In-stock products are live on the site automatically. Out-of-stock items auto-archive unless you pin them to stay live (📌).</p>
                   </div>
                   <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                     <button onClick={openNewProduct} className="adm-btn-red"><PackagePlus size={15} /> Add product</button>
@@ -2568,6 +2585,15 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                             title={specialsSet.has(product.id) ? 'Remove from specials' : 'Add to specials'}
                           >
                             <Star size={14} className={specialsSet.has(product.id) ? 'star-spinning' : ''} style={{ color: specialsSet.has(product.id) ? '#f59e0b' : undefined }} />
+                          </button>
+                          <button
+                            onClick={() => void toggleKeepLiveWhenOos(product)}
+                            className="adm-icon-btn"
+                            title={product.keepLiveWhenOos ? 'Auto-archive when out of stock (click to enable)' : 'Keep on site when out of stock (click to pin)'}
+                            disabled={saving === `keep-${product.id}`}
+                            style={{ color: product.keepLiveWhenOos ? '#8B1A1A' : undefined }}
+                          >
+                            {product.keepLiveWhenOos ? <Pin size={14} /> : <PinOff size={14} />}
                           </button>
                           <button onClick={() => openEditProduct(product)} className="adm-icon-btn" title="Edit product details"><Pencil size={14} /></button>
                           <button onClick={() => void toggleArchive(product)} className="adm-icon-btn">{product.isArchived ? <ArchiveRestore size={14} /> : <Archive size={14} />}</button>
@@ -2862,6 +2888,15 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                           {product.supplier && <div className="adm-muted" style={{ fontSize: 11 }}>{product.supplier}</div>}
                         </div>
                         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                          <button
+                            onClick={() => void toggleKeepLiveWhenOos(product)}
+                            className="adm-icon-btn"
+                            title={product.keepLiveWhenOos ? 'Pinned — restore to site' : 'Keep on site when out of stock'}
+                            disabled={saving === `keep-${product.id}`}
+                            style={{ color: product.keepLiveWhenOos ? '#8B1A1A' : undefined }}
+                          >
+                            {product.keepLiveWhenOos ? <Pin size={14} /> : <PinOff size={14} />}
+                          </button>
                           <button onClick={() => openEditProduct(product)} className="adm-icon-btn" title="Edit product"><Pencil size={14} /></button>
                           <button onClick={() => void toggleArchive(product)} className="adm-icon-btn" title="Restore from archive"><ArchiveRestore size={14} /></button>
                         </div>

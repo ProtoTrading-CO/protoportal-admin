@@ -51,6 +51,8 @@ const PAGE_SIZE = 1000;
 export const DORMANT_ARCHIVED_BY = 'new-products';
 /** Soft-deleted from Product Manager — restorable from Recycle Bin */
 export const RECYCLE_ARCHIVED_BY = 'recycle-bin';
+/** Auto-archived when source stock hits zero (unless keep_live_when_oos) */
+export const AUTO_OOS_ARCHIVED_BY = 'auto-oos';
 
 async function stockAction(body) {
   const res = await fetch('/api/stock-actions', {
@@ -126,6 +128,8 @@ function adapt(row, { archived = false, tree = null } = {}) {
     leadTime: '',
     tradeNote: '',
     inStock: stock.stockOnHand !== null ? stock.stockOnHand > 0 : true,
+    keepLiveWhenOos: !!row.keep_live_when_oos,
+    archivedBy: row.archived_by || null,
     createdAt: row.created_at,
     yearlySales: 0,
     supplier: '',
@@ -498,6 +502,13 @@ export async function archiveProduct(sku, shouldArchive = true) {
   } else {
     await stockAction({ action: 'unarchive', sku });
   }
+  invalidateProductCache();
+  invalidateAdminCache();
+}
+
+/** Keep a product on the live site even when source stock is zero (opts out of auto-oos archive). */
+export async function setKeepLiveWhenOos(sku, keepLive) {
+  await stockAction({ action: 'setKeepLive', sku, keepLive: !!keepLive });
   invalidateProductCache();
   invalidateAdminCache();
 }
