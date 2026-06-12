@@ -4879,6 +4879,7 @@ html, body { background: #f5f5f5; color: #111827; }
 .oa-hub { display: grid; gap: 16px; }
 .oa-hub-tabs { margin-bottom: 0; }
 .sa-stat-grid--5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.sa-stat-grid--4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .sa-badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; }
 .sa-badge--amber { background: #fef3c7; color: #92400e; border: 1px solid #fde68a; }
 .sa-badge--red { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
@@ -4901,6 +4902,7 @@ html, body { background: #f5f5f5; color: #111827; }
 @media (max-width: 900px) {
   .oa-stat-grid, .oa-split, .oa-peak-grid, .oa-insights-row { grid-template-columns: 1fr; }
   .sa-stat-grid--5 { grid-template-columns: 1fr 1fr; }
+  .sa-stat-grid--4 { grid-template-columns: 1fr 1fr; }
 }
 
 .oa-wa-notify {
@@ -4940,3 +4942,53 @@ html, body { background: #f5f5f5; color: #111827; }
 .oa-wa-notify-retry:hover:not(:disabled) { opacity: 1; }
 .oa-wa-notify-retry:disabled { opacity: 0.5; cursor: not-allowed; }
 .oa-wa-notify--muted { flex-wrap: wrap; }
+
+/* ── Apollo AI ─────────────────────────────────────────────────────────── */
+.apollo-panel { display: flex; flex-direction: column; gap: 16px; min-height: calc(100vh - 180px); }
+.apollo-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+.apollo-starters { display: flex; flex-wrap: wrap; gap: 8px; }
+.apollo-starter {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 8px 12px; border-radius: 999px; border: 1px solid #e5e7eb;
+  background: #fff; font-size: 12px; font-weight: 600; color: #374151;
+  cursor: pointer; font-family: inherit;
+}
+.apollo-starter:hover:not(:disabled) { border-color: #c40000; color: #c40000; }
+.apollo-starter:disabled { opacity: 0.5; cursor: not-allowed; }
+.apollo-chat {
+  flex: 1; min-height: 360px; max-height: 62vh; overflow-y: auto;
+  border: 1px solid #e5e7eb; border-radius: 12px; background: #fafafa;
+  padding: 16px; display: flex; flex-direction: column; gap: 14px;
+}
+.apollo-msg { max-width: 92%; }
+.apollo-msg--user { align-self: flex-end; }
+.apollo-msg--assistant { align-self: flex-start; }
+.apollo-msg-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #94a3b8; margin-bottom: 4px; }
+.apollo-msg--user .apollo-msg-label { text-align: right; color: #c40000; }
+.apollo-msg-body {
+  padding: 12px 14px; border-radius: 12px; font-size: 14px; line-height: 1.55; color: #111;
+}
+.apollo-msg--user .apollo-msg-body { background: #111; color: #fff; border-bottom-right-radius: 4px; }
+.apollo-msg--assistant .apollo-msg-body { background: #fff; border: 1px solid #e5e7eb; border-bottom-left-radius: 4px; }
+.apollo-thinking { display: flex; align-items: center; gap: 8px; color: #64748b; }
+.apollo-md h3 { margin: 12px 0 6px; font-size: 15px; font-weight: 800; color: #111; }
+.apollo-md h4 { margin: 10px 0 4px; font-size: 13px; font-weight: 700; color: #374151; }
+.apollo-md p { margin: 0 0 8px; }
+.apollo-md-bullet { padding-left: 4px; }
+.apollo-chart { margin: 12px 0; padding: 12px; background: #f8fafc; border-radius: 8px; border: 1px solid #e5e7eb; }
+.apollo-chart-title { font-size: 12px; font-weight: 700; color: #374151; margin-bottom: 10px; }
+.apollo-chart-bars { display: flex; align-items: flex-end; gap: 8px; min-height: 120px; }
+.apollo-chart-col { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 4px; height: 140px; }
+.apollo-chart-val { font-size: 10px; font-weight: 700; color: #64748b; }
+.apollo-chart-fill { width: 100%; max-width: 40px; background: #c40000; border-radius: 4px 4px 0 0; min-height: 4px; margin-top: auto; }
+.apollo-chart-label { font-size: 9px; color: #64748b; text-align: center; word-break: break-word; max-width: 64px; line-height: 1.2; }
+.apollo-pdf-link {
+  margin-top: 6px; display: inline-flex; align-items: center; gap: 4px;
+  border: none; background: none; color: #c40000; font-size: 11px; font-weight: 700; cursor: pointer; padding: 0;
+}
+.apollo-input-row { display: flex; gap: 10px; }
+.apollo-input {
+  flex: 1; height: 44px; padding: 0 14px; border-radius: 10px; border: 1px solid #e5e7eb;
+  font-size: 14px; font-family: inherit;
+}
+.apollo-input:focus { outline: none; border-color: #c40000; box-shadow: 0 0 0 2px rgba(196,0,0,0.12); }

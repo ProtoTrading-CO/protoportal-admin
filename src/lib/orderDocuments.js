@@ -119,6 +119,7 @@ export async function generateOrderPdfBase64({
   assignedTo = '',
   total = null,
   hasPrices = false,
+  includeInternalLink = false,
   fulfillmentUrl = '',
 }) {
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
@@ -141,7 +142,7 @@ export async function generateOrderPdfBase64({
   const dateStr = new Date(order?.created_at || Date.now()).toLocaleDateString('en-ZA', {
     day: 'numeric', month: 'long', year: 'numeric',
   });
-  const linkUrl = fulfillmentUrl || buildFulfillmentUrl(order?.id);
+  const linkUrl = includeInternalLink ? (fulfillmentUrl || buildFulfillmentUrl(order?.id)) : '';
 
   // ── Header band (Proto white / red / black) ───────────────────────────
   doc.setFillColor(255, 255, 255);

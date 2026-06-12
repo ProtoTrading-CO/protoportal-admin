@@ -328,7 +328,6 @@ export default function FulfillmentPage() {
         assignedTo: activeUser?.name,
         total: hasPrices ? total : null,
         hasPrices,
-        fulfillmentUrl: buildFulfillmentUrl(order?.id),
       });
       openPdfBase64Preview(pdfBase64, `proto-order-${displayOrderNumber(order)}.pdf`);
     } catch (e) {

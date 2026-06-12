@@ -4,6 +4,7 @@ import {
   ArchiveRestore,
   ArrowLeftRight,
   BarChart2,
+  Bot,
   MessageCircle,
   Building2,
   Check,
@@ -103,6 +104,7 @@ import ReorderGrid from '../components/ReorderGrid';
 import FulfillmentSettingsModal from '../components/FulfillmentSettingsModal';
 import OrderWhatsappNotify from '../components/OrderWhatsappNotify';
 import AnalyticsHub from '../components/AnalyticsHub';
+import ApolloPanel from '../components/ApolloPanel';
 import categories from '../data/categories.json';
 
 // ─── Reorder sort order — stored in localStorage, applied client-side ─────────
@@ -132,6 +134,7 @@ function applySavedOrder(products, category) {
 
 const sections = [
   { id: 'orders', label: 'Order Requests', icon: ShoppingBag },
+  { id: 'apollo', label: 'Apollo', icon: Bot },
   { id: 'products', label: 'Product Manager', icon: PackagePlus },
   { id: 'customers', label: 'Customer Management', icon: Users },
   { id: 'reorder', label: 'Reorder Grid', icon: Grip },
@@ -960,7 +963,6 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
         assignedTo: activeFulfillmentUser?.name || '',
         total,
         hasPrices,
-        fulfillmentUrl: buildFulfillmentUrl(order.id),
       });
       const emailRes = await fetch('/api/send-order-email', {
         method: 'POST',
@@ -2104,6 +2106,10 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
             )}
 
             {/* NEW PRODUCTS */}
+            {activeSection === 'apollo' && (
+              <ApolloPanel />
+            )}
+
             {activeSection === 'new-products' && (
               <div className="adm-panel">
                 {/* Hidden file inputs */}
