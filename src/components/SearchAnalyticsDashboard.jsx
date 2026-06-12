@@ -255,6 +255,24 @@ export default function SearchAnalyticsDashboard() {
 
       {error && <p className="oa-error">{error}</p>}
 
+      {data?.meta?.tableError && data?.meta?.trackingEnabled && (
+        <p className="oa-wa-notify oa-wa-notify--warn">Some analytics queries returned warnings: {data.meta.tableError}</p>
+      )}
+
+      {!loading && data && data.kpis?.totalSearches === 0 && (
+        <div className="sa-empty-banner">
+          <strong>No search data yet for this period.</strong>
+          <p>
+            Searches are logged from the trade portal when customers use the search bar on{' '}
+            <a href="https://protoportal-main.vercel.app" target="_blank" rel="noopener noreferrer">protoportal-main.vercel.app</a>.
+            Try a test search there, then click Refresh above.
+          </p>
+          {data.meta?.lastSearchAt && (
+            <p className="sa-empty-banner__meta">Last event in database: {new Date(data.meta.lastSearchAt).toLocaleString('en-ZA')}</p>
+          )}
+        </div>
+      )}
+
       {loading && !data ? (
         <div className="oa-loading"><Loader2 size={20} className="spin" /> Loading search analytics…</div>
       ) : (
