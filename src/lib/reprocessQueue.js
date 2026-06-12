@@ -1,10 +1,10 @@
-/** Reprocess live catalogue products → Gemini 800×800 → New Products (dormant). */
+/** Reprocess live catalogue products → Gemini → staged preview in New Products (live row unchanged). */
 
-export async function reprocessOneToDormant(sku) {
+export async function reprocessOneToDormant(sku, { prompt } = {}) {
   const res = await fetch('/api/reprocess-live-to-dormant', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sku }),
+    body: JSON.stringify({ sku, prompt: prompt || undefined }),
   });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(json.error || `Reprocess failed (${res.status})`);
@@ -13,9 +13,9 @@ export async function reprocessOneToDormant(sku) {
 
 /**
  * @param {{ sku: string, title?: string, imageUrl?: string }[]} products
- * @param {{ onItemUpdate?: (index: number, patch: object) => void, signal?: AbortSignal }} opts
+ * @param {{ prompt?: string, onItemUpdate?: (index: number, patch: object) => void, signal?: AbortSignal }} opts
  */
-export async function runReprocessBatch(products, { onItemUpdate, signal } = {}) {
+export async function runReprocessBatch(products, { prompt, onItemUpdate, signal } = {}) {
   const queue = products.filter((p) => p?.sku);
   const results = { done: 0, failed: 0, items: [] };
 
@@ -25,16 +25,16 @@ export async function runReprocessBatch(products, { onItemUpdate, signal } = {})
 
     onItemUpdate?.(i, {
       status: 'transforming',
-      message: 'Gemini fixing (800×800 white)…',
+      message: 'Gemini processing…',
     });
 
     try {
-      const json = await reprocessOneToDormant(item.sku);
+      const json = await reprocessOneToDormant(item.sku, { prompt });
       results.done += 1;
       results.items.push({ sku: item.sku, ok: true, imageUrl: json.imageUrl });
       onItemUpdate?.(i, {
         status: 'done',
-        message: 'Moved to New Products ✓',
+        message: json.stillLive ? 'Preview ready — still live on site ✓' : 'Moved to New Products ✓',
         previewUrl: json.imageUrl,
         sourceUrl: json.sourceUrl,
       });

@@ -73,17 +73,24 @@ export default async function handler(req, res) {
 
     if (action === 'listArchived') {
       const { archivedBy = null, excludeArchivedBy = null } = req.body;
-      const [rawRows, tree] = await Promise.all([
+      const [rawRows, tree, liveRows] = await Promise.all([
         fetchAllRows(supabase, 'archived_products', {
           orderBy: 'archived_at',
           filter: archivedBy ? (q) => q.eq('archived_by', archivedBy) : null,
         }),
         loadTaxonomy().catch(() => []),
+        archivedBy === 'new-products'
+          ? fetchAllRows(supabase, 'website_stock', { orderBy: 'sku' }).catch(() => [])
+          : Promise.resolve([]),
       ]);
       const filtered = Array.isArray(excludeArchivedBy) && excludeArchivedBy.length
         ? rawRows.filter((r) => !excludeArchivedBy.includes(r.archived_by))
         : rawRows;
-      const rows = await enrichRowsWithProductStock(supabase, filtered);
+      const liveSkuSet = new Set((liveRows || []).map((r) => r.sku));
+      const withLiveFlag = filtered.map((r) => (
+        archivedBy === 'new-products' ? { ...r, still_live: liveSkuSet.has(r.sku) } : r
+      ));
+      const rows = await enrichRowsWithProductStock(supabase, withLiveFlag);
       return res.status(200).json({ rows, tree });
     }
 

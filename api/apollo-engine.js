@@ -27,39 +27,57 @@ function fmtDate(iso) {
   return new Date(iso).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
-export function executeIntent(intent, data, terms = '', { limit = null } = {}) {
+export function executeIntent(intent, data, terms = '', { limit = null, skus = [], imagePrompt = '' } = {}) {
   const { customers, orders, products, search } = data;
 
   switch (intent) {
     case 'batch_fix_images': {
-      const canonical = resolveTaxonomyLabels(terms);
-      const displayLabel = canonical[0] || terms;
-      const matched = findProductsBySubcategory(products, terms);
+      let matched = [];
+      let displayLabel = '';
+
+      const skuList = Array.isArray(skus) ? skus.map((s) => String(s).trim()).filter(Boolean) : [];
+      if (skuList.length) {
+        const skuSet = new Set(skuList.map((s) => s.toUpperCase()));
+        matched = products.all.filter((p) => skuSet.has(String(p.sku || '').toUpperCase()) || skuSet.has(String(p.barcode || '').toUpperCase()));
+        displayLabel = skuList.length === 1 ? skuList[0] : `${skuList.length} SKUs`;
+      } else {
+        const canonical = resolveTaxonomyLabels(terms);
+        displayLabel = canonical[0] || terms;
+        matched = findProductsBySubcategory(products, terms);
+      }
+
       const withImages = matched.filter((p) => p.imageUrl);
       const missing = matched.length - withImages.length;
+      const notFound = skuList.length ? skuList.filter((code) => !matched.some((p) => p.sku.toUpperCase() === code.toUpperCase() || String(p.barcode || '').toUpperCase() === code.toUpperCase())) : [];
 
       if (!matched.length) {
-        const suggestions = suggestSubcategories(terms);
+        const suggestions = !skuList.length ? suggestSubcategories(terms) : [];
         const hint = suggestions.length
           ? `\n\nDid you mean: ${suggestions.map((s) => `**${s}**`).join(', ')}?`
           : '';
+        const skuHint = notFound.length ? `\n\nCodes not found: ${notFound.map((s) => `**${s}**`).join(', ')}` : '';
         return {
           source: 'live-index',
           intent,
-          reply: `## Image fix\n\nNo products matched **"${terms || '—'}"**.${hint}\n\nPick the subcategory from Product Manager, or try the exact label e.g. **Games & Puzzles**.`,
+          reply: `## Image fix\n\nNo products matched${skuList.length ? ` codes **${skuList.join(', ')}**` : ` **"${terms || '—'}"**`}.${skuHint}${hint}\n\nTry exact SKUs or a subcategory name e.g. **Games & Puzzles**.`,
         };
       }
 
       const preview = withImages.slice(0, 8).map((p, i) => `${i + 1}. **${p.title}** (${p.sku})`);
       const more = withImages.length > 8 ? `\n\n_…and ${withImages.length - 8} more._` : '';
+      const promptNote = imagePrompt
+        ? `\n\n**Your instructions:** ${imagePrompt}`
+        : '\n\n_Default: 800×800 white background, background removed._';
+      const stayLiveNote = '\n\n_Products **stay live** on the website with their current images. Only **Go live** in New Products will replace the live image._';
 
       return {
         source: 'live-index',
         intent,
-        reply: `## Image fix — ${displayLabel}\n\nFound **${withImages.length}** products${missing ? ` (${missing} skipped — no image)` : ''}.\n\nSending to **New Products** for Gemini processing (800×800 white background). Open the New Products tab to watch the live feed…\n\n${preview.join('\n')}${more}`,
+        reply: `## Image fix — ${displayLabel}\n\nFound **${withImages.length}** products${missing ? ` (${missing} skipped — no image)` : ''}${notFound.length ? ` · ${notFound.length} code(s) not found` : ''}.${promptNote}${stayLiveNote}\n\nSending to **New Products** for processing. Open that tab to watch the live feed…\n\n${preview.join('\n')}${more}`,
         batchAction: {
           type: 'reprocess_to_dormant',
           subcategory: displayLabel,
+          imagePrompt: imagePrompt || '',
           products: withImages.map((p) => ({ sku: p.sku, title: p.title, imageUrl: p.imageUrl })),
         },
       };

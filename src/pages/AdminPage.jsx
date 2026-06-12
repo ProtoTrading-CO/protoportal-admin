@@ -52,6 +52,7 @@ import {
 // xlsx is loaded on demand in the export handlers — keeps it out of the main bundle
 import {
   archiveProduct,
+  applyDormantLive,
   bulkArchiveProducts,
   bulkDeleteProducts,
   bulkMoveProducts,
@@ -652,13 +653,14 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     void loadDormant();
   };
 
-  const processReprocessBatch = async (products, { label = '', switchTab = true, skipConfirm = false } = {}) => {
+  const processReprocessBatch = async (products, { label = '', switchTab = true, skipConfirm = false, imagePrompt = '' } = {}) => {
     const rows = products.filter((p) => p?.sku);
     if (!rows.length) {
       showToast('No products with images to reprocess', 'error');
       return;
     }
-    if (!skipConfirm && !window.confirm(`Send ${rows.length} product${rows.length === 1 ? '' : 's'}${label ? ` from ${label}` : ''} through Gemini (800×800 white bg) and move to New Products? They will leave the live catalogue until you set them live again.`)) {
+    const promptNote = imagePrompt ? `\n\nInstructions: ${imagePrompt}` : '';
+    if (!skipConfirm && !window.confirm(`Process ${rows.length} product${rows.length === 1 ? '' : 's'}${label ? ` from ${label}` : ''} through Gemini and stage in New Products?${promptNote}\n\nProducts stay live on the website until you click Go live.`)) {
       return;
     }
 
@@ -678,6 +680,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
 
     try {
       const results = await runReprocessBatch(rows, {
+        prompt: imagePrompt,
         onItemUpdate: (index, patch) => {
           setUploadQueue((prev) => prev.map((item, idx) => (idx === index ? { ...item, ...patch } : item)));
           if (patch.status === 'done') void loadDormant();
@@ -688,7 +691,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
       await loadDormant();
       await loadProducts();
       await refreshDashboardStats();
-      showToast(`Reprocess complete — ${results.done} moved to New Products, ${results.failed} failed`);
+      showToast(`Reprocess complete — ${results.done} staged in New Products, ${results.failed} failed`);
     } catch (err) {
       showToast(err.message || 'Reprocess batch failed', 'error');
     } finally {
@@ -1352,9 +1355,13 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const goLive = async (product) => {
     setSaving(product.id);
     try {
-      await archiveProduct(product.id, false); // false = not archived = live
+      await applyDormantLive(product.id);
       setDormantRows((prev) => prev.filter((p) => p.id !== product.id));
       setDormantSelected((prev) => { const next = new Set(prev); next.delete(product.id); return next; });
+      invalidateProductCache();
+      invalidateAdminCache();
+      await loadProducts();
+      showToast(product.stillLive ? `"${product.name}" live image updated` : `"${product.name}" is now live`);
     } catch (err) {
       alert(err.message || 'Failed to go live');
     } finally { setSaving(''); }
@@ -1365,9 +1372,13 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     const ids = [...dormantSelected];
     setSaving('bulk-live');
     try {
-      await Promise.all(ids.map((id) => archiveProduct(id, false)));
+      await Promise.all(ids.map((id) => applyDormantLive(id)));
       setDormantRows((prev) => prev.filter((p) => !dormantSelected.has(p.id)));
       setDormantSelected(new Set());
+      invalidateProductCache();
+      invalidateAdminCache();
+      await loadProducts();
+      showToast(`${ids.length} product${ids.length === 1 ? '' : 's'} updated on site`);
     } catch (err) {
       alert(err.message || 'Failed to go live');
     } finally { setSaving(''); }
@@ -2208,7 +2219,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                     <h2 className="adm-section-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <Sparkles size={20} style={{ color: '#8B1A1A' }} /> New Products
                     </h2>
-                    <p className="adm-section-note">Upload one image or a whole folder. Each filename becomes the product code, enhances the image, and saves the product dormant until you set it live.</p>
+                    <p className="adm-section-note">Upload new images or reprocess live products. Staged products stay on the website until you click <strong>Go live</strong> to replace the live image.</p>
                   </div>
                   <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                     <button onClick={() => singleImageRef.current?.click()} className="adm-btn-red">
@@ -2398,6 +2409,9 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                         <div className="adm-muted" style={{ fontSize: 11 }}>
                           <span title="Barcode">BC: {product.barcode || product.code}</span>
                           {product.websiteSku && <span title="Website SKU" style={{ marginLeft: 8 }}>WSK: {product.websiteSku}</span>}
+                          {product.stillLive && (
+                            <span style={{ marginLeft: 8, color: '#16a34a', fontWeight: 700 }}>· Still live on site</span>
+                          )}
                         </div>
                       </div>
                       <div style={{ fontSize: 13, color: '#475569' }}>
@@ -2432,7 +2446,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                           }}
                         >
                           <Zap size={12} />
-                          {saving === product.id ? '…' : 'Go live'}
+                          {saving === product.id ? '…' : (product.stillLive ? 'Apply image' : 'Go live')}
                         </button>
                         <button
                           onClick={() => void removeDormantProduct(product)}

@@ -130,6 +130,7 @@ function adapt(row, { archived = false, tree = null } = {}) {
     inStock: stock.stockOnHand !== null ? stock.stockOnHand > 0 : true,
     keepLiveWhenOos: !!row.keep_live_when_oos,
     archivedBy: row.archived_by || null,
+    stillLive: !!row.still_live,
     createdAt: row.created_at,
     yearlySales: 0,
     supplier: '',
@@ -504,6 +505,20 @@ export async function archiveProduct(sku, shouldArchive = true) {
   }
   invalidateProductCache();
   invalidateAdminCache();
+}
+
+/** Go live from New Products — applies staged image if product is still on site, else unarchives. */
+export async function applyDormantLive(sku) {
+  const res = await fetch('/api/apply-dormant-live', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sku }),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json.error || 'Go live failed');
+  invalidateProductCache();
+  invalidateAdminCache();
+  return json;
 }
 
 /** Keep a product on the live site even when source stock is zero (opts out of auto-oos archive). */

@@ -39,7 +39,11 @@ function ensureChart(intent, reply, data) {
 
 function answerFromData(data, parsed, userQuery) {
   const limit = parseLimit(userQuery);
-  const result = executeIntent(parsed.intent, data, parsed.terms, { limit });
+  const result = executeIntent(parsed.intent, data, parsed.terms, {
+    limit,
+    skus: parsed.skus || [],
+    imagePrompt: parsed.imagePrompt || '',
+  });
   if (!result) return null;
 
   if (parsed.wantsChart && result.reply && !result.reply.includes('```chart')) {
@@ -57,6 +61,8 @@ async function resolveQuery(userQuery, data, apiKey, { rejectIntent = '', badRep
     parsed = {
       intent: !rejectIntent && hint.confidence >= 0.85 ? hint.intent : 'freeform',
       terms: '',
+      skus: [],
+      imagePrompt: '',
       wantsChart: hint.wantsChart,
     };
   }

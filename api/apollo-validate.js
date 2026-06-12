@@ -35,7 +35,11 @@ export function validateIntent(query, parsed) {
 
   if (intent === 'customer_search' && !String(terms || '').trim()) return false;
 
-  if (intent === 'batch_fix_images' && !String(terms || '').trim()) return false;
+  if (intent === 'batch_fix_images') {
+    const hasTerms = String(terms || '').trim().length > 0;
+    const hasSkus = Array.isArray(parsed.skus) && parsed.skus.length > 0;
+    if (!hasTerms && !hasSkus) return false;
+  }
 
   return true;
 }

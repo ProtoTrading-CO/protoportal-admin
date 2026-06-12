@@ -9,6 +9,15 @@ Remove the background and place the product on a pure white (#FFFFFF) background
 Center the product with even padding. Preserve the exact product, colours, and shape.
 No text, watermarks, or extra props. Clean catalogue-style square product shot.`;
 
+/** Build Gemini prompt from admin instructions; always enforces 800×800 white canvas after transform. */
+export function buildImagePrompt(userInstructions) {
+  const custom = String(userInstructions || '').trim();
+  if (!custom) return FIX_PROMPT;
+  return `${custom}
+
+Additional requirements: remove distracting backgrounds, preserve the exact product shape and colours, no text or watermarks. Final output will be placed on an 800×800 pure white (#FFFFFF) canvas with the product centred and even padding.`;
+}
+
 function getStockAdminClient() {
   return createClient(
     process.env.VITE_STOCK_SUPABASE_URL,
@@ -152,9 +161,10 @@ export async function uploadTransformedImage(buffer, filename, contentType = 'im
 }
 
 /** New Products pipeline: OpenRouter Gemini → 800×800 white canvas → upload. */
-export async function fixImageFromUrl(imageUrl, { sku = 'product' } = {}) {
+export async function fixImageFromUrl(imageUrl, { sku = 'product', prompt } = {}) {
   const { base64, contentType } = await fetchImageBuffer(imageUrl);
-  const transformed = await transformWithOpenRouter(base64, contentType);
+  const imagePrompt = prompt || FIX_PROMPT;
+  const transformed = await transformWithOpenRouter(base64, contentType, { prompt: imagePrompt });
   const resized = await resizeTo800White(transformed.buffer);
   const url = await uploadTransformedImage(resized, `${sku}.jpg`, 'image/jpeg');
   return {

@@ -1,7 +1,7 @@
 /** Regex hints only — never used as final routing without AI confirmation. */
 
 const INTENTS = [
-  { id: 'batch_fix_images', weight: 14, patterns: [/fix (the )?images/i, /image fixer/i, /new products engine/i, /through gemini/i, /gemini new products/i, /put them through/i, /reprocess.*images/i] },
+  { id: 'batch_fix_images', weight: 14, patterns: [/fix (the )?images/i, /image fixer/i, /new products engine/i, /through gemini/i, /gemini new products/i, /put them through/i, /reprocess.*images/i, /white background/i, /remove (the )?background/i, /resize.*800/i, /800\s*[x×]\s*800/i, /products with (the )?(following )?codes/i] },
   { id: 'order_top_items', weight: 12, patterns: [/best performing/i, /performing products/i, /ordered the most/i, /top selling/i, /most ordered/i, /based on orders/i, /popular products/i, /barograph/i, /bar chart/i] },
   { id: 'product_count', weight: 10, patterns: [/^how many products/i, /product count/i, /total products/i, /catalogue size/i, /number of products/i] },
   { id: 'product_negative_stock', weight: 12, patterns: [/negative stock/i, /below zero/i, /stock.*negative/i, /negative.*stock/i] },
@@ -65,25 +65,32 @@ export async function classifyIntent(query, apiKey, { rejectIntent = '', regexHi
         {
           role: 'system',
           content: `You route Proto Trading admin questions to exactly ONE data query. Reply ONLY JSON:
-{"intent":"<id>","terms":"<subcategory name, sku keyword, or empty>","wantsChart":true|false}
+{"intent":"<id>","terms":"<subcategory name or empty>","skus":["SKU1","SKU2"],"imagePrompt":"<image editing instructions or empty>","wantsChart":true|false}
 ${rejectNote}
 
 Regex hint (may be wrong): ${hint.intent} (${Math.round(hint.confidence * 100)}%)
 
 DISAMBIGUATION — follow strictly:
-• "fix images / gemini new products / put through new products" for a subcategory → batch_fix_images (terms = subcategory name, e.g. "games and puzzles")
+• Image editing / resize / white background / remove background for products → batch_fix_images
+  - subcategory named → terms = subcategory (e.g. "games and puzzles"), skus = []
+  - specific product codes/SKUs listed → skus = ["CODE1","CODE2"], terms = ""
+  - imagePrompt = the user's image instructions verbatim (e.g. "resize to 800x800 remove background white background")
+• "fix images / gemini new products / put through new products" for a subcategory → batch_fix_images
 • "best performing / top selling / most ordered / products + orders" → order_top_items (NOT product_count)
 • "how many products / catalogue size / total products" ONLY → product_count
 • "negative stock / below zero / give me N products with negative stock" → product_negative_stock (NOT product_search)
 • "lowest / least stock" → product_low_stock
 • "who are customers / list customers" → customer_list
 • "pending approval" → customer_pending
-• product_search ONLY when user names a specific SKU or product keyword (terms = that keyword)
-• terms must be empty for all intents except product_search, customer_search, and batch_fix_images
+• product_search ONLY when user names a specific SKU or product keyword for lookup (NOT image editing) (terms = that keyword)
+• terms = subcategory when batch_fix_images by category; empty when batch_fix_images by skus array
+• skus = array of product codes when user lists codes for image work; empty array otherwise
+• imagePrompt = copy user's image editing instructions; empty string if they only said "fix images" with no extra detail
 
 Examples:
-"fix images for games and puzzles subcategory" → {"intent":"batch_fix_images","terms":"games and puzzles","wantsChart":false}
-"all products in subcategory games and puzzles put through gemini new products" → {"intent":"batch_fix_images","terms":"games and puzzles","wantsChart":false}
+"products with codes ABC123 and XYZ789 resize them to 800 by 800 remove background white background" → {"intent":"batch_fix_images","terms":"","skus":["ABC123","XYZ789"],"imagePrompt":"resize to 800 by 800 remove the background and make it a white background","wantsChart":false}
+"fix images for games and puzzles subcategory" → {"intent":"batch_fix_images","terms":"games and puzzles","skus":[],"imagePrompt":"","wantsChart":false}
+"all products in subcategory games and puzzles put through gemini new products" → {"intent":"batch_fix_images","terms":"games and puzzles","skus":[],"imagePrompt":"","wantsChart":false}
 "best performing products bar chart" → {"intent":"order_top_items","terms":"","wantsChart":true}
 "give me 5 products with negative stock" → {"intent":"product_negative_stock","terms":"","wantsChart":false}
 "how many products do we have" → {"intent":"product_count","terms":"","wantsChart":false}
@@ -96,7 +103,7 @@ Valid intents: order_top_items, product_count, product_negative_stock, product_l
         { role: 'user', content: query },
       ],
       temperature: 0,
-      max_tokens: 120,
+      max_tokens: 200,
     }),
   });
 
@@ -109,6 +116,8 @@ Valid intents: order_top_items, product_count, product_negative_stock, product_l
     return {
       intent: json.intent,
       terms: String(json.terms || '').trim().slice(0, 80),
+      skus: Array.isArray(json.skus) ? json.skus.map((s) => String(s).trim()).filter(Boolean).slice(0, 50) : [],
+      imagePrompt: String(json.imagePrompt || '').trim().slice(0, 500),
       wantsChart: Boolean(json.wantsChart) || hint.wantsChart,
     };
   } catch {

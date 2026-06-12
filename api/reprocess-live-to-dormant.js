@@ -1,6 +1,14 @@
 import { requireAdminKey } from './_admin-auth.js';
 import { createClient } from '@supabase/supabase-js';
-import { fixImageFromUrl } from './_image-pipeline.js';
+import { fixImageFromUrl, buildImagePrompt } from './_image-pipeline.js';
+import { stageDormantPreview } from './_stage-dormant.js';
+
+const LIVE_SELECT = `
+  id, sku, barcode, title, original_description,
+  image_url_one, image_url_two, image_url_three, image_url_four,
+  category, subcategory_one, subcategory_two, subcategory_three, subcategory_four,
+  created_at, updated_at, price, stock_qty, available_stock, keep_live_when_oos
+`;
 
 function getClient() {
   return createClient(
@@ -15,14 +23,14 @@ export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   if (req.method !== 'POST') return res.status(405).end();
 
-  const { sku } = req.body || {};
+  const { sku, prompt: userPrompt } = req.body || {};
   const cleanSku = String(sku || '').trim();
   if (!cleanSku) return res.status(400).json({ error: 'sku is required' });
 
   const sb = getClient();
   const { data: row, error: lookupError } = await sb
     .from('website_stock')
-    .select('sku, title, category, subcategory_one, subcategory_two, original_description, image_url_one')
+    .select(LIVE_SELECT)
     .eq('sku', cleanSku)
     .maybeSingle();
 
@@ -36,19 +44,13 @@ export default async function handler(req, res) {
 
   try {
     const t0 = Date.now();
-    const { url: imageUrl, model, tokensIn, tokensOut } = await fixImageFromUrl(sourceUrl, { sku: cleanSku });
+    const imagePrompt = buildImagePrompt(userPrompt);
+    const { url: imageUrl, model, tokensIn, tokensOut } = await fixImageFromUrl(sourceUrl, {
+      sku: cleanSku,
+      prompt: imagePrompt,
+    });
 
-    const { error: updateError } = await sb
-      .from('website_stock')
-      .update({
-        image_url_one: imageUrl,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('sku', cleanSku);
-    if (updateError) return res.status(400).json({ error: updateError.message });
-
-    const { error: archiveError } = await sb.rpc('archive_product', { p_sku: cleanSku, p_by: 'new-products' });
-    if (archiveError) return res.status(400).json({ error: archiveError.message });
+    const { stillLive } = await stageDormantPreview(sb, row, imageUrl);
 
     return res.status(200).json({
       ok: true,
@@ -57,6 +59,7 @@ export default async function handler(req, res) {
       imageUrl,
       sourceUrl,
       category: row.category,
+      stillLive,
       model,
       tokensIn,
       tokensOut,
