@@ -2245,6 +2245,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                 onLegacyUpload={processUploadFiles}
                 singleImageRef={singleImageRef}
                 folderImageRef={folderImageRef}
+                taxonomyTree={taxonomyTree}
               />
             )}
 

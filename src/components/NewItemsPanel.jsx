@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
   Check,
+  Download,
   Image,
   ImagePlus,
   Loader2,
@@ -8,9 +9,9 @@ import {
   Sparkles,
   Trash2,
   Upload,
-  X,
   Zap,
 } from 'lucide-react';
+import { downloadNewItemsExcelTemplate } from '../lib/newItemsExcelTemplate.js';
 
 function stripExt(name) {
   return String(name || '').replace(/\.[^.]+$/, '');
@@ -51,10 +52,12 @@ export default function NewItemsPanel({
   excelInputRef,
   imageFolderRef,
   onLegacyUpload,
+  taxonomyTree = [],
 }) {
   const [stockStatus, setStockStatus] = useState({});
   const [importBusy, setImportBusy] = useState(false);
   const [folderBusy, setFolderBusy] = useState(false);
+  const [templateBusy, setTemplateBusy] = useState(false);
 
   useEffect(() => {
     const skus = dormantRows.map((p) => p.id || p.code);
@@ -83,8 +86,14 @@ export default function NewItemsPanel({
       const XLSX = await import('xlsx');
       const buf = await file.arrayBuffer();
       const wb = XLSX.read(buf, { type: 'array' });
-      const sheet = wb.Sheets[wb.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+      const sheetName = wb.SheetNames.find((n) => n.toLowerCase() === 'products') || wb.SheetNames[0];
+      const sheet = wb.Sheets[sheetName];
+      const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' })
+        .filter((row) => {
+          const sku = String(row.SKU || row.sku || '').trim();
+          return sku && sku.toUpperCase() !== 'EXAMPLE-SKU';
+        });
+      if (!rows.length) throw new Error('No product rows found — fill in the Products sheet (remove the example row).');
       const res = await fetch('/api/import-new-items-excel', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -151,8 +160,20 @@ export default function NewItemsPanel({
     }
   };
 
+  const handleDownloadTemplate = async () => {
+    setTemplateBusy(true);
+    try {
+      await downloadNewItemsExcelTemplate(taxonomyTree);
+      onShowToast('Template downloaded — fill the Products sheet and import when ready', 'success');
+    } catch (err) {
+      onShowToast(err.message || 'Could not generate template', 'error');
+    } finally {
+      setTemplateBusy(false);
+    }
+  };
+
   const selectedProducts = dormantRows.filter((p) => dormantSelected.has(p.id));
-  const busy = importBusy || folderBusy;
+  const busy = importBusy || folderBusy || templateBusy;
 
   return (
     <div className="adm-panel new-items-panel">
@@ -176,6 +197,9 @@ export default function NewItemsPanel({
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          <button type="button" onClick={() => void handleDownloadTemplate()} className="adm-btn-ghost" disabled={busy}>
+            {templateBusy ? <Loader2 size={14} className="spin" /> : <Download size={14} />} Download template
+          </button>
           <button type="button" onClick={() => excelInputRef?.current?.click()} className="adm-btn-red" disabled={busy}>
             {importBusy ? <Loader2 size={14} className="spin" /> : <Upload size={14} />} Import Excel
           </button>
