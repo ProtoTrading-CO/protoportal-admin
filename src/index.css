@@ -5970,3 +5970,46 @@ html, body { background: #f5f5f5; color: #111827; }
 .apollo-batch-banner-actions { display: flex; gap: 8px; flex-shrink: 0; align-items: flex-start; }
 .apollo-head-actions { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
 
+.apollo-remote-notice {
+  display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; margin-bottom: 14px;
+  background: #fffbeb; border: 1px solid #fcd34d; border-radius: 10px; color: #92400e; font-size: 13px;
+}
+.apollo-remote-notice strong { display: block; margin-bottom: 2px; }
+.apollo-remote-notice span { line-height: 1.45; opacity: 0.95; }
+
+.cost-tracking-panel { max-width: 1200px; }
+.cost-operator-bar {
+  display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; margin-bottom: 16px;
+  padding: 12px 14px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px;
+}
+.cost-operator-bar label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 600; color: #64748b; flex: 1; min-width: 200px; }
+.cost-tracking-warn {
+  padding: 12px 14px; margin-bottom: 16px; border-radius: 10px; background: #fffbeb;
+  border: 1px solid #fcd34d; color: #92400e; font-size: 13px; line-height: 1.45;
+}
+.cost-active-section { margin-bottom: 18px; }
+.cost-active-section h3 { display: flex; align-items: center; gap: 8px; font-size: 14px; margin: 0 0 10px; }
+.cost-active-card {
+  display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; padding: 10px 12px;
+  background: #fff5f5; border: 1px solid #fecaca; border-radius: 8px; margin-bottom: 8px; font-size: 13px;
+}
+.cost-active-locks { margin: 0; font-size: 12px; }
+.cost-stat-grid {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 20px;
+}
+@media (max-width: 900px) { .cost-stat-grid { grid-template-columns: repeat(2, 1fr); } }
+.cost-stat-card {
+  padding: 14px 16px; background: #fff; border: 1px solid #e2e8f0; border-radius: 12px;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.cost-stat-card span { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #64748b; }
+.cost-stat-card strong { font-size: 22px; color: #0f172a; font-variant-numeric: tabular-nums; }
+.cost-stat-card small { font-size: 12px; color: #64748b; }
+.cost-breakdown { margin-bottom: 20px; }
+.cost-breakdown h3, .cost-log-section h3 { font-size: 14px; margin: 0 0 10px; }
+.cost-breakdown-table-wrap { overflow-x: auto; border: 1px solid #e2e8f0; border-radius: 10px; }
+.cost-table { width: 100%; font-size: 12px; margin: 0; }
+.cost-table th { background: #f8fafc; white-space: nowrap; }
+.cost-model-cell { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cost-row--error td { background: #fef2f2; }
+

@@ -1,7 +1,15 @@
 import { requireAdminKey } from './_admin-auth.js';
-import { createClient } from '@supabase/supabase-js';
-import { fixImageFromUrl, IMAGE_STYLES } from './_image-pipeline.js';
+import { fixImageFromUrl, IMAGE_STYLES, DEFAULT_IMAGE_MODEL } from './_image-pipeline.js';
 import { readSlotUrl, stageDormantSlotPreview } from './_stage-dormant.js';
+import {
+  acquireImageGenLock,
+  estimateImageGenCost,
+  extractImageGenMeta,
+  fetchUsdToZarRate,
+  getStockClient,
+  logImageGenCost,
+  releaseImageGenLock,
+} from './_image-gen-cost.js';
 
 const LIVE_SELECT = `
   id, sku, barcode, title, original_description,
@@ -11,11 +19,7 @@ const LIVE_SELECT = `
 `;
 
 function getClient() {
-  return createClient(
-    process.env.VITE_STOCK_SUPABASE_URL,
-    process.env.VITE_STOCK_SUPABASE_KEY,
-    { auth: { autoRefreshToken: false, persistSession: false } },
-  );
+  return getStockClient();
 }
 
 function resolveStyle(imageStyle) {
@@ -47,33 +51,87 @@ export default async function handler(req, res) {
 
   const style = resolveStyle(imageStyle);
   const slot = Math.min(4, Math.max(1, Number(targetSlot) || 1));
+  const { operator, batchId } = extractImageGenMeta(req);
 
   const sb = getClient();
-  const { data: row, error: lookupError } = await sb
-    .from('website_stock')
-    .select(LIVE_SELECT)
-    .eq('sku', cleanSku)
-    .maybeSingle();
-
-  if (lookupError) return res.status(400).json({ error: lookupError.message });
-  if (!row) {
-    return res.status(404).json({ error: `Live product "${cleanSku}" not found` });
-  }
-
-  const srcSlot = sourceSlot ? Math.min(4, Math.max(1, Number(sourceSlot))) : firstSourceSlot(row);
-  const sourceUrl = readSlotUrl(row, srcSlot);
-  if (!sourceUrl) return res.status(400).json({ error: 'Product has no source image to reprocess' });
+  let lockHeld = false;
 
   try {
+    const lock = await acquireImageGenLock(sb, { sku: cleanSku, slot, batchId, operator });
+    lockHeld = lock.locked && !lock.skipped;
+
+    const { data: row, error: lookupError } = await sb
+      .from('website_stock')
+      .select(LIVE_SELECT)
+      .eq('sku', cleanSku)
+      .maybeSingle();
+
+    if (lookupError) return res.status(400).json({ error: lookupError.message });
+    if (!row) {
+      return res.status(404).json({ error: `Live product "${cleanSku}" not found` });
+    }
+
+    const srcSlot = sourceSlot ? Math.min(4, Math.max(1, Number(sourceSlot))) : firstSourceSlot(row);
+    const sourceUrl = readSlotUrl(row, srcSlot);
+    if (!sourceUrl) return res.status(400).json({ error: 'Product has no source image to reprocess' });
+
     const t0 = Date.now();
-    const { url: imageUrl, model, tokensIn, tokensOut } = await fixImageFromUrl(sourceUrl, {
+    let imageUrl;
+    let model;
+    let tokensIn;
+    let tokensOut;
+
+    try {
+      const result = await fixImageFromUrl(sourceUrl, {
+        sku: cleanSku,
+        imageStyle: style,
+        userInstructions: userPrompt,
+        productTitle: row.title,
+        productDescription: row.original_description,
+        referenceImageUrl: referenceImageUrl || undefined,
+        targetSlot: slot,
+      });
+      imageUrl = result.url;
+      model = result.model;
+      tokensIn = result.tokensIn;
+      tokensOut = result.tokensOut;
+    } catch (genErr) {
+      const costUsd = estimateImageGenCost({ model: DEFAULT_IMAGE_MODEL, isImageOutput: true });
+      const usdToZar = await fetchUsdToZarRate();
+      await logImageGenCost(sb, {
+        sku: cleanSku,
+        slot,
+        operation: 'transform',
+        imageStyle: style,
+        model: null,
+        tokensIn: 0,
+        tokensOut: 0,
+        costUsd,
+        costZar: costUsd * usdToZar,
+        usdToZar,
+        processingMs: Date.now() - t0,
+        operator,
+        batchId,
+        status: 'error',
+        error: genErr.message,
+      });
+      throw genErr;
+    }
+
+    const costUsd = estimateImageGenCost({ model, tokensIn, tokensOut, isImageOutput: true });
+    const costMeta = await logImageGenCost(sb, {
       sku: cleanSku,
+      slot,
+      operation: 'transform',
       imageStyle: style,
-      userInstructions: userPrompt,
-      productTitle: row.title,
-      productDescription: row.original_description,
-      referenceImageUrl: referenceImageUrl || undefined,
-      targetSlot: slot,
+      model,
+      tokensIn,
+      tokensOut,
+      costUsd,
+      processingMs: Date.now() - t0,
+      operator,
+      batchId,
+      status: 'ok',
     });
 
     const { stillLive } = await stageDormantSlotPreview(sb, row, { slot, imageUrl });
@@ -92,10 +150,17 @@ export default async function handler(req, res) {
       model,
       tokensIn,
       tokensOut,
+      costUsd: costMeta.costUsd,
+      costZar: costMeta.costZar,
+      usdToZar: costMeta.usdToZar,
       processingMs: Date.now() - t0,
+      operator,
     });
   } catch (err) {
     console.error('reprocess-live-to-dormant:', err?.message || err);
-    return res.status(500).json({ error: err.message || 'Reprocess failed' });
+    const status = /in use by/i.test(err.message) ? 409 : 500;
+    return res.status(status).json({ error: err.message || 'Reprocess failed' });
+  } finally {
+    if (lockHeld) await releaseImageGenLock(sb, cleanSku, slot);
   }
 }

@@ -66,7 +66,11 @@ export async function stageDormantSlotPreview(sb, liveRow, { slot = 1, imageUrl,
   payload[slotField(targetSlot)] = processedImageUrl;
 
   if (existing) {
-    const { error } = await sb.from('archived_products').update(payload).eq('sku', sku);
+    const patch = {
+      updated_at: now,
+      [slotField(targetSlot)]: processedImageUrl,
+    };
+    const { error } = await sb.from('archived_products').update(patch).eq('sku', sku);
     if (error) throw new Error(error.message);
   } else {
     const { error } = await sb.from('archived_products').insert({ ...payload, id: liveRow.id });

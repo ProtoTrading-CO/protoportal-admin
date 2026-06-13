@@ -13,6 +13,7 @@ import {
   ChevronRight,
   ClipboardList,
   Clock,
+  DollarSign,
   Eye,
   FileDown,
   Home,
@@ -115,6 +116,7 @@ import FulfillmentSettingsModal from '../components/FulfillmentSettingsModal';
 import OrderWhatsappNotify from '../components/OrderWhatsappNotify';
 import AnalyticsHub from '../components/AnalyticsHub';
 import ApolloPanel from '../components/ApolloPanel';
+import CostTrackingPanel from '../components/CostTrackingPanel';
 import categories from '../data/categories.json';
 
 // ─── Reorder sort order — stored in localStorage, applied client-side ─────────
@@ -145,6 +147,7 @@ function applySavedOrder(products, category) {
 const sections = [
   { id: 'orders', label: 'Order Requests', icon: ShoppingBag },
   { id: 'apollo', label: 'Apollo', icon: Bot },
+  { id: 'cost-tracking', label: 'Cost Tracking', icon: DollarSign },
   { id: 'products', label: 'Product Manager', icon: PackagePlus },
   { id: 'customers', label: 'Customer Management', icon: Users },
   { id: 'reorder', label: 'Reorder Grid', icon: Grip },
@@ -433,10 +436,6 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const [imageViewUrl, setImageViewUrl] = useState('');
   const [uploadQueue, setUploadQueue] = useState([]);
   const [reprocessBusy, setReprocessBusy] = useState(false);
-  const [costLog, setCostLog] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('proto_image_gen_costs') || '[]'); } catch { return []; }
-  });
-  const [newProductsTab, setNewProductsTab] = useState('products'); // 'products' | 'costs'
   const singleImageRef = useRef(null);
   const folderImageRef = useRef(null);
   const newItemsExcelRef = useRef(null);
@@ -595,8 +594,6 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     const initial = imageFiles.map((f) => ({ name: f.name, status: 'pending', message: '', cost: null }));
     setUploadQueue(initial);
 
-    const newEntries = [];
-
     for (let i = 0; i < imageFiles.length; i++) {
       const file = imageFiles[i];
       const sku = file.name.replace(/\.[^.]+$/, '');
@@ -633,13 +630,6 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
             costZar     = analyseJson.costZar ?? 0;
             usdToZar    = analyseJson.usdToZar ?? 0;
             model       = analyseJson.model       || '';
-            newEntries.push({
-              sku, title, cost, costUsd: cost, costZar, usdToZar, model,
-              tokensIn: analyseJson.tokensIn || 0,
-              tokensOut: analyseJson.tokensOut || 0,
-              processingMs: analyseJson.processingMs || 0,
-              timestamp: Date.now(),
-            });
           }
         } catch { /* non-fatal */ }
       }
@@ -659,15 +649,6 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
       } catch (err) {
         setUploadQueue((prev) => prev.map((item, idx) => idx === i ? { ...item, status: 'error', message: err.message } : item));
       }
-    }
-
-    // Persist cost log
-    if (newEntries.length) {
-      setCostLog((prev) => {
-        const next = [...newEntries, ...prev].slice(0, 500); // keep last 500
-        try { localStorage.setItem('proto_image_gen_costs', JSON.stringify(next)); } catch {}
-        return next;
-      });
     }
 
     invalidateAdminCache();
@@ -2225,6 +2206,10 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                 }}
               />
             </div>
+
+            {activeSection === 'cost-tracking' && (
+              <CostTrackingPanel onShowToast={showToast} />
+            )}
 
             {activeSection === 'new-items' && (
               <NewItemsPanel

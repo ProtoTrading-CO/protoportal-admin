@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { jsPDF } from 'jspdf';
-import { Bot, CheckCircle, FileDown, Loader2, Send, Sparkles, User, Wrench } from 'lucide-react';
+import { Bot, CheckCircle, FileDown, Loader2, Send, Sparkles, User, Users, Wrench } from 'lucide-react';
 import ApolloImageWizard from './ApolloImageWizard';
 import { getActiveImageBatch, subscribeImageBatch } from '../lib/imageBatchTracker';
+import { getImageGenOperator } from '../lib/imageGenSession';
 
 const STARTERS = [
   'What are my best performing products by orders?',
@@ -291,6 +292,22 @@ function ImageBatchBanner({ batch, onOpenApproval, onBackToWizard }) {
   return null;
 }
 
+function RemoteBatchNotice({ batches, lockCount }) {
+  if (!batches?.length) return null;
+  return (
+    <div className="apollo-remote-notice" role="status">
+      <Users size={16} />
+      <div>
+        <strong>{batches.length === 1 ? 'Another user is generating images' : `${batches.length} other image batches running`}</strong>
+        <span>
+          {batches.map((b) => b.operator || 'Someone').join(', ')} — overlapping SKUs will queue automatically.
+          {lockCount > 0 ? ` ${lockCount} slot lock${lockCount === 1 ? '' : 's'} active.` : ''}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 export default function ApolloPanel({ taxonomyTree, onShowToast, onGoToApproval, onRefreshCatalog }) {
   const [messages, setMessages] = useState(loadApolloMessages);
   const [input, setInput] = useState('');
@@ -300,9 +317,26 @@ export default function ApolloPanel({ taxonomyTree, onShowToast, onGoToApproval,
   const [wizardOpen, setWizardOpen] = useState(false);
   const [wizardBackground, setWizardBackground] = useState(false);
   const [imageBatch, setImageBatch] = useState(() => getActiveImageBatch());
+  const [remoteActive, setRemoteActive] = useState({ batches: [], locks: [] });
   const scrollRef = useRef(null);
 
   useEffect(() => subscribeImageBatch(setImageBatch), []);
+
+  useEffect(() => {
+    const poll = () => {
+      void fetch('/api/image-gen-costs?days=1&limit=5')
+        .then((r) => r.json())
+        .then((json) => {
+          const me = getImageGenOperator();
+          const others = (json.active?.batches || []).filter((b) => b.operator && b.operator !== me);
+          setRemoteActive({ batches: others, locks: json.active?.locks?.length || 0 });
+        })
+        .catch(() => {});
+    };
+    poll();
+    const timer = setInterval(poll, 15000);
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     void fetch('/api/apollo')
@@ -425,6 +459,8 @@ export default function ApolloPanel({ taxonomyTree, onShowToast, onGoToApproval,
           onBackToWizard={() => setWizardBackground(false)}
         />
       )}
+
+      <RemoteBatchNotice batches={remoteActive.batches} lockCount={remoteActive.locks} />
 
       {showChat && (
         <>

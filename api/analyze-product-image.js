@@ -1,4 +1,11 @@
 import { requireAdminKey } from './_admin-auth.js';
+import {
+  estimateImageGenCost,
+  extractImageGenMeta,
+  fetchUsdToZarRate,
+  getStockClient,
+  logImageGenCost,
+} from './_image-gen-cost.js';
 // Gemini Flash vision analysis — metadata only, no storage.
 // Frontend calls upload-product-image separately for the actual image URL.
 
@@ -99,9 +106,26 @@ export default async function handler(req, res) {
   const usage = json.usage || {};
   const tokensIn = usage.prompt_tokens || IMAGE_TOKEN_ESTIMATE;
   const tokensOut = usage.completion_tokens || 80;
-  const costUsd = parseFloat((((tokensIn / 1e6) * PRICE_IN_PER_M) + ((tokensOut / 1e6) * PRICE_OUT_PER_M)).toFixed(6));
+  const costUsd = estimateImageGenCost({ model: MODEL, tokensIn, tokensOut });
   const usdToZar = await fetchUsdToZarRate();
   const costZar = parseFloat((costUsd * usdToZar).toFixed(4));
+  const { operator, batchId } = extractImageGenMeta(req);
+  const sku = String(filename || '').replace(/\.[^.]+$/, '').trim();
+
+  await logImageGenCost(getStockClient(), {
+    sku: sku || null,
+    operation: 'analyze',
+    model: MODEL,
+    tokensIn,
+    tokensOut,
+    costUsd,
+    costZar,
+    usdToZar,
+    processingMs: Date.now() - t0,
+    operator,
+    batchId,
+    status: 'ok',
+  });
 
   const raw = json.choices?.[0]?.message?.content ?? '';
   const text = typeof raw === 'string' ? raw : (Array.isArray(raw) ? (raw.find((c) => c.type === 'text')?.text ?? '') : '');

@@ -21,6 +21,11 @@ import ReprocessLiveFeed from './ReprocessLiveFeed';
 import { compressImage } from '../lib/products';
 import { expandProductSlots, runReprocessBatch } from '../lib/reprocessQueue';
 import { finishImageBatch, startImageBatch, updateImageBatch } from '../lib/imageBatchTracker';
+import {
+  createImageGenBatchId,
+  registerImageGenBatch,
+  syncImageGenBatchProgress,
+} from '../lib/imageGenSession';
 
 const STYLES = [
   {
@@ -134,6 +139,7 @@ export default function ApolloImageWizard({
   const [refCandidatesLoading, setRefCandidatesLoading] = useState(false);
   const [refLightboxIndex, setRefLightboxIndex] = useState(-1);
   const abortRef = useRef(null);
+  const batchIdRef = useRef(null);
   const refInputRef = useRef(null);
   const backgroundRef = useRef(false);
 
@@ -297,6 +303,15 @@ export default function ApolloImageWizard({
       })));
       setQueue(initial);
 
+      const batchId = createImageGenBatchId();
+      batchIdRef.current = batchId;
+      await registerImageGenBatch({
+        batchId,
+        total: initial.length,
+        style: selectedStyle?.label || imageStyle,
+        productCount: products.length,
+      });
+
       startImageBatch({
         total: initial.length,
         style: selectedStyle?.label || imageStyle,
@@ -311,6 +326,7 @@ export default function ApolloImageWizard({
         imageStyle,
         referenceImageUrl: referenceUrl || undefined,
         fillSlots: multiAngle,
+        batchId,
         signal: ac.signal,
         onItemUpdate: (index, patch) => {
           const item = initial[index];
@@ -323,10 +339,12 @@ export default function ApolloImageWizard({
           if (patch.status === 'done') {
             doneCount += 1;
             updateImageBatch({ done: doneCount, failed: failedCount });
+            void syncImageGenBatchProgress(batchId, { done: doneCount, failed: failedCount });
           }
           if (patch.status === 'error') {
             failedCount += 1;
             updateImageBatch({ done: doneCount, failed: failedCount });
+            void syncImageGenBatchProgress(batchId, { done: doneCount, failed: failedCount });
           }
           if (backgroundRef.current) return;
           setQueue((prev) => {
@@ -342,6 +360,13 @@ export default function ApolloImageWizard({
 
       const aborted = ac.signal.aborted;
       finishImageBatch({ aborted });
+      if (batchIdRef.current) {
+        void syncImageGenBatchProgress(batchIdRef.current, {
+          done: doneCount,
+          failed: failedCount,
+          status: aborted ? 'cancelled' : 'complete',
+        });
+      }
       if (!aborted) {
         onShowToast?.(
           `Image batch complete — ${doneCount} staged${failedCount ? `, ${failedCount} failed` : ''}. Review in Approval.`,

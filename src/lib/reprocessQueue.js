@@ -1,4 +1,10 @@
+import { imageGenHeaders } from './imageGenSession.js';
+
 /** Reprocess live catalogue products → Gemini image gen → staged preview. */
+
+async function sleep(ms) {
+  return new Promise((resolve) => { setTimeout(resolve, ms); });
+}
 
 export async function reprocessOneToDormant(sku, {
   prompt,
@@ -6,22 +12,34 @@ export async function reprocessOneToDormant(sku, {
   targetSlot = 1,
   sourceSlot,
   referenceImageUrl,
+  batchId,
+  retries = 3,
 } = {}) {
-  const res = await fetch('/api/reprocess-live-to-dormant', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      sku,
-      prompt: prompt || undefined,
-      imageStyle: imageStyle || undefined,
-      targetSlot,
-      sourceSlot,
-      referenceImageUrl: referenceImageUrl || undefined,
-    }),
-  });
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(json.error || `Reprocess failed (${res.status})`);
-  return json;
+  let lastErr;
+  for (let attempt = 0; attempt < retries; attempt += 1) {
+    const res = await fetch('/api/reprocess-live-to-dormant', {
+      method: 'POST',
+      headers: imageGenHeaders(batchId),
+      body: JSON.stringify({
+        sku,
+        prompt: prompt || undefined,
+        imageStyle: imageStyle || undefined,
+        targetSlot,
+        sourceSlot,
+        referenceImageUrl: referenceImageUrl || undefined,
+        batchId,
+      }),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (res.status === 409 && attempt < retries - 1) {
+      lastErr = new Error(json.error || 'SKU slot locked — retrying…');
+      await sleep(4000 + attempt * 2000);
+      continue;
+    }
+    if (!res.ok) throw new Error(json.error || `Reprocess failed (${res.status})`);
+    return json;
+  }
+  throw lastErr || new Error('Reprocess failed after retries');
 }
 
 function styleMessage(imageStyle, slot) {
@@ -73,6 +91,7 @@ export async function runReprocessBatch(products, {
   imageStyle,
   referenceImageUrl,
   fillSlots = false,
+  batchId,
   onItemUpdate,
   signal,
 } = {}) {
@@ -96,6 +115,7 @@ export async function runReprocessBatch(products, {
         targetSlot: item.slot,
         sourceSlot: item.sourceSlot || 1,
         referenceImageUrl,
+        batchId,
       });
       results.done += 1;
       results.items.push({ sku: item.sku, slot: item.slot, ok: true, imageUrl: json.imageUrl });
