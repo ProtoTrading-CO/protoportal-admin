@@ -73,8 +73,8 @@ export default function ComingSoonPanel({ taxonomyTree = [] }) {
     <div className="adm-panel">
       <div className="adm-section-head">
         <div>
-          <h2 className="adm-section-title"><Clock size={18} /> Coming Soon</h2>
-          <p className="adm-section-note">Mark categories or SKUs as coming soon on the live site. Stored in site config for protoportal-main to consume.</p>
+          <h2 className="adm-section-title"><Clock size={18} /> Dormant Products</h2>
+          <p className="adm-section-note">Mark categories or SKUs as dormant on the live site. Stored in site config for protoportal-main to consume.</p>
         </div>
         <button type="button" className="adm-btn-red" onClick={() => void save()} disabled={saving}>
           {saving ? <Loader2 size={14} className="spin" /> : <Save size={14} />} Save

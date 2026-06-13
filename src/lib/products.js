@@ -333,10 +333,13 @@ export async function fetchProductsByMainCategory(mainCategory, { limit = 10000 
 
 export async function fetchDormantProducts({ searchQuery = '' } = {}) {
   let dormant = await loadArchivedFromDB({ dormantOnly: true });
+  dormant = dormant.filter((p) => !p.stillLive);
   dormant = searchQuery.trim() ? fuzzyFilter(dormant, searchQuery) : dormant;
   dormant.sort((a, b) => a.name.localeCompare(b.name));
   return dormant;
 }
+
+export { applyPathFilter };
 
 export async function exportProductsCsv() {
   return fetchAllProductsAdmin();

@@ -2,16 +2,18 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Grip, ImagePlus, Loader2, Pencil, Trash2 } from 'lucide-react';
 import { subcategoryOptionsFromTree } from '../lib/taxonomyAdmin';
 
-function deepestGroupKey(product, mainCategoryId) {
+function deepestGroupKey(product, mainCategoryId, selectedPath = []) {
   const path = product.categoryPath || [];
-  if (!path.length || path[0] !== mainCategoryId) return '__other__';
-  for (let i = path.length - 1; i >= 1; i -= 1) {
+  const root = selectedPath[0] || mainCategoryId;
+  if (!path.length || path[0] !== root) return '__other__';
+  const branchDepth = selectedPath.length > 1 ? selectedPath.length - 1 : path.length - 1;
+  for (let i = Math.min(branchDepth, path.length - 1); i >= 1; i -= 1) {
     if (path[i]) return path[i];
   }
   return path[1] || '__other__';
 }
 
-function groupBySubcategory(products, mainCategoryId, tree) {
+function groupBySubcategory(products, mainCategoryId, tree, selectedPath = []) {
   const subs = subcategoryOptionsFromTree(tree, mainCategoryId);
   const allSubs = new Map();
   function walk(nodes, prefix = '') {
@@ -25,7 +27,7 @@ function groupBySubcategory(products, mainCategoryId, tree) {
 
   const groups = new Map();
   products.forEach((p) => {
-    const key = deepestGroupKey(p, mainCategoryId);
+    const key = deepestGroupKey(p, mainCategoryId, selectedPath);
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(p);
   });
@@ -78,6 +80,7 @@ export default function ReorderGrid({
   selectedIds,
   onToggleSelect,
   mainCategoryId,
+  selectedPath = [],
   taxonomyTree,
   loading,
   dragDisabled = false,
@@ -103,8 +106,8 @@ export default function ReorderGrid({
   const [draggingSet, setDraggingSet] = useState(() => new Set());
 
   const groups = useMemo(
-    () => groupBySubcategory(products, mainCategoryId, taxonomyTree),
-    [products, mainCategoryId, taxonomyTree],
+    () => groupBySubcategory(products, mainCategoryId, taxonomyTree, selectedPath),
+    [products, mainCategoryId, taxonomyTree, selectedPath],
   );
 
   const getMoveSet = useCallback((id) => (

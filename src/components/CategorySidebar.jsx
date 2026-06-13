@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ChevronDown, ChevronRight, FolderTree } from 'lucide-react';
 
 function buildPathFromRoot(tree, targetId, path = []) {
@@ -13,12 +13,12 @@ function buildPathFromRoot(tree, targetId, path = []) {
   return null;
 }
 
-function TreeBranch({ node, depth, selectedPath, onSelectPath, expanded, onToggle, ancestors }) {
+function TreeBranch({ node, depth, selectedPath, onSelectPath, isOpen, onToggle, ancestors }) {
   const hasChildren = node.children?.length > 0;
   const pathHere = [...ancestors, node.id];
   const isSelected = selectedPath.length > 0 && selectedPath[selectedPath.length - 1] === node.id;
   const isOnPath = selectedPath.includes(node.id);
-  const isOpen = expanded.has(node.id) || isOnPath;
+  const open = isOpen(node.id);
 
   return (
     <div className="cat-sidebar-node">
@@ -34,21 +34,21 @@ function TreeBranch({ node, depth, selectedPath, onSelectPath, expanded, onToggl
             onClick={(e) => { e.stopPropagation(); onToggle(node.id); }}
             role="presentation"
           >
-            {isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+            {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
           </span>
         ) : (
           <span className="cat-sidebar-chevron cat-sidebar-chevron--spacer" />
         )}
         <span className="cat-sidebar-label">{node.label}</span>
       </button>
-      {hasChildren && isOpen && node.children.map((child) => (
+      {hasChildren && open && node.children.map((child) => (
         <TreeBranch
           key={child.id}
           node={child}
           depth={depth + 1}
           selectedPath={selectedPath}
           onSelectPath={onSelectPath}
-          expanded={expanded}
+          isOpen={isOpen}
           onToggle={onToggle}
           ancestors={pathHere}
         />
@@ -60,14 +60,39 @@ function TreeBranch({ node, depth, selectedPath, onSelectPath, expanded, onToggl
 /** Expandable category tree — up to 4 sub-levels under each main category. */
 export default function CategorySidebar({ tree = [], selectedPath = [], onSelectPath, showUncategorized = false, uncategorizedCount = 0 }) {
   const [expanded, setExpanded] = useState(() => new Set());
+  const [collapsed, setCollapsed] = useState(() => new Set());
 
-  const toggle = (id) => {
+  useEffect(() => {
+    if (!selectedPath.length) return;
     setExpanded((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      selectedPath.forEach((id) => next.add(id));
       return next;
     });
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      selectedPath.forEach((id) => next.delete(id));
+      return next;
+    });
+  }, [selectedPath.join('|')]);
+
+  const isOpen = (id) => {
+    const isOnPath = selectedPath.includes(id);
+    return (expanded.has(id) || isOnPath) && !collapsed.has(id);
+  };
+
+  const toggle = (id) => {
+    const open = isOpen(id);
+    if (open) {
+      setCollapsed((prev) => new Set(prev).add(id));
+    } else {
+      setCollapsed((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+      setExpanded((prev) => new Set(prev).add(id));
+    }
   };
 
   const handleSelectRoot = (nodeId) => {
@@ -108,21 +133,21 @@ export default function CategorySidebar({ tree = [], selectedPath = [], onSelect
                 onClick={(e) => { e.stopPropagation(); toggle(node.id); }}
                 role="presentation"
               >
-                {expanded.has(node.id) || selectedPath.includes(node.id) ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                {isOpen(node.id) ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
               </span>
             ) : (
               <span className="cat-sidebar-chevron cat-sidebar-chevron--spacer" />
             )}
             <span className="cat-sidebar-label">{node.label}</span>
           </button>
-          {node.children?.length && (expanded.has(node.id) || selectedPath.includes(node.id)) && node.children.map((child) => (
+          {node.children?.length && isOpen(node.id) && node.children.map((child) => (
             <TreeBranch
               key={child.id}
               node={child}
               depth={1}
               selectedPath={selectedPath}
               onSelectPath={onSelectPath}
-              expanded={expanded}
+              isOpen={isOpen}
               onToggle={toggle}
               ancestors={[node.id]}
             />

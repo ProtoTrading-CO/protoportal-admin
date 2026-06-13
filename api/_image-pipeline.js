@@ -11,7 +11,29 @@ export const IMAGE_STYLES = {
   standard: 'standard',
   shadow: 'shadow',
   generative: 'generative',
+  measurements: 'measurements',
 };
+
+/** Pull dimension hints from product description for measurement overlay style. */
+export function extractMeasurementsFromDescription(text = '') {
+  const src = String(text || '');
+  const hits = [];
+  const patterns = [
+    /\b(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)(?:\s*[x×]\s*(\d+(?:\.\d+)?))?\s*(cm|mm|m|in|inch|inches|"|')\b/gi,
+    /\b(L|W|H|D|length|width|height|depth)[:\s]+(\d+(?:\.\d+)?)\s*(cm|mm|m|in|inch|inches)?\b/gi,
+    /\b(\d+(?:\.\d+)?)\s*(cm|mm|m|in|inch|inches)\b/gi,
+    /\b(\d+(?:\.\d+)?)\s*["']\s*(?:L|W|H|long|wide|high|tall|dia|diameter)\b/gi,
+  ];
+  for (const re of patterns) {
+    let m;
+    while ((m = re.exec(src)) !== null) {
+      hits.push(m[0].trim());
+      if (hits.length >= 8) break;
+    }
+    if (hits.length >= 8) break;
+  }
+  return hits.length ? [...new Set(hits)].join('; ') : null;
+}
 
 const FIX_PROMPT = `Transform this into a professional wholesale e-commerce product photo.
 Remove the background and place the product on a pure white (#FFFFFF) background.
@@ -19,7 +41,7 @@ Center the product with even padding. Preserve the exact product, colours, and s
 No text, watermarks, or extra props. Clean catalogue-style square product shot.`;
 
 export function resolveImageModel(imageStyle = 'standard') {
-  if (imageStyle === IMAGE_STYLES.generative || imageStyle === IMAGE_STYLES.shadow) {
+  if (imageStyle === IMAGE_STYLES.generative || imageStyle === IMAGE_STYLES.shadow || imageStyle === IMAGE_STYLES.measurements) {
     return DEFAULT_IMAGE_MODEL;
   }
   return DEFAULT_IMAGE_MODEL;
@@ -41,23 +63,51 @@ function wantsShadow(text) {
 }
 
 /** Build prompt for OpenRouter image model from style + admin instructions. */
-export function buildImagePrompt({ style = IMAGE_STYLES.standard, userInstructions = '', productTitle = '' } = {}) {
+export function buildImagePrompt({
+  style = IMAGE_STYLES.standard,
+  userInstructions = '',
+  productTitle = '',
+  productDescription = '',
+  targetSlot = 1,
+  hasReferenceImage = false,
+} = {}) {
   const custom = String(userInstructions || '').trim();
   const productCtx = productTitle
     ? `\nProduct name: "${productTitle}". Keep this exact product — same shape, branding, colours, and proportions as the source photo.`
     : '';
+  const slotNote = targetSlot > 1
+    ? `\nThis is image slot ${targetSlot} of 4 — show a complementary angle or detail view consistent with the primary hero shot while preserving the exact same product.`
+    : '';
+
+  if (style === IMAGE_STYLES.measurements) {
+    const dims = extractMeasurementsFromDescription(productDescription);
+    const dimBlock = dims
+      ? `Render clean, professional measurement/dimension lines and labels on the image using these dimensions from the product description: ${dims}. Use thin grey or black lines with clear numeric labels — catalogue technical style.`
+      : 'If no explicit dimensions are available, add subtle generic size reference lines only where clearly inferable from the product — otherwise focus on a clean white-background product shot with soft shadow.';
+    const base = custom || 'Remove the background and isolate the product.';
+    return `${base}${productCtx}${slotNote}
+
+Place the product on a pure white (#FFFFFF) background with a soft, realistic drop shadow beneath it.
+${dimBlock}
+
+Preserve exact product colours and shape. Measurement annotations must be legible and not obscure the product. No watermarks. Square 1:1 composition.`;
+  }
 
   if (style === IMAGE_STYLES.generative) {
     const direction = custom || 'Place the product on a pure white background, clearly in view, professional catalogue quality.';
     const shadowNote = wantsShadow(`${custom} ${productTitle}`)
       ? '- Include a soft, realistic studio drop shadow beneath the product on the white background (subtle contact shadow + gentle ambient shadow).\n'
       : '';
-    return `You are an expert product photographer and generative image editor for wholesale e-commerce.${productCtx}
+    const refNote = hasReferenceImage
+      ? '- A **reference image** is provided as the second image — match its style, composition, lighting, and creative treatment while preserving the real product from the first (source) image.\n'
+      : '';
+    return `You are an expert product photographer and generative image editor for wholesale e-commerce.${productCtx}${slotNote}
 
 CREATIVE DIRECTION — follow precisely:
 ${direction}
 
 RULES:
+${refNote}
 - The source photo is the ground truth for the product itself — preserve identity, branding, colours, and proportions.
 - You MAY synthesize scene elements when the direction asks (e.g. a colourful kids painting displayed on a canvas, props, lighting) as long as the product remains accurate.
 - Professional catalogue hero shot; product must be clearly visible and the hero of the frame.
@@ -137,6 +187,7 @@ function extractGeneratedImage(payload) {
 function resolveTemperature(imageStyle) {
   if (imageStyle === IMAGE_STYLES.generative) return 0.45;
   if (imageStyle === IMAGE_STYLES.shadow) return 0.35;
+  if (imageStyle === IMAGE_STYLES.measurements) return 0.25;
   return 0.2;
 }
 
@@ -172,10 +223,27 @@ export async function fetchImageBuffer(imageUrl) {
   throw new Error(lastErr?.message || 'Could not download image');
 }
 
-export async function transformWithOpenRouter(base64, contentType, { prompt = FIX_PROMPT, model = DEFAULT_IMAGE_MODEL, imageStyle = IMAGE_STYLES.standard } = {}) {
+export async function transformWithOpenRouter(base64, contentType, {
+  prompt = FIX_PROMPT,
+  model = DEFAULT_IMAGE_MODEL,
+  imageStyle = IMAGE_STYLES.standard,
+  referenceBase64 = null,
+  referenceContentType = 'image/jpeg',
+} = {}) {
   const apiKey = getOpenRouterKey();
   const safeType = contentType || 'image/jpeg';
   const usePro = String(model).includes('gemini-3-pro');
+
+  const content = [
+    { type: 'image_url', image_url: { url: `data:${safeType};base64,${base64}` } },
+  ];
+  if (referenceBase64) {
+    content.push({
+      type: 'image_url',
+      image_url: { url: `data:${referenceContentType || 'image/jpeg'};base64,${referenceBase64}` },
+    });
+  }
+  content.push({ type: 'text', text: prompt });
 
   const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
@@ -190,10 +258,7 @@ export async function transformWithOpenRouter(base64, contentType, { prompt = FI
       modalities: ['image', 'text'],
       messages: [{
         role: 'user',
-        content: [
-          { type: 'image_url', image_url: { url: `data:${safeType};base64,${base64}` } },
-          { type: 'text', text: prompt },
-        ],
+        content,
       }],
       image_config: {
         aspect_ratio: '1:1',
@@ -240,9 +305,26 @@ export async function fixImageFromUrl(imageUrl, {
   imageStyle = IMAGE_STYLES.standard,
   userInstructions = '',
   productTitle = '',
+  productDescription = '',
+  referenceImageUrl = null,
+  targetSlot = 1,
 } = {}) {
   const style = imageStyle || IMAGE_STYLES.standard;
-  const finalPrompt = prompt || buildImagePrompt({ style, userInstructions, productTitle });
+  let refBase64 = null;
+  let refType = 'image/jpeg';
+  if (referenceImageUrl && style === IMAGE_STYLES.generative) {
+    const ref = await fetchImageBuffer(referenceImageUrl);
+    refBase64 = ref.base64;
+    refType = ref.contentType;
+  }
+  const finalPrompt = prompt || buildImagePrompt({
+    style,
+    userInstructions,
+    productTitle,
+    productDescription,
+    targetSlot,
+    hasReferenceImage: !!refBase64,
+  });
   const model = resolveImageModel(style);
 
   const { base64, contentType } = await fetchImageBuffer(imageUrl);
@@ -250,6 +332,8 @@ export async function fixImageFromUrl(imageUrl, {
     prompt: finalPrompt,
     model,
     imageStyle: style,
+    referenceBase64: refBase64,
+    referenceContentType: refType,
   });
   const resized = await resizeTo800White(transformed.buffer);
   const url = await uploadTransformedImage(resized, `${sku}.jpg`, 'image/jpeg');

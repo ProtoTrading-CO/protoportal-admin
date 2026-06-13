@@ -18,9 +18,11 @@ export default function ReprocessLiveFeed({ queue, busy, onDismiss, onOpenNewPro
           <span className="reprocess-live-feed-count">{done}/{queue.length}{failed ? ` · ${failed} failed` : ''}</span>
         </div>
         <div className="reprocess-live-feed-actions">
-          <button type="button" className="reprocess-live-feed-link" onClick={onOpenNewProducts}>
-            {openLabel}
-          </button>
+          {openLabel && (
+            <button type="button" className="reprocess-live-feed-link" onClick={onOpenNewProducts}>
+              {openLabel}
+            </button>
+          )}
           {busy && onStop && (
             <button type="button" className="reprocess-live-feed-stop" onClick={onStop}>
               <Square size={12} fill="currentColor" /> Stop

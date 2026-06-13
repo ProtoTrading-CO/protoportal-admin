@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Check,
   Image,
@@ -6,14 +6,11 @@ import {
   Loader2,
   Search,
   Sparkles,
-  Square,
   Trash2,
   Upload,
   X,
   Zap,
 } from 'lucide-react';
-import ImageGenPanel from './ImageGenPanel';
-import { runDormantImageBatch } from '../lib/dormantImageQueue';
 
 function stripExt(name) {
   return String(name || '').replace(/\.[^.]+$/, '');
@@ -42,34 +39,22 @@ export default function NewItemsPanel({
   onDormantSearchChange,
   dormantSelected,
   onDormantSelectedChange,
-  uploadQueue,
-  onUploadQueueChange,
-  reprocessBusy,
-  onReprocessBusyChange,
-  imageGenStyle,
-  onImageGenStyleChange,
-  imageGenPrompt,
-  onImageGenPromptChange,
-  costLog,
-  onCostLogChange,
   saving,
   onGoLive,
   onGoLiveSelected,
   onRemoveProduct,
   onLoadDormant,
   onShowToast,
+  onReprocessBusyChange,
   singleImageRef,
   folderImageRef,
   excelInputRef,
   imageFolderRef,
   onLegacyUpload,
-  reprocessAbortRef,
 }) {
   const [stockStatus, setStockStatus] = useState({});
   const [importBusy, setImportBusy] = useState(false);
-  const [imagePrompts, setImagePrompts] = useState({});
-  const [genBusy, setGenBusy] = useState(false);
-  const localAbortRef = useRef(null);
+  const [folderBusy, setFolderBusy] = useState(false);
 
   useEffect(() => {
     const skus = dormantRows.map((p) => p.id || p.code);
@@ -111,9 +96,6 @@ export default function NewItemsPanel({
       const ok = json.imported || 0;
       const fail = json.failed?.length || 0;
       onShowToast(`Imported ${ok} row${ok === 1 ? '' : 's'}${fail ? `, ${fail} failed` : ''}`, fail && !ok ? 'error' : 'success');
-      if (json.failed?.length) {
-        console.warn('Import failures:', json.failed);
-      }
     } catch (err) {
       onShowToast(err.message || 'Excel import failed', 'error');
     } finally {
@@ -123,7 +105,8 @@ export default function NewItemsPanel({
 
   const handleImageFolder = async (files) => {
     if (!files?.length) return;
-    onReprocessBusyChange(true);
+    setFolderBusy(true);
+    onReprocessBusyChange?.(true);
     const grouped = new Map();
     for (const file of files) {
       const { sku, slot } = parseSkuFromFilename(file.name);
@@ -163,73 +146,13 @@ export default function NewItemsPanel({
     } catch (err) {
       onShowToast(err.message || 'Image folder upload failed', 'error');
     } finally {
-      onReprocessBusyChange(false);
-    }
-  };
-
-  const runImageGen = async (targets, { promptOverride, slots } = {}) => {
-    if (!targets.length) return;
-    const ac = new AbortController();
-    localAbortRef.current = ac;
-    if (reprocessAbortRef) reprocessAbortRef.current = ac;
-    setGenBusy(true);
-    onReprocessBusyChange(true);
-
-    const queueItems = [];
-    for (const t of targets) {
-      const useSlots = slots || [1, 2, 3, 4].filter((s) => {
-        if (s === 1) return t.image || t.images?.[0];
-        return t.images?.[s - 1] || t[`image${s}`];
-      });
-      const slotList = useSlots.length ? useSlots : [1];
-      for (const slot of slotList) {
-        queueItems.push({
-          sku: t.id || t.code,
-          name: t.name,
-          slot,
-          thumbUrl: t.images?.[slot - 1] || t.image,
-          status: 'pending',
-          message: 'Queued…',
-        });
-      }
-    }
-    onUploadQueueChange([...queueItems, ...uploadQueue.filter((q) => q.status === 'done' || q.status === 'error')]);
-
-    try {
-      await runDormantImageBatch(targets.map((t) => ({
-        sku: t.id || t.code,
-        title: t.name,
-        slots: slots || undefined,
-      })), {
-        prompt: promptOverride ?? imageGenPrompt,
-        imageStyle: imageGenStyle,
-        signal: ac.signal,
-        onItemUpdate: (index, patch) => {
-          onUploadQueueChange((prev) => {
-            const next = prev.map((item, idx) => (idx === index ? { ...item, ...patch } : item));
-            if (patch.status === 'done') {
-              const doneItem = next[index];
-              const rest = next.filter((_, idx) => idx !== index);
-              return [doneItem, ...rest];
-            }
-            return next;
-          });
-          if (patch.status === 'done') void onLoadDormant();
-        },
-      });
-      await onLoadDormant();
-      onShowToast('Image generation complete');
-    } catch (err) {
-      if (!ac.signal.aborted) onShowToast(err.message || 'Generation failed', 'error');
-    } finally {
-      setGenBusy(false);
-      onReprocessBusyChange(false);
-      localAbortRef.current = null;
-      if (reprocessAbortRef) reprocessAbortRef.current = null;
+      setFolderBusy(false);
+      onReprocessBusyChange?.(false);
     }
   };
 
   const selectedProducts = dormantRows.filter((p) => dormantSelected.has(p.id));
+  const busy = importBusy || folderBusy;
 
   return (
     <div className="adm-panel new-items-panel">
@@ -249,14 +172,14 @@ export default function NewItemsPanel({
           </h2>
           <p className="adm-section-note">
             Stage A: Excel product list. Stage B: image folder (<code>SKU.jpg</code>, <code>SKU-1.jpg</code> … <code>SKU-3.jpg</code>).
-            Review, generate images, then Set Live when price + SOH exist in stock.
+            Set Live when price + SOH exist in stock. Product image generation → Apollo <code>/image</code>.
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-          <button type="button" onClick={() => excelInputRef?.current?.click()} className="adm-btn-red" disabled={importBusy}>
+          <button type="button" onClick={() => excelInputRef?.current?.click()} className="adm-btn-red" disabled={busy}>
             {importBusy ? <Loader2 size={14} className="spin" /> : <Upload size={14} />} Import Excel
           </button>
-          <button type="button" onClick={() => imageFolderRef?.current?.click()} className="adm-btn-ghost" disabled={reprocessBusy}>
+          <button type="button" onClick={() => imageFolderRef?.current?.click()} className="adm-btn-ghost" disabled={busy}>
             <ImagePlus size={14} /> Upload image folder
           </button>
           {dormantSelected.size > 0 && (
@@ -265,50 +188,11 @@ export default function NewItemsPanel({
               <button type="button" onClick={() => void onGoLiveSelected()} className="adm-btn-dark" disabled={saving === 'bulk-live'}>
                 <Zap size={14} /> {saving === 'bulk-live' ? 'Going live…' : 'Set Live'}
               </button>
-              <button type="button" onClick={() => void runImageGen(selectedProducts)} className="adm-btn-ghost" disabled={genBusy}>
-                <Sparkles size={14} /> Generate images
-              </button>
               <button type="button" onClick={() => onDormantSelectedChange(new Set())} className="adm-btn-ghost">Clear</button>
             </>
           )}
         </div>
       </div>
-
-      <ImageGenPanel
-        style={imageGenStyle}
-        onStyleChange={onImageGenStyleChange}
-        prompt={imageGenPrompt}
-        onPromptChange={onImageGenPromptChange}
-      />
-
-      {uploadQueue.length > 0 && (
-        <div className="new-items-feed">
-          <div className="new-items-feed-head">
-            <span>{reprocessBusy || genBusy ? 'Processing…' : 'Complete'} · {uploadQueue.filter((q) => q.status === 'done').length}/{uploadQueue.length}</span>
-            <div style={{ display: 'flex', gap: 8 }}>
-              {(reprocessBusy || genBusy) && (
-                <button type="button" className="reprocess-live-feed-stop" onClick={() => localAbortRef.current?.abort()}>
-                  <Square size={12} fill="currentColor" /> Stop
-                </button>
-              )}
-              {!reprocessBusy && !genBusy && (
-                <button type="button" className="adm-icon-btn" onClick={() => onUploadQueueChange([])}><X size={13} /></button>
-              )}
-            </div>
-          </div>
-          <div className="new-items-feed-list">
-            {[...uploadQueue].map((item, i) => (
-              <div key={`${item.sku}-${item.slot || 0}-${i}`} className={`new-items-feed-row new-items-feed-row--${item.status}`}>
-                <div className="new-items-feed-thumb">
-                  {item.previewUrl || item.thumbUrl ? <img src={item.previewUrl || item.thumbUrl} alt="" /> : <Image size={14} color="#cbd5e1" />}
-                </div>
-                <strong>{item.name || item.sku}{item.slot > 1 ? ` · img ${item.slot}` : ''}</strong>
-                <span>{item.message}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
 
       <label className="adm-search" style={{ marginBottom: 16, display: 'flex' }}>
         <Search size={15} />
@@ -327,7 +211,6 @@ export default function NewItemsPanel({
           const sku = product.id || product.code;
           const stock = stockStatus[sku];
           const images = product.images?.length ? product.images : [product.image].filter(Boolean);
-          const promptKey = `${sku}-all`;
           return (
             <article key={sku} className={`new-items-card${dormantSelected.has(product.id) ? ' new-items-card--selected' : ''}`}>
               <div className="new-items-card-head">
@@ -346,67 +229,31 @@ export default function NewItemsPanel({
                   <strong>{product.name}</strong>
                   <span className="adm-muted">{sku}</span>
                   <span className="adm-muted">{product.categoryLabel || product.category || '—'}</span>
-                  {product.stillLive && <span className="adm-pill adm-pill--live">Still live on site</span>}
                   {stock && (
                     <span className={`adm-pill${stock.ready ? ' adm-pill--ok' : ' adm-pill--warn'}`}>
-                      {stock.ready ? `R${Number(stock.price).toFixed(2)} · SOH ${stock.soh}` : (stock.error || 'Not ready')}
+                      {stock.ready ? <><Check size={11} /> R{Number(stock.price).toFixed(2)} · SOH {stock.soh}</> : (stock.error || 'Not ready')}
                     </span>
                   )}
                 </div>
                 <div className="new-items-card-actions">
-                  <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => void runImageGen([product])} disabled={genBusy}>
-                    <Sparkles size={13} /> Gen all
-                  </button>
-                  <button type="button" className="adm-btn-dark adm-btn--sm" onClick={() => void onGoLive(product)} disabled={!!saving || (stock && !stock.ready && !product.stillLive)}>
-                    <Zap size={13} /> {product.stillLive ? 'Apply' : 'Set Live'}
+                  <button type="button" className="adm-btn-dark adm-btn--sm" onClick={() => void onGoLive(product)} disabled={!!saving || (stock && !stock.ready)}>
+                    <Zap size={13} /> Set Live
                   </button>
                   <button type="button" className="adm-icon-btn" onClick={() => void onRemoveProduct(product)} title="Delete"><Trash2 size={14} /></button>
                 </div>
               </div>
-              <div className="new-items-card-images">
+              <div className="new-items-card-images new-items-card-images--view">
                 {[0, 1, 2, 3].map((idx) => {
                   const url = images[idx];
-                  const slot = idx + 1;
-                  const slotKey = `${sku}-${slot}`;
                   return (
-                    <div key={slotKey} className="new-items-image-slot">
+                    <div key={idx} className="new-items-image-slot">
                       <div className="new-items-image-thumb">
-                        {url ? <img src={url} alt="" /> : <span className="adm-muted">Slot {slot}</span>}
+                        {url ? <img src={url} alt="" /> : <span className="adm-muted"><Image size={14} /> {idx + 1}</span>}
                       </div>
-                      <textarea
-                        className="new-items-image-prompt"
-                        rows={2}
-                        placeholder={`Prompt for image ${slot}…`}
-                        value={imagePrompts[slotKey] ?? ''}
-                        onChange={(e) => setImagePrompts((p) => ({ ...p, [slotKey]: e.target.value }))}
-                      />
-                      <button
-                        type="button"
-                        className="adm-btn-ghost adm-btn--sm"
-                        disabled={!url || genBusy}
-                        onClick={() => void runImageGen([product], { promptOverride: imagePrompts[slotKey] || imageGenPrompt, slots: [slot] })}
-                      >
-                        Apply
-                      </button>
                     </div>
                   );
                 })}
               </div>
-              <textarea
-                className="new-items-batch-prompt"
-                rows={2}
-                placeholder="Apply instruction to all 4 images of this SKU…"
-                value={imagePrompts[promptKey] ?? ''}
-                onChange={(e) => setImagePrompts((p) => ({ ...p, [promptKey]: e.target.value }))}
-              />
-              <button
-                type="button"
-                className="adm-btn-ghost adm-btn--sm"
-                disabled={genBusy}
-                onClick={() => void runImageGen([product], { promptOverride: imagePrompts[promptKey] || imageGenPrompt, slots: [1, 2, 3, 4] })}
-              >
-                Run prompt on all images
-              </button>
             </article>
           );
         })}

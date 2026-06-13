@@ -8,6 +8,7 @@ import {
   MessageCircle,
   Building2,
   Check,
+  CheckCircle,
   ChevronLeft,
   ChevronRight,
   ClipboardList,
@@ -68,6 +69,7 @@ import {
   fetchDistinctCategories,
   fetchDormantProducts,
   fetchReorderProducts,
+  applyPathFilter,
   invalidateAdminCache,
   invalidateProductCache,
   recycleProduct,
@@ -108,13 +110,11 @@ import ReorderGrid from '../components/ReorderGrid';
 import CategorySidebar from '../components/CategorySidebar';
 import NewItemsPanel from '../components/NewItemsPanel';
 import ComingSoonPanel from '../components/ComingSoonPanel';
+import ApprovalPanel from '../components/ApprovalPanel';
 import FulfillmentSettingsModal from '../components/FulfillmentSettingsModal';
 import OrderWhatsappNotify from '../components/OrderWhatsappNotify';
 import AnalyticsHub from '../components/AnalyticsHub';
 import ApolloPanel from '../components/ApolloPanel';
-import ReprocessLiveFeed from '../components/ReprocessLiveFeed';
-import ImageGenPanel, { ImageGenModal } from '../components/ImageGenPanel';
-import { runReprocessBatch } from '../lib/reprocessQueue';
 import categories from '../data/categories.json';
 
 // ─── Reorder sort order — stored in localStorage, applied client-side ─────────
@@ -152,10 +152,11 @@ const sections = [
   { id: 'specials', label: 'Specials', icon: Star },
   { id: 'crm', label: 'WhatsApp', icon: MessageCircle },
   { id: 'banner', label: 'Banner Editor', icon: Layout },
-  { id: 'coming-soon', label: 'Coming Soon', icon: Clock },
+  { id: 'new-items', label: 'New Items', icon: Sparkles },
+  { id: 'approval', label: 'Approval', icon: CheckCircle },
+  { id: 'dormant-products', label: 'Dormant Products', icon: Clock },
   { id: 'pricing', label: 'Pricing & Returns', icon: SlidersHorizontal },
   { id: 'recycle', label: 'Recycle Bin', icon: Trash2 },
-  { id: 'new-items', label: 'New Items', icon: Sparkles },
 ];
 
 const productTypes = ['General product', 'Hot seller', 'New stock', 'Clearance stock'];
@@ -430,14 +431,8 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const [dormantSearch, setDormantSearch] = useState('');
   const [dormantSelected, setDormantSelected] = useState(new Set());
   const [imageViewUrl, setImageViewUrl] = useState('');
-  const [uploadQueue, setUploadQueue] = useState([]); // [{name, sku?, status, message, cost, thumbUrl?, previewUrl?}]
+  const [uploadQueue, setUploadQueue] = useState([]);
   const [reprocessBusy, setReprocessBusy] = useState(false);
-  const [imageGenStyle, setImageGenStyle] = useState(() => {
-    try { return localStorage.getItem('proto_image_style') || 'standard'; } catch { return 'standard'; }
-  });
-  const [imageGenPrompt, setImageGenPrompt] = useState(() => {
-    try { return localStorage.getItem('proto_image_prompt') || ''; } catch { return ''; }
-  });
   const [costLog, setCostLog] = useState(() => {
     try { return JSON.parse(localStorage.getItem('proto_image_gen_costs') || '[]'); } catch { return []; }
   });
@@ -447,7 +442,6 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const newItemsExcelRef = useRef(null);
   const newItemsFolderRef = useRef(null);
   const reprocessAbortRef = useRef(null);
-  const [imageGenModalOpen, setImageGenModalOpen] = useState(false);
   const [customerApproveBusy, setCustomerApproveBusy] = useState(false);
   const customerExcelRef = useRef(null);
 
@@ -489,8 +483,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const [selectedPricing, setSelectedPricing] = useState([]);
   const [priceDelta, setPriceDelta] = useState('-10');
 
-  const [reorderCategory, setReorderCategory] = useState(categories[0]?.id || '');
-  const [reorderSubcategory, setReorderSubcategory] = useState('all');
+  const [reorderCategoryPath, setReorderCategoryPath] = useState([]);
   const [reorderSearch, setReorderSearch] = useState('');
   const [reorderProducts, setReorderProducts] = useState([]);
   const [taxonomyTree, setTaxonomyTree] = useState(categories);
@@ -563,6 +556,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const [popupUploading, setPopupUploading] = useState(false);
 
   const mainCategories = taxonomyTree.map((item) => ({ id: item.id, label: item.label }));
+  const reorderMainId = reorderCategoryPath[0] || mainCategories[0]?.id || '';
 
   const crmBusinessTypeOptions = useMemo(() => (
     [...new Set(crmAllCustomers.map((c) => c.businessType).filter(Boolean))].sort()
@@ -594,13 +588,6 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   useEffect(() => { if (activeSection === 'banner') void loadBannerEditor(); }, [activeSection]);
   useEffect(() => { if (activeSection === 'specials') void loadPopupEditor(); }, [activeSection]);
 
-  useEffect(() => {
-    try {
-      localStorage.setItem('proto_image_style', imageGenStyle);
-      localStorage.setItem('proto_image_prompt', imageGenPrompt);
-    } catch { /* quota */ }
-  }, [imageGenStyle, imageGenPrompt]);
-
   const processUploadFiles = async (files) => {
     const imageFiles = Array.from(files).filter((f) => f.type.startsWith('image/'));
     if (!imageFiles.length) return;
@@ -619,10 +606,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
       let imageUrl = '', uploadedBase64 = '';
       try {
         // compressImage returns a Blob; we need both the URL and the base64 for Gemini
-        const { url, base64 } = await uploadDormantImageWithBase64(file, {
-          prompt: imageGenPrompt,
-          imageStyle: imageGenStyle,
-        });
+        const { url, base64 } = await uploadDormantImageWithBase64(file, {});
         imageUrl = url;
         uploadedBase64 = base64;
       } catch (err) {
@@ -688,70 +672,6 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
 
     invalidateAdminCache();
     void loadDormant();
-  };
-
-  const processReprocessBatch = async (products, { label = '', switchTab = true, skipConfirm = false, imagePrompt = '', imageStyle = '' } = {}) => {
-    const rows = products.filter((p) => p?.sku);
-    if (!rows.length) {
-      showToast('No products with images to reprocess', 'error');
-      return;
-    }
-    const style = imageStyle || imageGenStyle;
-    const prompt = imagePrompt || imageGenPrompt;
-    const styleLabel = style === 'generative' ? 'Generative AI' : style === 'shadow' ? 'White + shadow' : 'Standard';
-    const promptNote = prompt ? `\n\nInstructions: ${prompt}` : '';
-    if (!skipConfirm && !window.confirm(`Process ${rows.length} product${rows.length === 1 ? '' : 's'}${label ? ` from ${label}` : ''}?\n\nStyle: ${styleLabel} (Gemini 3 Pro Image)${promptNote}\n\nProducts stay live on the website until you click Go live.`)) {
-      return;
-    }
-
-    if (switchTab) setActiveSection('new-items');
-    setReprocessBusy(true);
-    const ac = new AbortController();
-    reprocessAbortRef.current = ac;
-
-    const initial = rows.map((p) => ({
-      sku: p.sku,
-      name: p.title || p.name || p.sku,
-      thumbUrl: p.imageUrl || p.image || p.images?.[0] || null,
-      previewUrl: null,
-      status: 'pending',
-      message: 'Queued…',
-      cost: null,
-    }));
-    setUploadQueue(initial);
-
-    try {
-      const results = await runReprocessBatch(rows, {
-        prompt,
-        imageStyle: style,
-        signal: ac.signal,
-        onItemUpdate: (index, patch) => {
-          setUploadQueue((prev) => {
-            const next = prev.map((item, idx) => (idx === index ? { ...item, ...patch } : item));
-            if (patch.status === 'done') {
-              const doneItem = next[index];
-              const rest = next.filter((_, idx) => idx !== index);
-              return [doneItem, ...rest];
-            }
-            return next;
-          });
-          if (patch.status === 'done') void loadDormant();
-        },
-      });
-      invalidateAdminCache();
-      invalidateProductCache();
-      await loadDormant();
-      await loadProducts();
-      await refreshDashboardStats();
-      if (!ac.signal.aborted) {
-        showToast(`Reprocess complete — ${results.done} staged in New Items, ${results.failed} failed`);
-      }
-    } catch (err) {
-      if (!ac.signal.aborted) showToast(err.message || 'Reprocess batch failed', 'error');
-    } finally {
-      setReprocessBusy(false);
-      reprocessAbortRef.current = null;
-    }
   };
 
   const loadDormant = async () => {
@@ -874,10 +794,10 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
       // Always load the full main category; subcategory + search filter client-side
       // so search spans every subcategory in the category.
       const rows = await fetchReorderProducts({
-        mainCategory: reorderCategory,
+        mainCategory: reorderMainId,
         subcategoryId: null,
       });
-      setReorderProducts(applySavedOrder(rows, reorderCategory));
+      setReorderProducts(applySavedOrder(rows, reorderMainId));
     } catch (err) {
       setLoadingError(err.message || 'Failed to load products');
     } finally { setLoading(false); }
@@ -1129,7 +1049,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   useEffect(() => { if (activeSection === 'customers') void loadCustomers(); }, [activeSection, customerPage, customerTab, customerSearch]);
   useEffect(() => { if (activeSection === 'pricing') void loadCategoryWorkingSet(pricingCategory, 'pricing'); }, [activeSection, pricingCategory]);
   useEffect(() => { void reloadTaxonomy(); }, []);
-  useEffect(() => { if (activeSection === 'reorder') void loadReorderProducts(); }, [activeSection, reorderCategory, reorderSubcategory]);
+  useEffect(() => { if (activeSection === 'reorder') void loadReorderProducts(); }, [activeSection, reorderMainId]);
   useEffect(() => { if (activeSection === 'orders' && orders.length === 0) void loadOrders(); }, [activeSection]);
   useEffect(() => {
     if (activeSection !== 'orders') return undefined;
@@ -1764,31 +1684,14 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     } finally { setSaving(''); }
   };
 
-  const reorderSubcategoryOptions = useMemo(() => {
-    const main = taxonomyTree.find((c) => c.id === reorderCategory);
-    if (!main?.children?.length) return [];
-    return flattenSubcategories(main.children, 0, main.label);
-  }, [reorderCategory, taxonomyTree]);
-
-  // Search filters the grid in place (original order preserved so the grouping
-  // stays stable). Drag-reorder is disabled while a search is active because
-  // persisting a filtered subset would drop the hidden products from the order.
-  const visibleReorderProducts = useMemo(() => {
-    let rows = reorderProducts;
-    const q = reorderSearch.trim();
-    if (q) {
-      rows = fuzzyFilter(rows, q);
-    } else if (reorderSubcategory !== 'all') {
-      rows = rows.filter((p) =>
-        p.categoryPath?.[1] === reorderSubcategory
-        || p.categoryPath?.[2] === reorderSubcategory
-        || p.categoryPath?.[3] === reorderSubcategory
-        || p.categoryPath?.[4] === reorderSubcategory
-      );
-    }
-    return rows;
-  }, [reorderProducts, reorderSearch, reorderSubcategory]);
   const reorderSearchActive = reorderSearch.trim().length > 0;
+
+  const visibleReorderProducts = useMemo(() => {
+    let rows = applyPathFilter(reorderProducts, reorderCategoryPath);
+    const q = reorderSearch.trim();
+    if (q) rows = fuzzyFilter(rows, q);
+    return rows;
+  }, [reorderProducts, reorderCategoryPath, reorderSearch]);
 
   const toggleSelectAllReorder = () => {
     const ids = visibleReorderProducts.map((p) => p.id);
@@ -1797,7 +1700,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   };
 
   const openMoveModal = () => {
-    setMoveTargetCategory(reorderCategory || mainCategories[0]?.id || '');
+    setMoveTargetCategory(reorderMainId || mainCategories[0]?.id || '');
     setMoveTargetSubcategory('');
     setMoveModalOpen(true);
   };
@@ -1890,7 +1793,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     try {
       await deleteTaxonomyNode(deleteSubModal.id);
       await reloadTaxonomy();
-      if (reorderSubcategory === deleteSubModal.id) setReorderSubcategory('all');
+      if (reorderCategoryPath.includes(deleteSubModal.id)) setReorderCategoryPath((prev) => prev.filter((id) => id !== deleteSubModal.id));
       invalidateAdminCache();
       await loadReorderProducts();
       setDeleteSubModal(null);
@@ -1963,16 +1866,6 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     } catch (err) {
       showToast(err.message || 'Delete failed', 'error');
     } finally { setSaving(''); }
-  };
-
-  const productsWithImages = (rows) => rows
-    .filter((p) => p.image || p.images?.[0])
-    .map((p) => ({ sku: p.id, title: p.name, imageUrl: p.image || p.images?.[0] }));
-
-  const runSelectedImageFix = async () => {
-    const selected = productRows.filter((p) => productSelectedIds.has(p.id));
-    setImageGenModalOpen(false);
-    await processReprocessBatch(productsWithImages(selected), { switchTab: true, imageStyle: imageGenStyle, imagePrompt: imageGenPrompt });
   };
 
   const confirmBulkRestoreArchive = async () => {
@@ -2065,7 +1958,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const persistOrder = (next) => {
     const updates = next.map((p, i) => ({ websiteSku: p.id, sortOrder: i + 1 }));
     saveSortOrder(updates).catch(console.error);
-    saveCategoryOrder(reorderCategory, next.map((p) => p.id));
+    saveCategoryOrder(reorderMainId, next.map((p) => p.id));
   };
 
   const moveSelectedToTop = () => {
@@ -2320,7 +2213,17 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
             {/* NEW PRODUCTS */}
             {/* Apollo — keep mounted so chat survives tab switches */}
             <div style={{ display: activeSection === 'apollo' ? 'block' : 'none' }}>
-              <ApolloPanel onReprocessBatch={processReprocessBatch} />
+              <ApolloPanel
+                taxonomyTree={taxonomyTree}
+                onShowToast={showToast}
+                onGoToApproval={() => setActiveSection('approval')}
+                onRefreshCatalog={() => {
+                  invalidateAdminCache();
+                  invalidateProductCache();
+                  void loadProducts();
+                  void refreshDashboardStats();
+                }}
+              />
             </div>
 
             {activeSection === 'new-items' && (
@@ -2330,26 +2233,29 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                 onDormantSearchChange={setDormantSearch}
                 dormantSelected={dormantSelected}
                 onDormantSelectedChange={setDormantSelected}
-                uploadQueue={uploadQueue}
-                onUploadQueueChange={setUploadQueue}
-                reprocessBusy={reprocessBusy}
-                onReprocessBusyChange={setReprocessBusy}
-                imageGenStyle={imageGenStyle}
-                onImageGenStyleChange={setImageGenStyle}
-                imageGenPrompt={imageGenPrompt}
-                onImageGenPromptChange={setImageGenPrompt}
-                costLog={costLog}
-                onCostLogChange={setCostLog}
                 saving={saving}
                 onGoLive={goLive}
                 onGoLiveSelected={goLiveSelected}
                 onRemoveProduct={removeDormantProduct}
                 onLoadDormant={loadDormant}
                 onShowToast={showToast}
+                onReprocessBusyChange={setReprocessBusy}
                 excelInputRef={newItemsExcelRef}
                 imageFolderRef={newItemsFolderRef}
                 onLegacyUpload={processUploadFiles}
-                reprocessAbortRef={reprocessAbortRef}
+                singleImageRef={singleImageRef}
+                folderImageRef={folderImageRef}
+              />
+            )}
+
+            {activeSection === 'approval' && (
+              <ApprovalPanel
+                onShowToast={showToast}
+                onRefreshStats={() => {
+                  invalidateAdminCache();
+                  void refreshDashboardStats();
+                  void loadProducts();
+                }}
               />
             )}
 
@@ -2429,14 +2335,6 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                       </button>
                     </div>
                     <div className="adm-bulk-bar__actions">
-                      <button
-                        type="button"
-                        className="adm-btn-ghost adm-btn--sm"
-                        onClick={() => setImageGenModalOpen(true)}
-                        disabled={reprocessBusy || !!saving}
-                      >
-                        <Sparkles size={15} /> Generate images
-                      </button>
                       <button
                         type="button"
                         className="adm-btn-ghost adm-btn--sm adm-btn-ghost--danger"
@@ -3023,19 +2921,6 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                         </button>
                       )}
                     </label>
-                    <label className="adm-filter-field">
-                      <span className="adm-filter-field__label">Subcategory</span>
-                      <select
-                        value={reorderSubcategory}
-                        onChange={(e) => { setReorderSubcategory(e.target.value); setSelectedIds(new Set()); }}
-                        className="adm-select adm-select--compact adm-select--enhanced"
-                      >
-                        <option value="all">All subcategories</option>
-                        {reorderSubcategoryOptions.map((s) => (
-                          <option key={s.id} value={s.id}>{s.path}</option>
-                        ))}
-                      </select>
-                    </label>
                     <span className="adm-reorder-count">
                       {visibleReorderProducts.length} {reorderSearchActive ? `match${visibleReorderProducts.length === 1 ? '' : 'es'}` : 'live products'}
                     </span>
@@ -3071,45 +2956,33 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                   </div>
                 )}
 
-                <div className="adm-reorder-layout">
-                  <div className="adm-reorder-cat-sidebar">
+                <div className="adm-reorder-layout adm-panel-with-sidebar">
+                  <aside className="adm-panel-sidebar adm-reorder-tree-sidebar">
                     <div className="adm-reorder-cat-heading">
                       <span>Categories</span>
                       <button
                         type="button"
                         className="adm-taxonomy-add-btn"
                         title="Add subcategory"
-                        onClick={() => setNewSubModal({ parentId: reorderCategory, label: '' })}
+                        onClick={() => setNewSubModal({ parentId: reorderMainId, label: '' })}
                       >
                         <Plus size={16} strokeWidth={2.5} />
                       </button>
                     </div>
-                    {mainCategories.map((cat) => (
-                      <div key={cat.id} className="adm-reorder-cat-row">
-                        <button
-                          onClick={() => { setSelectedIds(new Set()); setReorderCategory(cat.id); setReorderSubcategory('all'); setReorderSearch(''); }}
-                          className={`adm-reorder-cat-item${reorderCategory === cat.id ? ' adm-reorder-cat-item--active' : ''}`}
-                        >
-                          {cat.label}
-                        </button>
-                        <button
-                          type="button"
-                          className="adm-reorder-cat-edit"
-                          title="Edit category name"
-                          onClick={() => setEditTaxonomyModal({ id: cat.id, label: cat.label, type: 'category' })}
-                        >
-                          <Pencil size={12} />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
+                    <CategorySidebar
+                      tree={taxonomyTree}
+                      selectedPath={reorderCategoryPath}
+                      onSelectPath={(path) => { setReorderCategoryPath(path); setSelectedIds(new Set()); setReorderSearch(''); }}
+                    />
+                  </aside>
 
                   <ReorderGrid
                     products={visibleReorderProducts}
                     onProductsChange={setReorderProducts}
                     selectedIds={selectedIds}
                     onToggleSelect={toggleSelectReorder}
-                    mainCategoryId={reorderCategory}
+                    mainCategoryId={reorderMainId}
+                    selectedPath={reorderCategoryPath}
                     taxonomyTree={taxonomyTree}
                     loading={loading}
                     dragDisabled={reorderSearchActive}
@@ -3653,7 +3526,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
 
             {/* POPUP SPECIALS — merged into Specials tab */}
 
-            {activeSection === 'coming-soon' && (
+            {activeSection === 'dormant-products' && (
               <ComingSoonPanel taxonomyTree={taxonomyTree} />
             )}
 
@@ -4285,28 +4158,6 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
         open={fulfillmentSettingsOpen}
         onClose={() => setFulfillmentSettingsOpen(false)}
       />
-
-      <ImageGenModal
-        open={imageGenModalOpen}
-        onClose={() => setImageGenModalOpen(false)}
-        targetCount={productSelectedIds.size}
-        style={imageGenStyle}
-        onStyleChange={setImageGenStyle}
-        prompt={imageGenPrompt}
-        onPromptChange={setImageGenPrompt}
-        onRun={() => void runSelectedImageFix()}
-        busy={reprocessBusy}
-      />
-
-      {(reprocessBusy || uploadQueue.some((q) => q.status === 'transforming' || q.status === 'pending')) && uploadQueue.length > 0 && (
-        <ReprocessLiveFeed
-          queue={uploadQueue}
-          busy={reprocessBusy}
-          onDismiss={() => setUploadQueue([])}
-          onOpenNewProducts={() => setActiveSection('new-items')}
-          onStop={() => reprocessAbortRef.current?.abort()}
-        />
-      )}
     </div>
   );
 }

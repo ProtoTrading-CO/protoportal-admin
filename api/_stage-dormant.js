@@ -11,20 +11,44 @@ const LIVE_SELECT = `
  * Upsert archived_products preview (archived_by = new-products) while website_stock stays live.
  * @param {import('@supabase/supabase-js').SupabaseClient} sb
  */
-export async function stageDormantPreview(sb, liveRow, processedImageUrl) {
+function slotField(slot) {
+  const map = { 1: 'image_url_one', 2: 'image_url_two', 3: 'image_url_three', 4: 'image_url_four' };
+  return map[slot] || 'image_url_one';
+}
+
+function readSlotUrl(row, slot) {
+  const field = slotField(slot);
+  return String(row?.[field] || '').split(',')[0].trim();
+}
+
+export async function stageDormantSlotPreview(sb, liveRow, { slot = 1, imageUrl, mergeFromStaged = true } = {}) {
   const sku = String(liveRow.sku || '').trim();
   if (!sku) throw new Error('Missing SKU');
+  const targetSlot = Math.min(4, Math.max(1, Number(slot) || 1));
+  const processedImageUrl = String(imageUrl || '').trim();
+  if (!processedImageUrl) throw new Error('Missing image URL');
 
   const now = new Date().toISOString();
+  const { data: existing } = await sb
+    .from('archived_products')
+    .select('*')
+    .eq('sku', sku)
+    .maybeSingle();
+
+  if (existing && existing.archived_by !== 'new-products') {
+    throw new Error(`SKU "${sku}" is archived as "${existing.archived_by}" — cannot stage preview`);
+  }
+
+  const base = existing && mergeFromStaged ? existing : liveRow;
   const payload = {
     sku,
     barcode: liveRow.barcode,
     title: liveRow.title,
     original_description: liveRow.original_description,
-    image_url_one: processedImageUrl,
-    image_url_two: liveRow.image_url_two,
-    image_url_three: liveRow.image_url_three,
-    image_url_four: liveRow.image_url_four,
+    image_url_one: base.image_url_one ?? liveRow.image_url_one,
+    image_url_two: base.image_url_two ?? liveRow.image_url_two,
+    image_url_three: base.image_url_three ?? liveRow.image_url_three,
+    image_url_four: base.image_url_four ?? liveRow.image_url_four,
     category: liveRow.category,
     subcategory_one: liveRow.subcategory_one,
     subcategory_two: liveRow.subcategory_two,
@@ -39,16 +63,7 @@ export async function stageDormantPreview(sb, liveRow, processedImageUrl) {
     archived_at: now,
     archived_by: 'new-products',
   };
-
-  const { data: existing } = await sb
-    .from('archived_products')
-    .select('sku, archived_by')
-    .eq('sku', sku)
-    .maybeSingle();
-
-  if (existing && existing.archived_by !== 'new-products') {
-    throw new Error(`SKU "${sku}" is archived as "${existing.archived_by}" — cannot stage New Products preview`);
-  }
+  payload[slotField(targetSlot)] = processedImageUrl;
 
   if (existing) {
     const { error } = await sb.from('archived_products').update(payload).eq('sku', sku);
@@ -59,8 +74,14 @@ export async function stageDormantPreview(sb, liveRow, processedImageUrl) {
   }
 
   const { data: stillLive } = await sb.from('website_stock').select('sku').eq('sku', sku).maybeSingle();
-  return { stillLive: !!stillLive };
+  return { stillLive: !!stillLive, slot: targetSlot, imageUrl: processedImageUrl };
 }
+
+export async function stageDormantPreview(sb, liveRow, processedImageUrl) {
+  return stageDormantSlotPreview(sb, liveRow, { slot: 1, imageUrl: processedImageUrl });
+}
+
+export { readSlotUrl, slotField };
 
 function readStock(value) {
   if (value === null || value === undefined || value === '') return null;

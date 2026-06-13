@@ -1,16 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { jsPDF } from 'jspdf';
 import { Bot, FileDown, Loader2, Send, Sparkles, User, Wrench } from 'lucide-react';
+import ApolloImageWizard from './ApolloImageWizard';
 
 const STARTERS = [
   'What are my best performing products by orders?',
   'Which products have the lowest stock?',
   'Give me 5 products with negative stock',
-  'Fix images for all products in subcategory games and puzzles',
-  'Products with codes ABC123 and XYZ789 resize to 800x800 white background',
-  'Fix all the images on canvases and surfaces — white background, shadows, kids painting on the canvas',
-  'Do image gen on all monttaro canvas products — white background, product in view, painting on the canvas',
-  'All monttaro canvas with soft shadow on white background',
   'Who are all my customers?',
 ];
 
@@ -119,8 +115,7 @@ function ApolloWelcome({ onStarter, busy }) {
         <h3>Hi, I'm <span className="apollo-welcome-name">Apollo</span></h3>
         <p>
           Ask in plain English — every question is routed through live data first
-          (products, customers, orders, searches). Answers come from your index,
-          not guesswork.
+          (products, customers, orders, searches). Type <strong>/image</strong> to open the image generation wizard.
         </p>
       </div>
       <div className="apollo-welcome-starters">
@@ -250,12 +245,13 @@ function loadApolloMessages() {
   }
 }
 
-export default function ApolloPanel({ onReprocessBatch }) {
+export default function ApolloPanel({ taxonomyTree, onShowToast, onGoToApproval, onRefreshCatalog }) {
   const [messages, setMessages] = useState(loadApolloMessages);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [indexStatus, setIndexStatus] = useState(null);
+  const [wizardOpen, setWizardOpen] = useState(false);
   const scrollRef = useRef(null);
 
   useEffect(() => {
@@ -284,6 +280,13 @@ export default function ApolloPanel({ onReprocessBatch }) {
     const trimmed = String(text || '').trim();
     if (!trimmed && !fix) return;
     if (busy) return;
+
+    if (!fix && /^\/image\s*$/i.test(trimmed)) {
+      setInput('');
+      setWizardOpen(true);
+      return;
+    }
+
     setError('');
     setBusy(true);
 
@@ -330,45 +333,37 @@ export default function ApolloPanel({ onReprocessBatch }) {
         batchAction: json.batchAction || null,
       };
 
-      let batchIndex = -1;
-      setMessages((prev) => {
-        const next = fix || replaceLast ? [...prev.slice(0, -1), assistantMsg] : [...prev, assistantMsg];
-        batchIndex = next.length - 1;
-        return next;
-      });
-
-      if (json.batchAction?.type === 'reprocess_to_dormant' && onReprocessBatch) {
-        const label = json.batchAction.subcategory || '';
-        const imagePrompt = json.batchAction.imagePrompt || '';
-        void onReprocessBatch(json.batchAction.products, {
-          label,
-          switchTab: true,
-          skipConfirm: true,
-          imagePrompt: json.batchAction.imagePrompt || '',
-          imageStyle: json.batchAction.imageStyle || '',
-        });
-        if (batchIndex >= 0) {
-          setMessages((prev) => prev.map((m, i) => (
-            i === batchIndex
-              ? { ...m, batchComplete: `✓ Sent **${json.batchAction.products.length}** products to New Products — switch to the **New Products** tab to watch the live feed.` }
-              : m
-          )));
-        }
-      }
+      setMessages((prev) => (
+        fix || replaceLast ? [...prev.slice(0, -1), assistantMsg] : [...prev, assistantMsg]
+      ));
     } catch (e) {
       setError(e.message);
       if (fix) setMessages(messages);
     } finally {
       setBusy(false);
     }
-  }, [busy, messages, onReprocessBatch]);
+  }, [busy, messages]);
 
   const fixLastReply = useCallback(() => {
     void send('', { fix: true });
   }, [send]);
 
   const lastAssistantIdx = messages.reduce((acc, m, i) => (m.role === 'assistant' ? i : acc), -1);
-  const showWelcome = messages.length === 0;
+  const showWelcome = messages.length === 0 && !wizardOpen;
+
+  if (wizardOpen) {
+    return (
+      <div className="apollo-panel">
+        <ApolloImageWizard
+          taxonomyTree={taxonomyTree}
+          onExit={() => setWizardOpen(false)}
+          onShowToast={onShowToast}
+          onGoToApproval={onGoToApproval}
+          onRefreshCatalog={onRefreshCatalog}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="apollo-panel">
@@ -431,7 +426,7 @@ export default function ApolloPanel({ onReprocessBatch }) {
               className="apollo-input"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="Ask about orders, stock, customers — or fix images by subcategory…"
+              placeholder="Ask about orders, stock, customers — type /image for image gen…"
               disabled={busy}
             />
             <button type="submit" className="apollo-send-btn" disabled={busy || !input.trim()} aria-label="Send">

@@ -176,6 +176,18 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true });
     }
 
+    if (action === 'deleteStagedPreview') {
+      const { sku } = req.body;
+      if (!sku) return res.status(400).json({ error: 'sku required' });
+      const { error } = await supabase
+        .from('archived_products')
+        .delete()
+        .eq('sku', sku)
+        .eq('archived_by', 'new-products');
+      if (error) throw error;
+      return res.status(200).json({ ok: true });
+    }
+
     return res.status(400).json({ error: `Unknown action: ${action}` });
   } catch (err) {
     console.error('stock-actions error:', err.message);

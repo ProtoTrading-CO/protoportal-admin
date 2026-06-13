@@ -56,67 +56,10 @@ export function executeIntent(intent, data, terms = '', { limit = null, skus = [
 
   switch (intent) {
     case 'batch_fix_images': {
-      let matched = [];
-      let displayLabel = '';
-      let searchTerms = cleanBatchTerms(terms) || extractSubcategoryFromQuery(userQuery) || terms;
-
-      const skuList = Array.isArray(skus) ? skus.map((s) => String(s).trim()).filter(Boolean) : [];
-      if (skuList.length) {
-        const skuSet = new Set(skuList.map((s) => s.toUpperCase()));
-        matched = products.all.filter((p) => skuSet.has(String(p.sku || '').toUpperCase()) || skuSet.has(String(p.barcode || '').toUpperCase()));
-        displayLabel = skuList.length === 1 ? skuList[0] : `${skuList.length} SKUs`;
-      } else {
-        searchTerms = cleanBatchTerms(searchTerms);
-        const phrases = splitBatchTermPhrases(searchTerms);
-        const canonical = resolveTaxonomyLabelsMulti(searchTerms);
-        displayLabel = canonical.length
-          ? canonical.join(' + ')
-          : (phrases.length > 1 ? phrases.join(' + ') : searchTerms);
-        matched = findProductsBySubcategory(products, searchTerms);
-        if (!matched.length) matched = findProductsByKeyword(products, searchTerms);
-      }
-
-      const effectivePrompt = imagePrompt || extractCreativePrompt(userQuery);
-      const style = imageStyle || inferImageStyle(effectivePrompt, userQuery || terms);
-
-      const withImages = matched.filter((p) => p.imageUrl);
-      const missing = matched.length - withImages.length;
-      const notFound = skuList.length ? skuList.filter((code) => !matched.some((p) => p.sku.toUpperCase() === code.toUpperCase() || String(p.barcode || '').toUpperCase() === code.toUpperCase())) : [];
-
-      if (!matched.length) {
-        const suggestions = !skuList.length ? suggestSubcategories(searchTerms || terms) : [];
-        const hint = suggestions.length
-          ? `\n\nDid you mean: ${suggestions.map((s) => `**${s}**`).join(', ')}?`
-          : '';
-        const skuHint = notFound.length ? `\n\nCodes not found: ${notFound.map((s) => `**${s}**`).join(', ')}` : '';
-        const tried = displayLabel || terms || '—';
-        return {
-          source: 'live-index',
-          intent,
-          reply: `## Image fix\n\nNo products matched **${tried}**.${skuHint}${hint}\n\nTip: use one subcategory name, or several separated by commas — e.g. **Canvases, Spray Paint** or **Canvases & Surfaces**.`,
-        };
-      }
-
-      const preview = withImages.slice(0, 8).map((p, i) => `${i + 1}. **${p.title}** (${p.sku})`);
-      const more = withImages.length > 8 ? `\n\n_…and ${withImages.length - 8} more._` : '';
-      const styleLabel = style === 'generative' ? 'Generative AI' : style === 'shadow' ? 'White + shadow' : 'Standard white bg';
-      const promptNote = effectivePrompt
-        ? `\n\n**Your instructions:** ${effectivePrompt}`
-        : `\n\n_Style: **${styleLabel}**._`;
-      const modelNote = '\n\n_Model: **Gemini 3 Pro Image** via OpenRouter._';
-      const stayLiveNote = '\n\n_Products **stay live** on the website with their current images. Only **Go live** in New Products will replace the live image._';
-
       return {
         source: 'live-index',
         intent,
-        reply: `## Image generation — ${displayLabel}\n\nFound **${withImages.length}** products${missing ? ` (${missing} skipped — no image)` : ''}${notFound.length ? ` · ${notFound.length} code(s) not found` : ''}.${promptNote}${modelNote}${stayLiveNote}\n\nStaging in **New Products** — open that tab to watch the live feed…\n\n${preview.join('\n')}${more}`,
-        batchAction: {
-          type: 'reprocess_to_dormant',
-          subcategory: displayLabel,
-          imagePrompt: effectivePrompt || '',
-          imageStyle: style,
-          products: withImages.map((p) => ({ sku: p.sku, title: p.title, imageUrl: p.imageUrl })),
-        },
+        reply: '## Image generation\n\nProduct image generation is handled through the **/image** wizard in Apollo.\n\nType **`/image`** in the chat box to open the guided flow: pick categories or SKUs, choose a style, and run the batch with live progress.',
       };
     }
 
