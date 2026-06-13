@@ -11,8 +11,10 @@ import {
   ChevronLeft,
   ChevronRight,
   ClipboardList,
+  Clock,
   Eye,
   FileDown,
+  Home,
   Pin,
   PinOff,
   Plus,
@@ -56,6 +58,7 @@ import {
   bulkArchiveProducts,
   bulkDeleteProducts,
   bulkMoveProducts,
+  bulkUnarchiveProducts,
   createProduct,
   deleteProduct,
   fetchAdminProductsPage,
@@ -100,14 +103,17 @@ import { fetchBanner, saveBanner, uploadBannerImage } from '../lib/banner';
 import { fetchPopupSpecial, savePopupSpecial, uploadPopupImage } from '../lib/popupSpecial';
 import CrmContactsModal from '../components/CrmContactsModal';
 import WhatsappPanel from '../components/WhatsappPanel';
-import { adminProductSearch } from '../lib/fuzzySearch';
+import { fuzzyFilter } from '../lib/fuzzySearch';
 import ReorderGrid from '../components/ReorderGrid';
+import CategorySidebar from '../components/CategorySidebar';
+import NewItemsPanel from '../components/NewItemsPanel';
+import ComingSoonPanel from '../components/ComingSoonPanel';
 import FulfillmentSettingsModal from '../components/FulfillmentSettingsModal';
 import OrderWhatsappNotify from '../components/OrderWhatsappNotify';
 import AnalyticsHub from '../components/AnalyticsHub';
 import ApolloPanel from '../components/ApolloPanel';
 import ReprocessLiveFeed from '../components/ReprocessLiveFeed';
-import ImageGenOptions from '../components/ImageGenOptions';
+import ImageGenPanel, { ImageGenModal } from '../components/ImageGenPanel';
 import { runReprocessBatch } from '../lib/reprocessQueue';
 import categories from '../data/categories.json';
 
@@ -143,13 +149,13 @@ const sections = [
   { id: 'customers', label: 'Customer Management', icon: Users },
   { id: 'reorder', label: 'Reorder Grid', icon: Grip },
   { id: 'archive', label: 'Archive', icon: Archive },
-  { id: 'specials', label: "This Week's Specials", icon: Star },
+  { id: 'specials', label: 'Specials', icon: Star },
   { id: 'crm', label: 'WhatsApp', icon: MessageCircle },
   { id: 'banner', label: 'Banner Editor', icon: Layout },
-  { id: 'popup-specials', label: 'Popup Specials', icon: Megaphone },
+  { id: 'coming-soon', label: 'Coming Soon', icon: Clock },
   { id: 'pricing', label: 'Pricing & Returns', icon: SlidersHorizontal },
   { id: 'recycle', label: 'Recycle Bin', icon: Trash2 },
-  { id: 'new-products', label: 'New Products', icon: Sparkles },
+  { id: 'new-items', label: 'New Items', icon: Sparkles },
 ];
 
 const productTypes = ['General product', 'Hot seller', 'New stock', 'Clearance stock'];
@@ -387,6 +393,13 @@ function productToForm(product) {
   };
 }
 
+function WhatsappOptIn({ value }) {
+  if (value == null) return <span className="adm-muted">—</span>;
+  return value
+    ? <Check size={16} color="#15803d" strokeWidth={3} aria-label="WhatsApp yes" />
+    : <X size={16} color="#dc2626" strokeWidth={3} aria-label="WhatsApp no" />;
+}
+
 export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const [activeSection, setActiveSection] = useState('orders');
   const [loading, setLoading] = useState(false);
@@ -431,11 +444,16 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const [newProductsTab, setNewProductsTab] = useState('products'); // 'products' | 'costs'
   const singleImageRef = useRef(null);
   const folderImageRef = useRef(null);
+  const newItemsExcelRef = useRef(null);
+  const newItemsFolderRef = useRef(null);
+  const reprocessAbortRef = useRef(null);
+  const [imageGenModalOpen, setImageGenModalOpen] = useState(false);
+  const [customerApproveBusy, setCustomerApproveBusy] = useState(false);
+  const customerExcelRef = useRef(null);
 
   const [productSearchInput, setProductSearchInput] = useState('');
   const [productSearchDebounced, setProductSearchDebounced] = useState('');
-  const [productCategory, setProductCategory] = useState('all');
-  const [productSubcategory, setProductSubcategory] = useState('all');
+  const [productCategoryPath, setProductCategoryPath] = useState([]);
   const [productPageSize, setProductPageSize] = useState(50);
   const [productPage, setProductPage] = useState(1);
   const [productRows, setProductRows] = useState([]);
@@ -448,6 +466,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const [statsOrderTotal, setStatsOrderTotal] = useState(0);
 
   const [archiveSearch, setArchiveSearch] = useState('');
+  const [archiveCategoryPath, setArchiveCategoryPath] = useState([]);
   const [archivePage, setArchivePage] = useState(1);
   const [archiveRows, setArchiveRows] = useState([]);
   const [archiveTotal, setArchiveTotal] = useState(0);
@@ -527,6 +546,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const [crmSearch, setCrmSearch] = useState('');
   const [crmTemplates, setCrmTemplates] = useState([]);
   const [crmTemplatesLoading, setCrmTemplatesLoading] = useState(false);
+  const [crmError, setCrmError] = useState('');
   const [crmSelectedTemplate, setCrmSelectedTemplate] = useState('');
   const [crmSending, setCrmSending] = useState(false);
   const [crmSentCount, setCrmSentCount] = useState(null);
@@ -565,14 +585,14 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     const timer = setTimeout(() => setProductSearchDebounced(productSearchInput.trim()), 250);
     return () => clearTimeout(timer);
   }, [productSearchInput]);
-  useEffect(() => { setProductPage(1); }, [productSearchDebounced, productCategory, productSubcategory, productPageSize]);
-  useEffect(() => { setArchivePage(1); }, [archiveSearch]);
+  useEffect(() => { setProductPage(1); }, [productSearchDebounced, productCategoryPath.join('|'), productPageSize]);
+  useEffect(() => { setArchivePage(1); }, [archiveSearch, archiveCategoryPath.join('|')]);
   useEffect(() => { setRecyclePage(1); }, [recycleSearch]);
   useEffect(() => { setCustomerPage(1); }, [customerTab, customerSearch]);
   useEffect(() => { if (activeSection === 'crm') void loadCrmCustomers(1); }, [crmFilters.businessTypes.join('|'), crmFilters.joinedStatuses.join('|'), crmSearch]);
   useEffect(() => { if (activeSection === 'crm' && !crmTemplates.length && !crmTemplatesLoading) void loadCrmTemplates(); }, [activeSection, crmTemplates.length, crmTemplatesLoading]);
   useEffect(() => { if (activeSection === 'banner') void loadBannerEditor(); }, [activeSection]);
-  useEffect(() => { if (activeSection === 'popup-specials') void loadPopupEditor(); }, [activeSection]);
+  useEffect(() => { if (activeSection === 'specials') void loadPopupEditor(); }, [activeSection]);
 
   useEffect(() => {
     try {
@@ -684,8 +704,10 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
       return;
     }
 
-    if (switchTab) setActiveSection('new-products');
+    if (switchTab) setActiveSection('new-items');
     setReprocessBusy(true);
+    const ac = new AbortController();
+    reprocessAbortRef.current = ac;
 
     const initial = rows.map((p) => ({
       sku: p.sku,
@@ -702,8 +724,17 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
       const results = await runReprocessBatch(rows, {
         prompt,
         imageStyle: style,
+        signal: ac.signal,
         onItemUpdate: (index, patch) => {
-          setUploadQueue((prev) => prev.map((item, idx) => (idx === index ? { ...item, ...patch } : item)));
+          setUploadQueue((prev) => {
+            const next = prev.map((item, idx) => (idx === index ? { ...item, ...patch } : item));
+            if (patch.status === 'done') {
+              const doneItem = next[index];
+              const rest = next.filter((_, idx) => idx !== index);
+              return [doneItem, ...rest];
+            }
+            return next;
+          });
           if (patch.status === 'done') void loadDormant();
         },
       });
@@ -712,11 +743,14 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
       await loadDormant();
       await loadProducts();
       await refreshDashboardStats();
-      showToast(`Reprocess complete — ${results.done} staged in New Products, ${results.failed} failed`);
+      if (!ac.signal.aborted) {
+        showToast(`Reprocess complete — ${results.done} staged in New Items, ${results.failed} failed`);
+      }
     } catch (err) {
-      showToast(err.message || 'Reprocess batch failed', 'error');
+      if (!ac.signal.aborted) showToast(err.message || 'Reprocess batch failed', 'error');
     } finally {
       setReprocessBusy(false);
+      reprocessAbortRef.current = null;
     }
   };
 
@@ -735,8 +769,13 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     setLoadingProgress(0);
     setLoadingError('');
     try {
-      const catFilter = productSubcategory !== 'all' ? productSubcategory : productCategory;
-      const data = await fetchAdminProductsPage({ page: productPage, pageSize: productPageSize, searchQuery: productSearchDebounced, categoryFilter: catFilter, onProgress: setLoadingProgress });
+      const data = await fetchAdminProductsPage({
+        page: productPage,
+        pageSize: productPageSize,
+        searchQuery: productSearchDebounced,
+        categoryPathFilter: productCategoryPath,
+        onProgress: setLoadingProgress,
+      });
       setProductRows(data.rows);
       setProductTotal(data.total);
     } catch (err) {
@@ -748,7 +787,14 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     setLoadingProgress(0);
     setLoadingError('');
     try {
-      const data = await fetchAdminProductsPage({ page: archivePage, pageSize: ADMIN_PAGE_SIZE, searchQuery: archiveSearch, archived: true, onProgress: setLoadingProgress });
+      const data = await fetchAdminProductsPage({
+        page: archivePage,
+        pageSize: ADMIN_PAGE_SIZE,
+        searchQuery: archiveSearch,
+        archived: true,
+        categoryPathFilter: archiveCategoryPath,
+        onProgress: setLoadingProgress,
+      });
       setArchiveRows(data.rows);
       setArchiveTotal(data.total);
     } catch (err) {
@@ -1065,10 +1111,10 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     }
   };
 
-  useEffect(() => { if (activeSection === 'new-products') void loadDormant(); }, [activeSection, dormantSearch]);
-  useEffect(() => { if (activeSection === 'products') void loadProducts(); }, [activeSection, productPage, productSearchDebounced, productCategory, productSubcategory, productPageSize]);
-  useEffect(() => { setProductSelectedIds(new Set()); }, [productPage, productSearchDebounced, productCategory, productSubcategory]);
-  useEffect(() => { if (activeSection === 'archive') void loadArchive(); }, [activeSection, archivePage, archiveSearch]);
+  useEffect(() => { if (activeSection === 'new-items') void loadDormant(); }, [activeSection, dormantSearch]);
+  useEffect(() => { if (activeSection === 'products') void loadProducts(); }, [activeSection, productPage, productSearchDebounced, productCategoryPath.join('|'), productPageSize]);
+  useEffect(() => { setProductSelectedIds(new Set()); }, [productPage, productSearchDebounced, productCategoryPath.join('|')]);
+  useEffect(() => { if (activeSection === 'archive') void loadArchive(); }, [activeSection, archivePage, archiveSearch, archiveCategoryPath.join('|')]);
   useEffect(() => { setArchiveSelectedIds(new Set()); }, [archivePage, archiveSearch, activeSection]);
   useEffect(() => { if (activeSection === 'recycle') void loadRecycle(); }, [activeSection, recyclePage, recycleSearch]);
   useEffect(() => {
@@ -1335,6 +1381,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     if (activeSection === 'customers') return loadCustomers();
     if (activeSection === 'pricing') return loadCategoryWorkingSet(pricingCategory, 'pricing');
     if (activeSection === 'reorder') return loadReorderProducts();
+    if (activeSection === 'new-items') return loadDormant();
     if (activeSection === 'orders') return loadOrders();
   };
 
@@ -1392,14 +1439,30 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     if (!dormantSelected.size) return;
     const ids = [...dormantSelected];
     setSaving('bulk-live');
+    const errors = [];
+    let ok = 0;
+    const succeeded = new Set();
     try {
-      await Promise.all(ids.map((id) => applyDormantLive(id)));
-      setDormantRows((prev) => prev.filter((p) => !dormantSelected.has(p.id)));
-      setDormantSelected(new Set());
+      for (const id of ids) {
+        try {
+          await applyDormantLive(id);
+          ok += 1;
+          succeeded.add(id);
+        } catch (err) {
+          errors.push(`${id}: ${err.message}`);
+        }
+      }
+      setDormantRows((prev) => prev.filter((p) => !succeeded.has(p.id)));
+      setDormantSelected(new Set(ids.filter((id) => !succeeded.has(id))));
       invalidateProductCache();
       invalidateAdminCache();
       await loadProducts();
-      showToast(`${ids.length} product${ids.length === 1 ? '' : 's'} updated on site`);
+      await loadDormant();
+      if (errors.length) {
+        alert(`Set live: ${ok} succeeded, ${errors.length} failed:\n\n${errors.slice(0, 10).join('\n')}${errors.length > 10 ? '\n…' : ''}`);
+      } else {
+        showToast(`${ok} product${ok === 1 ? '' : 's'} updated on site`);
+      }
     } catch (err) {
       alert(err.message || 'Failed to go live');
     } finally { setSaving(''); }
@@ -1506,6 +1569,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
 
   const loadCrmCustomers = async (page = crmMeta.page || 1) => {
     setCrmLoading(true);
+    setCrmError('');
     try {
       const params = new URLSearchParams({ page: String(page), pageSize: String(crmMeta.pageSize || 25), search: crmSearch.trim() });
       crmFilters.businessTypes.forEach((value) => params.append('businessType', value));
@@ -1521,12 +1585,16 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
         pageSize: json.pageSize || 25,
         summary: json.summary || null,
       });
-    } catch (e) { console.error(e); }
+    } catch (e) {
+      console.error(e);
+      setCrmError(e.message || 'Failed to load WhatsApp contacts');
+    }
     finally { setCrmLoading(false); }
   };
 
   const loadCrmTemplates = async () => {
     setCrmTemplatesLoading(true);
+    setCrmError('');
     try {
       const res = await fetch('/api/whatsapp-templates');
       const json = await res.json();
@@ -1538,6 +1606,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
         : (templates[0]?.name || ''));
     } catch (e) {
       console.error(e);
+      setCrmError(e.message || 'Failed to load WhatsApp templates — check WATI_API_TOKEN');
     } finally {
       setCrmTemplatesLoading(false);
     }
@@ -1695,10 +1764,11 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     } finally { setSaving(''); }
   };
 
-  const reorderSubcategoryOptions = useMemo(
-    () => flattenSubcategories(subcategoryOptions(reorderCategory, taxonomyTree)),
-    [reorderCategory, taxonomyTree],
-  );
+  const reorderSubcategoryOptions = useMemo(() => {
+    const main = taxonomyTree.find((c) => c.id === reorderCategory);
+    if (!main?.children?.length) return [];
+    return flattenSubcategories(main.children, 0, main.label);
+  }, [reorderCategory, taxonomyTree]);
 
   // Search filters the grid in place (original order preserved so the grouping
   // stays stable). Drag-reorder is disabled while a search is active because
@@ -1707,12 +1777,13 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     let rows = reorderProducts;
     const q = reorderSearch.trim();
     if (q) {
-      rows = adminProductSearch(rows, q);
+      rows = fuzzyFilter(rows, q);
     } else if (reorderSubcategory !== 'all') {
       rows = rows.filter((p) =>
         p.categoryPath?.[1] === reorderSubcategory
         || p.categoryPath?.[2] === reorderSubcategory
         || p.categoryPath?.[3] === reorderSubcategory
+        || p.categoryPath?.[4] === reorderSubcategory
       );
     }
     return rows;
@@ -1898,25 +1969,62 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     .filter((p) => p.image || p.images?.[0])
     .map((p) => ({ sku: p.id, title: p.name, imageUrl: p.image || p.images?.[0] }));
 
-  const runFilteredImageFix = async () => {
-    const catFilter = productSubcategory !== 'all'
-      ? productSubcategory
-      : (productCategory !== 'all' && productCategory !== '__uncategorized__' ? productCategory : null);
-    if (!catFilter) {
-      showToast('Select a category or subcategory first', 'error');
-      return;
-    }
-    const label = productSubcategory !== 'all'
-      ? subcategoryOptions(productCategory).find((s) => s.id === productSubcategory)?.label || productSubcategory
-      : mainCategories.find((c) => c.id === productCategory)?.label || productCategory;
-    const data = await fetchAdminProductsPage({ page: 1, pageSize: 999999, categoryFilter: catFilter });
-    await processReprocessBatch(productsWithImages(data.rows), { label, switchTab: true, imageStyle: imageGenStyle, imagePrompt: imageGenPrompt });
-  };
-
   const runSelectedImageFix = async () => {
     const selected = productRows.filter((p) => productSelectedIds.has(p.id));
+    setImageGenModalOpen(false);
     await processReprocessBatch(productsWithImages(selected), { switchTab: true, imageStyle: imageGenStyle, imagePrompt: imageGenPrompt });
   };
+
+  const confirmBulkRestoreArchive = async () => {
+    const count = archiveSelectedIds.size;
+    const ids = [...archiveSelectedIds];
+    setSaving('bulk-restore-archive');
+    try {
+      const json = await bulkUnarchiveProducts(ids);
+      invalidateAdminCache();
+      invalidateProductCache();
+      setArchiveSelectedIds(new Set());
+      await refreshDashboardStats();
+      await loadArchive();
+      await loadProducts();
+      const failed = json.failed?.length || 0;
+      showToast(failed ? `Restored ${json.restored || 0}, ${failed} failed` : `Restored ${count} product${count === 1 ? '' : 's'}`);
+    } catch (err) {
+      showToast(err.message || 'Restore failed', 'error');
+    } finally { setSaving(''); }
+  };
+
+  const handleCustomerExcelApprove = async (file) => {
+    if (!file) return;
+    setCustomerApproveBusy(true);
+    try {
+      const XLSX = await import('xlsx');
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: 'array' });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+      const emails = rows.flatMap((row) => {
+        const val = row.email || row.Email || row.EMAIL || Object.values(row)[0];
+        return val ? [String(val).trim().toLowerCase()] : [];
+      }).filter(Boolean);
+      const res = await fetch('/api/approve-customers-bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ emails }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Bulk approve failed');
+      await refreshPendingCount();
+      await loadCustomers();
+      showToast(`Approved ${json.approved || 0}${json.notFound?.length ? `, ${json.notFound.length} not found` : ''}`);
+    } catch (err) {
+      showToast(err.message || 'Excel approve failed', 'error');
+    } finally {
+      setCustomerApproveBusy(false);
+    }
+  };
+
+  const goHome = () => setActiveSection('orders');
 
   // Archive bulk-select handlers — mirror the Product Manager bulk bar so
   // admins can multi-select archived rows and either restore or permanently
@@ -2165,6 +2273,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
             </div>
           </div>
           <div className="adm-header-actions">
+            <button type="button" onClick={goHome} className="adm-btn-ghost"><Home size={15} /><span className="adm-btn-text">Home</span></button>
             <button onClick={() => void refreshCurrentSection()} className="adm-btn-ghost"><RefreshCw size={15} /><span className="adm-btn-text">Refresh</span></button>
             <button onClick={onViewPortal} className="adm-btn-ghost"><ArrowLeftRight size={15} /><span className="adm-btn-text">Portal</span></button>
             <button onClick={onLogout} className="adm-btn-dark"><LogOut size={15} /><span className="adm-btn-text">Log out</span></button>
@@ -2214,403 +2323,62 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
               <ApolloPanel onReprocessBatch={processReprocessBatch} />
             </div>
 
-            {activeSection === 'new-products' && (
-              <div className="adm-panel">
-                {/* Hidden file inputs */}
-                <input
-                  ref={singleImageRef}
-                  type="file"
-                  accept="image/*"
-                  style={{ display: 'none' }}
-                  onChange={(e) => { if (e.target.files?.length) void processUploadFiles(e.target.files); e.target.value = ''; }}
-                />
-                <input
-                  ref={folderImageRef}
-                  type="file"
-                  accept="image/*"
-                  multiple
-                  // @ts-ignore
-                  webkitdirectory=""
-                  style={{ display: 'none' }}
-                  onChange={(e) => { if (e.target.files?.length) void processUploadFiles(e.target.files); e.target.value = ''; }}
-                />
-
-                <div className="adm-section-head">
-                  <div>
-                    <h2 className="adm-section-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <Sparkles size={20} style={{ color: '#8B1A1A' }} /> New Products
-                    </h2>
-                    <p className="adm-section-note">Upload new images or reprocess live products. Uses <strong>Gemini 3 Pro Image</strong> — standard, shadow, or generative AI. Staged products stay on the website until <strong>Go live</strong>.</p>
-                  </div>
-                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-                    <button onClick={() => singleImageRef.current?.click()} className="adm-btn-red">
-                      <ImagePlus size={14} /> Upload single image
-                    </button>
-                    <button onClick={() => folderImageRef.current?.click()} className="adm-btn-ghost">
-                      <Upload size={14} /> Upload image folder
-                    </button>
-                    {dormantSelected.size > 0 && (
-                      <>
-                        <span className="adm-pill">{dormantSelected.size} selected</span>
-                        <button
-                          onClick={() => void goLiveSelected()}
-                          className="adm-btn-dark"
-                          disabled={saving === 'bulk-live'}
-                          style={{ background: '#0f172a', color: '#fff', border: 'none', borderRadius: 8, padding: '0 14px', height: 36, fontWeight: 700, fontSize: 13, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontFamily: 'inherit' }}
-                        >
-                          <Zap size={14} /> {saving === 'bulk-live' ? 'Going live…' : 'Set selected live'}
-                        </button>
-                        <button onClick={() => setDormantSelected(new Set())} className="adm-btn-ghost">Clear</button>
-                      </>
-                    )}
-                    {dormantRows.length > 0 && (
-                      <button
-                        onClick={async () => {
-                          if (!window.confirm(`Delete all ${dormantRows.length} dormant products? This cannot be undone.`)) return;
-                          setSaving('delete-all-dormant');
-                          try {
-                            await Promise.all(dormantRows.map((p) => deleteProduct(p.id)));
-                            setDormantRows([]);
-                            setDormantSelected(new Set());
-                          } catch (err) { alert(err.message || 'Delete failed'); }
-                          finally { setSaving(''); }
-                        }}
-                        className="adm-btn-ghost"
-                        disabled={saving === 'delete-all-dormant'}
-                        style={{ color: '#c40000' }}
-                      >
-                        <Trash2 size={14} /> {saving === 'delete-all-dormant' ? 'Deleting…' : 'Delete all'}
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                <ImageGenOptions
-                  style={imageGenStyle}
-                  onStyleChange={setImageGenStyle}
-                  prompt={imageGenPrompt}
-                  onPromptChange={setImageGenPrompt}
-                />
-
-                {/* Upload progress */}
-                {uploadQueue.length > 0 && (
-                  <div style={{ marginBottom: 20, border: '1px solid #e5e7eb', borderRadius: 10, overflow: 'hidden' }}>
-                    <div style={{ padding: '10px 16px', background: '#f8fafc', borderBottom: '1px solid #e5e7eb', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span style={{ fontWeight: 700, fontSize: 13 }}>
-                        {reprocessBusy ? 'Live reprocess feed' : 'Processing complete'} · {uploadQueue.filter((q) => q.status === 'done').length}/{uploadQueue.length}
-                      </span>
-                      <button type="button" onClick={() => setUploadQueue([])} className="adm-icon-btn" disabled={reprocessBusy}><X size={13} /></button>
-                    </div>
-                    <div style={{ maxHeight: 320, overflowY: 'auto' }}>
-                      {uploadQueue.map((item, i) => (
-                        <div key={`${item.sku || item.name}-${i}`} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', borderBottom: i < uploadQueue.length - 1 ? '1px solid #f1f5f9' : 'none' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-                            <div title="Before" style={{ width: 52, height: 52, borderRadius: 8, border: '1px solid #e5e7eb', background: '#fff', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                              {item.thumbUrl ? (
-                                <img src={item.thumbUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
-                              ) : (
-                                <Image size={18} color="#cbd5e1" />
-                              )}
-                            </div>
-                            <span style={{ color: '#94a3b8', fontSize: 14 }}>→</span>
-                            <div title="After (800×800 white)" style={{ width: 52, height: 52, borderRadius: 8, border: item.previewUrl ? '2px solid #16a34a' : '1px solid #e5e7eb', background: '#fff', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                              {item.previewUrl ? (
-                                <img src={item.previewUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
-                              ) : item.status === 'transforming' ? (
-                                <Loader2 size={18} color="#f59e0b" className="spin" />
-                              ) : (
-                                <Image size={18} color="#cbd5e1" />
-                              )}
-                            </div>
-                          </div>
-                          <span style={{
-                            width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
-                            background: item.status === 'done' ? '#16a34a' : item.status === 'error' ? '#dc2626' : item.status === 'pending' ? '#d1d5db' : '#f59e0b',
-                          }} />
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontWeight: 700, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.name}</div>
-                            {item.sku && item.sku !== item.name && (
-                              <div style={{ fontSize: 10, color: '#94a3b8', fontWeight: 600 }}>{item.sku}</div>
-                            )}
-                          </div>
-                          <span style={{ fontSize: 11, color: item.status === 'error' ? '#dc2626' : '#64748b', whiteSpace: 'nowrap', maxWidth: '42%', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                            {item.status === 'pending' ? 'Waiting…' : item.message}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Sub-tabs */}
-                <div style={{ display: 'flex', gap: 0, borderBottom: '1px solid #e5e7eb', marginBottom: 20 }}>
-                  {[{ id: 'products', label: 'Dormant Products' }, { id: 'costs', label: `Cost Tracker  ${costLog.length ? `(${costLog.length})` : ''}` }].map((t) => (
-                    <button
-                      key={t.id}
-                      onClick={() => setNewProductsTab(t.id)}
-                      style={{
-                        padding: '9px 18px',
-                        background: 'transparent',
-                        border: 'none',
-                        borderBottom: newProductsTab === t.id ? '2px solid #8B1A1A' : '2px solid transparent',
-                        color: newProductsTab === t.id ? '#0f172a' : '#64748b',
-                        fontWeight: 700,
-                        fontSize: 13,
-                        cursor: 'pointer',
-                        fontFamily: 'inherit',
-                        marginBottom: -1,
-                      }}
-                    >
-                      {t.label}
-                    </button>
-                  ))}
-                </div>
-
-                {newProductsTab === 'products' && (
-                <div className="adm-toolbar" style={{ gridTemplateColumns: '1fr' }}>
-                  <label className="adm-search">
-                    <Search size={15} />
-                    <input
-                      value={dormantSearch}
-                      onChange={(e) => setDormantSearch(e.target.value)}
-                      placeholder="Search dormant products by SKU or title"
-                      className="adm-search-input"
-                    />
-                  </label>
-                </div>
-                )}
-
-                {newProductsTab === 'products' && dormantRows.length === 0 && loadingProgress === null && (
-                  <div className="adm-empty" style={{ padding: '48px 0', textAlign: 'center', color: '#64748b' }}>
-                    <Sparkles size={36} style={{ color: '#d1d5db', marginBottom: 12 }} />
-                    <p style={{ margin: 0 }}>No dormant products. All products are live.</p>
-                  </div>
-                )}
-
-                {newProductsTab === 'products' && <div className="adm-list">
-                  {dormantRows.length > 0 && (
-                    <div className="adm-list-head" style={{ gridTemplateColumns: '32px 44px 2fr 160px 180px' }}>
-                      <span>
-                        <input
-                          type="checkbox"
-                          checked={dormantSelected.size === dormantRows.length && dormantRows.length > 0}
-                          onChange={() => setDormantSelected(dormantSelected.size === dormantRows.length ? new Set() : new Set(dormantRows.map((p) => p.id)))}
-                          style={{ accentColor: '#8B1A1A', cursor: 'pointer' }}
-                        />
-                      </span>
-                      <span></span>
-                      <span>Product</span>
-                      <span>Category</span>
-                      <span>Actions</span>
-                    </div>
-                  )}
-                  {dormantRows.map((product) => (
-                    <div key={product.id} className="adm-list-row" style={{ gridTemplateColumns: '32px 44px 2fr 160px 180px', alignItems: 'center' }}>
-                      <div>
-                        <input
-                          type="checkbox"
-                          checked={dormantSelected.has(product.id)}
-                          onChange={() => setDormantSelected((prev) => {
-                            const next = new Set(prev);
-                            if (next.has(product.id)) next.delete(product.id);
-                            else next.add(product.id);
-                            return next;
-                          })}
-                          style={{ accentColor: '#8B1A1A', cursor: 'pointer' }}
-                        />
-                      </div>
-                      <div>
-                        {product.image ? (
-                          <img
-                            src={product.image}
-                            alt={product.name}
-                            onClick={() => setImageViewUrl(product.image)}
-                            style={{ width: 36, height: 36, objectFit: 'contain', borderRadius: 4, background: '#f3f4f6', mixBlendMode: 'multiply', cursor: 'zoom-in' }}
-                            title="Click to view"
-                          />
-                        ) : (
-                          <div style={{ width: 36, height: 36, borderRadius: 4, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, color: '#9ca3af' }}>IMG</div>
-                        )}
-                      </div>
-                      <div>
-                        <div style={{ fontWeight: 800, fontSize: 14 }}>{product.name}</div>
-                        <div className="adm-muted" style={{ fontSize: 11 }}>
-                          <span title="Barcode">BC: {product.barcode || product.code}</span>
-                          {product.websiteSku && <span title="Website SKU" style={{ marginLeft: 8 }}>WSK: {product.websiteSku}</span>}
-                          {product.stillLive && (
-                            <span style={{ marginLeft: 8, color: '#16a34a', fontWeight: 700 }}>· Still live on site</span>
-                          )}
-                        </div>
-                      </div>
-                      <div style={{ fontSize: 13, color: '#475569' }}>
-                        {product.category ? product.category.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) : '—'}
-                      </div>
-                      <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-                        {product.image && (
-                          <button
-                            onClick={() => setImageViewUrl(product.image)}
-                            className="adm-icon-btn"
-                            title="View image"
-                          >
-                            <Eye size={14} />
-                          </button>
-                        )}
-                        <button
-                          onClick={() => void goLive(product)}
-                          disabled={saving === product.id}
-                          style={{
-                            padding: '5px 12px',
-                            background: saving === product.id ? '#e2e8f0' : '#0f172a',
-                            color: saving === product.id ? '#94a3b8' : '#fff',
-                            border: 'none',
-                            borderRadius: 7,
-                            fontWeight: 800,
-                            fontSize: 12,
-                            cursor: saving === product.id ? 'not-allowed' : 'pointer',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 4,
-                            fontFamily: 'inherit',
-                          }}
-                        >
-                          <Zap size={12} />
-                          {saving === product.id ? '…' : (product.stillLive ? 'Apply image' : 'Go live')}
-                        </button>
-                        <button
-                          onClick={() => void removeDormantProduct(product)}
-                          className="adm-icon-btn"
-                          title="Delete product"
-                          disabled={saving === `del-dormant-${product.id}`}
-                          style={{ color: '#c40000' }}
-                        >
-                          {saving === `del-dormant-${product.id}` ? '…' : <Trash2 size={14} />}
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>}
-
-                {/* COST TRACKER TAB */}
-                {newProductsTab === 'costs' && (() => {
-                  const totalCost = costLog.reduce((s, e) => s + (e.costZar ?? e.cost ?? 0), 0);
-                  const avgCost   = costLog.length ? totalCost / costLog.length : 0;
-                  const freeCount = costLog.filter((e) => (e.costZar ?? e.cost ?? 0) === 0).length;
-                  return (
-                    <div>
-                      {/* Summary stats */}
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12, marginBottom: 24 }}>
-                        {[
-                          { label: 'Images processed', value: costLog.length },
-                          { label: 'Free tier', value: freeCount },
-                          { label: 'Total cost', value: formatRandAmount(totalCost) },
-                          { label: 'Avg per image', value: formatRandAmount(avgCost) },
-                        ].map(({ label, value }) => (
-                          <div key={label} style={{ background: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: 10, padding: '14px 16px' }}>
-                            <div style={{ fontSize: 20, fontWeight: 800, fontFamily: 'Outfit, sans-serif', color: '#0f172a' }}>{value}</div>
-                            <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b', marginTop: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{label}</div>
-                          </div>
-                        ))}
-                      </div>
-
-                      {costLog.length === 0 ? (
-                        <div style={{ padding: '40px 0', textAlign: 'center', color: '#64748b' }}>
-                          No images processed yet. Upload some products to see cost tracking here.
-                        </div>
-                      ) : (
-                        <>
-                          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
-                            <button
-                              onClick={() => {
-                                setCostLog([]);
-                                try { localStorage.removeItem('proto_image_gen_costs'); } catch {}
-                              }}
-                              className="adm-btn-ghost"
-                              style={{ fontSize: 12, color: '#c40000' }}
-                            >
-                              Clear history
-                            </button>
-                          </div>
-                          <div className="adm-list">
-                            <div className="adm-list-head" style={{ gridTemplateColumns: '2fr 1.2fr 80px 80px 120px 120px' }}>
-                              <span>SKU / Title</span><span>Model</span><span>Tokens in</span><span>Tokens out</span><span>Cost (R)</span><span>Time</span>
-                            </div>
-                            {costLog.map((entry, i) => {
-                              const entryCost = entry.costZar ?? entry.cost ?? 0;
-                              return (
-                              <div key={i} className="adm-list-row" style={{ gridTemplateColumns: '2fr 1.2fr 80px 80px 120px 120px' }}>
-                                <div>
-                                  <div style={{ fontWeight: 700, fontSize: 13 }}>{entry.title || entry.sku}</div>
-                                  <div className="adm-muted" style={{ fontSize: 11 }}>{entry.sku}</div>
-                                </div>
-                                <div style={{ fontSize: 11, color: entry.model?.includes('free') ? '#16a34a' : '#475569', fontWeight: 600 }}>
-                                  {entry.model?.includes('free') ? '✓ free' : entry.model?.replace('google/', '') || '—'}
-                                </div>
-                                <div style={{ fontSize: 12 }}>{entry.tokensIn || '—'}</div>
-                                <div style={{ fontSize: 12 }}>{entry.tokensOut || '—'}</div>
-                                <div style={{ fontSize: 12, fontWeight: 700, color: entryCost === 0 ? '#16a34a' : '#0f172a' }}>
-                                  {entryCost === 0 ? 'free' : formatRandAmount(entryCost)}
-                                </div>
-                                <div style={{ fontSize: 11, color: '#64748b' }}>
-                                  {new Date(entry.timestamp).toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
-                                </div>
-                              </div>
-                            );})}
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  );
-                })()}
-              </div>
+            {activeSection === 'new-items' && (
+              <NewItemsPanel
+                dormantRows={dormantRows}
+                dormantSearch={dormantSearch}
+                onDormantSearchChange={setDormantSearch}
+                dormantSelected={dormantSelected}
+                onDormantSelectedChange={setDormantSelected}
+                uploadQueue={uploadQueue}
+                onUploadQueueChange={setUploadQueue}
+                reprocessBusy={reprocessBusy}
+                onReprocessBusyChange={setReprocessBusy}
+                imageGenStyle={imageGenStyle}
+                onImageGenStyleChange={setImageGenStyle}
+                imageGenPrompt={imageGenPrompt}
+                onImageGenPromptChange={setImageGenPrompt}
+                costLog={costLog}
+                onCostLogChange={setCostLog}
+                saving={saving}
+                onGoLive={goLive}
+                onGoLiveSelected={goLiveSelected}
+                onRemoveProduct={removeDormantProduct}
+                onLoadDormant={loadDormant}
+                onShowToast={showToast}
+                excelInputRef={newItemsExcelRef}
+                imageFolderRef={newItemsFolderRef}
+                onLegacyUpload={processUploadFiles}
+                reprocessAbortRef={reprocessAbortRef}
+              />
             )}
 
             {/* PRODUCTS */}
             {activeSection === 'products' && (
-              <div className="adm-panel">
+              <div className="adm-panel adm-panel-with-sidebar">
                 <div className="adm-section-head">
                   <div>
                     <h2 className="adm-section-title">Product Manager</h2>
                     <p className="adm-section-note">In-stock products are live on the site automatically. Out-of-stock items auto-archive unless you pin them to stay live (📌).</p>
                   </div>
                   <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                    <button type="button" onClick={goHome} className="adm-btn-ghost"><Home size={15} /> Home</button>
                     <button onClick={openNewProduct} className="adm-btn-red"><PackagePlus size={15} /> Add product</button>
-                    {(productSubcategory !== 'all' || (productCategory !== 'all' && productCategory !== '__uncategorized__')) && (
-                      <button
-                        type="button"
-                        onClick={() => void runFilteredImageFix()}
-                        className="adm-btn-ghost"
-                        disabled={reprocessBusy || !!saving}
-                      >
-                        <Sparkles size={15} /> {reprocessBusy ? 'Processing…' : 'Send to New Products (Gemini)'}
-                      </button>
-                    )}
                     <button onClick={() => void exportLiveXlsx()} className="adm-btn-ghost">{saving === 'export-live' ? 'Exporting…' : 'Export Excel'}</button>
                   </div>
                 </div>
 
-                <ImageGenOptions
-                  style={imageGenStyle}
-                  onStyleChange={setImageGenStyle}
-                  prompt={imageGenPrompt}
-                  onPromptChange={setImageGenPrompt}
-                  compact
-                />
-
-                <div className="adm-toolbar" style={{ gridTemplateColumns: '1fr auto auto auto auto' }}>
-                  <label className="adm-search"><Search size={15} /><input value={productSearchInput} onChange={(e) => setProductSearchInput(e.target.value)} placeholder="Search by SKU or product name" className="adm-search-input" /></label>
-                  <select value={productCategory} onChange={(e) => { setProductCategory(e.target.value); setProductSubcategory('all'); }} className="adm-select adm-select--enhanced">
-                    <option value="all">All categories</option>
-                    <option value="__uncategorized__">
-                      ⚠️ Uncategorized{uncategorizedCount > 0 ? ` (${uncategorizedCount})` : ''}
-                    </option>
-                    {mainCategories.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
-                  </select>
-                  {productCategory !== 'all' && productCategory !== '__uncategorized__' && (
-                    <select value={productSubcategory} onChange={(e) => setProductSubcategory(e.target.value)} className="adm-select adm-select--enhanced">
-                      <option value="all">All subcategories</option>
-                      {subcategoryOptions(productCategory).map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
-                    </select>
-                  )}
+                <div className="adm-panel-split">
+                  <CategorySidebar
+                    tree={taxonomyTree}
+                    selectedPath={productCategoryPath}
+                    onSelectPath={setProductCategoryPath}
+                    showUncategorized
+                    uncategorizedCount={uncategorizedCount}
+                  />
+                  <div className="adm-panel-main">
+                <div className="adm-toolbar" style={{ gridTemplateColumns: '1fr auto auto' }}>
+                  <label className="adm-search"><Search size={15} /><input value={productSearchInput} onChange={(e) => setProductSearchInput(e.target.value)} placeholder="Search SKU, barcode, title, category…" className="adm-search-input" /></label>
                   <select value={productPageSize} onChange={(e) => setProductPageSize(Number(e.target.value))} className="adm-select adm-select--enhanced" style={{ width: 90 }}>
                     <option value={25}>25 / page</option>
                     <option value={50}>50 / page</option>
@@ -2618,13 +2386,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                   </select>
                 </div>
 
-                {/*
-                  Orphaned-products banner — products with no main category
-                  are filtered out by the customer-facing /api/products feed,
-                  so they never appear on the live site. Surface them here
-                  so admins can fix them in bulk.
-                */}
-                {uncategorizedCount > 0 && productCategory !== '__uncategorized__' && (
+                {uncategorizedCount > 0 && productCategoryPath[0] !== '__uncategorized__' && (
                   <div
                     role="alert"
                     style={{
@@ -2639,7 +2401,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                     <button
                       type="button"
                       className="adm-btn-ghost adm-btn--sm"
-                      onClick={() => { setProductCategory('__uncategorized__'); setProductSubcategory('all'); }}
+                      onClick={() => { setProductCategoryPath(['__uncategorized__']); }}
                     >
                       Show them
                     </button>
@@ -2670,10 +2432,10 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                       <button
                         type="button"
                         className="adm-btn-ghost adm-btn--sm"
-                        onClick={() => void runSelectedImageFix()}
+                        onClick={() => setImageGenModalOpen(true)}
                         disabled={reprocessBusy || !!saving}
                       >
-                        <Sparkles size={15} /> Send to New Products
+                        <Sparkles size={15} /> Generate images
                       </button>
                       <button
                         type="button"
@@ -2828,18 +2590,20 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                     </div>
                   </div>
                 )}
+                  </div>
+                </div>
               </div>
             )}
 
-            {/* THIS WEEK'S SPECIALS */}
+            {/* SPECIALS */}
             {activeSection === 'specials' && (
               <div className="adm-panel">
                 <div className="adm-section-head">
                   <div>
                     <h2 className="adm-section-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <Star size={20} style={{ color: '#f59e0b' }} /> This Week's Specials
+                      <Star size={20} style={{ color: '#f59e0b' }} /> Specials
                     </h2>
-                    <p className="adm-section-note">Max 10 specials. Star a product in Product Manager to add it here. Configure the deal type for each.</p>
+                    <p className="adm-section-note">Weekly featured products and login popup promo. Star a product in Product Manager to add it here.</p>
                   </div>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                     {specialsSaving && <span className="adm-muted" style={{ fontSize: 12 }}>Saving…</span>}
@@ -2953,25 +2717,67 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                     ))}
                   </div>
                 )}
+
+                <hr style={{ margin: '32px 0', border: 'none', borderTop: '1px solid #e5e7eb' }} />
+                <div className="adm-section-head">
+                  <div>
+                    <h3 className="adm-subtitle"><Megaphone size={16} /> Popup / Banner Promo</h3>
+                    <p className="adm-section-note">Flyer popup shown once per customer when they log in (while active).</p>
+                  </div>
+                  <button type="button" onClick={() => void loadPopupEditor()} className="adm-btn-ghost"><RefreshCw size={15} /><span className="adm-btn-text">Refresh</span></button>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, alignItems: 'start' }}>
+                  <div style={{ display: 'grid', gap: 12 }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 14, fontWeight: 600 }}>
+                      <input type="checkbox" checked={popupForm.active} onChange={(e) => setPopupForm((p) => ({ ...p, active: e.target.checked }))} style={{ accentColor: '#dc2626' }} />
+                      Active — show popup to logged-in customers
+                    </label>
+                    <div>
+                      <label className="adm-muted" style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Admin label (optional)</label>
+                      <input className="adm-field-input" style={{ width: '100%' }} value={popupForm.title} onChange={(e) => setPopupForm((p) => ({ ...p, title: e.target.value }))} placeholder="e.g. June clearance flyer" />
+                    </div>
+                    <div>
+                      <label className="adm-muted" style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Flyer image</label>
+                      <label className="adm-btn-ghost" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                        <ImagePlus size={15} /> {popupUploading ? 'Uploading…' : 'Upload flyer'}
+                        <input type="file" accept="image/*" hidden onChange={(e) => { void handlePopupImage(e.target.files?.[0]); e.target.value = ''; }} />
+                      </label>
+                    </div>
+                    <button type="button" className="adm-btn-red" disabled={popupSaving} onClick={() => void savePopupEditor()}>{popupSaving ? 'Saving…' : 'Save popup'}</button>
+                  </div>
+                  <div style={{ border: '1px solid #e5e7eb', borderRadius: 16, padding: 16, background: '#f9fafb', minHeight: 200, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    {popupForm.imageUrl
+                      ? <img src={popupForm.imageUrl} alt="Popup preview" style={{ maxWidth: '100%', maxHeight: 400, borderRadius: 8 }} />
+                      : <span className="adm-muted">No image uploaded</span>}
+                  </div>
+                </div>
               </div>
             )}
 
             {/* ARCHIVE */}
             {activeSection === 'archive' && (
-              <div className="adm-panel">
+              <div className="adm-panel adm-panel-with-sidebar">
                 <div className="adm-section-head">
                   <div>
                     <h2 className="adm-section-title">Archive — 0 Stock</h2>
                     <p className="adm-section-note">Products hidden from customers when stock hits 0. Restore or edit directly from here.</p>
                   </div>
                   <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                    <button type="button" onClick={goHome} className="adm-btn-ghost"><Home size={15} /> Home</button>
                     <button onClick={() => void exportArchiveXlsx()} className="adm-btn-ghost">{saving === 'export-archive' ? 'Exporting…' : 'Export Excel'}</button>
                     <span className="adm-pill" style={{ fontSize: 13, padding: '6px 14px' }}>{archiveTotal} products</span>
                   </div>
                 </div>
 
+                <div className="adm-panel-split">
+                  <CategorySidebar
+                    tree={taxonomyTree}
+                    selectedPath={archiveCategoryPath}
+                    onSelectPath={setArchiveCategoryPath}
+                  />
+                  <div className="adm-panel-main">
                 <div className="adm-toolbar" style={{ gridTemplateColumns: '1fr' }}>
-                  <label className="adm-search"><Search size={15} /><input value={archiveSearch} onChange={(e) => setArchiveSearch(e.target.value)} placeholder="Search archived products" className="adm-search-input" /></label>
+                  <label className="adm-search"><Search size={15} /><input value={archiveSearch} onChange={(e) => setArchiveSearch(e.target.value)} placeholder="Search SKU, barcode, title, category…" className="adm-search-input" /></label>
                 </div>
 
                 {archiveRows.length === 0 && loadingProgress === null && (
@@ -2993,6 +2799,14 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                       </button>
                     </div>
                     <div className="adm-bulk-bar__actions">
+                      <button
+                        type="button"
+                        className="adm-btn-ghost adm-btn--sm"
+                        onClick={() => void confirmBulkRestoreArchive()}
+                        disabled={!!saving || saving === 'bulk-restore-archive'}
+                      >
+                        <ArchiveRestore size={15} /> Make Live
+                      </button>
                       <button
                         type="button"
                         className="adm-btn-ghost adm-btn--sm adm-btn-ghost--danger"
@@ -3100,6 +2914,8 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                     </div>
                   </div>
                 )}
+                  </div>
+                </div>
               </div>
             )}
 
@@ -3490,7 +3306,13 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                 <div className="adm-section-head">
                   <div>
                     <h2 className="adm-section-title">Customer Management</h2>
-                    <p className="adm-section-note">New sign-ups appear in Approved automatically after onboarding. Trade Requests lists accounts still awaiting approval.</p>
+                    <p className="adm-section-note">New sign-ups land in Trade Requests until you approve them. Upload an Excel of emails to bulk-approve allow-listed customers.</p>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    <input ref={customerExcelRef} type="file" accept=".xlsx,.xls,.csv" style={{ display: 'none' }} onChange={(e) => { if (e.target.files?.[0]) void handleCustomerExcelApprove(e.target.files[0]); e.target.value = ''; }} />
+                    <button type="button" className="adm-btn-ghost" disabled={customerApproveBusy} onClick={() => customerExcelRef.current?.click()}>
+                      {customerApproveBusy ? 'Importing…' : <><Upload size={14} /> Approve from Excel</>}
+                    </button>
                   </div>
                 </div>
 
@@ -3520,9 +3342,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                           <div style={{ fontSize: 12 }}>{person.email}</div>
                           <div className="adm-muted" style={{ fontSize: 11 }}>{person.phone || '—'}</div>
                         </div>
-                        <div style={{ fontSize: 12, fontWeight: 700, color: person.accept_whatsapp ? '#15803d' : '#6b7280' }}>
-                          {person.accept_whatsapp == null ? '—' : person.accept_whatsapp ? 'Yes' : 'No'}
-                        </div>
+                        <div><WhatsappOptIn value={person.accept_whatsapp} /></div>
                         <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
                           <button onClick={() => void openCustomerProfile(person)} className="adm-btn-ghost adm-btn-sm" style={{ padding: '4px 9px', fontSize: 11 }}>View Profile</button>
                           <button onClick={() => void approveRequest(person)} className="adm-btn-green adm-btn-sm" disabled={saving === person.id}>
@@ -3548,9 +3368,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                         <span style={{ fontWeight: 700 }}>{person.name || person.business_name || 'Unnamed'}</span>
                         <span style={{ fontSize: 13 }}>{person.email}</span>
                         <span style={{ fontSize: 13 }}>{person.phone || '—'}</span>
-                        <span style={{ fontSize: 12, fontWeight: 700, color: person.accept_whatsapp ? '#15803d' : '#6b7280' }}>
-                          {person.accept_whatsapp == null ? '—' : person.accept_whatsapp ? 'Yes' : 'No'}
-                        </span>
+                        <span><WhatsappOptIn value={person.accept_whatsapp} /></span>
                         <span>{person.orderCount}</span>
                         <div style={{ display: 'flex', gap: 5 }}>
                           <button onClick={() => void openCustomerProfile(person)} className="adm-btn-ghost adm-btn-sm" style={{ padding: '4px 9px', fontSize: 11 }}>View Profile</button>
@@ -3622,7 +3440,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                         title="Fulfillment team settings"
                         style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px' }}
                       >
-                        <Settings size={16} /> Team
+                        <User size={16} /> Team
                       </button>
                       <label className="adm-search"><Search size={15} /><input value={orderSearch} onChange={(e) => setOrderSearch(e.target.value)} placeholder="Search orders" className="adm-search-input" /></label>
                     </div>
@@ -3761,6 +3579,12 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                   </div>
                 </div>
 
+                {crmError && (
+                  <div style={{ marginBottom: 12, padding: '10px 14px', background: '#fef2f2', borderRadius: 8, color: '#b91c1c', fontSize: 13, fontWeight: 600 }}>
+                    {crmError}
+                  </div>
+                )}
+
                 <WhatsappPanel
                   summary={crmMeta.summary}
                   totalFiltered={crmMeta.totalFiltered}
@@ -3827,42 +3651,10 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
               </div>
             )}
 
-            {/* POPUP SPECIALS */}
-            {activeSection === 'popup-specials' && (
-              <div className="adm-panel">
-                <div className="adm-section-head">
-                  <div>
-                    <h2 className="adm-section-title">Popup Specials</h2>
-                    <p className="adm-section-note">Upload a flyer popup shown once per customer when they log in (while active).</p>
-                  </div>
-                  <button type="button" onClick={() => void loadPopupEditor()} className="adm-btn-ghost"><RefreshCw size={15} /><span className="adm-btn-text">Refresh</span></button>
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, alignItems: 'start' }}>
-                  <div style={{ display: 'grid', gap: 12 }}>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 14, fontWeight: 600 }}>
-                      <input type="checkbox" checked={popupForm.active} onChange={(e) => setPopupForm((p) => ({ ...p, active: e.target.checked }))} style={{ accentColor: '#dc2626' }} />
-                      Active — show popup to logged-in customers
-                    </label>
-                    <div>
-                      <label className="adm-muted" style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Admin label (optional)</label>
-                      <input className="adm-field-input" style={{ width: '100%' }} value={popupForm.title} onChange={(e) => setPopupForm((p) => ({ ...p, title: e.target.value }))} placeholder="e.g. June clearance flyer" />
-                    </div>
-                    <div>
-                      <label className="adm-muted" style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Flyer image</label>
-                      <label className="adm-btn-ghost" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-                        <ImagePlus size={15} /> {popupUploading ? 'Uploading…' : 'Upload flyer'}
-                        <input type="file" accept="image/*" hidden onChange={(e) => { void handlePopupImage(e.target.files?.[0]); e.target.value = ''; }} />
-                      </label>
-                    </div>
-                    <button type="button" className="adm-btn-red" disabled={popupSaving} onClick={() => void savePopupEditor()}>{popupSaving ? 'Saving…' : 'Save popup'}</button>
-                  </div>
-                  <div style={{ border: '1px solid #e5e7eb', borderRadius: 16, padding: 16, background: '#f9fafb', minHeight: 200, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    {popupForm.imageUrl
-                      ? <img src={popupForm.imageUrl} alt="Popup preview" style={{ maxWidth: '100%', maxHeight: 400, borderRadius: 8 }} />
-                      : <span className="adm-muted">No image uploaded</span>}
-                  </div>
-                </div>
-              </div>
+            {/* POPUP SPECIALS — merged into Specials tab */}
+
+            {activeSection === 'coming-soon' && (
+              <ComingSoonPanel taxonomyTree={taxonomyTree} />
             )}
 
           </main>
@@ -4494,12 +4286,25 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
         onClose={() => setFulfillmentSettingsOpen(false)}
       />
 
+      <ImageGenModal
+        open={imageGenModalOpen}
+        onClose={() => setImageGenModalOpen(false)}
+        targetCount={productSelectedIds.size}
+        style={imageGenStyle}
+        onStyleChange={setImageGenStyle}
+        prompt={imageGenPrompt}
+        onPromptChange={setImageGenPrompt}
+        onRun={() => void runSelectedImageFix()}
+        busy={reprocessBusy}
+      />
+
       {(reprocessBusy || uploadQueue.some((q) => q.status === 'transforming' || q.status === 'pending')) && uploadQueue.length > 0 && (
         <ReprocessLiveFeed
           queue={uploadQueue}
           busy={reprocessBusy}
           onDismiss={() => setUploadQueue([])}
-          onOpenNewProducts={() => setActiveSection('new-products')}
+          onOpenNewProducts={() => setActiveSection('new-items')}
+          onStop={() => reprocessAbortRef.current?.abort()}
         />
       )}
     </div>

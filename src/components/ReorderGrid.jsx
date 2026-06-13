@@ -2,25 +2,51 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Grip, ImagePlus, Loader2, Pencil, Trash2 } from 'lucide-react';
 import { subcategoryOptionsFromTree } from '../lib/taxonomyAdmin';
 
+function deepestGroupKey(product, mainCategoryId) {
+  const path = product.categoryPath || [];
+  if (!path.length || path[0] !== mainCategoryId) return '__other__';
+  for (let i = path.length - 1; i >= 1; i -= 1) {
+    if (path[i]) return path[i];
+  }
+  return path[1] || '__other__';
+}
+
 function groupBySubcategory(products, mainCategoryId, tree) {
   const subs = subcategoryOptionsFromTree(tree, mainCategoryId);
+  const allSubs = new Map();
+  function walk(nodes, prefix = '') {
+    for (const n of nodes || []) {
+      const label = prefix ? `${prefix} › ${n.label}` : n.label;
+      allSubs.set(n.id, label);
+      walk(n.children, label);
+    }
+  }
+  walk(subs.length ? subs : tree.find((c) => c.id === mainCategoryId)?.children || []);
+
   const groups = new Map();
   products.forEach((p) => {
-    const key = p.categoryPath?.[1] || '__other__';
+    const key = deepestGroupKey(p, mainCategoryId);
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(p);
   });
-  const knownIds = new Set(subs.map((s) => s.id));
-  const ordered = subs.map((s) => ({ id: s.id, label: s.label, products: groups.get(s.id) || [] }));
+
+  const ordered = [];
+  const seen = new Set();
+  for (const [id, label] of allSubs) {
+    if (groups.has(id) && groups.get(id).length) {
+      ordered.push({ id, label, products: groups.get(id) });
+      seen.add(id);
+    }
+  }
   for (const [key, prods] of groups) {
-    if (key !== '__other__' && !knownIds.has(key) && prods.length) {
-      ordered.push({ id: key, label: key.replace(/-/g, ' '), products: prods });
+    if (key !== '__other__' && !seen.has(key) && prods.length) {
+      ordered.push({ id: key, label: allSubs.get(key) || key.replace(/-/g, ' '), products: prods });
     }
   }
   if (groups.has('__other__') && groups.get('__other__').length) {
     ordered.push({ id: '__other__', label: 'Other', products: groups.get('__other__') });
   }
-  return ordered.filter((g) => g.products.length > 0);
+  return ordered;
 }
 
 function sameOrder(a, b) {

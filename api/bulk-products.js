@@ -37,6 +37,21 @@ async function archiveProduct(supabase, sku) {
   return { sku, ok: true };
 }
 
+async function unarchiveProduct(supabase, sku) {
+  const { data: archived } = await supabase
+    .from('archived_products')
+    .select('sku, archived_by')
+    .eq('sku', sku)
+    .maybeSingle();
+  if (!archived) return { sku, ok: false, error: 'Not in archive' };
+  if (archived.archived_by === 'new-products') {
+    return { sku, ok: false, error: 'New Items staging — use Set Live in New Items tab' };
+  }
+  const { error } = await supabase.rpc('unarchive_product', { p_sku: sku });
+  if (error) return { sku, ok: false, error: error.message };
+  return { sku, ok: true };
+}
+
 /**
  * Permanently delete a product. Hits both tables because a SKU lives in
  * `website_stock` OR `archived_products` depending on state — and admins
@@ -103,6 +118,19 @@ export default async function handler(req, res) {
       return res.status(failed.length ? 207 : 200).json({
         ok: failed.length === 0,
         deleted: results.filter((r) => r.ok).length,
+        failed,
+      });
+    }
+
+    if (action === 'unarchive') {
+      const results = [];
+      for (const sku of normalizedSkus) {
+        results.push(await unarchiveProduct(supabase, sku));
+      }
+      const failed = results.filter((r) => !r.ok);
+      return res.status(failed.length ? 207 : 200).json({
+        ok: failed.length === 0,
+        restored: results.filter((r) => r.ok).length,
         failed,
       });
     }

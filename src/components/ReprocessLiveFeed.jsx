@@ -1,12 +1,13 @@
-import { ArrowRight, Image, Loader2, Sparkles, X } from 'lucide-react';
+import { ArrowRight, Image, Loader2, Sparkles, Square, X } from 'lucide-react';
 
 /** Sticky live feed — visible on every tab while batch reprocess runs. */
-export default function ReprocessLiveFeed({ queue, busy, onDismiss, onOpenNewProducts }) {
+export default function ReprocessLiveFeed({ queue, busy, onDismiss, onOpenNewProducts, onStop, openLabel = 'Open New Items' }) {
   if (!queue?.length) return null;
 
   const done = queue.filter((q) => q.status === 'done').length;
   const failed = queue.filter((q) => q.status === 'error').length;
   const active = queue.find((q) => q.status === 'transforming') || queue.find((q) => q.status === 'pending');
+  const history = queue.filter((q) => q.status === 'done' || q.status === 'error');
 
   return (
     <div className="reprocess-live-feed" role="status" aria-live="polite">
@@ -18,8 +19,13 @@ export default function ReprocessLiveFeed({ queue, busy, onDismiss, onOpenNewPro
         </div>
         <div className="reprocess-live-feed-actions">
           <button type="button" className="reprocess-live-feed-link" onClick={onOpenNewProducts}>
-            Open New Products
+            {openLabel}
           </button>
+          {busy && onStop && (
+            <button type="button" className="reprocess-live-feed-stop" onClick={onStop}>
+              <Square size={12} fill="currentColor" /> Stop
+            </button>
+          )}
           {!busy && (
             <button type="button" className="adm-icon-btn" onClick={onDismiss} aria-label="Dismiss feed">
               <X size={14} />
@@ -53,6 +59,20 @@ export default function ReprocessLiveFeed({ queue, busy, onDismiss, onOpenNewPro
             <strong>{active.name || active.sku}</strong>
             <span>{active.message || (active.status === 'pending' ? 'Waiting…' : 'Processing…')}</span>
           </div>
+        </div>
+      )}
+
+      {history.length > 0 && (
+        <div className="reprocess-live-feed-history">
+          {history.map((item, i) => (
+            <div key={`${item.sku}-${item.slot || 0}-${i}`} className={`reprocess-live-feed-history-row reprocess-live-feed-history-row--${item.status}`}>
+              <div className="reprocess-live-feed-history-thumb">
+                {item.previewUrl ? <img src={item.previewUrl} alt="" /> : <Image size={12} color="#cbd5e1" />}
+              </div>
+              <span className="reprocess-live-feed-history-name">{item.name || item.sku}{item.slot > 1 ? ` · img ${item.slot}` : ''}</span>
+              <span className="reprocess-live-feed-history-msg">{item.message}</span>
+            </div>
+          ))}
         </div>
       )}
 

@@ -231,11 +231,14 @@ function applyPathFilter(products, categoryPath) {
   });
 }
 
-function applyCategoryFilter(rows, categoryFilter) {
+function applyCategoryFilter(rows, categoryFilter, categoryPathFilter = []) {
+  if (categoryPathFilter?.length) {
+    if (categoryPathFilter[0] === '__uncategorized__') {
+      return rows.filter((p) => !p.category && !p.categoryLabel);
+    }
+    return applyPathFilter(rows, categoryPathFilter);
+  }
   if (!categoryFilter || categoryFilter === 'all') return rows;
-  // Special bucket for orphans — products with no main category. They never
-  // reach the customer site (the /api/products feed filters them out) but
-  // admins need to surface and fix them.
   if (categoryFilter === '__uncategorized__') {
     return rows.filter((p) => !p.category && !p.categoryLabel);
   }
@@ -244,6 +247,7 @@ function applyCategoryFilter(rows, categoryFilter) {
     || p.categoryPath?.[1] === categoryFilter
     || p.categoryPath?.[2] === categoryFilter
     || p.categoryPath?.[3] === categoryFilter
+    || p.categoryPath?.[4] === categoryFilter
   );
 }
 
@@ -297,8 +301,9 @@ export async function fetchAdminProductsPage({
   searchQuery = '',
   archived = false,
   recycled = false,
-  zeroStockOnly = false, // legacy alias — treated as archived
+  zeroStockOnly = false,
   categoryFilter = '',
+  categoryPathFilter = [],
   onProgress,
 } = {}) {
   const showArchived = archived || zeroStockOnly;
@@ -307,9 +312,9 @@ export async function fetchAdminProductsPage({
     : showArchived
       ? await loadArchivedFromDB({ catalogOnly: true })
       : await fetchAllProductsAdmin({ onProgress });
-  rows = applyCategoryFilter(rows, categoryFilter);
+  rows = applyCategoryFilter(rows, categoryFilter, categoryPathFilter);
   const hasSearch = Boolean(searchQuery.trim());
-  rows = hasSearch ? adminProductSearch(rows, searchQuery) : rows;
+  rows = hasSearch ? fuzzyFilter(rows, searchQuery) : rows;
   rows = hasSearch
     ? rows
     : [...rows].sort((a, b) => (a.categoryLabel || '').localeCompare(b.categoryLabel || '') || a.name.localeCompare(b.name));
@@ -576,6 +581,7 @@ export async function fetchReorderProducts({
       p.categoryPath?.[1] === subcategoryId
       || p.categoryPath?.[2] === subcategoryId
       || p.categoryPath?.[3] === subcategoryId
+      || p.categoryPath?.[4] === subcategoryId
     );
   }
 
@@ -609,6 +615,19 @@ export async function bulkArchiveProducts(skus) {
   if (json.failed?.length) {
     throw new Error(`${json.failed.length} item(s) failed to archive`);
   }
+  invalidateProductCache();
+  invalidateAdminCache();
+  return json;
+}
+
+export async function bulkUnarchiveProducts(skus) {
+  const res = await fetch('/api/bulk-products', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'unarchive', skus }),
+  });
+  const json = await res.json();
+  if (!res.ok && res.status !== 207) throw new Error(json.error || 'Bulk restore failed');
   invalidateProductCache();
   invalidateAdminCache();
   return json;

@@ -62,6 +62,38 @@ export async function stageDormantPreview(sb, liveRow, processedImageUrl) {
   return { stillLive: !!stillLive };
 }
 
+function readStock(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** Require price + SOH from source-of-truth products table (join: products.sku = barcode). */
+export async function validateStockReady(sb, barcode) {
+  const key = String(barcode || '').trim();
+  if (!key) return { ok: false, error: 'Missing barcode/SKU for stock lookup' };
+
+  const { data: product, error } = await sb
+    .from('products')
+    .select('sku, sell_price, available_stock, stock_qty')
+    .eq('sku', key)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!product) return { ok: false, error: `No stock record for "${key}" — add price and SOH in the stock system first` };
+
+  const price = readStock(product.sell_price);
+  if (price === null || price <= 0) {
+    return { ok: false, error: `Missing or zero price for "${key}" in stock system` };
+  }
+
+  const soh = readStock(product.available_stock) ?? readStock(product.stock_qty);
+  if (soh === null) {
+    return { ok: false, error: `Missing stock/SOH for "${key}" in stock system` };
+  }
+
+  return { ok: true, price, soh };
+}
+
 /** Apply staged New Products image to live site, or unarchive brand-new dormant SKUs. */
 export async function applyDormantToLive(sb, sku) {
   const cleanSku = String(sku || '').trim();
@@ -101,7 +133,10 @@ export async function applyDormantToLive(sb, sku) {
     return { mode: 'image_applied', sku: cleanSku, imageUrl: staged.image_url_one };
   }
 
+  const stockCheck = await validateStockReady(sb, staged.barcode || cleanSku);
+  if (!stockCheck.ok) throw new Error(stockCheck.error);
+
   const { error: unarchiveErr } = await sb.rpc('unarchive_product', { p_sku: cleanSku });
   if (unarchiveErr) throw new Error(unarchiveErr.message);
-  return { mode: 'unarchived', sku: cleanSku, imageUrl: staged.image_url_one };
+  return { mode: 'unarchived', sku: cleanSku, imageUrl: staged.image_url_one, price: stockCheck.price, soh: stockCheck.soh };
 }
