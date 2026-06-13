@@ -46,7 +46,7 @@ export default function CostTrackingPanel({ onShowToast }) {
       const json = await res.json();
       if (!res.ok && res.status !== 503) throw new Error(json.error || 'Failed to load costs');
       setData(json);
-      if (json.error && res.status === 503) setError(json.error);
+      setError(json.error && res.status === 503 ? json.error : '');
     } catch (err) {
       setError(err.message || 'Failed to load cost data');
       onShowToast?.(err.message, 'error');
@@ -83,7 +83,7 @@ export default function CostTrackingPanel({ onShowToast }) {
             <DollarSign size={20} style={{ color: '#8B1A1A' }} /> Cost Tracking
           </h2>
           <p className="adm-section-note">
-            OpenRouter / Gemini image generation costs — shared across all admin users. SKU locks prevent two people overwriting the same preview slot.
+            OpenRouter / Gemini image generation costs — shared across all admin users via site storage. SKU locks prevent two people overwriting the same preview slot.
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>

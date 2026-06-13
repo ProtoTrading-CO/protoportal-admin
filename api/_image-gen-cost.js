@@ -1,6 +1,12 @@
 import { createClient } from '@supabase/supabase-js';
+import { randomUUID } from 'crypto';
+import { readSiteConfigJson, writeSiteConfigJson } from './_site-config.js';
 
 const USD_TO_ZAR_FALLBACK = 18.0;
+const COSTS_FILE = 'image-gen/cost-logs.json';
+const LOCKS_FILE = 'image-gen/locks.json';
+const BATCHES_FILE = 'image-gen/batches.json';
+const MAX_LOGS = 500;
 
 /** Approximate OpenRouter pricing — image models often bill per call + tokens. */
 const MODEL_PRICING = {
@@ -19,6 +25,40 @@ export function getStockClient() {
     process.env.VITE_STOCK_SUPABASE_KEY,
     { auth: { autoRefreshToken: false, persistSession: false } },
   );
+}
+
+async function readStore(file, fallback) {
+  try {
+    const data = await readSiteConfigJson(file, fallback);
+    return data ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+async function writeStore(file, payload) {
+  await writeSiteConfigJson(file, payload);
+}
+
+function normalizeLog(row) {
+  return {
+    id: row.id || randomUUID(),
+    created_at: row.created_at || row.createdAt || new Date().toISOString(),
+    sku: row.sku || null,
+    slot: row.slot ?? null,
+    operation: row.operation || 'transform',
+    model: row.model || null,
+    image_style: row.image_style || row.imageStyle || null,
+    tokens_in: Number(row.tokens_in ?? row.tokensIn ?? 0),
+    tokens_out: Number(row.tokens_out ?? row.tokensOut ?? 0),
+    cost_usd: Number(row.cost_usd ?? row.costUsd ?? 0),
+    cost_zar: Number(row.cost_zar ?? row.costZar ?? 0),
+    processing_ms: row.processing_ms ?? row.processingMs ?? null,
+    operator: row.operator || null,
+    batch_id: row.batch_id || row.batchId || null,
+    status: row.status || 'ok',
+    error: row.error || null,
+  };
 }
 
 export async function fetchUsdToZarRate() {
@@ -53,90 +93,87 @@ export function extractImageGenMeta(req) {
   };
 }
 
-export async function logImageGenCost(sb, entry) {
+export async function logImageGenCost(_sb, entry) {
+  const usdToZar = entry.usdToZar ?? await fetchUsdToZarRate();
+  const costUsd = Number(entry.costUsd ?? entry.cost_usd ?? 0);
+  const costZar = Number(entry.costZar ?? entry.cost_zar ?? (costUsd * usdToZar).toFixed(4));
+  const row = normalizeLog({
+    ...entry,
+    cost_usd: costUsd,
+    cost_zar: costZar,
+  });
+
   try {
-    const usdToZar = entry.usdToZar ?? await fetchUsdToZarRate();
-    const costUsd = Number(entry.costUsd ?? entry.cost_usd ?? 0);
-    const costZar = Number(entry.costZar ?? entry.cost_zar ?? (costUsd * usdToZar).toFixed(4));
-    const row = {
-      sku: entry.sku || null,
-      slot: entry.slot ?? null,
-      operation: entry.operation || 'transform',
-      model: entry.model || null,
-      image_style: entry.imageStyle || entry.image_style || null,
-      tokens_in: Number(entry.tokensIn ?? entry.tokens_in ?? 0),
-      tokens_out: Number(entry.tokensOut ?? entry.tokens_out ?? 0),
-      cost_usd: costUsd,
-      cost_zar: costZar,
-      processing_ms: entry.processingMs ?? entry.processing_ms ?? null,
-      operator: entry.operator || null,
-      batch_id: entry.batchId || entry.batch_id || null,
-      status: entry.status || 'ok',
-      error: entry.error || null,
-    };
-    const { error } = await sb.from('image_gen_cost_logs').insert(row);
-    if (error && !/does not exist|relation/i.test(error.message)) {
-      console.warn('logImageGenCost:', error.message);
-    }
-    return { costUsd, costZar, usdToZar };
+    const store = await readStore(COSTS_FILE, { logs: [] });
+    const logs = [row, ...(store.logs || [])].slice(0, MAX_LOGS);
+    await writeStore(COSTS_FILE, { logs });
   } catch (err) {
-    console.warn('logImageGenCost failed:', err?.message || err);
-    const costUsd = Number(entry.costUsd ?? 0);
-    const usdToZar = entry.usdToZar ?? USD_TO_ZAR_FALLBACK;
-    return { costUsd, costZar: costUsd * usdToZar, usdToZar };
+    console.warn('logImageGenCost:', err?.message || err);
   }
+
+  return { costUsd, costZar, usdToZar };
 }
 
-export async function purgeExpiredLocks(sb) {
-  try {
-    await sb.from('image_gen_locks').delete().lt('expires_at', new Date().toISOString());
-  } catch { /* table may not exist yet */ }
+function purgeExpiredLocks(locks = []) {
+  const now = Date.now();
+  return locks.filter((l) => new Date(l.expires_at || l.expiresAt).getTime() > now);
 }
 
-export async function acquireImageGenLock(sb, { sku, slot, batchId, operator, ttlSec = 420 } = {}) {
-  await purgeExpiredLocks(sb);
+export async function purgeExpiredLocksStore() {
+  const store = await readStore(LOCKS_FILE, { locks: [] });
+  const locks = purgeExpiredLocks(store.locks || []);
+  if (locks.length !== (store.locks || []).length) {
+    await writeStore(LOCKS_FILE, { locks });
+  }
+  return locks;
+}
+
+export async function acquireImageGenLock(_sb, { sku, slot, batchId, operator, ttlSec = 180 } = {}) {
   const cleanSku = String(sku || '').trim();
   const cleanSlot = Math.min(4, Math.max(1, Number(slot) || 1));
   if (!cleanSku) throw new Error('Missing SKU for lock');
 
+  const locks = await purgeExpiredLocksStore();
+  const key = `${cleanSku}::${cleanSlot}`;
+  const existing = locks.find((l) => `${l.sku}::${l.slot}` === key);
+
+  if (existing) {
+    if (existing.batch_id === batchId || existing.batchId === batchId) {
+      return { locked: true, sku: cleanSku, slot: cleanSlot, reentry: true };
+    }
+    const who = existing.operator || 'another user';
+    throw new Error(`"${cleanSku}" slot ${cleanSlot} is in use by ${who}. Wait for their batch to finish or try again shortly.`);
+  }
+
   const expiresAt = new Date(Date.now() + ttlSec * 1000).toISOString();
-  const { error } = await sb.from('image_gen_locks').insert({
+  locks.push({
     sku: cleanSku,
     slot: cleanSlot,
     batch_id: batchId || null,
     operator: operator || null,
+    locked_at: new Date().toISOString(),
     expires_at: expiresAt,
   });
-
-  if (error) {
-    if (/does not exist|relation/i.test(error.message)) return { locked: false, skipped: true };
-    if (error.code === '23505') {
-      const { data: existing } = await sb
-        .from('image_gen_locks')
-        .select('operator, batch_id, expires_at')
-        .eq('sku', cleanSku)
-        .eq('slot', cleanSlot)
-        .maybeSingle();
-      const who = existing?.operator || 'another user';
-      throw new Error(`"${cleanSku}" slot ${cleanSlot} is in use by ${who}. Wait for their batch to finish or try again shortly.`);
-    }
-    throw new Error(error.message);
-  }
+  await writeStore(LOCKS_FILE, { locks });
   return { locked: true, sku: cleanSku, slot: cleanSlot };
 }
 
-export async function releaseImageGenLock(sb, sku, slot) {
+export async function releaseImageGenLock(_sb, sku, slot) {
   try {
     const cleanSku = String(sku || '').trim();
     const cleanSlot = Math.min(4, Math.max(1, Number(slot) || 1));
-    await sb.from('image_gen_locks').delete().eq('sku', cleanSku).eq('slot', cleanSlot);
+    const store = await readStore(LOCKS_FILE, { locks: [] });
+    const locks = (store.locks || []).filter((l) => !(l.sku === cleanSku && Number(l.slot) === cleanSlot));
+    await writeStore(LOCKS_FILE, { locks });
   } catch { /* ignore */ }
 }
 
-export async function registerImageGenBatch(sb, { batchId, operator, total, style, productCount } = {}) {
+export async function registerImageGenBatch(_sb, { batchId, operator, total, style, productCount } = {}) {
   if (!batchId) return;
   try {
-    await sb.from('image_gen_batches').upsert({
+    const store = await readStore(BATCHES_FILE, { batches: [] });
+    const batches = (store.batches || []).filter((b) => b.id !== batchId);
+    batches.unshift({
       id: batchId,
       operator: operator || null,
       status: 'running',
@@ -145,46 +182,49 @@ export async function registerImageGenBatch(sb, { batchId, operator, total, styl
       failed: 0,
       style: style || null,
       product_count: Number(productCount) || 0,
+      created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     });
+    await writeStore(BATCHES_FILE, { batches: batches.slice(0, 50) });
   } catch (err) {
     console.warn('registerImageGenBatch:', err?.message || err);
   }
 }
 
-export async function updateImageGenBatch(sb, batchId, patch = {}) {
+export async function updateImageGenBatch(_sb, batchId, patch = {}) {
   if (!batchId) return;
   try {
-    const row = { updated_at: new Date().toISOString(), ...patch };
-    if (patch.status === 'complete' || patch.status === 'cancelled') {
-      row.finished_at = new Date().toISOString();
-    }
-    await sb.from('image_gen_batches').update(row).eq('id', batchId);
+    const store = await readStore(BATCHES_FILE, { batches: [] });
+    const batches = (store.batches || []).map((b) => {
+      if (b.id !== batchId) return b;
+      const next = {
+        ...b,
+        ...patch,
+        updated_at: new Date().toISOString(),
+      };
+      if (patch.status === 'complete' || patch.status === 'cancelled') {
+        next.finished_at = new Date().toISOString();
+      }
+      return next;
+    });
+    await writeStore(BATCHES_FILE, { batches });
   } catch { /* ignore */ }
 }
 
-export async function listImageGenCosts(sb, { days = 30, limit = 200 } = {}) {
-  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
-  const { data: logs, error } = await sb
-    .from('image_gen_cost_logs')
-    .select('*')
-    .gte('created_at', since)
-    .order('created_at', { ascending: false })
-    .limit(Math.min(limit, 500));
-  if (error) throw error;
-  return logs || [];
+export async function listImageGenCosts(_sb, { days = 30, limit = 200 } = {}) {
+  const since = Date.now() - days * 24 * 60 * 60 * 1000;
+  const store = await readStore(COSTS_FILE, { logs: [] });
+  return (store.logs || [])
+    .map(normalizeLog)
+    .filter((row) => new Date(row.created_at).getTime() >= since)
+    .slice(0, Math.min(limit, 500));
 }
 
-export async function listActiveImageGenState(sb) {
-  await purgeExpiredLocks(sb);
-  const [locksRes, batchesRes] = await Promise.all([
-    sb.from('image_gen_locks').select('*').order('locked_at', { ascending: false }),
-    sb.from('image_gen_batches').select('*').eq('status', 'running').order('updated_at', { ascending: false }),
-  ]);
-  return {
-    locks: locksRes.data || [],
-    batches: batchesRes.data || [],
-  };
+export async function listActiveImageGenState(_sb) {
+  const locks = await purgeExpiredLocksStore();
+  const store = await readStore(BATCHES_FILE, { batches: [] });
+  const batches = (store.batches || []).filter((b) => b.status === 'running');
+  return { locks, batches };
 }
 
 export function summarizeCosts(logs = []) {
@@ -193,7 +233,7 @@ export function summarizeCosts(logs = []) {
   const byOperator = new Map();
   const byOperation = new Map();
 
-  for (const row of logs) {
+  for (const row of logs.map(normalizeLog)) {
     const usd = Number(row.cost_usd) || 0;
     const zar = Number(row.cost_zar) || 0;
     totals.usd += usd;
