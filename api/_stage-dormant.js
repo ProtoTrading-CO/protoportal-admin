@@ -87,6 +87,28 @@ export async function stageDormantPreview(sb, liveRow, processedImageUrl) {
 
 export { readSlotUrl, slotField };
 
+const IMAGE_FIELDS = ['image_url_one', 'image_url_two', 'image_url_three', 'image_url_four'];
+
+/** Merge staged image slots onto a live row — only non-empty staged URLs replace live values. */
+export function mergeStagedImagesOntoLive(staged, live) {
+  const merged = {};
+  const appliedSlots = [];
+  IMAGE_FIELDS.forEach((field, i) => {
+    const slot = i + 1;
+    const stagedUrl = readSlotUrl(staged, slot);
+    const liveUrl = live ? readSlotUrl(live, slot) : '';
+    if (stagedUrl) {
+      merged[field] = stagedUrl;
+      if (stagedUrl !== liveUrl) appliedSlots.push(slot);
+    } else if (live) {
+      merged[field] = live[field] ?? null;
+    } else {
+      merged[field] = null;
+    }
+  });
+  return { merged, appliedSlots };
+}
+
 function readStock(value) {
   if (value === null || value === undefined || value === '') return null;
   const n = Number(value);
@@ -133,20 +155,26 @@ export async function applyDormantToLive(sb, sku) {
   if (stagedErr) throw new Error(stagedErr.message);
   if (!staged) throw new Error(`No New Products preview for "${cleanSku}"`);
 
-  const { data: live } = await sb.from('website_stock').select('sku').eq('sku', cleanSku).maybeSingle();
+  const { data: live, error: liveErr } = await sb
+    .from('website_stock')
+    .select(LIVE_SELECT)
+    .eq('sku', cleanSku)
+    .maybeSingle();
+  if (liveErr) throw new Error(liveErr.message);
 
   if (live) {
-    const { error: updateErr } = await sb
-      .from('website_stock')
-      .update({
-        image_url_one: staged.image_url_one,
-        image_url_two: staged.image_url_two,
-        image_url_three: staged.image_url_three,
-        image_url_four: staged.image_url_four,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('sku', cleanSku);
-    if (updateErr) throw new Error(updateErr.message);
+    const { merged, appliedSlots } = mergeStagedImagesOntoLive(staged, live);
+
+    if (appliedSlots.length) {
+      const { error: updateErr } = await sb
+        .from('website_stock')
+        .update({
+          ...merged,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('sku', cleanSku);
+      if (updateErr) throw new Error(updateErr.message);
+    }
 
     const { error: delErr } = await sb
       .from('archived_products')
@@ -155,7 +183,13 @@ export async function applyDormantToLive(sb, sku) {
       .eq('archived_by', 'new-products');
     if (delErr) throw new Error(delErr.message);
 
-    return { mode: 'image_applied', sku: cleanSku, imageUrl: staged.image_url_one };
+    const primaryUrl = merged.image_url_one || readSlotUrl(live, 1);
+    return {
+      mode: appliedSlots.length ? 'image_applied' : 'already_live',
+      sku: cleanSku,
+      imageUrl: primaryUrl,
+      appliedSlots,
+    };
   }
 
   const stockCheck = await validateStockReady(sb, staged.barcode || cleanSku);

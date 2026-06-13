@@ -13,7 +13,7 @@ export async function reprocessOneToDormant(sku, {
   sourceSlot,
   referenceImageUrl,
   batchId,
-  retries = 3,
+  retries = 5,
 } = {}) {
   let lastErr;
   for (let attempt = 0; attempt < retries; attempt += 1) {
@@ -32,8 +32,8 @@ export async function reprocessOneToDormant(sku, {
     });
     const json = await res.json().catch(() => ({}));
     if (res.status === 409 && attempt < retries - 1) {
-      lastErr = new Error(json.error || 'SKU slot locked — retrying…');
-      await sleep(4000 + attempt * 2000);
+      lastErr = new Error(json.error || 'SKU slot locked — waiting for other user…');
+      await sleep(3000 + attempt * 2500 + Math.random() * 1500);
       continue;
     }
     if (!res.ok) throw new Error(json.error || `Reprocess failed (${res.status})`);
@@ -126,6 +126,8 @@ export async function runReprocessBatch(products, {
         sourceUrl: json.sourceUrl,
         slot: item.slot,
       });
+      // Brief pause between items so concurrent batches don't stampede the lock store.
+      if (i < queue.length - 1) await sleep(350);
     } catch (err) {
       results.failed += 1;
       results.items.push({ sku: item.sku, slot: item.slot, ok: false, error: err.message });

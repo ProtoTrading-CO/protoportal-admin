@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import ApolloProductPicker from './ApolloProductPicker';
 import ReprocessLiveFeed from './ReprocessLiveFeed';
-import { compressImage } from '../lib/products';
+import { compressImage, applyDormantLive } from '../lib/products';
 import { expandProductSlots, runReprocessBatch } from '../lib/reprocessQueue';
 import { finishImageBatch, startImageBatch, updateImageBatch } from '../lib/imageBatchTracker';
 import {
@@ -399,13 +399,7 @@ export default function ApolloImageWizard({
     const errors = [];
     for (const sku of skus) {
       try {
-        const res = await fetch('/api/apply-dormant-live', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sku }),
-        });
-        const json = await res.json();
-        if (!res.ok) throw new Error(json.error);
+        await applyDormantLive(sku);
         ok += 1;
       } catch (err) {
         errors.push(`${sku}: ${err.message}`);
@@ -416,7 +410,7 @@ export default function ApolloImageWizard({
     if (errors.length) {
       onShowToast?.(`Set live: ${ok} ok, ${errors.length} failed`, ok ? 'success' : 'error');
     } else {
-      onShowToast?.(`${ok} product${ok === 1 ? '' : 's'} set live`, 'success');
+      onShowToast?.(`${ok} product${ok === 1 ? '' : 's'} set live. Trade site updates within ~1 minute.`, 'success');
     }
     onExit?.();
   };

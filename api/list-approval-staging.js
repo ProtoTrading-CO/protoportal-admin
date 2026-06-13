@@ -1,6 +1,6 @@
 import { requireAdminKey } from './_admin-auth.js';
 import { createClient } from '@supabase/supabase-js';
-import { validateStockReady } from './_stage-dormant.js';
+import { mergeStagedImagesOntoLive, validateStockReady } from './_stage-dormant.js';
 
 function getClient() {
   return createClient(
@@ -45,6 +45,9 @@ export default async function handler(req, res) {
     if (!live) continue;
 
     const stockCheck = await validateStockReady(sb, row.barcode || row.sku);
+    const { appliedSlots } = mergeStagedImagesOntoLive(row, live);
+    if (!appliedSlots.length) continue;
+
     items.push({
       sku: row.sku,
       barcode: row.barcode,
@@ -53,6 +56,7 @@ export default async function handler(req, res) {
       subcategories: [row.subcategory_one, row.subcategory_two, row.subcategory_three, row.subcategory_four].filter(Boolean),
       liveImages: [1, 2, 3, 4].map((s) => splitUrl(live[`image_url_${['one', 'two', 'three', 'four'][s - 1]}`])),
       stagedImages: [1, 2, 3, 4].map((s) => splitUrl(row[`image_url_${['one', 'two', 'three', 'four'][s - 1]}`])),
+      changedSlots: appliedSlots,
       stockReady: stockCheck.ok,
       stockError: stockCheck.ok ? null : stockCheck.error,
       updatedAt: row.updated_at,

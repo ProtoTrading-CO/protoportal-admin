@@ -40,6 +40,41 @@ async function writeStore(file, payload) {
   await writeSiteConfigJson(file, payload);
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => { setTimeout(resolve, ms); });
+}
+
+/**
+ * Read-modify-write with optimistic retry — prevents lost lock updates when
+ * multiple admins run Apollo batches at the same time.
+ */
+async function mutateStore(file, fallback, mutator, { maxRetries = 10 } = {}) {
+  let lastErr;
+  for (let attempt = 0; attempt < maxRetries; attempt += 1) {
+    const store = await readStore(file, fallback);
+    const version = store.updatedAt || null;
+    const result = await mutator({ ...store });
+
+    if (result === false || result?.abort) return result;
+
+    const next = result?.store ?? result;
+    const current = await readStore(file, fallback);
+    if ((current.updatedAt || null) !== version && attempt < maxRetries - 1) {
+      await sleep(40 + attempt * 60 + Math.random() * 80);
+      continue;
+    }
+
+    try {
+      await writeStore(file, next);
+      return result?.store ? result : next;
+    } catch (err) {
+      lastErr = err;
+      await sleep(40 + attempt * 60);
+    }
+  }
+  throw lastErr || new Error('Concurrent update conflict — try again shortly');
+}
+
 function normalizeLog(row) {
   return {
     id: row.id || randomUUID(),
@@ -120,12 +155,16 @@ function purgeExpiredLocks(locks = []) {
 }
 
 export async function purgeExpiredLocksStore() {
-  const store = await readStore(LOCKS_FILE, { locks: [] });
-  const locks = purgeExpiredLocks(store.locks || []);
-  if (locks.length !== (store.locks || []).length) {
-    await writeStore(LOCKS_FILE, { locks });
+  try {
+    const result = await mutateStore(LOCKS_FILE, { locks: [] }, (store) => {
+      const locks = purgeExpiredLocks(store.locks || []);
+      return { store: { locks } };
+    });
+    return result?.store?.locks ?? [];
+  } catch {
+    const store = await readStore(LOCKS_FILE, { locks: [] });
+    return purgeExpiredLocks(store.locks || []);
   }
-  return locks;
 }
 
 export async function acquireImageGenLock(_sb, { sku, slot, batchId, operator, ttlSec = 180 } = {}) {
@@ -133,59 +172,80 @@ export async function acquireImageGenLock(_sb, { sku, slot, batchId, operator, t
   const cleanSlot = Math.min(4, Math.max(1, Number(slot) || 1));
   if (!cleanSku) throw new Error('Missing SKU for lock');
 
-  const locks = await purgeExpiredLocksStore();
   const key = `${cleanSku}::${cleanSlot}`;
-  const existing = locks.find((l) => `${l.sku}::${l.slot}` === key);
 
-  if (existing) {
-    if (existing.batch_id === batchId || existing.batchId === batchId) {
-      return { locked: true, sku: cleanSku, slot: cleanSlot, reentry: true };
+  try {
+    const result = await mutateStore(LOCKS_FILE, { locks: [] }, (store) => {
+      const locks = purgeExpiredLocks(store.locks || []);
+      const existing = locks.find((l) => `${l.sku}::${l.slot}` === key);
+
+      if (existing) {
+        if (existing.batch_id === batchId || existing.batchId === batchId) {
+          return { store: { locks }, acquired: true, reentry: true };
+        }
+        return {
+          abort: true,
+          conflict: true,
+          operator: existing.operator || 'another user',
+          sku: cleanSku,
+          slot: cleanSlot,
+        };
+      }
+
+      const expiresAt = new Date(Date.now() + ttlSec * 1000).toISOString();
+      locks.push({
+        sku: cleanSku,
+        slot: cleanSlot,
+        batch_id: batchId || null,
+        operator: operator || null,
+        locked_at: new Date().toISOString(),
+        expires_at: expiresAt,
+      });
+      return { store: { locks }, acquired: true };
+    });
+
+    if (result?.conflict) {
+      const who = result.operator || 'another user';
+      throw new Error(`"${cleanSku}" slot ${cleanSlot} is in use by ${who}. Wait for their batch to finish or try again shortly.`);
     }
-    const who = existing.operator || 'another user';
-    throw new Error(`"${cleanSku}" slot ${cleanSlot} is in use by ${who}. Wait for their batch to finish or try again shortly.`);
-  }
 
-  const expiresAt = new Date(Date.now() + ttlSec * 1000).toISOString();
-  locks.push({
-    sku: cleanSku,
-    slot: cleanSlot,
-    batch_id: batchId || null,
-    operator: operator || null,
-    locked_at: new Date().toISOString(),
-    expires_at: expiresAt,
-  });
-  await writeStore(LOCKS_FILE, { locks });
-  return { locked: true, sku: cleanSku, slot: cleanSlot };
+    return { locked: true, sku: cleanSku, slot: cleanSlot, reentry: !!result?.reentry };
+  } catch (err) {
+    if (/in use by/i.test(err.message)) throw err;
+    throw new Error(`Could not acquire lock for "${cleanSku}" slot ${cleanSlot} — ${err.message || 'try again'}`);
+  }
 }
 
 export async function releaseImageGenLock(_sb, sku, slot) {
   try {
     const cleanSku = String(sku || '').trim();
     const cleanSlot = Math.min(4, Math.max(1, Number(slot) || 1));
-    const store = await readStore(LOCKS_FILE, { locks: [] });
-    const locks = (store.locks || []).filter((l) => !(l.sku === cleanSku && Number(l.slot) === cleanSlot));
-    await writeStore(LOCKS_FILE, { locks });
+    await mutateStore(LOCKS_FILE, { locks: [] }, (store) => {
+      const locks = (store.locks || []).filter((l) => !(l.sku === cleanSku && Number(l.slot) === cleanSlot));
+      return { store: { locks } };
+    });
   } catch { /* ignore */ }
 }
 
 export async function registerImageGenBatch(_sb, { batchId, operator, total, style, productCount } = {}) {
   if (!batchId) return;
   try {
-    const store = await readStore(BATCHES_FILE, { batches: [] });
-    const batches = (store.batches || []).filter((b) => b.id !== batchId);
-    batches.unshift({
-      id: batchId,
-      operator: operator || null,
-      status: 'running',
-      total: Number(total) || 0,
-      done: 0,
-      failed: 0,
-      style: style || null,
-      product_count: Number(productCount) || 0,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
+    await mutateStore(BATCHES_FILE, { batches: [] }, (store) => {
+      const batches = (store.batches || []).filter((b) => b.id !== batchId);
+      batches.unshift({
+        id: batchId,
+        operator: operator || null,
+        status: 'running',
+        total: Number(total) || 0,
+        done: 0,
+        failed: 0,
+        style: style || null,
+        product_count: Number(productCount) || 0,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      });
+      return { store: { batches: batches.slice(0, 50) } };
     });
-    await writeStore(BATCHES_FILE, { batches: batches.slice(0, 50) });
   } catch (err) {
     console.warn('registerImageGenBatch:', err?.message || err);
   }
@@ -194,20 +254,21 @@ export async function registerImageGenBatch(_sb, { batchId, operator, total, sty
 export async function updateImageGenBatch(_sb, batchId, patch = {}) {
   if (!batchId) return;
   try {
-    const store = await readStore(BATCHES_FILE, { batches: [] });
-    const batches = (store.batches || []).map((b) => {
-      if (b.id !== batchId) return b;
-      const next = {
-        ...b,
-        ...patch,
-        updated_at: new Date().toISOString(),
-      };
-      if (patch.status === 'complete' || patch.status === 'cancelled') {
-        next.finished_at = new Date().toISOString();
-      }
-      return next;
+    await mutateStore(BATCHES_FILE, { batches: [] }, (store) => {
+      const batches = (store.batches || []).map((b) => {
+        if (b.id !== batchId) return b;
+        const next = {
+          ...b,
+          ...patch,
+          updated_at: new Date().toISOString(),
+        };
+        if (patch.status === 'complete' || patch.status === 'cancelled') {
+          next.finished_at = new Date().toISOString();
+        }
+        return next;
+      });
+      return { store: { batches } };
     });
-    await writeStore(BATCHES_FILE, { batches });
   } catch { /* ignore */ }
 }
 

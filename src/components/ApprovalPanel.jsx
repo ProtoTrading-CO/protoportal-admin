@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Check, CheckCircle, ChevronLeft, ChevronRight, Loader2, Trash2, X, ZoomIn } from 'lucide-react';
 import { dismissImageBatch, subscribeImageBatch } from '../lib/imageBatchTracker';
+import { applyDormantLive } from '../lib/products';
 
 function buildGallery(item) {
   const list = [];
@@ -218,16 +219,12 @@ export default function ApprovalPanel({ onShowToast, onRefreshStats }) {
     setBusy(true);
     const errors = [];
     let ok = 0;
+    let applied = 0;
     for (const sku of list) {
       try {
-        const res = await fetch('/api/apply-dormant-live', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sku }),
-        });
-        const json = await res.json();
-        if (!res.ok) throw new Error(json.error || 'Go live failed');
+        const result = await applyDormantLive(sku);
         ok += 1;
+        if (result.mode === 'image_applied') applied += 1;
       } catch (err) {
         errors.push(`${sku}: ${err.message}`);
       }
@@ -237,7 +234,10 @@ export default function ApprovalPanel({ onShowToast, onRefreshStats }) {
     if (errors.length) {
       onShowToast?.(`Set live: ${ok} ok, ${errors.length} failed — ${errors.slice(0, 2).join('; ')}`, ok ? 'success' : 'error');
     } else {
-      onShowToast?.(`${ok} product${ok === 1 ? '' : 's'} set live`, 'success');
+      const note = applied
+        ? ' Trade site updates within ~1 minute (hard refresh if images look stale).'
+        : '';
+      onShowToast?.(`${ok} product${ok === 1 ? '' : 's'} set live.${note}`, 'success');
     }
     setBusy(false);
   };
