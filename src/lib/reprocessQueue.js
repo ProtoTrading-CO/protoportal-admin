@@ -25,9 +25,11 @@ export async function reprocessOneToDormant(sku, {
 }
 
 function styleMessage(imageStyle, slot) {
-  const slotNote = slot > 1 ? ` slot ${slot}` : '';
+  const angles = { 1: 'front', 2: '45°', 3: 'side', 4: 'detail' };
+  const angle = angles[slot] ? ` · ${angles[slot]}` : '';
+  const slotNote = slot > 1 ? ` slot ${slot}${angle}` : `${angle}`;
   if (imageStyle === 'generative') return `Generative AI${slotNote}…`;
-  if (imageStyle === 'measurements') return `Measurements overlay${slotNote}…`;
+  if (imageStyle === 'measurements') return `Measurements${slotNote}…`;
   if (imageStyle === 'shadow') return `White + shadow${slotNote}…`;
   return `Processing${slotNote}…`;
 }
@@ -46,22 +48,16 @@ function buildWorkItems(products, { fillSlots = false } = {}) {
       const idx = slot - 1;
       return !!(images[idx] || (slot === 1 && (p.imageUrl || p.image)));
     };
-    const slots = p.slots || [1];
-    let expanded;
-    if (fillSlots) {
-      const empty = [2, 3, 4].filter((s) => !hasImage(s));
-      expanded = [1, ...empty];
-    } else {
-      expanded = slots;
-    }
+    const expanded = fillSlots ? [1, 2, 3, 4] : (p.slots || [1]);
     const uniqueSlots = [...new Set(expanded.length ? expanded : [1])];
+    const primarySource = hasImage(1) ? 1 : uniqueSlots.find((s) => hasImage(s));
     for (const slot of uniqueSlots) {
       work.push({
         sku: p.sku,
         title: p.title || p.name || p.sku,
         thumbUrl: hasImage(slot) ? (images[slot - 1] || p.imageUrl || p.image) : (images[0] || p.imageUrl || p.image),
         slot,
-        sourceSlot: hasImage(slot) ? slot : (hasImage(1) ? 1 : undefined),
+        sourceSlot: slot === 1 ? (primarySource || 1) : (primarySource || 1),
       });
     }
   }
@@ -128,14 +124,7 @@ export async function runReprocessBatch(products, {
 export function expandProductSlots(products, { fillSlots = false, defaultSlots = [1] } = {}) {
   return products.map((p) => {
     const images = p.images || [p.image, p.secondaryImage, p.imageThree, p.imageFour].filter(Boolean);
-    let slots = defaultSlots;
-    if (fillSlots) {
-      slots = [1, 2, 3, 4].filter((s) => {
-        const has = !!(images[s - 1]);
-        return !has || s === 1;
-      });
-      if (!slots.length) slots = [1];
-    }
+    const slots = fillSlots ? [1, 2, 3, 4] : defaultSlots;
     return { ...p, images, slots };
   });
 }

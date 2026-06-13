@@ -252,6 +252,7 @@ export default function ApolloPanel({ taxonomyTree, onShowToast, onGoToApproval,
   const [error, setError] = useState('');
   const [indexStatus, setIndexStatus] = useState(null);
   const [wizardOpen, setWizardOpen] = useState(false);
+  const [wizardBackground, setWizardBackground] = useState(false);
   const scrollRef = useRef(null);
 
   useEffect(() => {
@@ -353,15 +354,24 @@ export default function ApolloPanel({ taxonomyTree, onShowToast, onGoToApproval,
 
   if (wizardOpen) {
     return (
-      <div className="apollo-panel">
-        <ApolloImageWizard
-          taxonomyTree={taxonomyTree}
-          onExit={() => setWizardOpen(false)}
-          onShowToast={onShowToast}
-          onGoToApproval={onGoToApproval}
-          onRefreshCatalog={onRefreshCatalog}
-        />
-      </div>
+      <>
+        <div className="apollo-panel" style={{ display: wizardBackground ? 'none' : 'block' }}>
+          <ApolloImageWizard
+            taxonomyTree={taxonomyTree}
+            onExit={() => { setWizardOpen(false); setWizardBackground(false); }}
+            onRunInBackground={() => setWizardBackground(true)}
+            onShowToast={onShowToast}
+            onGoToApproval={() => { setWizardBackground(true); onGoToApproval?.(); }}
+            onRefreshCatalog={onRefreshCatalog}
+          />
+        </div>
+        {wizardBackground && (
+          <div className="apollo-panel apollo-panel--background-hint">
+            <p><Loader2 size={16} className="spin" /> Image batch running in the background — check the <strong>Approval</strong> tab for progress.</p>
+            <button type="button" className="adm-btn-red adm-btn--sm" onClick={onGoToApproval}>Open Approval</button>
+          </div>
+        )}
+      </>
     );
   }
 

@@ -62,6 +62,22 @@ function wantsShadow(text) {
   return /\bshadow/i.test(String(text || '').toLowerCase());
 }
 
+const SLOT_ANGLE_HINTS = {
+  1: 'Front-facing hero shot — product centred, primary catalogue view.',
+  2: 'Three-quarter (45°) angle — show depth and side detail while keeping the same product.',
+  3: 'Side profile view — product from the left or right, full product visible.',
+  4: 'Alternate detail view — back, top-down, or feature close-up as appropriate; same product throughout.',
+};
+
+function slotAngleNote(targetSlot) {
+  const slot = Math.min(4, Math.max(1, Number(targetSlot) || 1));
+  const hint = SLOT_ANGLE_HINTS[slot] || SLOT_ANGLE_HINTS[1];
+  if (slot === 1) {
+    return `\nCamera: ${hint}`;
+  }
+  return `\nThis is image ${slot} of 4 in the set. Camera: ${hint} Use the source photo as the ground truth for the product — only the viewing angle changes.`;
+}
+
 /** Build prompt for OpenRouter image model from style + admin instructions. */
 export function buildImagePrompt({
   style = IMAGE_STYLES.standard,
@@ -75,9 +91,7 @@ export function buildImagePrompt({
   const productCtx = productTitle
     ? `\nProduct name: "${productTitle}". Keep this exact product — same shape, branding, colours, and proportions as the source photo.`
     : '';
-  const slotNote = targetSlot > 1
-    ? `\nThis is image slot ${targetSlot} of 4 — show a complementary angle or detail view consistent with the primary hero shot while preserving the exact same product.`
-    : '';
+  const slotNote = slotAngleNote(targetSlot);
 
   if (style === IMAGE_STYLES.measurements) {
     const dims = extractMeasurementsFromDescription(productDescription);

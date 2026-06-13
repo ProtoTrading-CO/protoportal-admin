@@ -1,9 +1,11 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ArrowLeft,
   ArrowRight,
   Check,
   CheckCircle,
+  ChevronLeft,
+  ChevronRight,
   ImagePlus,
   Layers,
   Loader2,
@@ -12,11 +14,13 @@ import {
   Sun,
   Upload,
   X,
+  ZoomIn,
 } from 'lucide-react';
 import ApolloProductPicker from './ApolloProductPicker';
 import ReprocessLiveFeed from './ReprocessLiveFeed';
 import { compressImage } from '../lib/products';
 import { expandProductSlots, runReprocessBatch } from '../lib/reprocessQueue';
+import { finishImageBatch, startImageBatch, updateImageBatch } from '../lib/imageBatchTracker';
 
 const STYLES = [
   {
@@ -41,9 +45,75 @@ const STYLES = [
 
 const STEPS = ['Scope', 'Style', 'Reference', 'Prompt', 'Options', 'Generate', 'Destination'];
 
+function ReferenceImageLightbox({ gallery, index, onClose, onChangeIndex, onUseReference }) {
+  const current = gallery?.[index];
+  const hasPrev = gallery && index > 0;
+  const hasNext = gallery && index < gallery.length - 1;
+
+  useEffect(() => {
+    if (!gallery?.length) return undefined;
+    const onKey = (e) => {
+      if (e.key === 'Escape') onClose();
+      if (e.key === 'ArrowLeft' && index > 0) onChangeIndex(index - 1);
+      if (e.key === 'ArrowRight' && index < gallery.length - 1) onChangeIndex(index + 1);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [gallery, index, onClose, onChangeIndex]);
+
+  if (!gallery?.length || index < 0 || !current) return null;
+
+  return (
+    <div className="apollo-ref-lightbox" role="dialog" aria-modal="true" aria-label="Reference image preview">
+      <button type="button" className="apollo-ref-lightbox-backdrop" onClick={onClose} aria-label="Close" />
+      <div className="apollo-ref-lightbox-inner">
+        <header className="apollo-ref-lightbox-head">
+          <div>
+            <strong>{current.title || current.sku}</strong>
+            <span>{current.slot ? `Image ${current.slot}` : 'Uploaded reference'}</span>
+          </div>
+          <span className="apollo-ref-lightbox-counter">{index + 1} / {gallery.length}</span>
+          <button type="button" className="adm-icon-btn" onClick={onClose} aria-label="Close"><X size={18} /></button>
+        </header>
+        <div className="apollo-ref-lightbox-stage">
+          {hasPrev && (
+            <button type="button" className="apollo-ref-lightbox-nav apollo-ref-lightbox-nav--prev" onClick={() => onChangeIndex(index - 1)} aria-label="Previous">
+              <ChevronLeft size={28} />
+            </button>
+          )}
+          <img src={current.url} alt="" className="apollo-ref-lightbox-img" />
+          {hasNext && (
+            <button type="button" className="apollo-ref-lightbox-nav apollo-ref-lightbox-nav--next" onClick={() => onChangeIndex(index + 1)} aria-label="Next">
+              <ChevronRight size={28} />
+            </button>
+          )}
+        </div>
+        <footer className="apollo-ref-lightbox-foot">
+          <button type="button" className="adm-btn-red adm-btn--sm" onClick={() => { onUseReference(current.url); onClose(); }}>
+            <Check size={14} /> Use as reference
+          </button>
+        </footer>
+        <div className="apollo-ref-lightbox-thumbs">
+          {gallery.map((g, i) => (
+            <button
+              key={`${g.url}-${i}`}
+              type="button"
+              className={`apollo-ref-lightbox-thumb${i === index ? ' apollo-ref-lightbox-thumb--active' : ''}`}
+              onClick={() => onChangeIndex(i)}
+            >
+              <img src={g.url} alt="" />
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function ApolloImageWizard({
   taxonomyTree = [],
   onExit,
+  onRunInBackground,
   onShowToast,
   onGoToApproval,
   onRefreshCatalog,
@@ -52,7 +122,7 @@ export default function ApolloImageWizard({
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [imageStyle, setImageStyle] = useState('shadow');
   const [promptNotes, setPromptNotes] = useState('');
-  const [fillSlots, setFillSlots] = useState(false);
+  const [multiAngle, setMultiAngle] = useState(true);
   const [referenceUrl, setReferenceUrl] = useState('');
   const [referenceUploading, setReferenceUploading] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -60,10 +130,67 @@ export default function ApolloImageWizard({
   const [batchDone, setBatchDone] = useState(false);
   const [applyingLive, setApplyingLive] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [refCandidates, setRefCandidates] = useState([]);
+  const [refCandidatesLoading, setRefCandidatesLoading] = useState(false);
+  const [refLightboxIndex, setRefLightboxIndex] = useState(-1);
   const abortRef = useRef(null);
   const refInputRef = useRef(null);
+  const backgroundRef = useRef(false);
 
   const selectedStyle = STYLES.find((s) => s.id === imageStyle);
+
+  useEffect(() => {
+    if (step !== 2 || selectedIds.size === 0) {
+      setRefCandidates([]);
+      return undefined;
+    }
+    let cancelled = false;
+    setRefCandidatesLoading(true);
+    void (async () => {
+      try {
+        const res = await fetch('/api/stock-actions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'listLive' }),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || 'Failed to load images');
+        const idSet = new Set(selectedIds);
+        const list = [];
+        for (const row of json.rows || []) {
+          if (!idSet.has(row.sku)) continue;
+          [row.image_url_one, row.image_url_two, row.image_url_three, row.image_url_four].forEach((url, i) => {
+            if (url) {
+              list.push({
+                url,
+                sku: row.sku,
+                title: row.title,
+                slot: i + 1,
+                label: `${row.title} · Image ${i + 1}`,
+              });
+            }
+          });
+        }
+        if (!cancelled) setRefCandidates(list);
+      } catch {
+        if (!cancelled) setRefCandidates([]);
+      } finally {
+        if (!cancelled) setRefCandidatesLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [step, [...selectedIds].join(',')]);
+
+  const refGallery = referenceUrl && !refCandidates.some((c) => c.url === referenceUrl)
+    ? [{ url: referenceUrl, sku: '', title: 'Uploaded reference', slot: null, label: 'Uploaded reference' }, ...refCandidates]
+    : refCandidates;
+
+  const selectReference = (url) => {
+    setReferenceUrl(url);
+    onShowToast?.('Reference image selected', 'success');
+  };
+
+  const openRefLightbox = (index) => setRefLightboxIndex(index);
 
   const handleReferenceUpload = async (file) => {
     if (!file || !file.type.startsWith('image/')) {
@@ -100,6 +227,20 @@ export default function ApolloImageWizard({
     setDragOver(false);
     const file = e.dataTransfer.files?.[0];
     if (file) void handleReferenceUpload(file);
+  };
+
+  const goToApprovalWhileRunning = () => {
+    backgroundRef.current = true;
+    onRunInBackground?.();
+    onGoToApproval?.();
+  };
+
+  const handleExit = () => {
+    if (busy) {
+      goToApprovalWhileRunning();
+      return;
+    }
+    onExit?.();
   };
 
   const startGen = async () => {
@@ -142,11 +283,10 @@ export default function ApolloImageWizard({
 
       if (!products.length) {
         onShowToast?.('Could not load selected products', 'error');
-        setBusy(false);
         return;
       }
 
-      const expanded = expandProductSlots(products, { fillSlots, defaultSlots: [1] });
+      const expanded = expandProductSlots(products, { fillSlots: multiAngle, defaultSlots: [1] });
       const initial = expanded.flatMap((p) => p.slots.map((slot) => ({
         sku: p.sku,
         name: p.name,
@@ -157,15 +297,40 @@ export default function ApolloImageWizard({
       })));
       setQueue(initial);
 
+      startImageBatch({
+        total: initial.length,
+        style: selectedStyle?.label || imageStyle,
+        productCount: products.length,
+      });
+
+      let doneCount = 0;
+      let failedCount = 0;
+
       await runReprocessBatch(expanded, {
         prompt: promptNotes,
         imageStyle,
         referenceImageUrl: referenceUrl || undefined,
-        fillSlots,
+        fillSlots: multiAngle,
         signal: ac.signal,
         onItemUpdate: (index, patch) => {
+          const item = initial[index];
+          if (patch.status === 'transforming') {
+            updateImageBatch({
+              currentSku: item?.sku,
+              currentLabel: item?.name,
+            });
+          }
+          if (patch.status === 'done') {
+            doneCount += 1;
+            updateImageBatch({ done: doneCount, failed: failedCount });
+          }
+          if (patch.status === 'error') {
+            failedCount += 1;
+            updateImageBatch({ done: doneCount, failed: failedCount });
+          }
+          if (backgroundRef.current) return;
           setQueue((prev) => {
-            const next = prev.map((item, idx) => (idx === index ? { ...item, ...patch } : item));
+            const next = prev.map((q, idx) => (idx === index ? { ...q, ...patch } : q));
             if (patch.status === 'done' || patch.status === 'error') {
               const doneItem = next[index];
               return [doneItem, ...next.filter((_, idx) => idx !== index)];
@@ -174,11 +339,27 @@ export default function ApolloImageWizard({
           });
         },
       });
-      setBatchDone(true);
-      setStep(6);
-      onRefreshCatalog?.();
+
+      const aborted = ac.signal.aborted;
+      finishImageBatch({ aborted });
+      if (!aborted) {
+        onShowToast?.(
+          `Image batch complete — ${doneCount} staged${failedCount ? `, ${failedCount} failed` : ''}. Review in Approval.`,
+          failedCount && !doneCount ? 'error' : 'success',
+        );
+        onRefreshCatalog?.();
+      }
+      if (!backgroundRef.current) {
+        setBatchDone(true);
+        setStep(6);
+      }
     } catch (err) {
-      if (!ac.signal.aborted) onShowToast?.(err.message, 'error');
+      if (!ac.signal.aborted) {
+        onShowToast?.(err.message, 'error');
+        finishImageBatch({ aborted: false });
+      } else {
+        finishImageBatch({ aborted: true });
+      }
     } finally {
       setBusy(false);
       abortRef.current = null;
@@ -239,8 +420,8 @@ export default function ApolloImageWizard({
             Step {step + 1} of {STEPS.length} · <strong>{STEPS[step]}</strong>
           </p>
         </div>
-        <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={onExit} disabled={busy}>
-          <X size={14} /> Exit
+        <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={handleExit}>
+          <X size={14} /> {busy ? 'Run in background' : 'Exit'}
         </button>
       </div>
 
@@ -335,10 +516,16 @@ export default function ApolloImageWizard({
 
           {referenceUrl ? (
             <div className="apollo-ref-preview-large">
-              <img src={referenceUrl} alt="Reference style" />
+              <button type="button" className="apollo-ref-preview-large-btn" onClick={() => {
+                const idx = refGallery.findIndex((g) => g.url === referenceUrl);
+                openRefLightbox(idx >= 0 ? idx : 0);
+              }}>
+                <img src={referenceUrl} alt="Reference style" />
+                <span className="apollo-ref-preview-zoom"><ZoomIn size={20} /></span>
+              </button>
               <div className="apollo-ref-preview-actions">
                 <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => refInputRef.current?.click()} disabled={referenceUploading}>
-                  Replace
+                  Replace upload
                 </button>
                 <button type="button" className="adm-btn-ghost adm-btn--sm adm-btn-ghost--danger" onClick={() => setReferenceUrl('')}>
                   Remove
@@ -365,6 +552,55 @@ export default function ApolloImageWizard({
                 </>
               )}
             </button>
+          )}
+
+          <section className="apollo-ref-gallery-section">
+            <header className="apollo-ref-gallery-head">
+              <h5>Browse selected product images</h5>
+              <p>Click to view full size, or pick one as your reference style.</p>
+            </header>
+            {refCandidatesLoading && (
+              <div className="adm-loading-inline"><Loader2 size={16} className="spin" /> Loading images…</div>
+            )}
+            {!refCandidatesLoading && refCandidates.length === 0 && (
+              <p className="adm-muted apollo-ref-gallery-empty">No images on selected products yet — upload a reference above.</p>
+            )}
+            {!refCandidatesLoading && refCandidates.length > 0 && (
+              <div className="apollo-ref-gallery-grid">
+                {refCandidates.map((item, i) => {
+                  const selected = referenceUrl === item.url;
+                  return (
+                    <div key={`${item.sku}-${item.slot}`} className={`apollo-ref-gallery-item${selected ? ' apollo-ref-gallery-item--selected' : ''}`}>
+                      <button type="button" className="apollo-ref-gallery-thumb" onClick={() => openRefLightbox(i)} aria-label={`View ${item.label}`}>
+                        <img src={item.url} alt="" loading="lazy" />
+                        <span className="apollo-ref-gallery-zoom"><ZoomIn size={14} /></span>
+                      </button>
+                      <div className="apollo-ref-gallery-meta">
+                        <span className="apollo-ref-gallery-title" title={item.title}>{item.title}</span>
+                        <span className="apollo-ref-gallery-slot">Slot {item.slot}</span>
+                      </div>
+                      <button
+                        type="button"
+                        className={`apollo-ref-gallery-use${selected ? ' apollo-ref-gallery-use--on' : ''}`}
+                        onClick={() => selectReference(item.url)}
+                      >
+                        {selected ? <><Check size={12} /> Selected</> : 'Use as reference'}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+
+          {refLightboxIndex >= 0 && (
+            <ReferenceImageLightbox
+              gallery={refGallery}
+              index={refLightboxIndex}
+              onClose={() => setRefLightboxIndex(-1)}
+              onChangeIndex={setRefLightboxIndex}
+              onUseReference={selectReference}
+            />
           )}
         </div>
       )}
@@ -393,14 +629,15 @@ export default function ApolloImageWizard({
             <p>Review before starting generation.</p>
           </header>
           <label className="apollo-option-card">
-            <input type="checkbox" checked={fillSlots} onChange={(e) => setFillSlots(e.target.checked)} />
+            <input type="checkbox" checked={multiAngle} onChange={(e) => setMultiAngle(e.target.checked)} />
             <div>
-              <strong><Layers size={15} /> Fill all image slots</strong>
-              <p>Generate missing images (up to 4) using the primary as source. Alternate angles are AI-generated.</p>
+              <strong><Layers size={15} /> Multiple angles (4 views per product)</strong>
+              <p>Front hero plus three alternate angles — staged to image slots 1–4. Recommended for catalogue listings.</p>
             </div>
           </label>
           <div className="apollo-summary">
             <div><span>Products</span><strong>{selectedIds.size}</strong></div>
+            <div><span>Images to generate</span><strong>{selectedIds.size * (multiAngle ? 4 : 1)}</strong></div>
             <div><span>Style</span><strong>{selectedStyle?.label}</strong></div>
             <div><span>Reference</span><strong>{referenceUrl ? 'Uploaded' : 'None'}</strong></div>
             <div><span>Prompt</span><strong>{promptNotes.trim() ? 'Custom' : 'Default'}</strong></div>
@@ -410,6 +647,10 @@ export default function ApolloImageWizard({
 
       {step === 5 && (
         <div className="apollo-wizard-panel">
+          <div className="apollo-gen-notice">
+            <Sparkles size={16} />
+            <p>Generating images — you can switch to the <strong>Approval</strong> tab anytime. We&apos;ll notify you when the batch is done.</p>
+          </div>
           <ReprocessLiveFeed
             queue={queue}
             busy={busy}
@@ -418,6 +659,11 @@ export default function ApolloImageWizard({
             openLabel=""
             onStop={() => abortRef.current?.abort()}
           />
+          {busy && (
+            <button type="button" className="adm-btn-red" style={{ marginTop: 12 }} onClick={goToApprovalWhileRunning}>
+              Go to Approval — notify me when done
+            </button>
+          )}
           {!busy && batchDone && (
             <button type="button" className="adm-btn-red" style={{ marginTop: 12 }} onClick={() => setStep(6)}>
               Continue to destination

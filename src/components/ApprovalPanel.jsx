@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Check, CheckCircle, ChevronLeft, ChevronRight, Loader2, Trash2, X, ZoomIn } from 'lucide-react';
+import { dismissImageBatch, subscribeImageBatch } from '../lib/imageBatchTracker';
 
 function buildGallery(item) {
   const list = [];
@@ -113,12 +114,68 @@ function ImageLightbox({ gallery, index, onClose, onChangeIndex }) {
   );
 }
 
+function ImageBatchNotice({ batch, onDismiss, onRefresh }) {
+  const prevStatus = useRef(null);
+
+  useEffect(() => {
+    if (prevStatus.current === 'running' && batch?.status === 'complete') {
+      onRefresh?.();
+    }
+    prevStatus.current = batch?.status ?? null;
+  }, [batch?.status, onRefresh]);
+
+  if (!batch) return null;
+
+  if (batch.status === 'running') {
+    const processed = (batch.done || 0) + (batch.failed || 0);
+    const pct = batch.total ? Math.round((processed / batch.total) * 100) : 0;
+    return (
+      <div className="approval-batch-notice approval-batch-notice--running" role="status">
+        <Loader2 size={18} className="spin" />
+        <div className="approval-batch-notice-copy">
+          <strong>Generating images — we&apos;ll notify you when it&apos;s done</strong>
+          <span>
+            {batch.productCount} product{batch.productCount === 1 ? '' : 's'} · {processed}/{batch.total} images
+            {batch.currentLabel ? ` · ${batch.currentLabel}` : ''}
+          </span>
+          <div className="approval-batch-notice-bar"><div style={{ width: `${pct}%` }} /></div>
+        </div>
+      </div>
+    );
+  }
+
+  if (batch.status === 'complete') {
+    return (
+      <div className="approval-batch-notice approval-batch-notice--done" role="status">
+        <CheckCircle size={18} />
+        <div className="approval-batch-notice-copy">
+          <strong>Batch complete — ready for review</strong>
+          <span>{batch.done} image{batch.done === 1 ? '' : 's'} staged{batch.failed ? ` · ${batch.failed} failed` : ''}. Refresh below if previews aren&apos;t visible yet.</span>
+        </div>
+        <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={onDismiss}>Dismiss</button>
+      </div>
+    );
+  }
+
+  if (batch.status === 'cancelled') {
+    return (
+      <div className="approval-batch-notice approval-batch-notice--cancelled" role="status">
+        <span>Image batch stopped.</span>
+        <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={onDismiss}>Dismiss</button>
+      </div>
+    );
+  }
+
+  return null;
+}
+
 export default function ApprovalPanel({ onShowToast, onRefreshStats }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState(new Set());
   const [busy, setBusy] = useState(false);
   const [lightbox, setLightbox] = useState(null);
+  const [imageBatch, setImageBatch] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -136,6 +193,8 @@ export default function ApprovalPanel({ onShowToast, onRefreshStats }) {
   }, [onShowToast]);
 
   useEffect(() => { void load(); }, [load]);
+
+  useEffect(() => subscribeImageBatch(setImageBatch), []);
 
   const toggle = (sku) => {
     setSelected((prev) => {
@@ -216,6 +275,12 @@ export default function ApprovalPanel({ onShowToast, onRefreshStats }) {
           Refresh
         </button>
       </div>
+
+      <ImageBatchNotice
+        batch={imageBatch}
+        onDismiss={() => dismissImageBatch()}
+        onRefresh={() => { void load(); onRefreshStats?.(); }}
+      />
 
       {loading && (
         <div className="adm-loading-inline"><Loader2 size={18} className="spin" /> Loading…</div>
