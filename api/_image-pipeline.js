@@ -63,19 +63,21 @@ function wantsShadow(text) {
 }
 
 const SLOT_ANGLE_HINTS = {
-  1: 'Front-facing hero shot — product centred, primary catalogue view.',
-  2: 'Three-quarter (45°) angle — show depth and side detail while keeping the same product.',
-  3: 'Side profile view — product from the left or right, full product visible.',
-  4: 'Alternate detail view — back, top-down, or feature close-up as appropriate; same product throughout.',
+  1: 'Front-facing hero shot — product centred, straight-on primary catalogue view.',
+  2: 'Three-quarter (45°) angle — rotate the product to show depth and one side clearly.',
+  3: 'Side profile (90°) — product viewed from the left or right, full silhouette visible.',
+  4: 'Alternate view — back, top-down, or detail/feature angle; pick what best shows this product.',
 };
 
 function slotAngleNote(targetSlot) {
   const slot = Math.min(4, Math.max(1, Number(targetSlot) || 1));
   const hint = SLOT_ANGLE_HINTS[slot] || SLOT_ANGLE_HINTS[1];
   if (slot === 1) {
-    return `\nCamera: ${hint}`;
+    return `\nCamera angle (required): ${hint}`;
   }
-  return `\nThis is image ${slot} of 4 in the set. Camera: ${hint} Use the source photo as the ground truth for the product — only the viewing angle changes.`;
+  return `\n*** MULTI-ANGLE SET — IMAGE ${slot} OF 4 ***
+Camera angle (required): ${hint}
+You MUST render a visibly different viewpoint from the source photo — rotate the product in 3D space. Same product identity (shape, branding, colours), different camera angle. Do NOT copy the source photo's framing.`;
 }
 
 /** Build prompt for OpenRouter image model from style + admin instructions. */
@@ -131,18 +133,18 @@ ${shadowNote}- Square 1:1 composition. No watermarks, no garbled text, no distor
 
   if (style === IMAGE_STYLES.shadow) {
     const base = custom || 'Remove the background and isolate the product.';
-    return `${base}${productCtx}
+    return `${base}${productCtx}${slotNote}
 
 Place the product on a pure white (#FFFFFF) background with a soft, realistic drop shadow beneath it — subtle contact shadow plus gentle ambient shadow, as in a professional studio shot. Shadow must look natural (not harsh, oversized, or floating). Centre the product with even padding. Preserve exact product colours and shape. No text or watermarks.`;
   }
 
   if (custom) {
-    return `${custom}${productCtx}
+    return `${custom}${productCtx}${slotNote}
 
 Additional requirements: remove distracting backgrounds, preserve exact product shape and colours, no text or watermarks. Pure white (#FFFFFF) background, product centred with even padding.`;
   }
 
-  return FIX_PROMPT + productCtx;
+  return `${FIX_PROMPT}${productCtx}${slotNote}`;
 }
 
 function getStockAdminClient() {
@@ -198,11 +200,13 @@ function extractGeneratedImage(payload) {
   throw new Error('Model did not return an image — try again or check OPENROUTER_IMAGE_MODEL');
 }
 
-function resolveTemperature(imageStyle) {
-  if (imageStyle === IMAGE_STYLES.generative) return 0.45;
-  if (imageStyle === IMAGE_STYLES.shadow) return 0.35;
-  if (imageStyle === IMAGE_STYLES.measurements) return 0.25;
-  return 0.2;
+function resolveTemperature(imageStyle, targetSlot = 1) {
+  const slot = Math.min(4, Math.max(1, Number(targetSlot) || 1));
+  const angleBoost = slot > 1 ? 0.12 : 0;
+  if (imageStyle === IMAGE_STYLES.generative) return 0.45 + angleBoost;
+  if (imageStyle === IMAGE_STYLES.shadow) return 0.35 + angleBoost;
+  if (imageStyle === IMAGE_STYLES.measurements) return 0.25 + angleBoost;
+  return 0.2 + angleBoost;
 }
 
 /** Fit on 800×800 white canvas — matches New Products client compress. */
@@ -243,6 +247,7 @@ export async function transformWithOpenRouter(base64, contentType, {
   imageStyle = IMAGE_STYLES.standard,
   referenceBase64 = null,
   referenceContentType = 'image/jpeg',
+  targetSlot = 1,
 } = {}) {
   const apiKey = getOpenRouterKey();
   const safeType = contentType || 'image/jpeg';
@@ -279,7 +284,7 @@ export async function transformWithOpenRouter(base64, contentType, {
         ...(usePro ? { image_size: '2K' } : {}),
       },
       max_tokens: 2048,
-      temperature: resolveTemperature(imageStyle),
+      temperature: resolveTemperature(imageStyle, targetSlot),
     }),
   });
 
@@ -348,9 +353,10 @@ export async function fixImageFromUrl(imageUrl, {
     imageStyle: style,
     referenceBase64: refBase64,
     referenceContentType: refType,
+    targetSlot,
   });
   const resized = await resizeTo800White(transformed.buffer);
-  const url = await uploadTransformedImage(resized, `${sku}.jpg`, 'image/jpeg');
+  const url = await uploadTransformedImage(resized, `${sku}-s${targetSlot}.jpg`, 'image/jpeg');
   return {
     url,
     model: transformed.model,
