@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { jsPDF } from 'jspdf';
-import { Bot, FileDown, Loader2, Send, Sparkles, User, Wrench } from 'lucide-react';
+import { Bot, CheckCircle, FileDown, Loader2, Send, Sparkles, User, Wrench } from 'lucide-react';
 import ApolloImageWizard from './ApolloImageWizard';
+import { getActiveImageBatch, subscribeImageBatch } from '../lib/imageBatchTracker';
 
 const STARTERS = [
   'What are my best performing products by orders?',
@@ -245,6 +246,51 @@ function loadApolloMessages() {
   }
 }
 
+function ImageBatchBanner({ batch, onOpenApproval, onBackToWizard }) {
+  if (!batch) return null;
+  const processed = (batch.done || 0) + (batch.failed || 0);
+  const pct = batch.total ? Math.round((processed / batch.total) * 100) : 0;
+
+  if (batch.status === 'running') {
+    return (
+      <div className="apollo-batch-banner apollo-batch-banner--running" role="status">
+        <Loader2 size={16} className="spin" />
+        <div className="apollo-batch-banner-copy">
+          <strong>Image batch running in the background</strong>
+          <span>
+            {processed}/{batch.total} images
+            {batch.currentLabel ? ` · ${batch.currentLabel}` : ''}
+            — chat with Apollo below while you wait
+          </span>
+          <div className="apollo-batch-banner-bar"><div style={{ width: `${pct}%` }} /></div>
+        </div>
+        <div className="apollo-batch-banner-actions">
+          <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={onBackToWizard}>View batch</button>
+          <button type="button" className="adm-btn-red adm-btn--sm" onClick={onOpenApproval}>Approval</button>
+        </div>
+      </div>
+    );
+  }
+
+  if (batch.status === 'complete') {
+    return (
+      <div className="apollo-batch-banner apollo-batch-banner--done" role="status">
+        <CheckCircle size={16} />
+        <div className="apollo-batch-banner-copy">
+          <strong>Image batch complete</strong>
+          <span>{batch.done} staged{batch.failed ? ` · ${batch.failed} failed` : ''} — review in Approval or continue the wizard.</span>
+        </div>
+        <div className="apollo-batch-banner-actions">
+          <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={onBackToWizard}>View batch</button>
+          <button type="button" className="adm-btn-red adm-btn--sm" onClick={onOpenApproval}>Approval</button>
+        </div>
+      </div>
+    );
+  }
+
+  return null;
+}
+
 export default function ApolloPanel({ taxonomyTree, onShowToast, onGoToApproval, onRefreshCatalog }) {
   const [messages, setMessages] = useState(loadApolloMessages);
   const [input, setInput] = useState('');
@@ -253,7 +299,10 @@ export default function ApolloPanel({ taxonomyTree, onShowToast, onGoToApproval,
   const [indexStatus, setIndexStatus] = useState(null);
   const [wizardOpen, setWizardOpen] = useState(false);
   const [wizardBackground, setWizardBackground] = useState(false);
+  const [imageBatch, setImageBatch] = useState(() => getActiveImageBatch());
   const scrollRef = useRef(null);
+
+  useEffect(() => subscribeImageBatch(setImageBatch), []);
 
   useEffect(() => {
     void fetch('/api/apollo')
@@ -285,6 +334,7 @@ export default function ApolloPanel({ taxonomyTree, onShowToast, onGoToApproval,
     if (!fix && /^\/image\s*$/i.test(trimmed)) {
       setInput('');
       setWizardOpen(true);
+      setWizardBackground(false);
       return;
     }
 
@@ -350,12 +400,13 @@ export default function ApolloPanel({ taxonomyTree, onShowToast, onGoToApproval,
   }, [send]);
 
   const lastAssistantIdx = messages.reduce((acc, m, i) => (m.role === 'assistant' ? i : acc), -1);
-  const showWelcome = messages.length === 0 && !wizardOpen;
+  const showWelcome = messages.length === 0 && (!wizardOpen || wizardBackground);
+  const showChat = !wizardOpen || wizardBackground;
 
-  if (wizardOpen) {
-    return (
-      <>
-        <div className="apollo-panel" style={{ display: wizardBackground ? 'none' : 'block' }}>
+  return (
+    <div className="apollo-panel">
+      {wizardOpen && (
+        <div className="apollo-wizard-layer" style={{ display: wizardBackground ? 'none' : 'block' }}>
           <ApolloImageWizard
             taxonomyTree={taxonomyTree}
             onExit={() => { setWizardOpen(false); setWizardBackground(false); }}
@@ -365,86 +416,95 @@ export default function ApolloPanel({ taxonomyTree, onShowToast, onGoToApproval,
             onRefreshCatalog={onRefreshCatalog}
           />
         </div>
-        {wizardBackground && (
-          <div className="apollo-panel apollo-panel--background-hint">
-            <p><Loader2 size={16} className="spin" /> Image batch running in the background — check the <strong>Approval</strong> tab for progress.</p>
-            <button type="button" className="adm-btn-red adm-btn--sm" onClick={onGoToApproval}>Open Approval</button>
-          </div>
-        )}
-      </>
-    );
-  }
+      )}
 
-  return (
-    <div className="apollo-panel">
-      <div className="apollo-head">
-        <div className="apollo-head-brand">
-          <div className="apollo-head-icon"><Bot size={20} /></div>
-          <div>
-            <h2 className="apollo-head-title">Apollo</h2>
-            <p className="apollo-head-sub">
-              Live keyword index · {indexStatus ? `${indexStatus.counts?.products?.toLocaleString() ?? '—'} products, ${indexStatus.counts?.customers ?? '—'} customers` : 'building…'}
-            </p>
-          </div>
-        </div>
-        {messages.length > 0 && (
-          <button type="button" className="apollo-action-btn apollo-action-btn--ghost" onClick={clearChat} disabled={busy}>
-            Clear chat
-          </button>
-        )}
-      </div>
+      {wizardBackground && (
+        <ImageBatchBanner
+          batch={imageBatch}
+          onOpenApproval={onGoToApproval}
+          onBackToWizard={() => setWizardBackground(false)}
+        />
+      )}
 
-      <div className="apollo-shell">
-        <div className="apollo-chat" ref={scrollRef}>
-          {showWelcome && <ApolloWelcome onStarter={send} busy={busy} />}
-          {messages.map((msg, i) => (
-            <ChatMessage
-              key={i}
-              msg={msg}
-              isLastAssistant={i === lastAssistantIdx && !busy}
-              onExportPdf={exportMessagePdf}
-              onFix={fixLastReply}
-              fixBusy={busy}
-            />
-          ))}
-          {busy && (
-            <div className="apollo-msg-row apollo-msg-row--assistant">
-              <div className="apollo-avatar apollo-avatar--assistant" aria-hidden="true">
-                <Bot size={15} />
-              </div>
-              <div className="apollo-msg-stack">
-                <div className="apollo-msg-meta"><span className="apollo-msg-name">Apollo</span></div>
-                <div className="apollo-msg-body apollo-msg-body--assistant apollo-thinking">
-                  <Loader2 size={15} className="spin" />
-                  <span>Analysing your data…</span>
-                </div>
+      {showChat && (
+        <>
+          <div className="apollo-head">
+            <div className="apollo-head-brand">
+              <div className="apollo-head-icon"><Bot size={20} /></div>
+              <div>
+                <h2 className="apollo-head-title">Apollo</h2>
+                <p className="apollo-head-sub">
+                  Live keyword index · {indexStatus ? `${indexStatus.counts?.products?.toLocaleString() ?? '—'} products, ${indexStatus.counts?.customers ?? '—'} customers` : 'building…'}
+                </p>
               </div>
             </div>
-          )}
-        </div>
+            <div className="apollo-head-actions">
+              {wizardOpen && wizardBackground && (
+                <button type="button" className="apollo-action-btn apollo-action-btn--ghost" onClick={() => setWizardBackground(false)}>
+                  Image batch
+                </button>
+              )}
+              {messages.length > 0 && (
+                <button type="button" className="apollo-action-btn apollo-action-btn--ghost" onClick={clearChat} disabled={busy}>
+                  Clear chat
+                </button>
+              )}
+            </div>
+          </div>
 
-        <div className="apollo-composer">
-          {error && <p className="apollo-error">{error}</p>}
-          <form
-            className="apollo-input-row"
-            onSubmit={(e) => {
-              e.preventDefault();
-              void send(input);
-            }}
-          >
-            <input
-              className="apollo-input"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="Ask about orders, stock, customers — type /image for image gen…"
-              disabled={busy}
-            />
-            <button type="submit" className="apollo-send-btn" disabled={busy || !input.trim()} aria-label="Send">
-              {busy ? <Loader2 size={18} className="spin" /> : <Send size={18} />}
-            </button>
-          </form>
-        </div>
-      </div>
+          <div className="apollo-shell">
+            <div className="apollo-chat" ref={scrollRef}>
+              {showWelcome && <ApolloWelcome onStarter={send} busy={busy} />}
+              {messages.map((msg, i) => (
+                <ChatMessage
+                  key={i}
+                  msg={msg}
+                  isLastAssistant={i === lastAssistantIdx && !busy}
+                  onExportPdf={exportMessagePdf}
+                  onFix={fixLastReply}
+                  fixBusy={busy}
+                />
+              ))}
+              {busy && (
+                <div className="apollo-msg-row apollo-msg-row--assistant">
+                  <div className="apollo-avatar apollo-avatar--assistant" aria-hidden="true">
+                    <Bot size={15} />
+                  </div>
+                  <div className="apollo-msg-stack">
+                    <div className="apollo-msg-meta"><span className="apollo-msg-name">Apollo</span></div>
+                    <div className="apollo-msg-body apollo-msg-body--assistant apollo-thinking">
+                      <Loader2 size={15} className="spin" />
+                      <span>Analysing your data…</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="apollo-composer">
+              {error && <p className="apollo-error">{error}</p>}
+              <form
+                className="apollo-input-row"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void send(input);
+                }}
+              >
+                <input
+                  className="apollo-input"
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  placeholder="Ask about orders, stock, customers — type /image for image gen…"
+                  disabled={busy}
+                />
+                <button type="submit" className="apollo-send-btn" disabled={busy || !input.trim()} aria-label="Send">
+                  {busy ? <Loader2 size={18} className="spin" /> : <Send size={18} />}
+                </button>
+              </form>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
