@@ -236,6 +236,19 @@ function exportMessagePdf(content, title = 'Apollo Report') {
 
 const APOLLO_STORAGE_KEY = 'proto_apollo_chat_v1';
 
+function formatErrorMessage(value, fallback = 'Something went wrong') {
+  if (!value) return fallback;
+  if (typeof value === 'string') return value;
+  if (value instanceof Error) return value.message || fallback;
+  if (typeof value === 'object') {
+    if (typeof value.message === 'string') return value.message;
+    if (typeof value.error === 'string') return value.error;
+    if (value.error && typeof value.error.message === 'string') return value.error.message;
+    try { return JSON.stringify(value); } catch { return fallback; }
+  }
+  return String(value);
+}
+
 function loadApolloMessages() {
   try {
     const raw = sessionStorage.getItem(APOLLO_STORAGE_KEY);
@@ -429,11 +442,15 @@ export default function ApolloPanel({ taxonomyTree, onShowToast, onGoToApproval,
         }),
       });
       const json = await res.json();
-      if (!res.ok) throw new Error(json.error || 'Apollo request failed');
+      if (!res.ok) throw new Error(formatErrorMessage(json?.error, 'Apollo request failed'));
+
+      const replyText = typeof json.reply === 'string'
+        ? json.reply
+        : (json.reply != null ? JSON.stringify(json.reply) : 'No response from Apollo.');
 
       const assistantMsg = {
         role: 'assistant',
-        content: json.reply,
+        content: replyText,
         source: json.source,
         intent: json.intent,
         batchAction: json.batchAction || null,
@@ -443,7 +460,7 @@ export default function ApolloPanel({ taxonomyTree, onShowToast, onGoToApproval,
         fix || replaceLast ? [...prev.slice(0, -1), assistantMsg] : [...prev, assistantMsg]
       ));
     } catch (e) {
-      setError(e.message);
+      setError(formatErrorMessage(e, 'Apollo request failed'));
       if (fix) setMessages(messages);
     } finally {
       setBusy(false);

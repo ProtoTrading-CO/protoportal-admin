@@ -204,6 +204,15 @@ export default async function handler(req, res) {
     });
   } catch (err) {
     console.error('apollo:', err?.message || err);
-    return res.status(500).json({ error: 'Apollo failed' });
+    const msg = formatServerError(err);
+    return res.status(500).json({ error: msg });
   }
+}
+
+function formatServerError(err) {
+  if (!err) return 'Apollo failed';
+  if (typeof err === 'string') return err;
+  if (err instanceof Error && err.message) return err.message;
+  if (typeof err?.message === 'string') return err.message;
+  return 'Apollo failed';
 }
