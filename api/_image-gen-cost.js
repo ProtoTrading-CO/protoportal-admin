@@ -6,7 +6,9 @@ const USD_TO_ZAR_FALLBACK = 18.0;
 const COSTS_FILE = 'image-gen/cost-logs.json';
 const LOCKS_FILE = 'image-gen/locks.json';
 const BATCHES_FILE = 'image-gen/batches.json';
+const SEMAPHORE_FILE = 'image-gen/semaphore.json';
 const MAX_LOGS = 500;
+const MAX_CONCURRENT_TRANSFORMS = 2;
 
 /** Approximate OpenRouter pricing — image models often bill per call + tokens. */
 const MODEL_PRICING = {
@@ -165,6 +167,49 @@ export async function purgeExpiredLocksStore() {
     const store = await readStore(LOCKS_FILE, { locks: [] });
     return purgeExpiredLocks(store.locks || []);
   }
+}
+
+export async function acquireTransformSemaphore(_sb, { batchId, operator, ttlSec = 300 } = {}) {
+  const expiresAt = new Date(Date.now() + ttlSec * 1000).toISOString();
+  try {
+    const result = await mutateStore(SEMAPHORE_FILE, { slots: [] }, (store) => {
+      const now = Date.now();
+      let slots = (store.slots || []).filter((s) => new Date(s.expires_at).getTime() > now);
+      const existing = slots.find((s) => s.batch_id === batchId);
+      if (existing) return { store: { slots }, acquired: true, reentry: true };
+      if (slots.length >= MAX_CONCURRENT_TRANSFORMS) {
+        return {
+          abort: true,
+          conflict: true,
+          operator: slots[0]?.operator || 'another user',
+        };
+      }
+      slots.push({
+        batch_id: batchId || null,
+        operator: operator || null,
+        locked_at: new Date().toISOString(),
+        expires_at: expiresAt,
+      });
+      return { store: { slots }, acquired: true };
+    });
+    if (result?.conflict) {
+      throw new Error(`Image generation queue full (${MAX_CONCURRENT_TRANSFORMS} running). ${result.operator || 'Another user'} is processing — try again shortly.`);
+    }
+    return { acquired: true, reentry: !!result?.reentry };
+  } catch (err) {
+    if (/queue full/i.test(err.message)) throw err;
+    throw new Error(`Could not enter image gen queue — ${err.message || 'try again'}`);
+  }
+}
+
+export async function releaseTransformSemaphore(_sb, batchId) {
+  if (!batchId) return;
+  try {
+    await mutateStore(SEMAPHORE_FILE, { slots: [] }, (store) => {
+      const slots = (store.slots || []).filter((s) => s.batch_id !== batchId);
+      return { store: { slots } };
+    });
+  } catch { /* ignore */ }
 }
 
 export async function acquireImageGenLock(_sb, { sku, slot, batchId, operator, ttlSec = 180 } = {}) {

@@ -1,16 +1,8 @@
 import { requireAdminKey } from './_admin-auth.js';
-import { createClient } from '@supabase/supabase-js';
 import { loadTaxonomy } from './_taxonomy-utils.js';
+import { getStockClient, enrichRowsWithProductStock } from './_stock-client.js';
 
 const PAGE_SIZE = 1000;
-
-function getStockClient() {
-  return createClient(
-    process.env.VITE_STOCK_SUPABASE_URL,
-    process.env.VITE_STOCK_SUPABASE_KEY,
-    { auth: { autoRefreshToken: false, persistSession: false } },
-  );
-}
 
 async function fetchAllRows(supabase, table, { filter = null, orderBy = null } = {}) {
   const rows = [];
@@ -30,24 +22,8 @@ async function fetchAllRows(supabase, table, { filter = null, orderBy = null } =
 }
 
 /** Attach live SOH from public.products (join: products.sku = row.barcode). */
-async function enrichRowsWithProductStock(supabase, rows) {
-  const barcodes = [...new Set(rows.map((r) => r.barcode).filter(Boolean))];
-  if (!barcodes.length) return rows;
-  const stockByBarcode = new Map();
-  for (let i = 0; i < barcodes.length; i += 500) {
-    const chunk = barcodes.slice(i, i + 500);
-    const { data, error } = await supabase
-      .from('products')
-      .select('sku, stock_qty, available_stock')
-      .in('sku', chunk);
-    if (error) throw error;
-    for (const p of data || []) stockByBarcode.set(p.sku, p);
-  }
-  return rows.map((r) => {
-    const p = stockByBarcode.get(r.barcode);
-    if (!p) return r;
-    return { ...r, stock_qty: p.stock_qty, available_stock: p.available_stock };
-  });
+async function enrichRowsWithProductStockLocal(supabase, rows) {
+  return enrichRowsWithProductStock(supabase, rows);
 }
 
 /**
@@ -90,7 +66,7 @@ export default async function handler(req, res) {
       const withLiveFlag = filtered.map((r) => (
         archivedBy === 'new-products' ? { ...r, still_live: liveSkuSet.has(r.sku) } : r
       ));
-      const rows = await enrichRowsWithProductStock(supabase, withLiveFlag);
+      const rows = await enrichRowsWithProductStockLocal(supabase, withLiveFlag);
       return res.status(200).json({ rows, tree });
     }
 

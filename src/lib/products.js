@@ -1,5 +1,7 @@
 import { adminProductSearch, fuzzyFilter } from './fuzzySearch';
 import { labelToSlug, resolveCategoryIdsFromTree, slugToLabel } from './taxonomy';
+import { queryClient } from './queryClient';
+import { queryKeys } from './queryKeys';
 
 function matchesMainCategory(product, mainCategory) {
   if (!mainCategory || mainCategory === 'all') return true;
@@ -220,6 +222,8 @@ export function invalidateAdminCache() {
   _adminCacheGen += 1;
   _adminCache = null;
   _adminLoadPromise = null;
+  queryClient.invalidateQueries({ queryKey: ['catalog'] });
+  queryClient.invalidateQueries({ queryKey: queryKeys.dashboardStats() });
 }
 
 function applyPathFilter(products, categoryPath) {

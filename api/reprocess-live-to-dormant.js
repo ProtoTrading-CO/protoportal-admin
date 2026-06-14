@@ -3,12 +3,14 @@ import { fixImageFromUrl, IMAGE_STYLES, DEFAULT_IMAGE_MODEL } from './_image-pip
 import { readSlotUrl, stageDormantSlotPreview } from './_stage-dormant.js';
 import {
   acquireImageGenLock,
+  acquireTransformSemaphore,
   estimateImageGenCost,
   extractImageGenMeta,
   fetchUsdToZarRate,
   getStockClient,
   logImageGenCost,
   releaseImageGenLock,
+  releaseTransformSemaphore,
 } from './_image-gen-cost.js';
 
 const LIVE_SELECT = `
@@ -55,10 +57,16 @@ export default async function handler(req, res) {
 
   const sb = getClient();
   let lockHeld = false;
+  let semHeld = false;
 
   try {
+    if (batchId) {
+      const sem = await acquireTransformSemaphore(sb, { batchId, operator });
+      semHeld = sem.acquired && !sem.reentry;
+    }
+
     const lock = await acquireImageGenLock(sb, { sku: cleanSku, slot, batchId, operator });
-    lockHeld = lock.locked && !lock.skipped;
+    lockHeld = lock.locked;
 
     const { data: row, error: lookupError } = await sb
       .from('website_stock')
@@ -162,5 +170,6 @@ export default async function handler(req, res) {
     return res.status(status).json({ error: err.message || 'Reprocess failed' });
   } finally {
     if (lockHeld) await releaseImageGenLock(sb, cleanSku, slot);
+    if (semHeld && batchId) await releaseTransformSemaphore(sb, batchId);
   }
 }

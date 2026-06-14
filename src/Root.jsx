@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { getStoredAdminKey, storeAdminKey, clearAdminKey, verifyAdminKey, installAuthFetch } from './lib/adminKey';
+import QueryProvider from './components/QueryProvider';
 
 const AdminPage = lazy(() => import('./pages/AdminPage'));
 const FulfillmentPage = lazy(() => import('./pages/FulfillmentPage'));
@@ -105,12 +106,14 @@ export default function Root() {
   if (!unlocked) return <LoginGate onUnlocked={() => setUnlocked(true)} />;
 
   return (
-    <Suspense fallback={loadingFallback}>
-      <AdminPage
-        customer={adminUser}
-        onLogout={() => { clearAdminKey(); window.location.reload(); }}
-        onViewPortal={() => { window.location.href = 'https://protoportal-main.vercel.app'; }}
-      />
-    </Suspense>
+    <QueryProvider>
+      <Suspense fallback={loadingFallback}>
+        <AdminPage
+          customer={adminUser}
+          onLogout={() => { clearAdminKey(); window.location.reload(); }}
+          onViewPortal={() => { window.location.href = 'https://protoportal-main.vercel.app'; }}
+        />
+      </Suspense>
+    </QueryProvider>
   );
 }

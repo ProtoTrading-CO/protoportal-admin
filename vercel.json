@@ -5,6 +5,7 @@
     { "source": "/((?!api).*)", "destination": "/index.html" }
   ],
   "crons": [
-    { "path": "/api/run-scheduled-broadcasts", "schedule": "0 * * * *" }
+    { "path": "/api/run-scheduled-broadcasts", "schedule": "0 * * * *" },
+    { "path": "/api/brevo-sync", "schedule": "*/15 * * * *" }
   ]
 }

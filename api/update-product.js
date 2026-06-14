@@ -16,6 +16,7 @@ export default async function handler(req, res) {
 
   const {
     websiteSku,
+    expectedUpdatedAt,
     image,
     description,
     title,
@@ -54,12 +55,19 @@ export default async function handler(req, res) {
 
   const { data: product, error: lookupError } = await supabase
     .from('website_stock')
-    .select('sku')
+    .select('sku, updated_at')
     .eq('sku', sku)
     .maybeSingle();
 
   if (lookupError) return res.status(400).json({ error: lookupError.message });
   if (!product) return res.status(404).json({ error: 'Product not found' });
+
+  if (expectedUpdatedAt && product.updated_at && product.updated_at !== expectedUpdatedAt) {
+    return res.status(409).json({
+      error: 'This product was changed by someone else — reload to see the latest.',
+      currentUpdatedAt: product.updated_at,
+    });
+  }
 
   const { error } = await supabase.from('website_stock').update(patch).eq('sku', sku);
   if (error) return res.status(400).json({ error: error.message });

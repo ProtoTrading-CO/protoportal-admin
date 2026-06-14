@@ -115,6 +115,12 @@ import ApprovalPanel from '../components/ApprovalPanel';
 import FulfillmentSettingsModal from '../components/FulfillmentSettingsModal';
 import OrderWhatsappNotify from '../components/OrderWhatsappNotify';
 import AnalyticsHub from '../components/AnalyticsHub';
+import ProductManagerEngine from '../components/ProductManagerEngine';
+import GroupedSidebar from '../components/GroupedSidebar';
+import CrmPanel from '../components/CrmPanel';
+import { useDashboardStats } from '../hooks/useDashboardStats';
+import { queryClient } from '../lib/queryClient';
+import { queryKeys } from '../lib/queryKeys';
 import ApolloPanel from '../components/ApolloPanel';
 import CostTrackingPanel from '../components/CostTrackingPanel';
 import categories from '../data/categories.json';
@@ -144,23 +150,7 @@ function applySavedOrder(products, category) {
   return [...products].sort((a, b) => (orderMap.get(a.id) ?? 999999) - (orderMap.get(b.id) ?? 999999));
 }
 
-const sections = [
-  { id: 'orders', label: 'Order Requests', icon: ShoppingBag },
-  { id: 'apollo', label: 'Apollo', icon: Bot },
-  { id: 'cost-tracking', label: 'Cost Tracking', icon: DollarSign },
-  { id: 'products', label: 'Product Manager', icon: PackagePlus },
-  { id: 'customers', label: 'Customer Management', icon: Users },
-  { id: 'reorder', label: 'Reorder Grid', icon: Grip },
-  { id: 'archive', label: 'Archive', icon: Archive },
-  { id: 'specials', label: 'Specials', icon: Star },
-  { id: 'crm', label: 'WhatsApp', icon: MessageCircle },
-  { id: 'banner', label: 'Banner Editor', icon: Layout },
-  { id: 'new-items', label: 'New Items', icon: Sparkles },
-  { id: 'approval', label: 'Approval', icon: CheckCircle },
-  { id: 'dormant-products', label: 'Dormant Products', icon: Clock },
-  { id: 'pricing', label: 'Pricing & Returns', icon: SlidersHorizontal },
-  { id: 'recycle', label: 'Recycle Bin', icon: Trash2 },
-];
+// Legacy flat nav removed — see GroupedSidebar.jsx
 
 const productTypes = ['General product', 'Hot seller', 'New stock', 'Clearance stock'];
 const ADMIN_PAGE_SIZE = 50;
@@ -405,7 +395,9 @@ function WhatsappOptIn({ value }) {
 }
 
 export default function AdminPage({ customer, onLogout, onViewPortal }) {
-  const [activeSection, setActiveSection] = useState('orders');
+  const [activeSection, setActiveSection] = useState('catalogue');
+  const [catalogStatus, setCatalogStatus] = useState('live');
+  const { data: dashStats } = useDashboardStats();
   const [loading, setLoading] = useState(false);
   const [loadingProgress, setLoadingProgress] = useState(null);
   const [loadingError, setLoadingError] = useState('');
@@ -716,23 +708,8 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     } finally { setLoadingProgress(null); }
   };
 
-  const refreshDashboardStats = async () => {
-    try {
-      const [products, archiveCount, customerRes, orders, orphanCount] = await Promise.all([
-        fetchAllProductsAdmin(),
-        fetchCatalogArchiveCount(),
-        fetch('/api/admin-customers?tab=regular&page=1&pageSize=1').then((r) => r.json()),
-        fetchAllOrdersAdmin(10000),
-        fetchUncategorizedCount().catch(() => 0),
-      ]);
-      setCatalogTotal(products.length);
-      setArchiveCatalogTotal(archiveCount);
-      setStatsCustomerTotal(customerRes.total || 0);
-      setStatsOrderTotal(orders.length);
-      setUncategorizedCount(orphanCount);
-    } catch {
-      // Stats are best-effort; section loads still work if this fails.
-    }
+  const refreshDashboardStats = () => {
+    queryClient.invalidateQueries({ queryKey: queryKeys.dashboardStats() });
   };
 
   const refreshRecycleCatalogCount = async () => {
@@ -1019,7 +996,6 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   useEffect(() => { setArchiveSelectedIds(new Set()); }, [archivePage, archiveSearch, activeSection]);
   useEffect(() => { if (activeSection === 'recycle') void loadRecycle(); }, [activeSection, recyclePage, recycleSearch]);
   useEffect(() => {
-    void refreshDashboardStats();
     void refreshRecycleCatalogCount();
   }, []);
   useEffect(() => {
@@ -1186,11 +1162,11 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   };
 
   const stats = useMemo(() => ({
-    products: catalogTotal,
-    archived: archiveCatalogTotal,
-    customers: statsCustomerTotal,
-    orders: statsOrderTotal,
-  }), [catalogTotal, archiveCatalogTotal, statsCustomerTotal, statsOrderTotal]);
+    products: dashStats?.liveProducts ?? catalogTotal,
+    archived: dashStats?.archivedProducts ?? archiveCatalogTotal,
+    customers: dashStats?.customers ?? statsCustomerTotal,
+    orders: dashStats?.orders ?? statsOrderTotal,
+  }), [dashStats, catalogTotal, archiveCatalogTotal, statsCustomerTotal, statsOrderTotal]);
 
   const orderRows = useMemo(() => {
     const q = orderSearch.trim().toLowerCase();
@@ -2166,22 +2142,19 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
         <div className="adm-layout">
           {sidebarOpen && <div className="adm-sidebar-backdrop" onClick={() => setSidebarOpen(false)} />}
           <aside className={`adm-sidebar${sidebarOpen ? ' adm-sidebar--open' : ''}`}>
-            {sections.map((section) => {
-              const Icon = section.icon;
-              const active = section.id === activeSection;
-              return (
-                <button
-                  key={section.id}
-                  onClick={() => { setActiveSection(section.id); setSidebarOpen(false); }}
-                  className={`adm-nav-btn${active ? ' adm-nav-btn--active' : ''}`}
-                >
-                  <Icon size={17} /> {section.label}
-                  {section.id === 'customers' && pendingCount > 0 && (
-                    <span className="adm-nav-badge">{pendingCount}</span>
-                  )}
-                </button>
-              );
-            })}
+            <GroupedSidebar
+              activeSection={activeSection}
+              onSelectSection={(id) => {
+                if (id === 'team') {
+                  setFulfillmentSettingsOpen(true);
+                  setSidebarOpen(false);
+                  return;
+                }
+                setActiveSection(id);
+                setSidebarOpen(false);
+              }}
+              pendingCount={pendingCount}
+            />
           </aside>
 
           <main className="adm-main">
@@ -2191,18 +2164,35 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
               </div>
             )}
 
-            {/* NEW PRODUCTS */}
+            {activeSection === 'catalogue' && (
+              <ProductManagerEngine
+                taxonomyTree={taxonomyTree}
+                onShowToast={showToast}
+                onRefreshStats={refreshDashboardStats}
+                initialStatus={catalogStatus}
+                onEditProduct={(item) => openContentEdit(item)}
+              />
+            )}
+
+            {activeSection === 'brevo-crm' && (
+              <CrmPanel />
+            )}
+
+            {activeSection === 'analytics' && (
+              <AnalyticsHub />
+            )}
+
             {/* Apollo — keep mounted so chat survives tab switches */}
             <div style={{ display: activeSection === 'apollo' ? 'block' : 'none' }}>
               <ApolloPanel
                 taxonomyTree={taxonomyTree}
                 onShowToast={showToast}
-                onGoToApproval={() => setActiveSection('approval')}
+                onGoToApproval={() => { setCatalogStatus('approval'); setActiveSection('catalogue'); }}
                 onRefreshCatalog={() => {
                   invalidateAdminCache();
                   invalidateProductCache();
-                  void loadProducts();
-                  void refreshDashboardStats();
+                  queryClient.invalidateQueries({ queryKey: ['catalog'] });
+                  refreshDashboardStats();
                 }}
               />
             </div>
@@ -2211,7 +2201,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
               <CostTrackingPanel onShowToast={showToast} />
             )}
 
-            {activeSection === 'new-items' && (
+            {false && activeSection === 'new-items' && (
               <NewItemsPanel
                 dormantRows={dormantRows}
                 dormantSearch={dormantSearch}
@@ -2234,7 +2224,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
               />
             )}
 
-            {activeSection === 'approval' && (
+            {false && activeSection === 'approval' && (
               <ApprovalPanel
                 onShowToast={showToast}
                 onRefreshStats={() => {
@@ -2246,7 +2236,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
             )}
 
             {/* PRODUCTS */}
-            {activeSection === 'products' && (
+            {false && activeSection === 'products' && (
               <div className="adm-panel adm-panel-with-sidebar">
                 <div className="adm-section-head">
                   <div>
@@ -2639,7 +2629,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
             )}
 
             {/* ARCHIVE */}
-            {activeSection === 'archive' && (
+            {false && activeSection === 'archive' && (
               <div className="adm-panel adm-panel-with-sidebar">
                 <div className="adm-section-head">
                   <div>
@@ -2804,7 +2794,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
             )}
 
             {/* RECYCLE BIN */}
-            {activeSection === 'recycle' && (
+            {false && activeSection === 'recycle' && (
               <div className="adm-panel">
                 <div className="adm-section-head">
                   <div>
@@ -2869,7 +2859,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
             )}
 
             {/* REORDER */}
-            {activeSection === 'reorder' && (
+            {false && activeSection === 'reorder' && (
               <div className="adm-panel adm-panel--reorder">
                 <div className="adm-section-head adm-section-head--reorder">
                   <div>
@@ -3248,7 +3238,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
               <div className="adm-panel">
                 <div className="adm-section-head">
                   <div>
-                    <h2 className="adm-section-title">Pricing & Returns</h2>
+                    <h2 className="adm-section-title">Pricing</h2>
                     <p className="adm-section-note">Select products and apply a percentage price adjustment.</p>
                   </div>
                 </div>
@@ -3512,7 +3502,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
 
             {/* POPUP SPECIALS — merged into Specials tab */}
 
-            {activeSection === 'dormant-products' && (
+            {false && activeSection === 'dormant-products' && (
               <ComingSoonPanel taxonomyTree={taxonomyTree} />
             )}
 

@@ -1,0 +1,181 @@
+import { requireAdminKey } from './_admin-auth.js';
+import { loadTaxonomy } from './_taxonomy-utils.js';
+import { mergeStagedImagesOntoLive, validateStockReady } from './_stage-dormant.js';
+import { getStockClient, enrichRowsWithProductStock } from './_stock-client.js';
+import {
+  adaptCatalogRow,
+  applySearchFilter,
+  filterByCategoryPath,
+  paginateRows,
+  resolveCategoryFilters,
+  applyCategoryFiltersToQuery,
+} from './_catalog-adapt.js';
+
+const VALID_STATUS = new Set(['live', 'archived', 'new-items', 'approval', 'recycle']);
+const EXCLUDE_ARCHIVED = ['new-products', 'recycle-bin'];
+
+function parseCategoryPath(raw) {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return String(raw).split('/').filter(Boolean);
+  }
+}
+
+function safeSearchTerm(search) {
+  return String(search || '').replace(/[%',()\\]/g, ' ').trim();
+}
+
+async function queryLivePaginated(sb, { search, categoryPath, tree, page, pageSize, sort }) {
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize - 1;
+  let q = sb.from('website_stock').select('*', { count: 'exact' });
+  const term = safeSearchTerm(search);
+  if (term) {
+    q = q.or(`title.ilike.%${term}%,sku.ilike.%${term}%,barcode.ilike.%${term}%`);
+  }
+  q = applyCategoryFiltersToQuery(q, resolveCategoryFilters(tree, categoryPath));
+  if (sort === 'updated') q = q.order('updated_at', { ascending: false });
+  else q = q.order('title', { ascending: true });
+  q = q.range(from, to);
+  const { data, error, count } = await q;
+  if (error) throw error;
+  return { rows: data || [], total: count || 0, page, pageSize, hasMore: (count || 0) > to + 1, archived: false };
+}
+
+async function queryArchivedPaginated(sb, { search, categoryPath, tree, page, pageSize, sort, archivedBy, excludeBy }) {
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize - 1;
+  let q = sb.from('archived_products').select('*', { count: 'exact' });
+  if (archivedBy) q = q.eq('archived_by', archivedBy);
+  const term = safeSearchTerm(search);
+  if (term) {
+    q = q.or(`title.ilike.%${term}%,sku.ilike.%${term}%,barcode.ilike.%${term}%`);
+  }
+  q = applyCategoryFiltersToQuery(q, resolveCategoryFilters(tree, categoryPath));
+  if (excludeBy?.length) {
+    for (const by of excludeBy) q = q.neq('archived_by', by);
+  }
+  if (sort === 'updated') q = q.order('updated_at', { ascending: false });
+  else q = q.order('title', { ascending: true });
+  q = q.range(from, to);
+  const { data, error, count } = await q;
+  if (error) throw error;
+  return { rows: data || [], total: count || 0, page, pageSize, hasMore: (count || 0) > to + 1, archived: true };
+}
+
+async function fetchLiveSkus(sb) {
+  const skus = new Set();
+  let from = 0;
+  while (true) {
+    const { data } = await sb.from('website_stock').select('sku').range(from, from + 999);
+    for (const r of data || []) skus.add(r.sku);
+    if ((data || []).length < 1000) break;
+    from += 1000;
+  }
+  return skus;
+}
+
+async function loadApprovalRows(sb) {
+  const { data: staged, error } = await sb
+    .from('archived_products')
+    .select('*')
+    .eq('archived_by', 'new-products')
+    .order('updated_at', { ascending: false });
+  if (error) throw error;
+  const skus = (staged || []).map((r) => r.sku).filter(Boolean);
+  if (!skus.length) return [];
+  const { data: liveRows } = await sb.from('website_stock').select('*').in('sku', skus);
+  const liveBySku = new Map((liveRows || []).map((r) => [r.sku, r]));
+  const rows = [];
+  for (const row of staged || []) {
+    const live = liveBySku.get(row.sku);
+    if (!live) continue;
+    const { appliedSlots } = mergeStagedImagesOntoLive(row, live);
+    if (!appliedSlots.length) continue;
+    const stockCheck = await validateStockReady(sb, row.barcode || row.sku);
+    rows.push({
+      ...row,
+      _live: live,
+      _changedSlots: appliedSlots,
+      _stockReady: stockCheck.ok,
+      _stockError: stockCheck.ok ? null : stockCheck.error,
+    });
+  }
+  return rows;
+}
+
+/** Paginated catalogue read for unified Product Manager. */
+export default async function handler(req, res) {
+  if (!requireAdminKey(req, res)) return;
+  if (req.method !== 'GET') return res.status(405).end();
+
+  const status = String(req.query.status || 'live').trim();
+  if (!VALID_STATUS.has(status)) {
+    return res.status(400).json({ error: `status must be one of: ${[...VALID_STATUS].join(', ')}` });
+  }
+
+  const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+  const pageSize = Math.min(200, Math.max(1, parseInt(req.query.pageSize, 10) || 50));
+  const search = String(req.query.search || '').trim();
+  const categoryPath = parseCategoryPath(req.query.categoryPath);
+  const sort = String(req.query.sort || 'title').trim();
+
+  try {
+    const sb = getStockClient();
+    const tree = await loadTaxonomy().catch(() => []);
+
+    let result;
+    if (status === 'live') {
+      result = await queryLivePaginated(sb, { search, categoryPath, tree, page, pageSize, sort });
+    } else if (status === 'recycle') {
+      result = await queryArchivedPaginated(sb, {
+        search, categoryPath, tree, page, pageSize, sort, archivedBy: 'recycle-bin',
+      });
+    } else if (status === 'archived') {
+      result = await queryArchivedPaginated(sb, {
+        search, categoryPath, tree, page, pageSize, sort, excludeBy: EXCLUDE_ARCHIVED,
+      });
+    } else if (status === 'new-items') {
+      const liveSkus = await fetchLiveSkus(sb);
+      const raw = await queryArchivedPaginated(sb, {
+        search, categoryPath, tree, page: 1, pageSize: 10000, sort, archivedBy: 'new-products',
+      });
+      let rows = raw.rows.filter((r) => !liveSkus.has(r.sku));
+      rows = filterByCategoryPath(rows, categoryPath);
+      rows = applySearchFilter(rows, search);
+      const pageSlice = paginateRows(rows, page, pageSize);
+      result = { ...pageSlice, archived: true };
+    } else if (status === 'approval') {
+      let rows = await loadApprovalRows(sb);
+      rows = filterByCategoryPath(rows, categoryPath);
+      rows = applySearchFilter(rows, search);
+      const pageSlice = paginateRows(rows, page, pageSize);
+      result = { ...pageSlice, archived: true };
+    }
+
+    const needsStock = status === 'new-items' || status === 'approval' || status === 'archived';
+    let enriched = result.rows;
+    if (needsStock && enriched.length) {
+      enriched = await enrichRowsWithProductStock(sb, enriched, { includePrice: status === 'new-items' });
+    }
+
+    const adapted = enriched.map((r) => adaptCatalogRow(r, tree, { archived: result.archived }));
+
+    res.setHeader('Cache-Control', 'no-store');
+    return res.status(200).json({
+      rows: adapted,
+      total: result.total,
+      page: result.page,
+      pageSize: result.pageSize,
+      hasMore: result.hasMore,
+      status,
+      tree,
+    });
+  } catch (err) {
+    console.error('catalog:', err?.message || err);
+    return res.status(500).json({ error: err.message || 'Catalog fetch failed' });
+  }
+}
