@@ -27,6 +27,20 @@ const STATUS_META = {
   recycle: { label: 'Recycle Bin', icon: Trash2 },
 };
 
+const ROW_COLUMNS = {
+  live: '32px 72px 2fr 140px 120px',
+  archived: '32px 72px 2fr 120px',
+  approval: '32px 72px 2fr 120px',
+  recycle: '32px 72px 2fr 120px',
+  'new-items': '32px 72px 2fr 120px',
+};
+
+function formatStockUnits(qty, keepLive = false) {
+  if (keepLive && (qty === null || qty === undefined || qty <= 0)) return 'Available';
+  if (qty === null || qty === undefined) return '—';
+  return `${qty} units`;
+}
+
 function CatalogSkeleton() {
   return (
     <div className="pm-skeleton">
@@ -296,28 +310,73 @@ export default function ProductManagerEngine({
             ) : (
               <>
                 <div className="adm-list pm-list">
+                  <div
+                    className="adm-list-head pm-list-head"
+                    style={{ gridTemplateColumns: ROW_COLUMNS[status] || ROW_COLUMNS.live }}
+                  >
+                    <span />
+                    <span />
+                    <span>Product</span>
+                    {status === 'live' && <span>Stock</span>}
+                    <span>Actions</span>
+                  </div>
                   {rows.map((item) => (
-                    <div key={item.id} className={`adm-list-row${selected.has(item.id) ? ' adm-list-row--selected' : ''}`}>
-                      <input
-                        type="checkbox"
-                        checked={selected.has(item.id)}
-                        onChange={() => toggleSelect(item.id)}
-                        aria-label={`Select ${item.sku}`}
-                      />
-                      {item.image ? (
-                        <img src={item.image} alt="" className="adm-list-thumb" />
-                      ) : (
-                        <div className="adm-list-thumb adm-list-thumb--empty" />
-                      )}
-                      <div className="adm-list-body">
-                        <strong>{item.title || item.sku}</strong>
-                        <span className="adm-list-meta">{item.sku} · {item.barcode}</span>
-                        {item.categoryLabel && <span className="adm-list-meta">{item.categoryLabel}</span>}
-                        {status === 'approval' && item.stockError && (
-                          <span className="adm-list-warn">{item.stockError}</span>
+                    <div
+                      key={item.id}
+                      className={`adm-list-row${selected.has(item.id) ? ' adm-list-row--selected' : ''}`}
+                      style={{ gridTemplateColumns: ROW_COLUMNS[status] || ROW_COLUMNS.live }}
+                    >
+                      <div>
+                        <input
+                          type="checkbox"
+                          checked={selected.has(item.id)}
+                          onChange={() => toggleSelect(item.id)}
+                          style={{ accentColor: '#8B1A1A', cursor: 'pointer' }}
+                          aria-label={`Select ${item.sku}`}
+                        />
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center' }}>
+                        {item.image ? (
+                          <img src={item.image} alt="" className="adm-product-thumb" />
+                        ) : (
+                          <div className="adm-product-thumb adm-product-thumb--placeholder">IMG</div>
                         )}
                       </div>
-                      <div className="adm-list-actions">
+                      <div>
+                        <div style={{ fontWeight: 800, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                          {item.title || item.name || item.sku}
+                          {!item.image && (
+                            <span style={{ fontSize: 10, fontWeight: 700, color: '#92400e', background: '#fef3c7', borderRadius: 4, padding: '1px 5px' }}>No image</span>
+                          )}
+                        </div>
+                        <div className="adm-muted" style={{ fontSize: 11 }}>
+                          <span title="Barcode">BC: {item.barcode || item.code || '—'}</span>
+                          {item.sku && <span title="Website SKU" style={{ marginLeft: 8 }}>WSK: {item.sku}</span>}
+                          {item.price > 0 && (
+                            <span title="Price excl. VAT" style={{ marginLeft: 8, fontWeight: 700, color: '#374151' }}>
+                              R{Number(item.price).toFixed(2)}
+                            </span>
+                          )}
+                        </div>
+                        {item.categoryLabel && (
+                          <div className="adm-muted" style={{ fontSize: 11 }}>{item.categoryLabel}</div>
+                        )}
+                        {status === 'approval' && item.stockError && (
+                          <span className="adm-list-warn" style={{ fontSize: 11 }}>{item.stockError}</span>
+                        )}
+                      </div>
+                      {status === 'live' && (
+                        <div>
+                          <span style={{
+                            fontWeight: 700,
+                            color: !item.keepLiveWhenOos && item.stockQty < 0 ? '#b91c1c' : undefined,
+                          }}
+                          >
+                            {formatStockUnits(item.stockQty, item.keepLiveWhenOos)}
+                          </span>
+                        </div>
+                      )}
+                      <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
                         {status === 'live' && (
                           <>
                             <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => onEditProduct?.(item)}>Edit</button>
