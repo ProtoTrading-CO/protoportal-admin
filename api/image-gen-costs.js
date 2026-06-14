@@ -28,7 +28,16 @@ export default async function handler(req, res) {
           : null,
       });
     } catch (err) {
-      return res.status(500).json({ error: err.message || 'Failed to load image gen costs' });
+      const msg = err?.message || 'Failed to load image gen costs';
+      if (/Missing VITE_SUPABASE|SUPABASE_SERVICE_ROLE/i.test(msg)) {
+        return res.status(503).json({
+          error: 'Cost storage is not configured on this deployment (missing Supabase service role key).',
+          logs: [],
+          summary: summarizeCosts([]),
+          active: { locks: [], batches: [] },
+        });
+      }
+      return res.status(500).json({ error: msg });
     }
   }
 

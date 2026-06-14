@@ -31,6 +31,24 @@ function formatWhen(value) {
   return d.toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 }
 
+async function parseJsonResponse(res) {
+  const text = await res.text();
+  if (!text.trim()) {
+    if (!res.ok) throw new Error(`Server error (${res.status})`);
+    return {};
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    const snippet = text.replace(/\s+/g, ' ').slice(0, 80);
+    throw new Error(
+      res.ok
+        ? 'Invalid response from cost tracking API'
+        : `Server error (${res.status})${snippet ? `: ${snippet}` : ''}`,
+    );
+  }
+}
+
 export default function CostTrackingPanel({ onShowToast }) {
   const [operator, setOperator] = useState(() => getImageGenOperator());
   const [loading, setLoading] = useState(true);
@@ -43,13 +61,16 @@ export default function CostTrackingPanel({ onShowToast }) {
     setError('');
     try {
       const res = await fetch(`/api/image-gen-costs?days=${days}&limit=250`);
-      const json = await res.json();
-      if (!res.ok && res.status !== 503) throw new Error(json.error || 'Failed to load costs');
+      const json = await parseJsonResponse(res);
+      if (!res.ok && res.status !== 503) {
+        throw new Error(typeof json.error === 'string' ? json.error : 'Failed to load costs');
+      }
       setData(json);
-      setError(json.error && res.status === 503 ? json.error : '');
+      setError(typeof json.error === 'string' && res.status === 503 ? json.error : '');
     } catch (err) {
-      setError(err.message || 'Failed to load cost data');
-      onShowToast?.(err.message, 'error');
+      const message = err?.message || 'Failed to load cost data';
+      setError(message);
+      onShowToast?.(message, 'error');
     } finally {
       setLoading(false);
     }

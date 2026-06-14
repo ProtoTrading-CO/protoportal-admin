@@ -12,11 +12,22 @@ export function getPortalAdminClient() {
 }
 
 export async function readSiteConfigJson(file, fallback = {}) {
-  const supabase = getPortalAdminClient();
-  const { data, error } = await supabase.storage.from(SITE_CONFIG_BUCKET).download(file);
-  if (error) return fallback;
-  const text = await data.text();
-  return JSON.parse(text);
+  try {
+    const supabase = getPortalAdminClient();
+    const { data, error } = await supabase.storage.from(SITE_CONFIG_BUCKET).download(file);
+    if (error) return fallback;
+    const text = await data.text();
+    if (!String(text || '').trim()) return fallback;
+    try {
+      return JSON.parse(text);
+    } catch {
+      console.warn(`readSiteConfigJson: invalid JSON in ${file}`);
+      return fallback;
+    }
+  } catch (err) {
+    console.warn(`readSiteConfigJson: ${file}`, err?.message || err);
+    return fallback;
+  }
 }
 
 export async function writeSiteConfigJson(file, payload) {
