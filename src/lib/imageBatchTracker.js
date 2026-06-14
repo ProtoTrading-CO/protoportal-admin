@@ -1,6 +1,26 @@
 /** Shared state for Apollo image batches — survives wizard close / tab switches. */
 
-let activeBatch = null;
+const STORAGE_KEY = 'proto_active_image_batch';
+
+function loadStoredBatch() {
+  try {
+    const raw = sessionStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function persistBatch(batch) {
+  try {
+    if (batch) sessionStorage.setItem(STORAGE_KEY, JSON.stringify(batch));
+    else sessionStorage.removeItem(STORAGE_KEY);
+  } catch { /* quota */ }
+}
+
+let activeBatch = loadStoredBatch();
 const listeners = new Set();
 
 export function getActiveImageBatch() {
@@ -32,6 +52,7 @@ export function startImageBatch({ total = 0, style = '', productCount = 0 } = {}
     productCount,
     startedAt: Date.now(),
   };
+  persistBatch(activeBatch);
   emit();
   return activeBatch.id;
 }
@@ -39,6 +60,7 @@ export function startImageBatch({ total = 0, style = '', productCount = 0 } = {}
 export function updateImageBatch(patch) {
   if (!activeBatch || activeBatch.status !== 'running') return;
   activeBatch = { ...activeBatch, ...patch };
+  persistBatch(activeBatch);
   emit();
 }
 
@@ -49,10 +71,12 @@ export function finishImageBatch({ aborted = false } = {}) {
     status: aborted ? 'cancelled' : 'complete',
     finishedAt: Date.now(),
   };
+  persistBatch(activeBatch);
   emit();
 }
 
 export function dismissImageBatch() {
   activeBatch = null;
+  persistBatch(null);
   emit();
 }

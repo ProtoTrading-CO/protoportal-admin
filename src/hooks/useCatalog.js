@@ -30,11 +30,14 @@ async function fetchCatalog(params) {
 }
 
 export function useCatalogQuery(params) {
+  const isApproval = params.status === 'approval';
   return useQuery({
     queryKey: queryKeys.catalog(params),
     queryFn: () => fetchCatalog(params),
     placeholderData: keepPreviousData,
-    staleTime: 30_000,
+    staleTime: isApproval ? 10_000 : 30_000,
+    refetchInterval: isApproval ? 20_000 : false,
+    refetchIntervalInBackground: true,
   });
 }
 

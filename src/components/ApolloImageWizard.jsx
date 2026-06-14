@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
   ArrowRight,
@@ -17,6 +17,7 @@ import {
   ZoomIn,
 } from 'lucide-react';
 import ApolloProductPicker from './ApolloProductPicker';
+import ApolloCompactProductList from './ApolloCompactProductList';
 import ReprocessLiveFeed from './ReprocessLiveFeed';
 import { compressImage, applyDormantLive } from '../lib/products';
 import { expandProductSlots, runReprocessBatch } from '../lib/reprocessQueue';
@@ -117,14 +118,19 @@ function ReferenceImageLightbox({ gallery, index, onClose, onChangeIndex, onUseR
 
 export default function ApolloImageWizard({
   taxonomyTree = [],
+  prefillProducts = null,
   onExit,
   onRunInBackground,
   onShowToast,
   onGoToApproval,
   onRefreshCatalog,
 }) {
+  const prefillIds = useMemo(
+    () => (prefillProducts?.length ? new Set(prefillProducts.map((p) => p.id || p.sku)) : null),
+    [prefillProducts],
+  );
   const [step, setStep] = useState(0);
-  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [selectedIds, setSelectedIds] = useState(() => prefillIds || new Set());
   const [imageStyle, setImageStyle] = useState('shadow');
   const [promptNotes, setPromptNotes] = useState('');
   const [multiAngle, setMultiAngle] = useState(true);
@@ -463,13 +469,25 @@ export default function ApolloImageWizard({
         ))}
       </div>
 
-      {step === 0 && (
+      {step === 0 && prefillProducts?.length ? (
+        <div className="apollo-wizard-panel">
+          <header className="apollo-panel-intro">
+            <h4>Products for image fix</h4>
+            <p>Confirm your selection, then choose a style on the next step.</p>
+          </header>
+          <ApolloCompactProductList
+            products={prefillProducts}
+            selectedIds={selectedIds}
+            onSelectedIdsChange={setSelectedIds}
+          />
+        </div>
+      ) : step === 0 ? (
         <ApolloProductPicker
           taxonomyTree={taxonomyTree}
           selectedIds={selectedIds}
           onSelectedIdsChange={setSelectedIds}
         />
-      )}
+      ) : null}
 
       {step === 1 && (
         <div className="apollo-wizard-panel apollo-wizard-panel--style">

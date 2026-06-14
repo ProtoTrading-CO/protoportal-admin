@@ -5817,6 +5817,17 @@ html, body { background: #f5f5f5; color: #111827; }
 .apollo-picker-meta strong { display: block; font-size: 12px; line-height: 1.3; }
 .apollo-picker-meta span { font-size: 11px; color: #64748b; }
 .apollo-picker-pager { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+
+.apollo-compact-list { display: flex; flex-direction: column; gap: 8px; }
+.apollo-compact-list-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.apollo-compact-list-rows { max-height: 360px; overflow: auto; border: 1px solid #e5e7eb; border-radius: 8px; }
+.apollo-compact-row { display: grid; grid-template-columns: 20px 72px 1fr; gap: 10px; align-items: center; padding: 8px 12px; border-bottom: 1px solid #f1f5f9; cursor: pointer; margin: 0; }
+.apollo-compact-row:last-child { border-bottom: none; }
+.apollo-compact-row--on { background: #fef2f2; }
+.apollo-compact-row input { accent-color: #8B1A1A; cursor: pointer; }
+.apollo-compact-row-meta { min-width: 0; }
+.apollo-compact-row-meta strong { display: block; font-size: 13px; line-height: 1.3; }
+.apollo-compact-row-meta span { font-size: 11px; }
 .adm-reorder-tree-sidebar { padding: 8px; border-right: 1px solid #e5e7eb; }
 .adm-reorder-layout.adm-panel-with-sidebar { grid-template-columns: 240px 1fr; }
 

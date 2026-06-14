@@ -308,7 +308,7 @@ function RemoteBatchNotice({ batches, lockCount }) {
   );
 }
 
-export default function ApolloPanel({ taxonomyTree, onShowToast, onGoToApproval, onRefreshCatalog }) {
+export default function ApolloPanel({ taxonomyTree, onShowToast, onGoToApproval, onRefreshCatalog, imageFixRequest, onImageFixRequestHandled }) {
   const [messages, setMessages] = useState(loadApolloMessages);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
@@ -316,11 +316,32 @@ export default function ApolloPanel({ taxonomyTree, onShowToast, onGoToApproval,
   const [indexStatus, setIndexStatus] = useState(null);
   const [wizardOpen, setWizardOpen] = useState(false);
   const [wizardBackground, setWizardBackground] = useState(false);
+  const [wizardPrefill, setWizardPrefill] = useState(null);
+  const [wizardKey, setWizardKey] = useState('default');
   const [imageBatch, setImageBatch] = useState(() => getActiveImageBatch());
   const [remoteActive, setRemoteActive] = useState({ batches: [], locks: [] });
   const scrollRef = useRef(null);
 
   useEffect(() => subscribeImageBatch(setImageBatch), []);
+
+  useEffect(() => {
+    if (!imageFixRequest?.products?.length) return;
+    setWizardPrefill(imageFixRequest.products);
+    setWizardKey(String(imageFixRequest.id || Date.now()));
+    setWizardOpen(true);
+    setWizardBackground(false);
+    const count = imageFixRequest.products.length;
+    const preview = imageFixRequest.products
+      .slice(0, 4)
+      .map((p) => p.title || p.name || p.sku)
+      .join(', ');
+    const suffix = count > 4 ? ` and ${count - 4} more` : '';
+    setMessages((prev) => [
+      ...prev,
+      { role: 'user', content: `Image fix for ${count} product${count === 1 ? '' : 's'}: ${preview}${suffix}.` },
+    ]);
+    onImageFixRequestHandled?.();
+  }, [imageFixRequest?.id]);
 
   useEffect(() => {
     const poll = () => {
@@ -442,8 +463,10 @@ export default function ApolloPanel({ taxonomyTree, onShowToast, onGoToApproval,
       {wizardOpen && (
         <div className="apollo-wizard-layer" style={{ display: wizardBackground ? 'none' : 'block' }}>
           <ApolloImageWizard
+            key={wizardKey}
             taxonomyTree={taxonomyTree}
-            onExit={() => { setWizardOpen(false); setWizardBackground(false); }}
+            prefillProducts={wizardPrefill}
+            onExit={() => { setWizardOpen(false); setWizardBackground(false); setWizardPrefill(null); }}
             onRunInBackground={() => setWizardBackground(true)}
             onShowToast={onShowToast}
             onGoToApproval={() => { setWizardBackground(true); onGoToApproval?.(); }}

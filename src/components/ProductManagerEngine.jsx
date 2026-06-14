@@ -18,6 +18,7 @@ import { useCatalogQuery, buildCatalogParams, CATALOG_STATUSES } from '../hooks/
 import { useCatalogMutations } from '../hooks/useCatalogMutations';
 import { queryClient } from '../lib/queryClient';
 import { queryKeys } from '../lib/queryKeys';
+import { subscribeImageBatch } from '../lib/imageBatchTracker';
 
 const STATUS_META = {
   live: { label: 'Live', icon: PackagePlus },
@@ -65,9 +66,8 @@ function Pager({ page, total, pageSize, onPageChange }) {
   );
 }
 
-function scrollProductListToTop(anchor) {
+function scrollToPageTop() {
   requestAnimationFrame(() => {
-    anchor?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     window.scrollTo({ top: 0, behavior: 'smooth' });
   });
 }
@@ -77,6 +77,7 @@ export default function ProductManagerEngine({
   onShowToast,
   onRefreshStats,
   onEditProduct,
+  onImageFix,
   initialStatus = 'live',
 }) {
   const [status, setStatus] = useState(initialStatus);
@@ -93,10 +94,26 @@ export default function ProductManagerEngine({
   const [selected, setSelected] = useState(new Set());
   const [reorderProducts, setReorderProducts] = useState([]);
   const [sortOrderMeta, setSortOrderMeta] = useState({ updatedAt: null });
-  const listTopRef = useRef(null);
+  const selectedRowsRef = useRef(new Map());
+  const panelTopRef = useRef(null);
 
   const mutations = useCatalogMutations();
   const showStockColumn = STOCK_STATUSES.has(status);
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'instant' });
+  }, []);
+
+  useEffect(() => {
+    return subscribeImageBatch((batch) => {
+      if (batch?.status === 'complete') {
+        queryClient.invalidateQueries({ queryKey: ['catalog'] });
+        if (status === 'approval') {
+          onShowToast?.('New images ready for approval', 'success');
+        }
+      }
+    });
+  }, [status, onShowToast]);
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(searchInput.trim()), 300);
@@ -106,11 +123,12 @@ export default function ProductManagerEngine({
   useEffect(() => {
     setPage(1);
     setSelected(new Set());
+    selectedRowsRef.current = new Map();
   }, [status, debouncedSearch, categoryPath.join('/')]);
 
   const handlePageChange = useCallback((nextPage) => {
     setPage(nextPage);
-    scrollProductListToTop(listTopRef.current);
+    scrollToPageTop();
   }, []);
 
   const catalogParams = useMemo(() => buildCatalogParams({
@@ -125,10 +143,6 @@ export default function ProductManagerEngine({
   const rows = data?.rows || [];
   const total = data?.total || 0;
   const tree = taxonomyTree.length ? taxonomyTree : (data?.tree || []);
-
-  useEffect(() => {
-    scrollProductListToTop(listTopRef.current);
-  }, [status, debouncedSearch, categoryPath.join('/')]);
 
   useEffect(() => {
     if (reorderMode && status === 'live' && rows.length) {
@@ -181,13 +195,31 @@ export default function ProductManagerEngine({
     }
   };
 
-  const toggleSelect = (id) => {
+  const toggleSelect = (id, item) => {
     setSelected((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      if (next.has(id)) {
+        next.delete(id);
+        selectedRowsRef.current.delete(id);
+      } else {
+        next.add(id);
+        if (item) selectedRowsRef.current.set(id, item);
+      }
       return next;
     });
+  };
+
+  const handleImageFix = () => {
+    const products = [...selected]
+      .map((id) => selectedRowsRef.current.get(id))
+      .filter(Boolean);
+    if (!products.length) {
+      onShowToast?.('Select at least one product', 'error');
+      return;
+    }
+    onImageFix?.(products);
+    setSelected(new Set());
+    selectedRowsRef.current = new Map();
   };
 
   const runBulk = async (action) => {
@@ -214,7 +246,7 @@ export default function ProductManagerEngine({
   const showSkeleton = isLoading && !isPlaceholderData && !data;
 
   return (
-    <div className="adm-panel adm-panel-with-sidebar pm-engine">
+    <div ref={panelTopRef} className="adm-panel adm-panel-with-sidebar pm-engine">
       <div className="adm-section-head">
         <div>
           <h2 className="adm-section-title">Product Manager</h2>
@@ -293,6 +325,11 @@ export default function ProductManagerEngine({
               {selected.size > 0 && (
                 <div className="pm-bulk-bar">
                   <span>{selected.size} selected</span>
+                  {(status === 'live' || status === 'archived') && onImageFix && (
+                    <button type="button" className="adm-btn-red adm-btn--sm" onClick={handleImageFix}>
+                      <Sparkles size={14} /> Image fix
+                    </button>
+                  )}
                   {status === 'live' && (
                     <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => runBulk(mutations.archive)}>Archive</button>
                   )}
@@ -331,7 +368,6 @@ export default function ProductManagerEngine({
               />
             ) : (
               <>
-                <div ref={listTopRef} className="pm-list-anchor" aria-hidden="true" />
                 <div className="adm-list pm-list">
                   <div
                     className="adm-list-head pm-list-head"
@@ -353,7 +389,7 @@ export default function ProductManagerEngine({
                         <input
                           type="checkbox"
                           checked={selected.has(item.id)}
-                          onChange={() => toggleSelect(item.id)}
+                          onChange={() => toggleSelect(item.id, item)}
                           style={{ accentColor: '#8B1A1A', cursor: 'pointer' }}
                           aria-label={`Select ${item.sku}`}
                         />

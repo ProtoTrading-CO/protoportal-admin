@@ -397,6 +397,7 @@ function WhatsappOptIn({ value }) {
 export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const [activeSection, setActiveSection] = useState('catalogue');
   const [catalogStatus, setCatalogStatus] = useState('live');
+  const [imageFixRequest, setImageFixRequest] = useState(null);
   const { data: dashStats } = useDashboardStats();
   const [loading, setLoading] = useState(false);
   const [loadingProgress, setLoadingProgress] = useState(null);
@@ -2152,6 +2153,9 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                 }
                 setActiveSection(id);
                 setSidebarOpen(false);
+                if (id === 'catalogue' || id === 'apollo') {
+                  window.scrollTo({ top: 0, behavior: 'instant' });
+                }
               }}
               pendingCount={pendingCount}
             />
@@ -2171,6 +2175,11 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                 onRefreshStats={refreshDashboardStats}
                 initialStatus={catalogStatus}
                 onEditProduct={(item) => openContentEdit(item)}
+                onImageFix={(products) => {
+                  setImageFixRequest({ id: Date.now(), products });
+                  setActiveSection('apollo');
+                  window.scrollTo({ top: 0, behavior: 'instant' });
+                }}
               />
             )}
 
@@ -2187,13 +2196,15 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
               <ApolloPanel
                 taxonomyTree={taxonomyTree}
                 onShowToast={showToast}
-                onGoToApproval={() => { setCatalogStatus('approval'); setActiveSection('catalogue'); }}
+                onGoToApproval={() => { setCatalogStatus('approval'); setActiveSection('catalogue'); window.scrollTo({ top: 0, behavior: 'instant' }); }}
                 onRefreshCatalog={() => {
                   invalidateAdminCache();
                   invalidateProductCache();
                   queryClient.invalidateQueries({ queryKey: ['catalog'] });
                   refreshDashboardStats();
                 }}
+                imageFixRequest={imageFixRequest}
+                onImageFixRequestHandled={() => setImageFixRequest(null)}
               />
             </div>
 
