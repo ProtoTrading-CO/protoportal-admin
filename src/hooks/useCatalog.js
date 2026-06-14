@@ -29,7 +29,7 @@ async function fetchCatalog(params) {
   return json;
 }
 
-export function useCatalogQuery(params) {
+export function useCatalogQuery(params, { enabled = true } = {}) {
   const isApproval = params.status === 'approval';
   return useQuery({
     queryKey: queryKeys.catalog(params),
@@ -38,6 +38,7 @@ export function useCatalogQuery(params) {
     staleTime: isApproval ? 10_000 : 30_000,
     refetchInterval: isApproval ? 20_000 : false,
     refetchIntervalInBackground: true,
+    enabled,
   });
 }
 

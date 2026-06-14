@@ -14,6 +14,7 @@ import {
 import CategorySidebar from './CategorySidebar';
 import ReorderGrid from './ReorderGrid';
 import NewItemsPanel from './NewItemsPanel';
+import ApprovalPanel from './ApprovalPanel';
 import { useCatalogQuery, buildCatalogParams, CATALOG_STATUSES } from '../hooks/useCatalog';
 import { useCatalogMutations } from '../hooks/useCatalogMutations';
 import { queryClient } from '../lib/queryClient';
@@ -139,7 +140,9 @@ export default function ProductManagerEngine({
     categoryPath,
   }), [status, page, pageSize, debouncedSearch, categoryPath, reorderMode]);
 
-  const { data, isLoading, isFetching, isPlaceholderData } = useCatalogQuery(catalogParams);
+  const { data, isLoading, isFetching, isPlaceholderData } = useCatalogQuery(catalogParams, {
+    enabled: status !== 'approval',
+  });
   const rows = data?.rows || [];
   const total = data?.total || 0;
   const tree = taxonomyTree.length ? taxonomyTree : (data?.tree || []);
@@ -286,7 +289,13 @@ export default function ProductManagerEngine({
         )}
       </div>
 
-      {status === 'new-items' ? (
+      {status === 'approval' ? (
+        <ApprovalPanel
+          embedded
+          onShowToast={onShowToast}
+          onRefreshStats={onRefreshStats}
+        />
+      ) : status === 'new-items' ? (
         <div className="adm-panel-main pm-panel-body">
           <NewItemsPanel
           dormantRows={rows}

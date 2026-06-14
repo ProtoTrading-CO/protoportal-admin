@@ -274,27 +274,75 @@ export default function ApolloImageWizard({
     abortRef.current = ac;
 
     try {
-      const res = await fetch('/api/stock-actions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'listLive' }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || 'Failed to load products');
       const idSet = new Set(selectedIds);
-      const products = (json.rows || [])
-        .filter((row) => idSet.has(row.sku))
-        .map((row) => ({
-          id: row.sku,
-          sku: row.sku,
-          name: row.title,
-          title: row.title,
-          image: row.image_url_one,
-          images: [row.image_url_one, row.image_url_two, row.image_url_three, row.image_url_four].filter(Boolean),
-        }));
+      const mapStockRow = (row) => ({
+        id: row.sku,
+        sku: row.sku,
+        name: row.title,
+        title: row.title,
+        image: row.image_url_one,
+        images: [row.image_url_one, row.image_url_two, row.image_url_three, row.image_url_four].filter(Boolean),
+      });
+      const mapPrefillRow = (p) => {
+        const images = p.images?.length
+          ? p.images
+          : [p.image, p.secondaryImage, p.imageThree, p.imageFour].filter(Boolean);
+        return {
+          id: p.id || p.sku,
+          sku: p.sku || p.id,
+          name: p.title || p.name || p.sku,
+          title: p.title || p.name || p.sku,
+          image: images[0] || p.image,
+          images,
+        };
+      };
+
+      let products = [];
+      if (prefillProducts?.length) {
+        products = prefillProducts
+          .filter((p) => idSet.has(p.id || p.sku))
+          .map(mapPrefillRow);
+      }
+
+      const haveSkus = new Set(products.map((p) => p.sku));
+      let missing = [...idSet].filter((id) => !haveSkus.has(id));
+
+      if (missing.length) {
+        const res = await fetch('/api/stock-actions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'listLive' }),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || 'Failed to load products');
+        for (const row of json.rows || []) {
+          if (missing.includes(row.sku)) {
+            products.push(mapStockRow(row));
+            haveSkus.add(row.sku);
+          }
+        }
+      }
+
+      missing = [...idSet].filter((id) => !haveSkus.has(id));
+      if (missing.length) {
+        const res = await fetch('/api/stock-actions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'listArchived' }),
+        });
+        const json = await res.json();
+        if (res.ok) {
+          for (const row of json.rows || []) {
+            if (missing.includes(row.sku)) {
+              products.push(mapStockRow(row));
+            }
+          }
+        }
+      }
 
       if (!products.length) {
         onShowToast?.('Could not load selected products', 'error');
+        setStep(4);
         return;
       }
 
@@ -399,7 +447,10 @@ export default function ApolloImageWizard({
 
   const applyLiveNow = async () => {
     const skus = [...new Set(queue.filter((q) => q.status === 'done').map((q) => q.sku))];
-    if (!skus.length) return;
+    if (!skus.length) {
+      onShowToast?.('No staged previews yet — wait for generation to finish or use Send to Approval', 'error');
+      return;
+    }
     setApplyingLive(true);
     let ok = 0;
     const errors = [];

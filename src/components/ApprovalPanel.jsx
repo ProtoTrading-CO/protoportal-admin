@@ -170,7 +170,7 @@ function ImageBatchNotice({ batch, onDismiss, onRefresh }) {
   return null;
 }
 
-export default function ApprovalPanel({ onShowToast, onRefreshStats }) {
+export default function ApprovalPanel({ onShowToast, onRefreshStats, embedded = false }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState(new Set());
@@ -229,10 +229,14 @@ export default function ApprovalPanel({ onShowToast, onRefreshStats }) {
         errors.push(`${sku}: ${err.message}`);
       }
     }
+    setSelected(new Set());
     await load();
     onRefreshStats?.();
     if (errors.length) {
-      onShowToast?.(`Set live: ${ok} ok, ${errors.length} failed — ${errors.slice(0, 2).join('; ')}`, ok ? 'success' : 'error');
+      onShowToast?.(
+        `Set live: ${ok} ok, ${errors.length} failed${errors.length ? ` — ${errors.slice(0, 3).join('; ')}` : ''}`,
+        ok ? 'warning' : 'error',
+      );
     } else {
       const note = applied
         ? ' Trade site updates within ~1 minute (hard refresh if images look stale).'
@@ -265,16 +269,27 @@ export default function ApprovalPanel({ onShowToast, onRefreshStats }) {
   const selectedList = items.filter((i) => selected.has(i.sku));
 
   return (
-    <div className="adm-panel approval-panel">
-      <div className="adm-section-head">
-        <div>
-          <h2 className="adm-section-title"><CheckCircle size={18} /> Approval</h2>
-          <p className="adm-section-note">Review staged images before publishing. Click any thumbnail for full-size view and click-through.</p>
+    <div className={embedded ? 'approval-panel-embedded' : 'adm-panel approval-panel'}>
+      {!embedded && (
+        <div className="adm-section-head">
+          <div>
+            <h2 className="adm-section-title"><CheckCircle size={18} /> Approval</h2>
+            <p className="adm-section-note">Review staged images before publishing. Click any thumbnail for full-size view and click-through.</p>
+          </div>
+          <button type="button" className="adm-btn-ghost" onClick={() => void load()} disabled={loading || busy}>
+            Refresh
+          </button>
         </div>
-        <button type="button" className="adm-btn-ghost" onClick={() => void load()} disabled={loading || busy}>
-          Refresh
-        </button>
-      </div>
+      )}
+
+      {embedded && (
+        <div className="approval-embedded-toolbar">
+          <p className="adm-section-note">Review staged images before publishing — click thumbnails or <strong>View all images</strong> for full-size.</p>
+          <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => void load()} disabled={loading || busy}>
+            Refresh
+          </button>
+        </div>
+      )}
 
       <ImageBatchNotice
         batch={imageBatch}

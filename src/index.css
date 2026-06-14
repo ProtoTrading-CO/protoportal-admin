@@ -5833,6 +5833,17 @@ html, body { background: #f5f5f5; color: #111827; }
 
 /* Approval tab */
 .approval-panel .adm-section-title { display: flex; align-items: center; gap: 8px; }
+.approval-panel-embedded { padding: 0 0 16px; }
+.approval-embedded-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 0 12px;
+  border-bottom: 1px solid #e5e7eb;
+  margin-bottom: 12px;
+}
+.approval-embedded-toolbar .adm-section-note { margin: 0; flex: 1; }
 .approval-empty { padding: 24px; text-align: center; }
 .approval-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 14px; }
 .approval-card {
