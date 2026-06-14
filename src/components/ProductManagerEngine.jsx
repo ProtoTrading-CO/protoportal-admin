@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Archive,
   ArchiveRestore,
@@ -29,11 +29,13 @@ const STATUS_META = {
 
 const ROW_COLUMNS = {
   live: '32px 72px 2fr 140px 120px',
-  archived: '32px 72px 2fr 120px',
+  archived: '32px 72px 2fr 140px 120px',
   approval: '32px 72px 2fr 120px',
   recycle: '32px 72px 2fr 120px',
   'new-items': '32px 72px 2fr 120px',
 };
+
+const STOCK_STATUSES = new Set(['live', 'archived']);
 
 function formatStockUnits(qty, keepLive = false) {
   if (keepLive && (qty === null || qty === undefined || qty <= 0)) return 'Available';
@@ -63,6 +65,13 @@ function Pager({ page, total, pageSize, onPageChange }) {
   );
 }
 
+function scrollProductListToTop(anchor) {
+  requestAnimationFrame(() => {
+    anchor?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+}
+
 export default function ProductManagerEngine({
   taxonomyTree = [],
   onShowToast,
@@ -84,8 +93,10 @@ export default function ProductManagerEngine({
   const [selected, setSelected] = useState(new Set());
   const [reorderProducts, setReorderProducts] = useState([]);
   const [sortOrderMeta, setSortOrderMeta] = useState({ updatedAt: null });
+  const listTopRef = useRef(null);
 
   const mutations = useCatalogMutations();
+  const showStockColumn = STOCK_STATUSES.has(status);
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(searchInput.trim()), 300);
@@ -96,6 +107,11 @@ export default function ProductManagerEngine({
     setPage(1);
     setSelected(new Set());
   }, [status, debouncedSearch, categoryPath.join('/')]);
+
+  const handlePageChange = useCallback((nextPage) => {
+    setPage(nextPage);
+    scrollProductListToTop(listTopRef.current);
+  }, []);
 
   const catalogParams = useMemo(() => buildCatalogParams({
     status,
@@ -109,6 +125,10 @@ export default function ProductManagerEngine({
   const rows = data?.rows || [];
   const total = data?.total || 0;
   const tree = taxonomyTree.length ? taxonomyTree : (data?.tree || []);
+
+  useEffect(() => {
+    scrollProductListToTop(listTopRef.current);
+  }, [status, debouncedSearch, categoryPath.join('/')]);
 
   useEffect(() => {
     if (reorderMode && status === 'live' && rows.length) {
@@ -311,6 +331,7 @@ export default function ProductManagerEngine({
               />
             ) : (
               <>
+                <div ref={listTopRef} className="pm-list-anchor" aria-hidden="true" />
                 <div className="adm-list pm-list">
                   <div
                     className="adm-list-head pm-list-head"
@@ -319,7 +340,7 @@ export default function ProductManagerEngine({
                     <span />
                     <span />
                     <span>Product</span>
-                    {status === 'live' && <span>Stock</span>}
+                    {showStockColumn && <span>Stock</span>}
                     <span>Actions</span>
                   </div>
                   {rows.map((item) => (
@@ -367,11 +388,14 @@ export default function ProductManagerEngine({
                           <span className="adm-list-warn" style={{ fontSize: 11 }}>{item.stockError}</span>
                         )}
                       </div>
-                      {status === 'live' && (
+                      {showStockColumn && (
                         <div>
                           <span style={{
-                            fontWeight: 700,
-                            color: !item.keepLiveWhenOos && item.stockQty < 0 ? '#b91c1c' : undefined,
+                            fontWeight: status === 'archived' ? 900 : 700,
+                            fontSize: status === 'archived' ? 15 : undefined,
+                            color: !item.keepLiveWhenOos && item.stockQty < 0
+                              ? '#b91c1c'
+                              : (status === 'archived' ? '#8B1A1A' : undefined),
                           }}
                           >
                             {formatStockUnits(item.stockQty, item.keepLiveWhenOos)}
@@ -416,7 +440,7 @@ export default function ProductManagerEngine({
                     <p className="adm-empty">No products in this view.</p>
                   )}
                 </div>
-                <Pager page={page} total={total} pageSize={pageSize} onPageChange={setPage} />
+                <Pager page={page} total={total} pageSize={pageSize} onPageChange={handlePageChange} />
               </>
             )}
           </div>

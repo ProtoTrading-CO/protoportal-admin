@@ -6025,6 +6025,7 @@ html, body { background: #f5f5f5; color: #111827; }
 .pm-toolbar { margin-bottom: 12px; }
 .pm-bulk-bar { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; }
 .pm-list { margin-top: 0; }
+.pm-list-anchor { height: 0; scroll-margin-top: 88px; }
 .pm-list-head { border-radius: 16px 16px 0 0; }
 .pm-list .adm-list-row--selected { background: #fef2f2; }
 .adm-list-warn { color: #b45309; font-weight: 600; }
