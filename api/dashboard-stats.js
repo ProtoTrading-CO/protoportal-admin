@@ -95,7 +95,7 @@ export default async function handler(req, res) {
       recycleBin,
       uncategorized,
       customers: customersRes.count || 0,
-      orders: ordersCount || 0,
+      orders: ordersCount.count || 0,
       fetchedAt: new Date().toISOString(),
     });
   } catch (err) {

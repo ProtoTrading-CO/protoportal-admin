@@ -4186,9 +4186,10 @@ function DrawerField({ icon: Icon, label, value }) {
 }
 
 function AdminStat({ label, value, accent }) {
+  const display = typeof value === 'object' ? '—' : value;
   return (
     <div className={`adm-stat${accent ? ' adm-stat--accent' : ''}`}>
-      <div className="adm-stat-value">{value}</div>
+      <div className="adm-stat-value">{display}</div>
       <div className="adm-stat-label">{label}</div>
     </div>
   );
