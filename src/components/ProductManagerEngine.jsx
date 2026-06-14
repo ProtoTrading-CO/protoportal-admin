@@ -194,11 +194,11 @@ export default function ProductManagerEngine({
   const showSkeleton = isLoading && !isPlaceholderData && !data;
 
   return (
-    <div className="pm-engine">
-      <header className="pm-engine-head">
+    <div className="adm-panel adm-panel-with-sidebar pm-engine">
+      <div className="adm-section-head">
         <div>
           <h2 className="adm-section-title">Product Manager</h2>
-          <p className="adm-section-note">One catalogue — filter by status or enter reorder mode.</p>
+          <p className="adm-section-note">In-stock products are live on the site. Filter by status or use reorder mode for sort order.</p>
         </div>
         <div className="pm-engine-head-actions">
           {isFetching && !isLoading && <Loader2 size={16} className="spin" aria-label="Refreshing" />}
@@ -206,9 +206,9 @@ export default function ProductManagerEngine({
             <RefreshCw size={14} /> Refresh
           </button>
         </div>
-      </header>
+      </div>
 
-      <div className="pm-status-bar">
+      <div className="adm-customer-tabs pm-status-tabs">
         {CATALOG_STATUSES.map((s) => {
           const meta = STATUS_META[s];
           const Icon = meta.icon;
@@ -216,7 +216,7 @@ export default function ProductManagerEngine({
             <button
               key={s}
               type="button"
-              className={`pm-status-btn${status === s ? ' pm-status-btn--active' : ''}`}
+              className={`adm-tab${status === s ? ' adm-tab--active' : ''}`}
               onClick={() => { setStatus(s); setReorderMode(false); }}
             >
               <Icon size={14} /> {meta.label}
@@ -226,7 +226,7 @@ export default function ProductManagerEngine({
         {status === 'live' && (
           <button
             type="button"
-            className={`pm-status-btn pm-status-btn--reorder${reorderMode ? ' pm-status-btn--active' : ''}`}
+            className={`adm-tab pm-reorder-tab${reorderMode ? ' adm-tab--active' : ''}`}
             onClick={() => setReorderMode((v) => !v)}
           >
             <Grip size={14} /> Reorder mode
@@ -235,7 +235,8 @@ export default function ProductManagerEngine({
       </div>
 
       {status === 'new-items' ? (
-        <NewItemsPanel
+        <div className="adm-panel-main pm-panel-body">
+          <NewItemsPanel
           dormantRows={rows}
           dormantSearch={searchInput}
           onDormantSearchChange={setSearchInput}
@@ -248,18 +249,19 @@ export default function ProductManagerEngine({
           onLoadDormant={() => queryClient.invalidateQueries({ queryKey: ['catalog'] })}
           onShowToast={onShowToast}
           taxonomyTree={tree}
-        />
+          />
+        </div>
       ) : (
-        <div className="pm-split">
+        <div className="adm-panel-split">
           <CategorySidebar
             tree={tree}
             selectedPath={categoryPath}
             onSelectPath={setCategoryPath}
           />
-          <div className="pm-main">
-            <div className="pm-toolbar">
-              <div className="adm-search-wrap">
-                <Search size={16} />
+          <div className="adm-panel-main">
+            <div className="adm-toolbar pm-toolbar">
+              <label className="adm-search">
+                <Search size={15} />
                 <input
                   type="search"
                   className="adm-search-input"
@@ -267,7 +269,7 @@ export default function ProductManagerEngine({
                   value={searchInput}
                   onChange={(e) => setSearchInput(e.target.value)}
                 />
-              </div>
+              </label>
               {selected.size > 0 && (
                 <div className="pm-bulk-bar">
                   <span>{selected.size} selected</span>
