@@ -325,7 +325,7 @@ export async function generateOrderPdfBase64({
     doc.setFontSize(12);
     doc.setTextColor(17, 17, 17);
     doc.text('Order total (incl. VAT)', margin + 12, y + 18);
-    doc.setTextColor(196, 0, 0);
+    doc.setTextColor(17, 17, 17);
     doc.text(money(total * 1.15), margin + contentWidth - 12, y + 18, { align: 'right' });
     y += 40;
   }
