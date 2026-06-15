@@ -237,7 +237,7 @@ export async function generateOrderPdfBase64({
     const orderedQty = item.originalQty != null ? item.originalQty : item.qty;
     const confirmedQty = item.removed ? 0 : (item.qty ?? item.finalQty ?? 0);
     const price = item.unitPrice || item.price || 0;
-    const lineTotal = hasPrices && !item.removed && price ? confirmedQty * price : null;
+    const lineTotal = hasPrices && !item.removed && price ? confirmedQty * price * 1.15 : null;
     const codeText = String(item.code || '—');
     const nameText = String(item.name || '—');
 
@@ -326,7 +326,7 @@ export async function generateOrderPdfBase64({
     doc.setTextColor(17, 17, 17);
     doc.text('Order total (incl. VAT)', margin + 12, y + 18);
     doc.setTextColor(196, 0, 0);
-    doc.text(money(total), margin + contentWidth - 12, y + 18, { align: 'right' });
+    doc.text(money(total * 1.15), margin + contentWidth - 12, y + 18, { align: 'right' });
     y += 40;
   }
 
