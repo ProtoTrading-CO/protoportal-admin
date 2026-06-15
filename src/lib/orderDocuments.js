@@ -212,6 +212,7 @@ export async function generateOrderPdfBase64({
   detail('Location', [c.city, c.province, c.country].filter(Boolean).join(', '));
   detail('Company address', c.company_address);
   detail('Delivery address', c.delivery_address);
+  detail('Delivery method', order?.delivery_method);
   y += 8;
 
   // ── Table header ──────────────────────────────────────────────────────

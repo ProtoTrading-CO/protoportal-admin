@@ -21,7 +21,7 @@ export default async function handler(req, res) {
 
     let ordersQuery = supabase
       .from('orders')
-      .select('*, customers(name, email, phone, business_name, business_type, city, province, country, tier)')
+      .select('*, customers(name, contact_name, email, phone, business_name, business_type, city, province, country, company_address, delivery_address, vat_number, customer_code, tier)')
       .order('created_at', { ascending: false })
       .limit(lim);
 
@@ -78,7 +78,7 @@ export default async function handler(req, res) {
 
     const { data, error } = await supabase
       .from('orders')
-      .select('*, customers(name, email, phone, business_name, business_type, city, province, country, tier)')
+      .select('*, customers(name, contact_name, email, phone, business_name, business_type, city, province, country, company_address, delivery_address, vat_number, customer_code, tier)')
       .eq('id', id)
       .single();
 

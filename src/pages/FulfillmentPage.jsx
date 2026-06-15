@@ -428,6 +428,9 @@ export default function FulfillmentPage() {
           <div className="ff-hero-meta">
             <div className="ff-hero-customer">{order.customers?.name || 'Customer'}</div>
             <div className="ff-hero-email">{order.customers?.email || '—'}</div>
+            {order.delivery_method && (
+              <div className="ff-hero-delivery">🚚 {order.delivery_method}</div>
+            )}
           </div>
           <div className="ff-hero-progress" aria-label={`${completedCount} of ${totalSections} sections complete`}>
             <div className="ff-hero-progress__bar"><div className="ff-hero-progress__fill" style={{ width: `${completionPct}%` }} /></div>
