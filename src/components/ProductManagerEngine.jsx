@@ -6,6 +6,8 @@ import {
   Grip,
   Loader2,
   PackagePlus,
+  Pencil,
+  Plus,
   RefreshCw,
   Search,
   Sparkles,
@@ -79,6 +81,9 @@ export default function ProductManagerEngine({
   onRefreshStats,
   onEditProduct,
   onImageFix,
+  onEditCategory,
+  onAddSubcategory,
+  onDeleteSubcategory,
   initialStatus = 'live',
 }) {
   const [status, setStatus] = useState(initialStatus);
@@ -95,6 +100,8 @@ export default function ProductManagerEngine({
   const [selected, setSelected] = useState(new Set());
   const [reorderProducts, setReorderProducts] = useState([]);
   const [sortOrderMeta, setSortOrderMeta] = useState({ updatedAt: null });
+  const newItemsExcelRef = useRef(null);
+  const newItemsFolderRef = useRef(null);
   const selectedRowsRef = useRef(new Map());
   const panelTopRef = useRef(null);
 
@@ -147,33 +154,34 @@ export default function ProductManagerEngine({
   const total = data?.total || 0;
   const tree = taxonomyTree.length ? taxonomyTree : (data?.tree || []);
 
-  useEffect(() => {
-    if (reorderMode && status === 'live' && rows.length) {
-      setReorderProducts(rows);
-    }
-  }, [reorderMode, status, rows]);
-
   const categoryKey = categoryPath.length ? categoryPath.join('/') : '__all__';
 
-  const loadSortOrder = useCallback(async () => {
+  const loadSortOrder = useCallback(async (baseRows) => {
     if (!categoryKey || categoryKey === '__all__') return;
     try {
       const res = await fetch(`/api/category-sort-order?categoryKey=${encodeURIComponent(categoryKey)}`);
       const json = await res.json();
       if (!res.ok) return;
       setSortOrderMeta({ updatedAt: json.updatedAt });
-      if (json.skuOrder?.length && reorderProducts.length) {
+      if (json.skuOrder?.length && baseRows?.length) {
         const orderMap = new Map(json.skuOrder.map((id, i) => [id, i]));
-        setReorderProducts((prev) => [...prev].sort((a, b) => (orderMap.get(a.id) ?? 999999) - (orderMap.get(b.id) ?? 999999)));
+        setReorderProducts([...baseRows].sort((a, b) => (orderMap.get(a.id) ?? 999999) - (orderMap.get(b.id) ?? 999999)));
       }
     } catch { /* ignore */ }
-  }, [categoryKey, reorderProducts.length]);
+  }, [categoryKey]);
 
   useEffect(() => {
-    if (reorderMode) void loadSortOrder();
-  }, [reorderMode, categoryKey]);
+    if (reorderMode && status === 'live' && rows.length && categoryKey !== '__all__') {
+      setReorderProducts(rows);
+      void loadSortOrder(rows);
+    }
+  }, [reorderMode, categoryKey, rows, status, loadSortOrder]);
 
   const persistOrder = async (next) => {
+    if (!categoryKey || categoryKey === '__all__') {
+      onShowToast?.('Select a category before saving sort order', 'error');
+      return;
+    }
     const skuOrder = next.map((p) => p.id);
     try {
       const res = await fetch('/api/category-sort-order', {
@@ -193,6 +201,7 @@ export default function ProductManagerEngine({
       }
       if (!res.ok) throw new Error(json.error);
       setSortOrderMeta({ updatedAt: json.updatedAt });
+      onShowToast?.('Sort order saved — live site updates within ~30s', 'success');
     } catch (err) {
       onShowToast?.(err.message, 'error');
     }
@@ -246,7 +255,13 @@ export default function ProductManagerEngine({
     }
   };
 
+  const recycleSku = (sku, fromArchive) => mutations.softDelete.mutate(
+    { sku, fromArchive },
+    { onSuccess: () => onRefreshStats?.() },
+  );
+
   const showSkeleton = isLoading && !isPlaceholderData && !data;
+  const addSubParentId = categoryPath[0] || tree[0]?.id || '';
 
   return (
     <div ref={panelTopRef} className="adm-panel adm-panel-with-sidebar pm-engine">
@@ -306,19 +321,37 @@ export default function ProductManagerEngine({
           saving={mutations.setLive.isPending}
           onGoLive={(sku) => mutations.setLive.mutateAsync(sku).then(() => onRefreshStats?.())}
           onGoLiveSelected={() => runBulk(mutations.setLive)}
-          onRemoveProduct={(sku) => mutations.permanentDelete.mutateAsync(sku)}
+          onRemoveProduct={(product) => mutations.permanentDelete.mutateAsync(product?.id || product?.sku || product)}
           onLoadDormant={() => queryClient.invalidateQueries({ queryKey: ['catalog'] })}
           onShowToast={onShowToast}
           taxonomyTree={tree}
+          excelInputRef={newItemsExcelRef}
+          imageFolderRef={newItemsFolderRef}
           />
         </div>
       ) : (
         <div className="adm-panel-split">
-          <CategorySidebar
-            tree={tree}
-            selectedPath={categoryPath}
-            onSelectPath={setCategoryPath}
-          />
+          <aside className="adm-panel-sidebar adm-reorder-tree-sidebar">
+            <div className="adm-reorder-cat-heading">
+              <span>Categories</span>
+              {onAddSubcategory && addSubParentId && (
+                <button
+                  type="button"
+                  className="adm-taxonomy-add-btn"
+                  title="Add subcategory"
+                  onClick={() => onAddSubcategory(addSubParentId)}
+                >
+                  <Plus size={16} strokeWidth={2.5} />
+                </button>
+              )}
+            </div>
+            <CategorySidebar
+              tree={tree}
+              selectedPath={categoryPath}
+              onSelectPath={setCategoryPath}
+              onEditNode={onEditCategory}
+            />
+          </aside>
           <div className="adm-panel-main">
             <div className="adm-toolbar pm-toolbar">
               <label className="adm-search">
@@ -340,12 +373,15 @@ export default function ProductManagerEngine({
                     </button>
                   )}
                   {status === 'live' && (
-                    <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => runBulk(mutations.archive)}>Archive</button>
+                    <>
+                      <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => runBulk(mutations.archive)}>Archive</button>
+                      <button type="button" className="adm-btn-red adm-btn--sm" onClick={() => runBulk({ mutateAsync: (sku) => mutations.softDelete.mutateAsync({ sku, fromArchive: false }) })}>To recycle</button>
+                    </>
                   )}
                   {status === 'archived' && (
                     <>
                       <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => runBulk(mutations.unarchive)}>Restore</button>
-                      <button type="button" className="adm-btn-red adm-btn--sm" onClick={() => runBulk(mutations.softDelete)}>To recycle</button>
+                      <button type="button" className="adm-btn-red adm-btn--sm" onClick={() => runBulk({ mutateAsync: (sku) => mutations.softDelete.mutateAsync({ sku, fromArchive: true }) })}>To recycle</button>
                     </>
                   )}
                   {status === 'approval' && (
@@ -373,6 +409,8 @@ export default function ProductManagerEngine({
                 loading={isLoading}
                 dragDisabled={!!debouncedSearch}
                 onEditProduct={onEditProduct}
+                onEditSubcategory={onEditCategory}
+                onDeleteSubcategory={onDeleteSubcategory}
                 onPersistOrder={(next) => void persistOrder(next)}
               />
             ) : (
@@ -448,17 +486,30 @@ export default function ProductManagerEngine({
                         </div>
                       )}
                       <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                        {onEditProduct && (
+                          <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => onEditProduct(item)}>
+                            <Pencil size={14} /> Edit
+                          </button>
+                        )}
                         {status === 'live' && (
                           <>
-                            <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => onEditProduct?.(item)}>Edit</button>
                             <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => mutations.archive.mutate(item.sku, { onSuccess: () => onRefreshStats?.() })}>Archive</button>
+                            <button type="button" className="adm-btn-red adm-btn--sm" onClick={() => recycleSku(item.sku, false)}>To recycle</button>
                           </>
                         )}
                         {status === 'archived' && (
-                          <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => mutations.unarchive.mutate(item.sku, { onSuccess: () => onRefreshStats?.() })}>Restore</button>
+                          <>
+                            <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => mutations.unarchive.mutate(item.sku, { onSuccess: () => onRefreshStats?.() })}>Restore</button>
+                            <button type="button" className="adm-btn-red adm-btn--sm" onClick={() => recycleSku(item.sku, true)}>To recycle</button>
+                          </>
                         )}
                         {status === 'approval' && (
                           <>
+                            {onEditProduct && (
+                              <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => onEditProduct(item)}>
+                                <Pencil size={14} /> Edit
+                              </button>
+                            )}
                             <button
                               type="button"
                               className="adm-btn-red adm-btn--sm"
@@ -474,9 +525,12 @@ export default function ProductManagerEngine({
                           </>
                         )}
                         {status === 'recycle' && (
-                          <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => mutations.restoreRecycle.mutate(item.sku, { onSuccess: () => onRefreshStats?.() })}>
-                            <ArchiveRestore size={14} /> Restore
-                          </button>
+                          <>
+                            <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => mutations.restoreRecycle.mutate(item.sku, { onSuccess: () => onRefreshStats?.() })}>
+                              <ArchiveRestore size={14} /> Restore
+                            </button>
+                            <button type="button" className="adm-btn-red adm-btn--sm" onClick={() => mutations.permanentDelete.mutate(item.sku, { onSuccess: () => onRefreshStats?.() })}>Delete forever</button>
+                          </>
                         )}
                       </div>
                     </div>

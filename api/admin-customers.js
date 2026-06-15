@@ -38,7 +38,7 @@ export default async function handler(req, res) {
     const q = (search || '').trim();
     if (q) {
       const safe = q.replace(/[%',()]/g, ' ').trim();
-      if (safe) query = query.or(`name.ilike.%${safe}%,email.ilike.%${safe}%,phone.ilike.%${safe}%,business_name.ilike.%${safe}%`);
+      if (safe) query = query.or(`name.ilike.%${safe}%,email.ilike.%${safe}%,phone.ilike.%${safe}%,business_name.ilike.%${safe}%,first_name.ilike.%${safe}%,contact_name.ilike.%${safe}%,customer_code.ilike.%${safe}%`);
     }
 
     const { data, error, count } = await query;
@@ -73,14 +73,36 @@ export default async function handler(req, res) {
     const ALLOWED_PATCH_FIELDS = new Set([
       'is_approved', 'tier', 'name', 'email', 'phone', 'business_name',
       'business_type', 'company_address', 'delivery_address', 'vat_number',
-      'country', 'province', 'city', 'accept_whatsapp',
+      'country', 'province', 'city', 'accept_whatsapp', 'customer_code',
+      'sales_last_12_months', 'invoice_count', 'last_purchase_date',
+      'contact_name', 'first_name',
     ]);
     const { id, ...rawPatch } = req.body || {};
     if (!id) return res.status(400).json({ error: 'id required' });
     const patch = Object.fromEntries(
       Object.entries(rawPatch).filter(([key]) => ALLOWED_PATCH_FIELDS.has(key)),
     );
+    if (patch.customer_code !== undefined) {
+      const code = String(patch.customer_code || '').trim().toUpperCase();
+      if (code && !/^[A-Z0-9]{6}$/.test(code)) {
+        return res.status(400).json({ error: 'Customer code must be exactly 6 letters or numbers' });
+      }
+      patch.customer_code = code || null;
+    }
     if (!Object.keys(patch).length) return res.status(400).json({ error: 'No valid fields to update' });
+
+    if (patch.is_approved === true) {
+      const { data: existing } = await supabase
+        .from('customers')
+        .select('customer_code')
+        .eq('id', id)
+        .maybeSingle();
+      const code = patch.customer_code || existing?.customer_code;
+      if (!code || !/^[A-Z0-9]{6}$/.test(code)) {
+        return res.status(400).json({ error: 'A 6-character customer code is required before approval' });
+      }
+      if (!patch.customer_code) patch.customer_code = code;
+    }
     const { data, error } = await supabase
       .from('customers')
       .update(patch)

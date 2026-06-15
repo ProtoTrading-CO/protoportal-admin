@@ -2,6 +2,7 @@ import {
   BarChart2,
   Bot,
   DollarSign,
+  Grip,
   Layout,
   MessageCircle,
   PackagePlus,
@@ -20,6 +21,7 @@ const NAV_ITEMS = [
   { id: 'apollo', label: 'Apollo', icon: Bot },
   { id: 'cost-tracking', label: 'Cost Tracking', icon: DollarSign },
   { id: 'catalogue', label: 'Product Manager', icon: PackagePlus },
+  { id: 'reorder', label: 'Reorder Grid', icon: Grip },
   { id: 'customers', label: 'Customer Management', icon: Users },
   { id: 'specials', label: 'Specials', icon: Star },
   { id: 'crm', label: 'WhatsApp', icon: MessageCircle },
@@ -31,7 +33,7 @@ const NAV_ITEMS = [
 ];
 
 function prefetchSection(sectionId) {
-  if (sectionId === 'catalogue') {
+  if (sectionId === 'catalogue' || sectionId === 'reorder') {
     queryClient.prefetchQuery({
       queryKey: queryKeys.catalog(buildCatalogParams({ status: 'live', page: 1 })),
       queryFn: async () => {

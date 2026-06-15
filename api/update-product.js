@@ -27,6 +27,8 @@ export default async function handler(req, res) {
     subcategory_two,
     subcategory_three,
     subcategory_four,
+    barcode,
+    code,
   } = req.body || {};
   if (!websiteSku) return res.status(400).json({ error: 'websiteSku is required' });
 
@@ -39,6 +41,8 @@ export default async function handler(req, res) {
     patch.image_url_three = images[2] || null;
     patch.image_url_four = images[3] || null;
   }
+  if (barcode !== undefined) patch.barcode = String(barcode).trim();
+  if (code !== undefined) patch.barcode = String(code).trim();
   if (description !== undefined) patch.original_description = String(description).trim();
   if (title !== undefined) patch.title = String(title).trim();
   if (name !== undefined) patch.title = String(name).trim();
@@ -53,14 +57,26 @@ export default async function handler(req, res) {
   patch.updated_at = new Date().toISOString();
   const supabase = getStockAdminClient();
 
-  const { data: product, error: lookupError } = await supabase
+  let table = 'website_stock';
+  let { data: product, error: lookupError } = await supabase
     .from('website_stock')
     .select('sku, updated_at')
     .eq('sku', sku)
     .maybeSingle();
 
   if (lookupError) return res.status(400).json({ error: lookupError.message });
-  if (!product) return res.status(404).json({ error: 'Product not found' });
+
+  if (!product) {
+    const archived = await supabase
+      .from('archived_products')
+      .select('sku, updated_at')
+      .eq('sku', sku)
+      .maybeSingle();
+    if (archived.error) return res.status(400).json({ error: archived.error.message });
+    if (!archived.data) return res.status(404).json({ error: 'Product not found' });
+    product = archived.data;
+    table = 'archived_products';
+  }
 
   if (expectedUpdatedAt && product.updated_at && product.updated_at !== expectedUpdatedAt) {
     return res.status(409).json({
@@ -69,7 +85,7 @@ export default async function handler(req, res) {
     });
   }
 
-  const { error } = await supabase.from('website_stock').update(patch).eq('sku', sku);
+  const { error } = await supabase.from(table).update(patch).eq('sku', sku);
   if (error) return res.status(400).json({ error: error.message });
 
   return res.status(200).json({ ok: true });

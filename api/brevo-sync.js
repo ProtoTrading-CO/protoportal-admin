@@ -62,23 +62,34 @@ export default async function handler(req, res) {
       const contacts = batch?.contacts || [];
       if (!contacts.length) break;
 
-      const rows = contacts.map((c) => {
-        const listIds = c.listIds || [];
-        const listNames = listIds.map((id) => listMap.get(id)).filter(Boolean);
-        const attrs = c.attributes || {};
-        return {
-          brevo_id: c.id,
-          email: c.email,
-          name: [attrs.FIRSTNAME, attrs.LASTNAME].filter(Boolean).join(' ') || attrs.FNAME || null,
-          list_ids: listIds,
-          list_names: listNames,
-          last_campaign_name: campaignSummary.name,
-          last_sent_at: campaignSummary.sentAt,
-          last_open_at: null,
-          last_click_at: null,
-          synced_at: syncedAt,
-        };
-      });
+      const rows = contacts
+        .map((c) => {
+          const email = String(c.email || '').trim().toLowerCase();
+          if (!email) return null;
+          const listIds = c.listIds || [];
+          const listNames = listIds.map((id) => listMap.get(id)).filter(Boolean);
+          const attrs = c.attributes || {};
+          return {
+            brevo_id: c.id,
+            email,
+            name: [attrs.FIRSTNAME, attrs.LASTNAME].filter(Boolean).join(' ') || attrs.FNAME || null,
+            list_ids: listIds,
+            list_names: listNames,
+            last_campaign_name: campaignSummary.name,
+            last_sent_at: campaignSummary.sentAt,
+            last_open_at: null,
+            last_click_at: null,
+            synced_at: syncedAt,
+          };
+        })
+        .filter(Boolean);
+
+      if (!rows.length) {
+        if (contacts.length < limit) break;
+        offset += limit;
+        if (offset >= 5000) break;
+        continue;
+      }
 
       const { error } = await sb.from('crm_contacts').upsert(rows, { onConflict: 'brevo_id' });
       if (error) throw error;

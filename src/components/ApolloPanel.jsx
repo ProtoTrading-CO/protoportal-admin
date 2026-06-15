@@ -362,7 +362,15 @@ export default function ApolloPanel({ taxonomyTree, onShowToast, onGoToApproval,
         .then((r) => r.json())
         .then((json) => {
           const me = getImageGenOperator();
-          const others = (json.active?.batches || []).filter((b) => b.operator && b.operator !== me);
+          const others = (json.active?.batches || []).filter((b) => {
+            if (!b.operator || b.operator === me) return false;
+            const done = Number(b?.done || 0);
+            const total = Number(b?.total || 0);
+            const failed = Number(b?.failed || 0);
+            const pending = total > 0 && done + failed < total;       // items still left
+            const fresh = Date.now() - new Date(b?.created_at || 0).getTime() < 20 * 60 * 1000;
+            return pending && fresh;                                  // genuinely running now
+          });
           setRemoteActive({ batches: others, locks: json.active?.locks?.length || 0 });
         })
         .catch(() => {});

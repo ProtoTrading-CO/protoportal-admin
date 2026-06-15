@@ -459,13 +459,6 @@ export default function FulfillmentPage() {
               </div>
             )}
           </div>
-          {activeUser?.categoryIds?.length > 0 && (
-            <div className="ff-user-cats">
-              {activeUser.categoryIds.map((id) => (
-                <span key={id} className="ff-user-cat-pill">{CATEGORY_LABELS[id] || id}</span>
-              ))}
-            </div>
-          )}
         </div>
 
         {categoryGroups.map((group) => {

@@ -5424,7 +5424,27 @@ html, body { background: #f5f5f5; color: #111827; }
 .cat-sidebar-item--all { font-weight: 700; }
 .cat-sidebar-chevron { display: inline-flex; width: 14px; flex-shrink: 0; color: #94a3b8; }
 .cat-sidebar-chevron--spacer { visibility: hidden; }
-.cat-sidebar-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cat-sidebar-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
+.cat-sidebar-item-row {
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid #f3f4f6;
+}
+.cat-sidebar-item-row .cat-sidebar-item { flex: 1; border-bottom: none; }
+.cat-sidebar-item-row:hover .adm-reorder-cat-edit {
+  opacity: 1;
+  color: #64748b;
+}
+.cat-sidebar-item-row .adm-reorder-cat-edit {
+  opacity: 0.55;
+  align-self: center;
+  margin-right: 8px;
+  flex-shrink: 0;
+}
+.cat-sidebar-item-row .adm-reorder-cat-edit:hover {
+  opacity: 1;
+  color: #dc2626;
+}
 
 .adm-panel-with-sidebar { padding-bottom: 0; }
 .adm-panel-split {

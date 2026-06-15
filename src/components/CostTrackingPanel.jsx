@@ -85,6 +85,16 @@ export default function CostTrackingPanel({ onShowToast }) {
   const summary = data?.summary;
   const logs = data?.logs || [];
   const active = data?.active || { locks: [], batches: [] };
+  // Only batches that are genuinely still running: items left to process AND
+  // started recently. Completed, fully-failed and stale batches drop off.
+  const liveBatches = (active.batches || []).filter((b) => {
+    const done = Number(b?.done || 0);
+    const total = Number(b?.total || 0);
+    const failed = Number(b?.failed || 0);
+    const pending = total > 0 && done + failed < total;
+    const fresh = Date.now() - new Date(b?.created_at || 0).getTime() < 20 * 60 * 1000;
+    return pending && fresh;
+  });
   const today = useMemo(() => {
     const key = new Date().toISOString().slice(0, 10);
     return summary?.byDay?.find((d) => d.day === key) || { usd: 0, zar: 0, count: 0 };
@@ -137,10 +147,10 @@ export default function CostTrackingPanel({ onShowToast }) {
         <div className="cost-tracking-warn">{error}</div>
       )}
 
-      {(active.batches?.length > 0 || active.locks?.length > 0) && (
+      {(liveBatches.length > 0 || active.locks?.length > 0) && (
         <section className="cost-active-section">
           <h3><Zap size={16} /> Active now</h3>
-          {active.batches?.map((b) => (
+          {liveBatches.map((b) => (
             <div key={b.id} className="cost-active-card">
               <strong>{b.operator || 'Unknown'}</strong>
               <span>{b.style || 'Image batch'} · {b.done}/{b.total} done{b.failed ? ` · ${b.failed} failed` : ''}</span>

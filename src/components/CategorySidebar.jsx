@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ChevronDown, ChevronRight, FolderTree } from 'lucide-react';
+import { ChevronDown, ChevronRight, FolderTree, Pencil } from 'lucide-react';
 
 function buildPathFromRoot(tree, targetId, path = []) {
   for (const node of tree) {
@@ -13,7 +13,7 @@ function buildPathFromRoot(tree, targetId, path = []) {
   return null;
 }
 
-function TreeBranch({ node, depth, selectedPath, onSelectPath, isOpen, onToggle, ancestors }) {
+function TreeBranch({ node, depth, selectedPath, onSelectPath, isOpen, onToggle, ancestors, onEditNode }) {
   const hasChildren = node.children?.length > 0;
   const pathHere = [...ancestors, node.id];
   const isSelected = selectedPath.length > 0 && selectedPath[selectedPath.length - 1] === node.id;
@@ -22,25 +22,37 @@ function TreeBranch({ node, depth, selectedPath, onSelectPath, isOpen, onToggle,
 
   return (
     <div className="cat-sidebar-node">
-      <button
-        type="button"
-        className={`cat-sidebar-item${isSelected ? ' cat-sidebar-item--active' : ''}${isOnPath && !isSelected ? ' cat-sidebar-item--path' : ''}`}
-        style={{ paddingLeft: 8 + depth * 14 }}
-        onClick={() => onSelectPath(pathHere)}
-      >
-        {hasChildren ? (
-          <span
-            className="cat-sidebar-chevron"
-            onClick={(e) => { e.stopPropagation(); onToggle(node.id); }}
-            role="presentation"
+      <div className="cat-sidebar-item-row">
+        <button
+          type="button"
+          className={`cat-sidebar-item${isSelected ? ' cat-sidebar-item--active' : ''}${isOnPath && !isSelected ? ' cat-sidebar-item--path' : ''}`}
+          style={{ paddingLeft: 8 + depth * 14 }}
+          onClick={() => onSelectPath(pathHere)}
+        >
+          {hasChildren ? (
+            <span
+              className="cat-sidebar-chevron"
+              onClick={(e) => { e.stopPropagation(); onToggle(node.id); }}
+              role="presentation"
+            >
+              {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+            </span>
+          ) : (
+            <span className="cat-sidebar-chevron cat-sidebar-chevron--spacer" />
+          )}
+          <span className="cat-sidebar-label">{node.label}</span>
+        </button>
+        {onEditNode && (
+          <button
+            type="button"
+            className="adm-reorder-cat-edit"
+            title="Rename"
+            onClick={() => onEditNode({ id: node.id, label: node.label, type: 'subcategory' })}
           >
-            {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-          </span>
-        ) : (
-          <span className="cat-sidebar-chevron cat-sidebar-chevron--spacer" />
+            <Pencil size={11} />
+          </button>
         )}
-        <span className="cat-sidebar-label">{node.label}</span>
-      </button>
+      </div>
       {hasChildren && open && node.children.map((child) => (
         <TreeBranch
           key={child.id}
@@ -51,6 +63,7 @@ function TreeBranch({ node, depth, selectedPath, onSelectPath, isOpen, onToggle,
           isOpen={isOpen}
           onToggle={onToggle}
           ancestors={pathHere}
+          onEditNode={onEditNode}
         />
       ))}
     </div>
@@ -58,7 +71,7 @@ function TreeBranch({ node, depth, selectedPath, onSelectPath, isOpen, onToggle,
 }
 
 /** Expandable category tree — up to 4 sub-levels under each main category. */
-export default function CategorySidebar({ tree = [], selectedPath = [], onSelectPath, showUncategorized = false, uncategorizedCount = 0 }) {
+export default function CategorySidebar({ tree = [], selectedPath = [], onSelectPath, showUncategorized = false, uncategorizedCount = 0, onEditNode }) {
   const [expanded, setExpanded] = useState(() => new Set());
   const [collapsed, setCollapsed] = useState(() => new Set());
 
@@ -122,24 +135,36 @@ export default function CategorySidebar({ tree = [], selectedPath = [], onSelect
       )}
       {tree.map((node) => (
         <div key={node.id} className="cat-sidebar-root">
-          <button
-            type="button"
-            className={`cat-sidebar-item${selectedPath.length === 1 && selectedPath[0] === node.id ? ' cat-sidebar-item--active' : ''}${selectedPath.includes(node.id) && selectedPath[selectedPath.length - 1] !== node.id ? ' cat-sidebar-item--path' : ''}`}
-            onClick={() => handleSelectRoot(node.id)}
-          >
-            {node.children?.length ? (
-              <span
-                className="cat-sidebar-chevron"
-                onClick={(e) => { e.stopPropagation(); toggle(node.id); }}
-                role="presentation"
+          <div className="cat-sidebar-item-row">
+            <button
+              type="button"
+              className={`cat-sidebar-item${selectedPath.length === 1 && selectedPath[0] === node.id ? ' cat-sidebar-item--active' : ''}${selectedPath.includes(node.id) && selectedPath[selectedPath.length - 1] !== node.id ? ' cat-sidebar-item--path' : ''}`}
+              onClick={() => handleSelectRoot(node.id)}
+            >
+              {node.children?.length ? (
+                <span
+                  className="cat-sidebar-chevron"
+                  onClick={(e) => { e.stopPropagation(); toggle(node.id); }}
+                  role="presentation"
+                >
+                  {isOpen(node.id) ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                </span>
+              ) : (
+                <span className="cat-sidebar-chevron cat-sidebar-chevron--spacer" />
+              )}
+              <span className="cat-sidebar-label">{node.label}</span>
+            </button>
+            {onEditNode && (
+              <button
+                type="button"
+                className="adm-reorder-cat-edit"
+                title="Rename category"
+                onClick={() => onEditNode({ id: node.id, label: node.label, type: 'category' })}
               >
-                {isOpen(node.id) ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-              </span>
-            ) : (
-              <span className="cat-sidebar-chevron cat-sidebar-chevron--spacer" />
+                <Pencil size={11} />
+              </button>
             )}
-            <span className="cat-sidebar-label">{node.label}</span>
-          </button>
+          </div>
           {node.children?.length && isOpen(node.id) && node.children.map((child) => (
             <TreeBranch
               key={child.id}
@@ -150,6 +175,7 @@ export default function CategorySidebar({ tree = [], selectedPath = [], onSelect
               isOpen={isOpen}
               onToggle={toggle}
               ancestors={[node.id]}
+              onEditNode={onEditNode}
             />
           ))}
         </div>

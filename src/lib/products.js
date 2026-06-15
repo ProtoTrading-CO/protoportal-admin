@@ -1,5 +1,5 @@
 import { adminProductSearch, fuzzyFilter } from './fuzzySearch';
-import { labelToSlug, resolveCategoryIdsFromTree, slugToLabel } from './taxonomy';
+import { labelToSlug, resolveCategoryIdsFromTree, slugToLabel, slugToLabelFromTree } from './taxonomy';
 import { queryClient } from './queryClient';
 import { queryKeys } from './queryKeys';
 
@@ -440,9 +440,17 @@ export async function uploadDormantImage(file) {
 
 // ─── Admin writes ─────────────────────────────────────────────────────────────
 
+let _liveTaxonomyTree = null;
+
+/** Keep in sync with the live taxonomy tree so renames map to correct DB labels. */
+export function setLiveTaxonomyTree(tree) {
+  _liveTaxonomyTree = Array.isArray(tree) ? tree : null;
+}
+
 function pathToWriteFields(categoryPath = []) {
-  const category = slugToLabel(categoryPath[0]) || '';
-  const subs = categoryPath.slice(1).map((slug) => slugToLabel(slug)).filter(Boolean);
+  const label = (slug) => slugToLabelFromTree(slug, _liveTaxonomyTree);
+  const category = label(categoryPath[0]) || '';
+  const subs = categoryPath.slice(1).map((slug) => label(slug)).filter(Boolean);
   return {
     category,
     subcategory_one: subs[0] || category,
@@ -494,6 +502,7 @@ export async function updateProduct(sku, payload) {
       payload.imageFour,
     ].map((value) => String(value ?? '').trim()).join(',');
   }
+  if (payload.code !== undefined) body.barcode = String(payload.code).trim();
   if (payload.description !== undefined) body.description = payload.description;
   if (payload.name !== undefined) body.title = payload.name;
   if (payload.price !== undefined) body.price = Number(payload.price) || 0;

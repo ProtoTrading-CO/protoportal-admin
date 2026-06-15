@@ -4,7 +4,22 @@ import { parseIntentHint, classifyIntent } from './apollo-intent.js';
 import { validateIntent, validateAnswer } from './apollo-validate.js';
 import { executeIntent, parseLimit } from './apollo-engine.js';
 
-const MODEL = 'google/gemini-2.5-flash';
+function isGreeting(query) {
+  const q = String(query || '').trim();
+  return /^(hi|hello|hey|howdy|good\s+(morning|afternoon|evening))[\s!.,?]*$/i.test(q);
+}
+
+function greetingReply() {
+  return `Hello — I'm **Apollo**, your Proto Trading admin assistant.
+
+Ask me things like:
+- *Show low stock items*
+- *Orders this week*
+- *Top searches this month*
+- *Which products have negative stock?*
+
+I'll pull live numbers from your dashboard. I won't show charts unless you're asking for data.`;
+}
 
 function appendChart(reply, title, labels, values) {
   if (!labels.length) return reply;
@@ -124,11 +139,12 @@ async function fallbackAnswer(userQuery, data, apiKey) {
         {
           role: 'system',
           content: `You are Apollo for Proto Trading admin. Answer ONLY from the live data below. Never invent numbers.
-Use ## headings, bullets, and include a chart block when helpful:
+Use ## headings and bullets. Do NOT include chart blocks unless the user explicitly asks for data, stats, stock levels, orders, or searches.
+When charts are requested, use:
 \`\`\`chart
 {"type":"bar","title":"...","labels":["A"],"values":[1]}
 \`\`\`
-Max 10 chart labels. ZAR currency. Be direct.`,
+Max 10 chart labels. ZAR currency. Be direct and conversational.`,
         },
         {
           role: 'user',
@@ -185,6 +201,15 @@ export default async function handler(req, res) {
   const lastUser = [...messages].reverse().find((m) => m.role === 'user');
   const userQuery = String(lastUser?.content || '').trim();
   if (!userQuery) return res.status(400).json({ error: 'Empty question' });
+
+  if (isGreeting(userQuery)) {
+    return res.status(200).json({
+      reply: greetingReply(),
+      source: 'greeting',
+      intent: 'greeting',
+      indexedAt: new Date().toISOString(),
+    });
+  }
 
   try {
     const data = await getApolloData();

@@ -144,43 +144,75 @@ export async function generateOrderPdfBase64({
   });
   const linkUrl = includeInternalLink ? (fulfillmentUrl || buildFulfillmentUrl(order?.id)) : '';
 
-  // ── Header band (Proto white / red / black) ───────────────────────────
-  doc.setFillColor(255, 255, 255);
-  doc.rect(0, 0, pageWidth, 112, 'F');
+  // ── Header band (black bar with Proto logo) ─────────────────────────────
   doc.setFillColor(196, 0, 0);
   doc.rect(0, 0, pageWidth, 5, 'F');
-  doc.setDrawColor(229, 229, 229);
-  doc.line(0, 112, pageWidth, 112);
-  doc.setTextColor(196, 0, 0);
+  doc.setFillColor(17, 17, 17);
+  doc.rect(0, 5, pageWidth, 105, 'F');
+
+  const logoData = await loadImageDataUrl('/proto-logo.png');
+  let brandX = margin;
+  if (logoData) {
+    try { doc.addImage(logoData, detectImageFormat(logoData), margin, 30, 44, 44); brandX = margin + 56; } catch { brandX = margin; }
+  }
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(11);
-  doc.text('PROTO TRADING', margin, 30);
+  doc.setFontSize(16);
+  doc.setTextColor(255, 255, 255);
+  doc.text('PROTO', brandX, 50);
+  const protoW = doc.getTextWidth('PROTO');
+  doc.setTextColor(220, 38, 38);
+  doc.text(' TRADING', brandX + protoW, 50);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8);
-  doc.setTextColor(100, 100, 100);
-  doc.text('Wholesale you can count on — since 1987', margin, 44);
-  doc.setTextColor(17, 17, 17);
+  doc.setTextColor(150, 150, 150);
+  doc.setCharSpace(1.4);
+  doc.text('ORDER CONFIRMATION', brandX, 66);
+  doc.setCharSpace(0);
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(22);
-  doc.text('Order Confirmation', margin, 70);
+  doc.setFontSize(15);
+  doc.setTextColor(255, 255, 255);
+  doc.text(orderNumber, pageWidth - margin, 48, { align: 'right' });
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(10);
-  doc.setTextColor(80, 80, 80);
-  doc.text(`${orderNumber}  ·  ${dateStr}`, margin, 88);
-  y = 128;
+  doc.setFontSize(9);
+  doc.setTextColor(150, 150, 150);
+  doc.text(dateStr, pageWidth - margin, 64, { align: 'right' });
+  y = 132;
 
-  // ── Customer ──────────────────────────────────────────────────────────
+  // ── Customer details (full sign-up record) ──────────────────────────────
+  const c = order?.customers || {};
+  const contactName = c.contact_name || c.name || customerName;
   doc.setTextColor(15, 23, 42);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(13);
-  doc.text(customerName, margin, y);
-  y += 16;
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(10);
-  doc.setTextColor(71, 85, 105);
-  if (customerEmail) { doc.text(customerEmail, margin, y); y += 14; }
-  if (businessName && businessName !== customerName) { doc.text(businessName, margin, y); y += 14; }
-  y += 6;
+  doc.text(businessName || contactName, margin, y);
+  y += 17;
+
+  const detail = (label, value) => {
+    if (!value) return;
+    ensureSpace(14);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8.5);
+    doc.setTextColor(100, 116, 139);
+    const labelText = `${label}:  `;
+    doc.text(labelText, margin, y);
+    const lw = doc.getTextWidth(labelText);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(30, 41, 59);
+    const vlines = doc.splitTextToSize(String(value), contentWidth - lw);
+    doc.text(vlines, margin + lw, y, { lineHeightFactor: 1.25 });
+    y += Math.max(13, vlines.length * 12);
+  };
+
+  if (businessName && contactName && businessName !== contactName) detail('Contact', contactName);
+  detail('Email', customerEmail);
+  detail('Phone', c.phone);
+  detail('VAT number', c.vat_number);
+  detail('Account code', c.account_code || c.customer_code);
+  detail('Business type', c.business_type);
+  detail('Location', [c.city, c.province, c.country].filter(Boolean).join(', '));
+  detail('Company address', c.company_address);
+  detail('Delivery address', c.delivery_address);
+  y += 8;
 
   // ── Table header ──────────────────────────────────────────────────────
   ensureSpace(30);
@@ -291,24 +323,10 @@ export async function generateOrderPdfBase64({
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(12);
     doc.setTextColor(17, 17, 17);
-    doc.text('Order total (excl. VAT)', margin + 12, y + 18);
+    doc.text('Order total (incl. VAT)', margin + 12, y + 18);
     doc.setTextColor(196, 0, 0);
     doc.text(money(total), margin + contentWidth - 12, y + 18, { align: 'right' });
     y += 40;
-  }
-
-  if (assignedTo) {
-    ensureSpace(52);
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(11);
-    doc.setTextColor(15, 23, 42);
-    doc.text(`Order Handled with Care by ${assignedTo}`, margin, y);
-    y += 16;
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(10);
-    doc.setTextColor(71, 85, 105);
-    doc.text('Personally reviewed and packed — just as we have done for 39 years.', margin, y, { maxWidth: contentWidth });
-    y += 24;
   }
 
   const notes = buildOrderNoteSections({ assignedTo: '', autoNotes, userNotes });
@@ -355,8 +373,7 @@ export async function generateOrderPdfBase64({
   ensureSpace(30);
   doc.setFontSize(9);
   doc.setTextColor(148, 163, 184);
-  doc.text('Proto Trading · South Africa · Prices excl. VAT unless stated otherwise', margin, pageHeight - margin - 14);
-  doc.text('Wholesale you can count on — since 1987', margin, pageHeight - margin);
+  doc.text('Proto Trading · South Africa · All prices incl. VAT', margin, pageHeight - margin);
 
   return doc.output('datauristring').split(',')[1];
 }

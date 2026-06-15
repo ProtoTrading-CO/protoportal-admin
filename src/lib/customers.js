@@ -22,14 +22,50 @@ export async function deleteCustomer(id) {
   if (!res.ok) throw new Error(json.error || 'Failed to delete customer');
 }
 
-export async function approveCustomer(id, approved = true) {
+export async function approveCustomer(id, approved = true, { customerCode } = {}) {
+  const body = { id, is_approved: approved };
+  if (customerCode) body.customer_code = String(customerCode).trim().toUpperCase();
   const res = await fetch('/api/admin-customers', {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id, is_approved: approved }),
+    body: JSON.stringify(body),
   });
   const json = await res.json();
   if (!res.ok) throw new Error(json.error || 'Failed to approve customer');
+}
+
+export async function fetchProtoActiveCustomersPage({ page = 1, pageSize = 50, searchQuery = '' } = {}) {
+  const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+  if (searchQuery) params.set('search', searchQuery);
+  const res = await fetch(`/api/proto-active-customers?${params}`);
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || 'Failed to fetch proto active customers');
+  return {
+    rows: json.rows || [],
+    total: json.total || 0,
+    page: json.page || page,
+    pageSize: json.pageSize || pageSize,
+    migrationRequired: json.migrationRequired,
+    message: json.message,
+  };
+}
+
+export async function updateProtoActiveCustomer(id, fields) {
+  const res = await fetch('/api/proto-active-customers', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id, ...fields }),
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || 'Failed to update proto active customer');
+  return json.row;
+}
+
+export async function seedProtoActiveCustomers() {
+  const res = await fetch('/api/seed-proto-active-customers', { method: 'POST' });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || 'Import failed');
+  return json;
 }
 
 export async function updateCustomerAdmin(id, fields) {

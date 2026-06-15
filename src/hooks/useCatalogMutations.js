@@ -43,7 +43,11 @@ export function useCatalogMutations() {
   });
 
   const softDelete = useMutation({
-    mutationFn: (sku) => recycleProduct(sku, { fromArchive: false }),
+    mutationFn: (arg) => {
+      const sku = typeof arg === 'string' ? arg : arg?.sku;
+      const fromArchive = typeof arg === 'object' && arg?.fromArchive;
+      return recycleProduct(sku, { fromArchive: !!fromArchive });
+    },
     onSettled: () => invalidateCatalogAndStats(queryClient),
   });
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Grip, ImagePlus, Loader2, Pencil, Trash2 } from 'lucide-react';
+import { Grip, Loader2, Pencil, Trash2 } from 'lucide-react';
 import { subcategoryOptionsFromTree } from '../lib/taxonomyAdmin';
 
 function deepestGroupKey(product, mainCategoryId, selectedPath = []) {
@@ -74,6 +74,52 @@ function reorderInsert(prev, moveSet, targetId, { toTop = false } = {}) {
   return sameOrder(prev, next) ? prev : next;
 }
 
+/** Move selection in a multi-column grid: ←/→ one column, ↑/↓ one row. */
+function moveBlockGrid(prev, moveSet, direction, cols) {
+  const columnCount = Math.max(1, cols || 1);
+  const start = prev.findIndex((p) => moveSet.has(p.id));
+  if (start < 0) return prev;
+  let end = start;
+  while (end + 1 < prev.length && moveSet.has(prev[end + 1].id)) end += 1;
+
+  let delta = 0;
+  switch (direction) {
+    case 'left':
+      if (start % columnCount === 0) return prev;
+      delta = -1;
+      break;
+    case 'right':
+      if (end % columnCount === columnCount - 1 || end >= prev.length - 1) return prev;
+      delta = 1;
+      break;
+    case 'up':
+      if (start < columnCount) return prev;
+      delta = -columnCount;
+      break;
+    case 'down':
+      if (end + columnCount >= prev.length) return prev;
+      delta = columnCount;
+      break;
+    default:
+      return prev;
+  }
+
+  const newStart = start + delta;
+  const newEnd = end + delta;
+  if (newStart < 0 || newEnd >= prev.length) return prev;
+
+  const block = prev.slice(start, end + 1);
+  const without = [...prev.slice(0, start), ...prev.slice(end + 1)];
+  without.splice(newStart, 0, ...block);
+  return sameOrder(prev, without) ? prev : without;
+}
+
+function readGridColumnCount(gridEl) {
+  if (!gridEl) return 5;
+  const tracks = window.getComputedStyle(gridEl).gridTemplateColumns.trim().split(/\s+/).filter(Boolean);
+  return Math.max(1, tracks.length);
+}
+
 export default function ReorderGrid({
   products,
   onProductsChange,
@@ -90,6 +136,7 @@ export default function ReorderGrid({
   onPersistOrder,
 }) {
   const scrollRef = useRef(null);
+  const gridRef = useRef(null);
   const scrollRafRef = useRef(null);
   const dragIdRef = useRef(null);
   const overIdRef = useRef(null);
@@ -252,8 +299,32 @@ export default function ReorderGrid({
 
   useEffect(() => () => endDrag(), [endDrag]);
 
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if (dragDisabled || !selectedIds?.size) return;
+      if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown' && e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      const tag = e.target?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      e.preventDefault();
+
+      let direction = 'right';
+      if (e.key === 'ArrowUp') direction = 'up';
+      else if (e.key === 'ArrowDown') direction = 'down';
+      else if (e.key === 'ArrowLeft') direction = 'left';
+
+      const cols = readGridColumnCount(gridRef.current);
+      const next = moveBlockGrid(products, selectedIds, direction, cols);
+      if (next === products) return;
+      orderRef.current = next;
+      onProductsChange(next);
+      scrollRef.current?.focus({ preventScroll: true });
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [dragDisabled, selectedIds, products, onProductsChange]);
+
   return (
-    <div className="adm-reorder-content" ref={scrollRef}>
+    <div className="adm-reorder-content" ref={scrollRef} tabIndex={0}>
       {loading && (
         <div className="adm-loading-inline">
           <Loader2 size={18} className="spin" /> Loading products…
@@ -270,7 +341,7 @@ export default function ReorderGrid({
         ↑ Drop here to move to top
       </div>
 
-      <div className="adm-reorder-grid">
+      <div className="adm-reorder-grid" ref={gridRef}>
         {groups.map((group) => (
           <div key={`grp-${group.id}`} className="adm-reorder-group">
             <div className="adm-reorder-group-header">
@@ -281,7 +352,7 @@ export default function ReorderGrid({
                     type="button"
                     className="adm-reorder-cat-edit"
                     title="Edit subcategory name"
-                    onClick={() => onEditSubcategory({ id: group.id, label: group.label, type: 'subcategory' })}
+                    onClick={() => onEditSubcategory?.({ id: group.id, label: group.label, type: 'subcategory' })}
                   >
                     <Pencil size={11} />
                   </button>
@@ -317,7 +388,10 @@ export default function ReorderGrid({
                       <input
                         type="checkbox"
                         checked={isSelected}
-                        onChange={() => onToggleSelect(product.id)}
+                        onChange={() => {
+                          onToggleSelect(product.id);
+                          scrollRef.current?.focus({ preventScroll: true });
+                        }}
                         className="adm-reorder-checkbox"
                         aria-label={`Select ${product.name}`}
                       />
@@ -335,9 +409,9 @@ export default function ReorderGrid({
                       type="button"
                       onClick={(e) => { e.stopPropagation(); onEditProduct(product); }}
                       className="adm-reorder-edit-btn"
-                      title="Edit image"
+                      title="Edit product"
                     >
-                      <ImagePlus size={16} />
+                      <Pencil size={14} />
                     </button>
                   </div>
                   <div className="adm-thumb adm-thumb--reorder">

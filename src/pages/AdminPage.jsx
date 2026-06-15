@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Archive,
   ArchiveRestore,
@@ -77,6 +77,7 @@ import {
   restoreRecycledProduct,
   saveSortOrder,
   setKeepLiveWhenOos,
+  setLiveTaxonomyTree,
   updateProduct,
   uploadDormantImage,
   uploadDormantImageWithBase64,
@@ -91,7 +92,7 @@ import {
   renameTaxonomyNode,
   subcategoryOptionsFromTree,
 } from '../lib/taxonomyAdmin';
-import { approveCustomer, deleteCustomer, fetchCustomersPage } from '../lib/customers';
+import { approveCustomer, deleteCustomer, fetchCustomersPage, fetchProtoActiveCustomersPage, seedProtoActiveCustomers, updateProtoActiveCustomer } from '../lib/customers';
 import { supabase } from '../lib/supabase';
 import { buildOrderNoteSections, createEmailOrderItems, generateOrderPdfBase64, buildEmailItemsFromOrder } from '../lib/orderDocuments';
 import { displayOrderNumber, buildFulfillmentUrl } from '../lib/orderNumber';
@@ -148,6 +149,27 @@ function applySavedOrder(products, category) {
   if (!saved || !saved.length) return products;
   const orderMap = new Map(saved.map((id, i) => [id, i]));
   return [...products].sort((a, b) => (orderMap.get(a.id) ?? 999999) - (orderMap.get(b.id) ?? 999999));
+}
+
+/** Merge a reordered visible slice back into the full product list (arrow-key reorder). */
+function mergeVisibleReorder(prev, currentVisible, nextVisible) {
+  if (nextVisible.length === prev.length) return nextVisible;
+  const visibleIdSet = new Set(currentVisible.map((p) => p.id));
+  if (nextVisible.length !== currentVisible.length) return prev;
+  const result = [];
+  let merged = false;
+  for (const p of prev) {
+    if (visibleIdSet.has(p.id)) {
+      if (!merged) {
+        result.push(...nextVisible);
+        merged = true;
+      }
+    } else {
+      result.push(p);
+    }
+  }
+  if (!merged) result.push(...nextVisible);
+  return result;
 }
 
 // Legacy flat nav removed — see GroupedSidebar.jsx
@@ -372,7 +394,7 @@ function formatStockUnits(qty, keepLive = false) {
   return `${qty} units`;
 }
 
-function productToForm(product) {
+function productToForm(product, tree = categories) {
   return {
     code: product.code || '',
     name: product.name || '',
@@ -382,7 +404,7 @@ function productToForm(product) {
     imageFour: product.imageFour || product.images?.[3] || '',
     price: String(product.price ?? 0),
     stockOnHand: product.stockOnHand != null ? String(product.stockOnHand) : '',
-    ...categoryFormFromPath(product.categoryPath, categories),
+    ...categoryFormFromPath(product.categoryPath, tree),
     productType: getProductType(product),
   };
 }
@@ -416,7 +438,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const [profileOrdersLoading, setProfileOrdersLoading] = useState(false);
 
   const [contentEditProduct, setContentEditProduct] = useState(null);
-  const [contentEditForm, setContentEditForm] = useState({ image: '', description: '' });
+  const [contentEditForm, setContentEditForm] = useState({ image: '', description: '', code: '' });
   const [contentEditSaving, setContentEditSaving] = useState(false);
   const [contentEditError, setContentEditError] = useState('');
   const [imageUploading, setImageUploading] = useState(false);
@@ -468,6 +490,9 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const [customerPage, setCustomerPage] = useState(1);
   const [customerRows, setCustomerRows] = useState([]);
   const [customerTotal, setCustomerTotal] = useState(0);
+  const [approvalCodes, setApprovalCodes] = useState({});
+  const [protoSeedBusy, setProtoSeedBusy] = useState(false);
+  const [protoNameSaving, setProtoNameSaving] = useState(null);
 
   const [pricingCategory, setPricingCategory] = useState(categories[0]?.id || '');
   const [pricingSubcategory, setPricingSubcategory] = useState('all');
@@ -723,14 +748,49 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const loadCustomers = async () => {
     setLoading(true);
     try {
-      const data = await fetchCustomersPage({ page: customerPage, pageSize: ADMIN_PAGE_SIZE, tab: customerTab, searchQuery: customerSearch });
+      const data = customerTab === 'proto-active'
+        ? await fetchProtoActiveCustomersPage({ page: customerPage, pageSize: ADMIN_PAGE_SIZE, searchQuery: customerSearch })
+        : await fetchCustomersPage({ page: customerPage, pageSize: ADMIN_PAGE_SIZE, tab: customerTab, searchQuery: customerSearch });
       setCustomerRows(data.rows);
       setCustomerTotal(data.total);
+      if (data.migrationRequired && data.message) showToast(data.message, 'warning');
     } catch (err) {
       showToast(err.message || 'Failed to load customers', 'error');
       setCustomerRows([]);
       setCustomerTotal(0);
     } finally { setLoading(false); }
+  };
+
+  const importProtoActiveList = async () => {
+    setProtoSeedBusy(true);
+    try {
+      const json = await seedProtoActiveCustomers();
+      const dupNote = json.skippedDuplicates ? ` (${json.skippedDuplicates} duplicate emails merged)` : '';
+      const nameNote = json.missingNames ? ` · ${json.withNames} with names, ${json.missingNames} still blank (edit inline)` : '';
+      showToast(`Imported ${json.upserted} proto active customers${dupNote}${nameNote}`, 'success');
+      setCustomerTab('proto-active');
+      setCustomerPage(1);
+      await loadCustomers();
+    } catch (err) {
+      showToast(err.message || 'Import failed — check console', 'error');
+      console.error('proto active import:', err);
+    } finally { setProtoSeedBusy(false); }
+  };
+
+  const saveProtoActiveName = async (row, field, value) => {
+    const trimmed = String(value || '').trim();
+    const current = String(row[field] || '').trim();
+    if (trimmed === current) return;
+    setProtoNameSaving(`${row.id}-${field}`);
+    try {
+      const updated = await updateProtoActiveCustomer(row.id, { [field]: trimmed || null });
+      setCustomerRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, ...updated } : r)));
+      showToast('Name saved', 'success');
+    } catch (err) {
+      showToast(err.message || 'Save failed', 'error');
+    } finally {
+      setProtoNameSaving(null);
+    }
   };
 
   const loadCategoryWorkingSet = async (categoryId, target) => {
@@ -770,6 +830,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const reloadTaxonomy = async () => {
     const tree = await fetchTaxonomy();
     setTaxonomyTree(tree);
+    setLiveTaxonomyTree(tree);
     return tree;
   };
 
@@ -1195,7 +1256,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
 
   const openEditProduct = (product) => {
     setEditingProduct(product);
-    setProductForm(productToForm(product));
+    setProductForm(productToForm(product, taxonomyTree));
     setEditorError('');
     setEditorImageUploading(false);
     setEditorImageDragOver('');
@@ -1224,7 +1285,11 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
 
   const openContentEdit = (product) => {
     setContentEditProduct(product);
-    setContentEditForm({ image: product.image || '', description: product.description || '' });
+    setContentEditForm({
+      image: product.image || '',
+      description: product.description || '',
+      code: product.code || product.barcode || '',
+    });
     setContentEditError('');
   };
 
@@ -1238,11 +1303,19 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
       await updateProduct(contentEditProduct.id, {
         image: contentEditForm.image.trim(),
         description: contentEditForm.description,
+        code: contentEditForm.code?.trim() || '',
       });
       // Update local lists so image/description reflects the change without a full reload
-      const patch = { image: contentEditForm.image.trim(), description: contentEditForm.description };
+      const patch = {
+        image: contentEditForm.image.trim(),
+        description: contentEditForm.description,
+        code: contentEditForm.code?.trim() || '',
+        barcode: contentEditForm.code.trim(),
+      };
       setProductRows((prev) => prev.map((p) => p.id === contentEditProduct.id ? { ...p, ...patch } : p));
       setReorderProducts((prev) => prev.map((p) => p.id === contentEditProduct.id ? { ...p, ...patch } : p));
+      queryClient.invalidateQueries({ queryKey: ['catalog'] });
+      invalidateProductCache();
       closeContentEdit();
     } catch (err) {
       setContentEditError(err.message || 'Save failed');
@@ -1292,6 +1365,9 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     try {
       await (editingProduct ? updateProduct(editingProduct.id, payload) : createProduct(payload));
       closeEditor();
+      queryClient.invalidateQueries({ queryKey: ['catalog'] });
+      invalidateProductCache();
+      invalidateAdminCache();
       await loadProducts();
     } catch (err) {
       setEditorError(err.message || 'Save failed');
@@ -1651,6 +1727,21 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     return rows;
   }, [reorderProducts, reorderCategoryPath, reorderSearch]);
 
+  const handleReorderProductsChange = useCallback((nextOrFn) => {
+    setReorderProducts((prev) => {
+      let merged;
+      if (typeof nextOrFn === 'function') merged = nextOrFn(prev);
+      else {
+        const pathFiltered = applyPathFilter(prev, reorderCategoryPath);
+        const q = reorderSearch.trim();
+        const currentVisible = q ? fuzzyFilter(pathFiltered, q) : pathFiltered;
+        merged = mergeVisibleReorder(prev, currentVisible, nextOrFn);
+      }
+      persistOrder(merged);
+      return merged;
+    });
+  }, [reorderCategoryPath, reorderSearch, reorderMainId]);
+
   const toggleSelectAllReorder = () => {
     const ids = visibleReorderProducts.map((p) => p.id);
     const allSelected = ids.length > 0 && ids.every((id) => selectedIds.has(id));
@@ -1709,6 +1800,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
       await renameTaxonomyNode(editTaxonomyModal.id, editTaxonomyModal.label.trim());
       await reloadTaxonomy();
       invalidateAdminCache();
+      queryClient.invalidateQueries({ queryKey: ['catalog'] });
       await loadReorderProducts();
       setEditTaxonomyModal(null);
       showToast('Category updated');
@@ -1723,6 +1815,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     try {
       const json = await createSubcategory(newSubModal.parentId, newSubModal.label.trim());
       await reloadTaxonomy();
+      queryClient.invalidateQueries({ queryKey: ['catalog'] });
       if (json.node?.id) {
         setMoveTargetCategory(newSubModal.parentId);
         setMoveTargetSubcategory(json.node.id);
@@ -1751,6 +1844,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     try {
       await deleteTaxonomyNode(deleteSubModal.id);
       await reloadTaxonomy();
+      queryClient.invalidateQueries({ queryKey: ['catalog'] });
       if (reorderCategoryPath.includes(deleteSubModal.id)) setReorderCategoryPath((prev) => prev.filter((id) => id !== deleteSubModal.id));
       invalidateAdminCache();
       await loadReorderProducts();
@@ -1968,9 +2062,19 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   };
 
   const approveRequest = async (person) => {
+    const customerCode = String(approvalCodes[person.id] || '').trim().toUpperCase();
+    if (!/^[A-Z0-9]{6}$/.test(customerCode)) {
+      showToast('Enter a 6-character customer code before approving', 'error');
+      return;
+    }
     setSaving(person.id);
     try {
-      await approveCustomer(person.id, true);
+      await approveCustomer(person.id, true, { customerCode });
+      setApprovalCodes((prev) => {
+        const next = { ...prev };
+        delete next[person.id];
+        return next;
+      });
       await refreshPendingCount();
       await refreshDashboardStats();
       setCustomerTab('regular');
@@ -2153,7 +2257,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                 }
                 setActiveSection(id);
                 setSidebarOpen(false);
-                if (id === 'catalogue' || id === 'apollo') {
+                if (id === 'catalogue' || id === 'reorder' || id === 'apollo') {
                   window.scrollTo({ top: 0, behavior: 'instant' });
                 }
               }}
@@ -2174,7 +2278,10 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                 onShowToast={showToast}
                 onRefreshStats={refreshDashboardStats}
                 initialStatus={catalogStatus}
-                onEditProduct={(item) => openContentEdit(item)}
+                onEditProduct={(item) => openEditProduct(item)}
+                onEditCategory={setEditTaxonomyModal}
+                onAddSubcategory={(parentId) => setNewSubModal({ parentId, label: '' })}
+                onDeleteSubcategory={(sub) => void openDeleteSubcategory(sub)}
                 onImageFix={(products) => {
                   setImageFixRequest({ id: Date.now(), products });
                   setActiveSection('apollo');
@@ -2184,7 +2291,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
             )}
 
             {activeSection === 'brevo-crm' && (
-              <CrmPanel />
+              <CrmPanel onShowToast={showToast} />
             )}
 
             {activeSection === 'analytics' && (
@@ -2870,12 +2977,12 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
             )}
 
             {/* REORDER */}
-            {false && activeSection === 'reorder' && (
+            {activeSection === 'reorder' && (
               <div className="adm-panel adm-panel--reorder">
                 <div className="adm-section-head adm-section-head--reorder">
                   <div>
                     <h2 className="adm-section-title">Reorder Grid</h2>
-                    <p className="adm-section-note">Select products for bulk actions, or drag by the grip handle to reorder live.</p>
+                    <p className="adm-section-note">Select products for bulk actions, or drag by the grip handle to reorder live. Check one or more products, then use ↑ ↓ arrow keys to move them.</p>
                   </div>
                   <button
                     onClick={() => { setSelectedIds(new Set()); invalidateAdminCache(); void loadReorderProducts(); }}
@@ -2965,7 +3072,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
 
                   <ReorderGrid
                     products={visibleReorderProducts}
-                    onProductsChange={setReorderProducts}
+                    onProductsChange={handleReorderProductsChange}
                     selectedIds={selectedIds}
                     onToggleSelect={toggleSelectReorder}
                     mainCategoryId={reorderMainId}
@@ -2976,7 +3083,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                     onEditProduct={openContentEdit}
                     onEditSubcategory={setEditTaxonomyModal}
                     onDeleteSubcategory={(sub) => void openDeleteSubcategory(sub)}
-                    onPersistOrder={persistOrder}
+                    onPersistOrder={(merged) => persistOrder(merged)}
                   />
                 </div>
 
@@ -3166,9 +3273,12 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                 <div className="adm-section-head">
                   <div>
                     <h2 className="adm-section-title">Customer Management</h2>
-                    <p className="adm-section-note">New sign-ups land in Trade Requests until you approve them. Upload an Excel of emails to bulk-approve allow-listed customers.</p>
+                    <p className="adm-section-note">Proto active customers get instant portal access on sign-up. Everyone else waits in Trade Requests until you assign a 6-digit code and approve. Contact and first name columns are editable — blank rows (red outline) are not in Customer names 2.</p>
                   </div>
                   <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    <button type="button" className="adm-btn-ghost" disabled={protoSeedBusy} onClick={() => void importProtoActiveList()}>
+                      {protoSeedBusy ? 'Importing…' : <><Upload size={14} /> Sync proto active list</>}
+                    </button>
                     <input ref={customerExcelRef} type="file" accept=".xlsx,.xls,.csv" style={{ display: 'none' }} onChange={(e) => { if (e.target.files?.[0]) void handleCustomerExcelApprove(e.target.files[0]); e.target.value = ''; }} />
                     <button type="button" className="adm-btn-ghost" disabled={customerApproveBusy} onClick={() => customerExcelRef.current?.click()}>
                       {customerApproveBusy ? 'Importing…' : <><Upload size={14} /> Approve from Excel</>}
@@ -3179,21 +3289,71 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                 <div className="adm-customer-tabs">
                   <button onClick={() => setCustomerTab('requests')} className={`adm-tab${customerTab === 'requests' ? ' adm-tab--active' : ''}`}>Trade Requests</button>
                   <button onClick={() => setCustomerTab('regular')} className={`adm-tab${customerTab === 'regular' ? ' adm-tab--active' : ''}`}>Approved</button>
+                  <button onClick={() => setCustomerTab('proto-active')} className={`adm-tab${customerTab === 'proto-active' ? ' adm-tab--active' : ''}`}>Proto Active</button>
                   <label className="adm-search adm-search--inline"><Search size={14} /><input value={customerSearch} onChange={(e) => setCustomerSearch(e.target.value)} placeholder="Search…" className="adm-search-input" /></label>
                 </div>
 
-                {customerTab === 'requests' ? (
+                {customerTab === 'proto-active' ? (
                   <div className="adm-list">
-                    <div className="adm-list-head" style={{ gridTemplateColumns: '1.4fr 1fr 0.9fr 1.3fr 0.8fr 180px' }}>
-                      <span>Business Name</span><span>Location</span><span>Date Applied</span><span>Email / Phone</span><span>Whatsapp</span><span>Actions</span>
+                    <div className="adm-list-head" style={{ gridTemplateColumns: '80px 1.2fr 110px 90px 1.1fr 100px 80px 100px 70px' }}>
+                      <span>Code</span><span>Business</span><span>Contact</span><span>First name</span><span>Email</span><span>12mo Sales</span><span>Invoices</span><span>Last purchase</span><span>WhatsApp</span>
+                    </div>
+                    {customerRows.length === 0 && !loading && (
+                      <div className="adm-empty" style={{ padding: '24px 0' }}>
+                        No proto active customers loaded. Click <strong>Sync proto active list</strong> to import from the master file.
+                      </div>
+                    )}
+                    {customerRows.map((row) => (
+                      <div key={row.id || row.email} className="adm-list-row" style={{ gridTemplateColumns: '80px 1.2fr 110px 90px 1.1fr 100px 80px 100px 70px', alignItems: 'center' }}>
+                        <span style={{ fontWeight: 800, fontFamily: 'monospace' }}>{row.account_code}</span>
+                        <span style={{ fontWeight: 600, fontSize: 13 }}>{row.name}</span>
+                        <input
+                          type="text"
+                          className="adm-tiny-input"
+                          defaultValue={row.contact_name || ''}
+                          placeholder="Contact name"
+                          disabled={protoNameSaving === `${row.id}-contact_name`}
+                          onBlur={(e) => void saveProtoActiveName(row, 'contact_name', e.target.value)}
+                          onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }}
+                          style={{ width: '100%', fontSize: 12, borderColor: row.contact_name ? undefined : '#fca5a5' }}
+                          aria-label={`Contact name for ${row.email}`}
+                        />
+                        <input
+                          type="text"
+                          className="adm-tiny-input"
+                          defaultValue={row.first_name || ''}
+                          placeholder="First name"
+                          disabled={protoNameSaving === `${row.id}-first_name`}
+                          onBlur={(e) => void saveProtoActiveName(row, 'first_name', e.target.value)}
+                          onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }}
+                          style={{ width: '100%', fontSize: 12, fontWeight: 600, borderColor: row.first_name ? undefined : '#fca5a5' }}
+                          aria-label={`First name for ${row.email}`}
+                        />
+                        <span style={{ fontSize: 12 }}>{row.email}</span>
+                        <span style={{ fontSize: 12 }}>R{Number(row.sales_last_12_months || 0).toLocaleString('en-ZA', { minimumFractionDigits: 2 })}</span>
+                        <span style={{ fontSize: 12 }}>{row.invoice_count ?? '—'}</span>
+                        <span style={{ fontSize: 11, color: '#6b7280' }}>{row.last_purchase_date ? new Date(row.last_purchase_date).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}</span>
+                        <span><WhatsappOptIn value={null} /></span>
+                      </div>
+                    ))}
+                  </div>
+                ) : customerTab === 'requests' ? (
+                  <div className="adm-list">
+                    <div className="adm-list-head" style={{ gridTemplateColumns: '1.4fr 1fr 0.9fr 1.3fr 0.8fr 90px 200px' }}>
+                      <span>Business Name</span><span>Location</span><span>Date Applied</span><span>Email / Phone</span><span>Whatsapp</span><span>Code</span><span>Actions</span>
                     </div>
                     {customerRows.length === 0 && !loading && (
                       <div className="adm-empty" style={{ padding: '24px 0' }}>No pending trade requests.</div>
                     )}
                     {customerRows.map((person) => (
-                      <div key={person.id} className="adm-list-row" style={{ gridTemplateColumns: '1.4fr 1fr 0.9fr 1.3fr 0.8fr 180px', alignItems: 'center' }}>
+                      <div key={person.id} className="adm-list-row" style={{ gridTemplateColumns: '1.4fr 1fr 0.9fr 1.3fr 0.8fr 90px 200px', alignItems: 'center' }}>
                         <div>
-                          <div style={{ fontWeight: 700, fontSize: 13 }}>{person.business_name || person.name || 'Unknown'}</div>
+                          <div style={{ fontWeight: 700, fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                            {person.business_name || person.name || 'Unknown'}
+                            {person.accept_whatsapp === true && (
+                              <Check size={14} color="#15803d" strokeWidth={3} aria-label="WhatsApp opted in" />
+                            )}
+                          </div>
                           <div className="adm-muted" style={{ fontSize: 11 }}>{person.name}{person.business_type ? ` · ${person.business_type}` : ''}</div>
                         </div>
                         <div style={{ fontSize: 12 }}>{[person.city, person.province, person.country].filter(Boolean).join(', ') || '—'}</div>
@@ -3203,9 +3363,28 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                           <div className="adm-muted" style={{ fontSize: 11 }}>{person.phone || '—'}</div>
                         </div>
                         <div><WhatsappOptIn value={person.accept_whatsapp} /></div>
+                        <div>
+                          <input
+                            type="text"
+                            className="adm-tiny-input"
+                            placeholder="6-digit"
+                            maxLength={6}
+                            value={approvalCodes[person.id] || ''}
+                            onChange={(e) => setApprovalCodes((prev) => ({
+                              ...prev,
+                              [person.id]: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6),
+                            }))}
+                            style={{ width: '72px', fontFamily: 'monospace', fontWeight: 700 }}
+                            aria-label={`Customer code for ${person.email}`}
+                          />
+                        </div>
                         <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
                           <button onClick={() => void openCustomerProfile(person)} className="adm-btn-ghost adm-btn-sm" style={{ padding: '4px 9px', fontSize: 11 }}>View Profile</button>
-                          <button onClick={() => void approveRequest(person)} className="adm-btn-green adm-btn-sm" disabled={saving === person.id}>
+                          <button
+                            onClick={() => void approveRequest(person)}
+                            className="adm-btn-green adm-btn-sm"
+                            disabled={saving === person.id || !/^[A-Z0-9]{6}$/.test(approvalCodes[person.id] || '')}
+                          >
                             {saving === person.id ? '…' : <><Check size={12} /> Approve</>}
                           </button>
                           <button onClick={() => void removeCustomer(person)} className="adm-btn-ghost adm-btn-sm" style={{ padding: '4px 7px', color: '#c40000' }} disabled={saving === `del-${person.id}`}>
@@ -3217,15 +3396,28 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                   </div>
                 ) : (
                   <div className="adm-list">
-                    <div className="adm-list-head" style={{ gridTemplateColumns: '1.2fr 1.2fr 1fr 80px 70px 90px' }}>
-                      <span>Name</span><span>Email</span><span>Phone</span><span>WhatsApp</span><span>Orders</span><span></span>
+                    <div className="adm-list-head" style={{ gridTemplateColumns: '80px 1.1fr 1.1fr 1fr 80px 70px 90px' }}>
+                      <span>Code</span><span>Name</span><span>Email</span><span>Phone</span><span>WhatsApp</span><span>Orders</span><span></span>
                     </div>
                     {customerRows.length === 0 && !loading && (
                       <div className="adm-empty" style={{ padding: '24px 0' }}>No approved customers yet.</div>
                     )}
                     {customerRows.map((person) => (
-                      <div key={person.id} className="adm-list-row" style={{ gridTemplateColumns: '1.2fr 1.2fr 1fr 80px 70px 90px' }}>
-                        <span style={{ fontWeight: 700 }}>{person.name || person.business_name || 'Unnamed'}</span>
+                      <div key={person.id} className="adm-list-row" style={{ gridTemplateColumns: '80px 1.1fr 1.1fr 1fr 80px 70px 90px' }}>
+                        <span style={{ fontWeight: 800, fontFamily: 'monospace', fontSize: 12 }}>{person.customer_code || '—'}</span>
+                        <div>
+                          <span style={{ fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                            {person.name || person.business_name || 'Unnamed'}
+                            {person.accept_whatsapp === true && (
+                              <Check size={14} color="#15803d" strokeWidth={3} aria-label="WhatsApp opted in" />
+                            )}
+                          </span>
+                          {(person.first_name || person.contact_name) && (
+                            <div className="adm-muted" style={{ fontSize: 11 }}>
+                              {[person.first_name, person.contact_name && person.contact_name !== person.name ? person.contact_name : null].filter(Boolean).join(' · ')}
+                            </div>
+                          )}
+                        </div>
                         <span style={{ fontSize: 13 }}>{person.email}</span>
                         <span style={{ fontSize: 13 }}>{person.phone || '—'}</span>
                         <span><WhatsappOptIn value={person.accept_whatsapp} /></span>
@@ -3542,6 +3734,16 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                 <DrawerField icon={MapPin} label="Province" value={profileCustomer.province} />
                 <DrawerField icon={MapPin} label="City" value={profileCustomer.city} />
                 <DrawerField icon={Shield} label="Accept WhatsApp" value={profileCustomer.accept_whatsapp == null ? null : profileCustomer.accept_whatsapp ? 'Yes' : 'No'} />
+                <DrawerField icon={Building2} label="Customer code" value={profileCustomer.customer_code} />
+                {profileCustomer.sales_last_12_months != null && (
+                  <DrawerField icon={Store} label="12mo sales" value={`R${Number(profileCustomer.sales_last_12_months).toLocaleString('en-ZA', { minimumFractionDigits: 2 })}`} />
+                )}
+                {profileCustomer.invoice_count != null && (
+                  <DrawerField icon={Store} label="Invoices (12mo)" value={String(profileCustomer.invoice_count)} />
+                )}
+                {profileCustomer.last_purchase_date && (
+                  <DrawerField icon={Building2} label="Last purchase" value={new Date(profileCustomer.last_purchase_date).toLocaleDateString('en-ZA')} />
+                )}
                 <DrawerField icon={Building2} label="Applied" value={new Date(profileCustomer.created_at).toLocaleString('en-ZA')} />
               </div>
 
@@ -3577,13 +3779,134 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
             <div className="adm-drawer-footer">
               <button onClick={closeCustomerProfile} className="adm-btn-ghost">Close</button>
               {!profileCustomer.is_approved && (
-                <button onClick={() => void approveRequest(profileCustomer)} className="adm-btn-green" disabled={saving === profileCustomer.id}>
-                  {saving === profileCustomer.id ? 'Approving…' : <><Check size={15} /> Approve</>}
-                </button>
+                <>
+                  <input
+                    type="text"
+                    className="adm-tiny-input"
+                    placeholder="6-digit code"
+                    maxLength={6}
+                    value={approvalCodes[profileCustomer.id] || ''}
+                    onChange={(e) => setApprovalCodes((prev) => ({
+                      ...prev,
+                      [profileCustomer.id]: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6),
+                    }))}
+                    style={{ width: 88, fontFamily: 'monospace', fontWeight: 700 }}
+                  />
+                  <button
+                    onClick={() => void approveRequest(profileCustomer)}
+                    className="adm-btn-green"
+                    disabled={saving === profileCustomer.id || !/^[A-Z0-9]{6}$/.test(approvalCodes[profileCustomer.id] || '')}
+                  >
+                    {saving === profileCustomer.id ? 'Approving…' : <><Check size={15} /> Approve</>}
+                  </button>
+                </>
               )}
               <button onClick={() => void removeCustomer(profileCustomer)} className="adm-btn-ghost" style={{ color: '#c40000' }} disabled={saving === `del-${profileCustomer.id}`}>
                 {saving === `del-${profileCustomer.id}` ? '…' : <><Trash2 size={14} /> Delete</>}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Taxonomy modals — used by Product Manager reorder + category sidebar */}
+      {editTaxonomyModal && (
+        <div className="adm-modal-backdrop" onClick={() => setEditTaxonomyModal(null)}>
+          <div className="adm-modal adm-modal--form" onClick={(e) => e.stopPropagation()}>
+            <div className="adm-modal-header">
+              <h3 className="adm-modal-title">Rename {editTaxonomyModal.type === 'category' ? 'category' : 'subcategory'}</h3>
+              <button type="button" className="adm-modal-close" onClick={() => setEditTaxonomyModal(null)} aria-label="Close"><X size={18} /></button>
+            </div>
+            <p className="adm-modal-note">The ID stays the same — only the display name and database labels update.</p>
+            <div className="adm-modal-body">
+              <label className="adm-field">
+                <span className="adm-field-label">Name</span>
+                <input
+                  value={editTaxonomyModal.label}
+                  onChange={(e) => setEditTaxonomyModal((m) => ({ ...m, label: e.target.value }))}
+                  className="adm-field-input"
+                  autoFocus
+                />
+              </label>
+            </div>
+            <div className="adm-modal-footer adm-modal-footer--end">
+              <div className="adm-modal-footer__actions">
+                <button type="button" className="adm-btn-ghost" onClick={() => setEditTaxonomyModal(null)}>Cancel</button>
+                <button type="button" className="adm-btn-red" onClick={() => void saveTaxonomyRename()} disabled={taxonomySaving}>
+                  {taxonomySaving ? 'Saving…' : 'Save'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteSubModal && (
+        <div className="adm-modal-backdrop" onClick={() => setDeleteSubModal(null)}>
+          <div className="adm-modal adm-modal--form" onClick={(e) => e.stopPropagation()}>
+            <div className="adm-modal-header">
+              <h3 className="adm-modal-title">Delete subcategory?</h3>
+              <button type="button" className="adm-modal-close" onClick={() => setDeleteSubModal(null)} aria-label="Close"><X size={18} /></button>
+            </div>
+            <p className="adm-modal-note">
+              Remove <strong>{deleteSubModal.label}</strong> from the catalogue structure.
+              {deleteSubModal.productCount > 0
+                ? ` ${deleteSubModal.productCount} product(s) still use this subcategory — move them first.`
+                : ' No live products are assigned to it.'}
+            </p>
+            <div className="adm-modal-footer adm-modal-footer--end">
+              <div className="adm-modal-footer__actions">
+                <button type="button" className="adm-btn-ghost" onClick={() => setDeleteSubModal(null)}>Cancel</button>
+                <button
+                  type="button"
+                  className="adm-btn-red"
+                  onClick={() => void confirmDeleteSubcategory()}
+                  disabled={taxonomySaving || deleteSubModal.productCount > 0}
+                >
+                  {taxonomySaving ? 'Deleting…' : 'Delete'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {newSubModal && (
+        <div className="adm-modal-backdrop" onClick={() => setNewSubModal(null)}>
+          <div className="adm-modal adm-modal--form" onClick={(e) => e.stopPropagation()}>
+            <div className="adm-modal-header">
+              <h3 className="adm-modal-title">New subcategory</h3>
+              <button type="button" className="adm-modal-close" onClick={() => setNewSubModal(null)} aria-label="Close"><X size={18} /></button>
+            </div>
+            <div className="adm-modal-body">
+              <label className="adm-field">
+                <span className="adm-field-label">Under category</span>
+                <select
+                  value={newSubModal.parentId}
+                  onChange={(e) => setNewSubModal((m) => ({ ...m, parentId: e.target.value }))}
+                  className="adm-field-input"
+                >
+                  {mainCategories.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+                </select>
+              </label>
+              <label className="adm-field">
+                <span className="adm-field-label">Subcategory name</span>
+                <input
+                  value={newSubModal.label}
+                  onChange={(e) => setNewSubModal((m) => ({ ...m, label: e.target.value }))}
+                  className="adm-field-input"
+                  placeholder="e.g. Seasonal Items"
+                  autoFocus
+                />
+              </label>
+            </div>
+            <div className="adm-modal-footer adm-modal-footer--end">
+              <div className="adm-modal-footer__actions">
+                <button type="button" className="adm-btn-ghost" onClick={() => setNewSubModal(null)}>Cancel</button>
+                <button type="button" className="adm-btn-red" onClick={() => void saveNewSubcategory()} disabled={taxonomySaving}>
+                  {taxonomySaving ? 'Creating…' : 'Create'}
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -3685,6 +4008,17 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                 onChange={(e) => setContentEditForm((f) => ({ ...f, image: e.target.value }))}
                 className="adm-field-input"
                 placeholder="https://example.com/product.jpg"
+                style={{ fontSize: 12 }}
+              />
+            </label>
+
+            <label style={{ display: 'grid', gap: 5, marginBottom: 18 }}>
+              <span style={{ fontWeight: 700, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Barcode</span>
+              <input
+                value={contentEditForm.code || ''}
+                onChange={(e) => setContentEditForm((f) => ({ ...f, code: e.target.value }))}
+                className="adm-field-input"
+                placeholder="Product barcode"
                 style={{ fontSize: 12 }}
               />
             </label>
@@ -4145,6 +4479,10 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
         open={fulfillmentSettingsOpen}
         onClose={() => setFulfillmentSettingsOpen(false)}
       />
+
+      {toast && (
+        <div className={`adm-toast adm-toast--${toast.type}`} role="status">{toast.message}</div>
+      )}
     </div>
   );
 }
