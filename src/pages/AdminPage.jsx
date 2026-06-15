@@ -92,7 +92,7 @@ import {
   renameTaxonomyNode,
   subcategoryOptionsFromTree,
 } from '../lib/taxonomyAdmin';
-import { approveCustomer, deleteCustomer, fetchCustomersPage, fetchProtoActiveCustomersPage, seedProtoActiveCustomers, updateProtoActiveCustomer } from '../lib/customers';
+import { approveCustomer, deleteCustomer, fetchCustomersPage, fetchProtoActiveCustomersPage, seedProtoActiveCustomers, updateProtoActiveCustomer, updateCustomerAdmin } from '../lib/customers';
 import { supabase } from '../lib/supabase';
 import { buildOrderNoteSections, createEmailOrderItems, generateOrderPdfBase64, buildEmailItemsFromOrder } from '../lib/orderDocuments';
 import { displayOrderNumber, buildFulfillmentUrl } from '../lib/orderNumber';
@@ -436,6 +436,9 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const [profileCustomer, setProfileCustomer] = useState(null);
   const [profileOrders, setProfileOrders] = useState([]);
   const [profileOrdersLoading, setProfileOrdersLoading] = useState(false);
+  const [profileEditing, setProfileEditing] = useState(false);
+  const [profileForm, setProfileForm] = useState({});
+  const [savingProfile, setSavingProfile] = useState(false);
 
   const [contentEditProduct, setContentEditProduct] = useState(null);
   const [contentEditForm, setContentEditForm] = useState({ image: '', description: '', code: '' });
@@ -2042,6 +2045,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
 
   const openCustomerProfile = async (person) => {
     setProfileCustomer(person);
+    setProfileEditing(false);
     setProfileOrders([]);
     setProfileOrdersLoading(true);
     try {
@@ -2052,7 +2056,36 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     finally { setProfileOrdersLoading(false); }
   };
 
-  const closeCustomerProfile = () => { setProfileCustomer(null); setProfileOrders([]); };
+  const closeCustomerProfile = () => { setProfileCustomer(null); setProfileOrders([]); setProfileEditing(false); };
+
+  const SPEND_BANDS = ['R0 – R5,000', 'R5,000 – R10,000', 'R10,000 – R500,000', 'R500,000 – R1,000,000', 'R1,000,000+'];
+  const startEditProfile = () => {
+    setProfileForm({
+      name: profileCustomer.name || '',
+      phone: profileCustomer.phone || '',
+      business_name: profileCustomer.business_name || '',
+      business_type: profileCustomer.business_type || '',
+      monthly_spend: profileCustomer.monthly_spend || '',
+      website: profileCustomer.website || '',
+      vat_number: profileCustomer.vat_number || '',
+      company_address: profileCustomer.company_address || '',
+      delivery_address: profileCustomer.delivery_address || '',
+    });
+    setProfileEditing(true);
+  };
+  const saveProfileEdit = async () => {
+    setSavingProfile(true);
+    try {
+      const row = await updateCustomerAdmin(profileCustomer.id, profileForm);
+      setProfileCustomer(row);
+      setProfileEditing(false);
+      await loadCustomers();
+      showToast('Customer profile updated');
+    } catch (err) {
+      showToast(err.message || 'Update failed', 'error');
+    } finally { setSavingProfile(false); }
+  };
+  const setPf = (key) => (e) => setProfileForm((f) => ({ ...f, [key]: e.target.value }));
 
   const refreshPendingCount = async () => {
     try {
@@ -3719,33 +3752,75 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
           <div className="adm-drawer" onClick={(e) => e.stopPropagation()}>
             <div className="adm-drawer-head">
               <h3>Customer Profile</h3>
-              <button onClick={closeCustomerProfile} className="adm-icon-btn"><X size={16} /></button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                {!profileEditing && (
+                  <button onClick={startEditProfile} className="adm-btn-ghost adm-btn-sm">Edit</button>
+                )}
+                <button onClick={closeCustomerProfile} className="adm-icon-btn"><X size={16} /></button>
+              </div>
             </div>
             <div className="adm-drawer-body">
               <div className="adm-drawer-avatar">{(profileCustomer.business_name || profileCustomer.name || '?')[0].toUpperCase()}</div>
               <h2 className="adm-drawer-biz">{profileCustomer.business_name || profileCustomer.name}</h2>
 
-              <div className="adm-drawer-fields">
-                <DrawerField icon={User} label="Contact person" value={profileCustomer.name} />
-                <DrawerField icon={Mail} label="Email" value={profileCustomer.email} />
-                <DrawerField icon={Phone} label="Phone" value={profileCustomer.phone} />
-                <DrawerField icon={Store} label="Business type" value={profileCustomer.business_type} />
-                <DrawerField icon={Globe} label="Country" value={profileCustomer.country} />
-                <DrawerField icon={MapPin} label="Province" value={profileCustomer.province} />
-                <DrawerField icon={MapPin} label="City" value={profileCustomer.city} />
-                <DrawerField icon={Shield} label="Accept WhatsApp" value={profileCustomer.accept_whatsapp == null ? null : profileCustomer.accept_whatsapp ? 'Yes' : 'No'} />
-                <DrawerField icon={Building2} label="Customer code" value={profileCustomer.customer_code} />
-                {profileCustomer.sales_last_12_months != null && (
-                  <DrawerField icon={Store} label="12mo sales" value={`R${Number(profileCustomer.sales_last_12_months).toLocaleString('en-ZA', { minimumFractionDigits: 2 })}`} />
-                )}
-                {profileCustomer.invoice_count != null && (
-                  <DrawerField icon={Store} label="Invoices (12mo)" value={String(profileCustomer.invoice_count)} />
-                )}
-                {profileCustomer.last_purchase_date && (
-                  <DrawerField icon={Building2} label="Last purchase" value={new Date(profileCustomer.last_purchase_date).toLocaleDateString('en-ZA')} />
-                )}
-                <DrawerField icon={Building2} label="Applied" value={new Date(profileCustomer.created_at).toLocaleString('en-ZA')} />
-              </div>
+              {profileEditing ? (
+                <div style={{ display: 'grid', gap: 12, marginTop: 4 }}>
+                  {[
+                    ['Contact person', 'name', 'text'],
+                    ['Phone', 'phone', 'tel'],
+                    ['Business name', 'business_name', 'text'],
+                    ['Business type', 'business_type', 'text'],
+                    ['VAT number', 'vat_number', 'text'],
+                    ['Website / social', 'website', 'text'],
+                  ].map(([label, key, type]) => (
+                    <div key={key}>
+                      <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 5 }}>{label}</label>
+                      <input className="adm-field-input" type={type} value={profileForm[key] || ''} onChange={setPf(key)} style={{ width: '100%' }} />
+                    </div>
+                  ))}
+                  <div>
+                    <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 5 }}>Monthly spend</label>
+                    <select className="adm-field-input" value={profileForm.monthly_spend || ''} onChange={setPf('monthly_spend')} style={{ width: '100%' }}>
+                      <option value="">—</option>
+                      {SPEND_BANDS.map((b) => <option key={b} value={b}>{b}</option>)}
+                    </select>
+                  </div>
+                  {[['Company address', 'company_address'], ['Delivery address', 'delivery_address']].map(([label, key]) => (
+                    <div key={key}>
+                      <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 5 }}>{label}</label>
+                      <textarea className="adm-field-input" rows={2} value={profileForm[key] || ''} onChange={setPf(key)} style={{ width: '100%', resize: 'vertical' }} />
+                    </div>
+                  ))}
+                  <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
+                    <button className="adm-btn-green" onClick={() => void saveProfileEdit()} disabled={savingProfile}>{savingProfile ? 'Saving…' : 'Save changes'}</button>
+                    <button className="adm-btn-ghost" onClick={() => setProfileEditing(false)} disabled={savingProfile}>Cancel</button>
+                  </div>
+                </div>
+              ) : (
+                <div className="adm-drawer-fields">
+                  <DrawerField icon={User} label="Contact person" value={profileCustomer.name} />
+                  <DrawerField icon={Mail} label="Email" value={profileCustomer.email} />
+                  <DrawerField icon={Phone} label="Phone" value={profileCustomer.phone} />
+                  <DrawerField icon={Store} label="Business type" value={profileCustomer.business_type} />
+                  <DrawerField icon={Store} label="Monthly spend" value={profileCustomer.monthly_spend} />
+                  <DrawerField icon={Globe} label="Website / social" value={profileCustomer.website} />
+                  <DrawerField icon={Shield} label="Accept WhatsApp" value={profileCustomer.accept_whatsapp == null ? null : profileCustomer.accept_whatsapp ? 'Yes' : 'No'} />
+                  <DrawerField icon={Building2} label="Customer code" value={profileCustomer.customer_code} />
+                  {profileCustomer.vat_number && <DrawerField icon={Shield} label="VAT number" value={profileCustomer.vat_number} />}
+                  {profileCustomer.company_address && <DrawerField icon={MapPin} label="Company address" value={profileCustomer.company_address} />}
+                  {profileCustomer.delivery_address && <DrawerField icon={MapPin} label="Delivery address" value={profileCustomer.delivery_address} />}
+                  {profileCustomer.sales_last_12_months != null && (
+                    <DrawerField icon={Store} label="12mo sales" value={`R${Number(profileCustomer.sales_last_12_months).toLocaleString('en-ZA', { minimumFractionDigits: 2 })}`} />
+                  )}
+                  {profileCustomer.invoice_count != null && (
+                    <DrawerField icon={Store} label="Invoices (12mo)" value={String(profileCustomer.invoice_count)} />
+                  )}
+                  {profileCustomer.last_purchase_date && (
+                    <DrawerField icon={Building2} label="Last purchase" value={new Date(profileCustomer.last_purchase_date).toLocaleDateString('en-ZA')} />
+                  )}
+                  <DrawerField icon={Building2} label="Applied" value={new Date(profileCustomer.created_at).toLocaleString('en-ZA')} />
+                </div>
+              )}
 
               {/* Order history */}
               <div style={{ marginTop: 24 }}>
