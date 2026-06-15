@@ -291,7 +291,7 @@ export default function FulfillmentPage() {
   const total = items.filter((it) => !it.removed).reduce((s, it) => s + it.finalQty * (it.unitPrice || it.price || 0), 0);
   const hasPrices = items.some((it) => it.unitPrice || it.price);
   const buildFinalItems = () => items.filter((it) => !it.removed).map(({ removed, finalQty, swapped, originalCode, originalName, idx, mainCategoryId, mainCategoryLabel, ...rest }) => ({ ...rest, qty: finalQty }));
-  const combinedNotes = [activeUser ? `Handled by: ${activeUser.name}` : '', autoNotes, userNotes].filter(Boolean).join('\n\n');
+  const combinedNotes = [autoNotes, userNotes].filter(Boolean).join('\n\n');
 
   const doSave = async () => {
     setSaving(true);

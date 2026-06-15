@@ -85,7 +85,7 @@ function buildEmailHtml({
         </tr>`;
     }
     const qtyChanged = item.originalQty != null && item.qty !== item.originalQty;
-    const lineTotal = item.unitPrice ? (item.qty * item.unitPrice * 1.15).toFixed(2) : null;
+    const lineTotal = item.unitPrice ? (item.qty * item.unitPrice).toFixed(2) : null;
     return `
       <tr style="background:${qtyChanged ? '#fffbeb' : 'transparent'};border-bottom:1px solid #f1f5f9;">
         <td style="padding:8px 12px">
@@ -147,7 +147,7 @@ function buildEmailHtml({
     ${total != null ? `
     <div style="margin-top:16px;padding:14px 12px;background:#fafafa;border-radius:8px;border:1px solid #e5e5e5;border-left:4px solid #c40000;display:flex;justify-content:space-between;align-items:center">
       <span style="font-size:14px;font-weight:700;color:#111111">Total (incl. VAT)</span>
-      <span style="font-size:20px;font-weight:900;color:#c40000">R ${(Number(total) * 1.15).toFixed(2)}</span>
+      <span style="font-size:20px;font-weight:900;color:#c40000">R ${Number(total).toFixed(2)}</span>
     </div>` : ''}
 
     ${allNotes ? `
