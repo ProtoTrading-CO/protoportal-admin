@@ -29,7 +29,6 @@ import {
   Lock,
   Megaphone,
   Upload,
-  LogOut,
   Mail,
   MapPin,
   Menu,
@@ -391,7 +390,7 @@ function WhatsappOptIn({ value }) {
     : <X size={16} color="#dc2626" strokeWidth={3} aria-label="WhatsApp no" />;
 }
 
-export default function AdminPage({ customer, onLogout, onViewPortal }) {
+export default function AdminPage({ customer, onViewPortal }) {
   const [activeSection, setActiveSection] = useState('catalogue');
   const [catalogStatus, setCatalogStatus] = useState('live');
   const [imageFixRequest, setImageFixRequest] = useState(null);
@@ -2291,7 +2290,6 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
             <button type="button" onClick={goHome} className="adm-btn-ghost"><Home size={15} /><span className="adm-btn-text">Home</span></button>
             <button onClick={() => void refreshCurrentSection()} className="adm-btn-ghost"><RefreshCw size={15} /><span className="adm-btn-text">Refresh</span></button>
             <button onClick={onViewPortal} className="adm-btn-ghost"><ArrowLeftRight size={15} /><span className="adm-btn-text">Portal</span></button>
-            <button onClick={onLogout} className="adm-btn-dark"><LogOut size={15} /><span className="adm-btn-text">Log out</span></button>
           </div>
         </div>
       </header>

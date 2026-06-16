@@ -66,36 +66,17 @@ function extractOrderToken(req) {
   return String(req.headers['x-order-token'] || req.query?.k || req.body?.orderToken || '').trim();
 }
 
-/** Admin dashboard key required. Sends 401/503 and returns false on failure. */
-export function requireAdminKey(req, res) {
-  if (!process.env.ADMIN_DASH_KEY) {
-    res.status(503).json({ error: 'ADMIN_DASH_KEY is not configured on this deployment' });
-    return false;
-  }
-  if (hasAdminKey(req)) return true;
-  res.status(401).json({ error: 'Unauthorised — admin key required' });
-  return false;
+/** Auth removed — dashboard is open. Always allows the request. */
+export function requireAdminKey() {
+  return true;
 }
 
-/**
- * Admin key OR a valid signed token for the order referenced in the request.
- * Used by fulfillment endpoints reached from WhatsApp links without a login.
- */
-export function requireAdminOrOrderToken(req, res) {
-  if (hasAdminKey(req)) return true;
-  const orderId = extractOrderId(req);
-  const token = extractOrderToken(req);
-  if (orderId && verifyOrderToken(orderId, token)) return true;
-  res.status(401).json({ error: 'Unauthorised' });
-  return false;
+/** Auth removed — fulfillment endpoints are open. Always allows the request. */
+export function requireAdminOrOrderToken() {
+  return true;
 }
 
-/** Vercel cron (Authorization: Bearer CRON_SECRET) or admin key. */
-export function requireCronOrAdminKey(req, res) {
-  const cronSecret = process.env.CRON_SECRET;
-  const authHeader = String(req.headers.authorization || '');
-  if (cronSecret && safeEqual(authHeader, `Bearer ${cronSecret}`)) return true;
-  if (hasAdminKey(req)) return true;
-  res.status(401).json({ error: 'Unauthorised' });
-  return false;
+/** Auth removed — cron/admin endpoints are open. Always allows the request. */
+export function requireCronOrAdminKey() {
+  return true;
 }

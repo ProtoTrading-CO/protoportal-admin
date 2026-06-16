@@ -25,7 +25,9 @@ npm run build
 - `api/` — serverless backend
 
 ## Auth
-No real login yet — temporary hardcoded admin in `Root.jsx`.
+None — login removed. The dashboard is publicly accessible and the `api/`
+gate functions (`requireAdminKey` / `requireAdminOrOrderToken` /
+`requireCronOrAdminKey` in `api/_admin-auth.js`) always allow the request.
 
 ## Agent skill
 See `.cursor/skills/protoportal-admin/SKILL.md` for full architecture.
