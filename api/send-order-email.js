@@ -51,6 +51,16 @@ async function loadPresaleAttachment(orderId) {
   };
 }
 
+/** Download the order confirmation PDF the browser uploaded via signed URL. */
+async function loadConfirmationAttachment(storagePath, name) {
+  if (!storagePath) return null;
+  const supabase = getPortalAdminClient();
+  const { data, error } = await supabase.storage.from(SITE_CONFIG_BUCKET).download(storagePath);
+  if (error) return null;
+  const buffer = Buffer.from(await data.arrayBuffer());
+  return { name, content: buffer.toString('base64') };
+}
+
 function buildEmailHtml({
   customerName,
   orderNumber,
@@ -197,6 +207,7 @@ export default async function handler(req, res) {
     total,
     pdfBase64,
     pdfFilename,
+    confirmationStoragePath,
   } = req.body || {};
 
   if (!to) return res.status(400).json({ error: 'Recipient email (to) is required.' });
@@ -205,17 +216,20 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'Brevo API key not configured (BREVO_API_KEY).' });
   }
 
-  if (!pdfBase64) {
+  const confirmationName = pdfFilename || `proto-order-confirmation-${orderNumber || orderId || 'order'}.pdf`;
+
+  // Prefer the PDF uploaded to storage via signed URL (no request-size limit).
+  // Fall back to inlined base64 for older clients.
+  let confirmationAttachment = await loadConfirmationAttachment(confirmationStoragePath, confirmationName);
+  if (!confirmationAttachment && pdfBase64) {
+    confirmationAttachment = { name: confirmationName, content: pdfBase64 };
+  }
+  if (!confirmationAttachment) {
     return res.status(400).json({ error: 'Order confirmation PDF is required.' });
   }
 
   const presaleAttachment = await loadPresaleAttachment(orderId);
-  const attachments = [
-    {
-      name: pdfFilename || `proto-order-confirmation-${orderNumber || orderId || 'order'}.pdf`,
-      content: pdfBase64,
-    },
-  ];
+  const attachments = [confirmationAttachment];
   if (presaleAttachment) attachments.push(presaleAttachment);
 
   const html = buildEmailHtml({

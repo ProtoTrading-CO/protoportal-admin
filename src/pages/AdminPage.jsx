@@ -93,7 +93,7 @@ import {
 } from '../lib/taxonomyAdmin';
 import { approveCustomer, deleteCustomer, fetchCustomersPage, fetchProtoActiveCustomersPage, seedProtoActiveCustomers, updateProtoActiveCustomer, updateCustomerAdmin } from '../lib/customers';
 import { supabase } from '../lib/supabase';
-import { buildOrderNoteSections, createEmailOrderItems, generateOrderPdfBase64, buildEmailItemsFromOrder } from '../lib/orderDocuments';
+import { buildOrderNoteSections, createEmailOrderItems, generateOrderPdfBase64, buildEmailItemsFromOrder, base64ToBlob } from '../lib/orderDocuments';
 import { displayOrderNumber, buildFulfillmentUrl } from '../lib/orderNumber';
 import { fetchPresaleInvoices, uploadPresaleInvoice } from '../lib/presaleInvoice';
 import { fetchConfirmationSent, markConfirmationSent, fetchPaymentRecords, uploadPop, setPaymentStatus } from '../lib/orderPayment';
@@ -1021,6 +1021,21 @@ export default function AdminPage({ customer, onViewPortal }) {
         total,
         hasPrices,
       });
+      // Upload the PDF straight to storage via a signed URL so we never hit
+      // Vercel's 4.5 MB request-body limit (large PDFs used to 413 on send).
+      const urlRes = await fetch('/api/order-confirmation-upload-url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderId: order.id }),
+      });
+      const urlData = await urlRes.json();
+      if (!urlRes.ok) throw new Error(urlData.error || 'Could not prepare PDF upload');
+      const putRes = await fetch(urlData.signedUrl, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/pdf', 'x-upsert': 'true' },
+        body: base64ToBlob(pdfBase64, 'application/pdf'),
+      });
+      if (!putRes.ok) throw new Error('Could not upload order confirmation PDF');
       const emailRes = await fetch('/api/send-order-email', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1034,7 +1049,7 @@ export default function AdminPage({ customer, onViewPortal }) {
           userNotes: order.order_change_notes || '',
           assignedTo: activeFulfillmentUser?.name || '',
           total,
-          pdfBase64,
+          confirmationStoragePath: urlData.path,
           pdfFilename: `proto-order-confirmation-${displayOrderNumber(order)}.pdf`,
         }),
       });

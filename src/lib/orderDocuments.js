@@ -75,18 +75,39 @@ function money(value) {
   return new Intl.NumberFormat('en-ZA', { style: 'currency', currency: 'ZAR' }).format(Number(value || 0));
 }
 
-async function loadImageDataUrl(url) {
+function blobToDataUrl(blob) {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => resolve(null);
+    reader.readAsDataURL(blob);
+  });
+}
+
+// Images render at 44pt in the PDF, so embedding full-resolution source images
+// just bloats the file (and used to push the email payload past size limits).
+// Downscale to a small JPEG before embedding.
+async function loadImageDataUrl(url, maxPx = 160) {
   if (!url) return null;
   try {
     const res = await fetch(url, { mode: 'cors' });
     if (!res.ok) return null;
     const blob = await res.blob();
-    return await new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
-      reader.onerror = () => resolve(null);
-      reader.readAsDataURL(blob);
-    });
+    const bitmap = await createImageBitmap(blob).catch(() => null);
+    if (!bitmap) return await blobToDataUrl(blob);
+
+    const scale = Math.min(1, maxPx / Math.max(bitmap.width, bitmap.height));
+    const w = Math.max(1, Math.round(bitmap.width * scale));
+    const h = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(bitmap, 0, 0, w, h);
+    bitmap.close?.();
+    return canvas.toDataURL('image/jpeg', 0.82);
   } catch {
     return null;
   }
@@ -379,12 +400,17 @@ export async function generateOrderPdfBase64({
   return doc.output('datauristring').split(',')[1];
 }
 
-/** Open a base64 PDF in a new tab (avoids blocked data: URL fetches). */
-export function openPdfBase64Preview(pdfBase64, filename = 'proto-order-preview.pdf') {
-  const binary = atob(pdfBase64);
+/** Convert a base64 string into a Blob (for direct uploads / object URLs). */
+export function base64ToBlob(base64, type = 'application/pdf') {
+  const binary = atob(base64);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  const blob = new Blob([bytes], { type: 'application/pdf' });
+  return new Blob([bytes], { type });
+}
+
+/** Open a base64 PDF in a new tab (avoids blocked data: URL fetches). */
+export function openPdfBase64Preview(pdfBase64, filename = 'proto-order-preview.pdf') {
+  const blob = base64ToBlob(pdfBase64, 'application/pdf');
   const url = URL.createObjectURL(blob);
   const opened = window.open(url, '_blank', 'noopener,noreferrer');
   if (!opened) {
