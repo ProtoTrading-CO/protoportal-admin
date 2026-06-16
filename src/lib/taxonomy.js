@@ -48,6 +48,89 @@ export function slugToLabelFromTree(slug, tree) {
   return slugToLabel(slug);
 }
 
+/** Legacy nav ids whose slug no longer matches labelToSlug(label) after a rename. */
+const LEGACY_NAV_ALIASES = {
+  'arts-crafts-stationery': 'art-supplies-and-stationery',
+};
+
+/**
+ * Map a navigation path (taxonomy node ids) to product categoryPath slugs.
+ * Sort orders and product counts must use this key so the trade portal matches.
+ */
+export function resolveNavPathForProducts(navPath, categories) {
+  if (!Array.isArray(navPath) || !navPath.length) return [];
+  if (!Array.isArray(categories) || !categories.length) {
+    return navPath.map((seg, i) => (i === 0 && LEGACY_NAV_ALIASES[seg]) || seg);
+  }
+
+  const out = [];
+  let nodes = categories;
+  for (let i = 0; i < navPath.length; i += 1) {
+    const seg = navPath[i];
+    const node = (nodes || []).find((n) => n.id === seg);
+    if (!node) {
+      out.push(i === 0 && LEGACY_NAV_ALIASES[seg] ? LEGACY_NAV_ALIASES[seg] : seg);
+      break;
+    }
+    if (i === 0 && LEGACY_NAV_ALIASES[seg]) {
+      out.push(LEGACY_NAV_ALIASES[seg]);
+    } else {
+      out.push(labelToSlug(node.label));
+    }
+    nodes = node.children || [];
+  }
+  return out;
+}
+
+/** Canonical key for sort-order storage (matches trade portal lookup). */
+export function sortOrderCategoryKey(navPath, categories) {
+  const resolved = resolveNavPathForProducts(navPath, categories);
+  if (resolved.length) return resolved.join('/');
+  return Array.isArray(navPath) && navPath.length ? navPath.join('/') : '';
+}
+
+/** All keys that may hold a saved order for this nav path (canonical + legacy). */
+export function sortOrderLookupKeys(navPath, categories) {
+  if (!Array.isArray(navPath) || !navPath.length) return [];
+  const keys = [];
+  const seen = new Set();
+  const add = (key) => {
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    keys.push(key);
+  };
+
+  add(sortOrderCategoryKey(navPath, categories));
+  add(navPath.join('/'));
+
+  const resolved = resolveNavPathForProducts(navPath, categories);
+  if (resolved.length) add(resolved.join('/'));
+
+  const alias = LEGACY_NAV_ALIASES[navPath[0]];
+  if (alias) {
+    add([alias, ...navPath.slice(1)].join('/'));
+    add([navPath[0], ...navPath.slice(1)].join('/'));
+  }
+
+  return keys;
+}
+
+/** Find skuOrder[] for a category path in a sort-order store. */
+export function lookupSortOrder(sortOrders, navPath, categories) {
+  if (!sortOrders || !navPath?.length) return null;
+  for (const key of sortOrderLookupKeys(navPath, categories)) {
+    const skuOrder = sortOrders[key]?.skuOrder;
+    if (Array.isArray(skuOrder) && skuOrder.length) return skuOrder;
+  }
+  return null;
+}
+
+export function applySkuOrder(products, skuOrder) {
+  if (!skuOrder?.length) return products;
+  const orderMap = new Map(skuOrder.map((id, i) => [id, i]));
+  return [...products].sort((a, b) => (orderMap.get(a.id) ?? 999999) - (orderMap.get(b.id) ?? 999999));
+}
+
 /** Build a slug categoryPath from human labels (category + ordered subcategory levels). */
 export function buildCategoryPath(category, subLabels = []) {
   const catSlug = labelToSlug(category);
