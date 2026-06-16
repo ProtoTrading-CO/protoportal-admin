@@ -21,7 +21,7 @@ import { useCatalogMutations } from '../hooks/useCatalogMutations';
 import { queryClient } from '../lib/queryClient';
 import { queryKeys } from '../lib/queryKeys';
 import { subscribeImageBatch } from '../lib/imageBatchTracker';
-import { sortOrderCategoryKey } from '../lib/taxonomy';
+import { sortOrderCategoryKey, lookupSortOrder, applySkuOrder, sortOrderLookupKeys } from '../lib/taxonomy';
 
 const STATUS_META = {
   live: { label: 'Live', icon: PackagePlus },
@@ -157,18 +157,20 @@ export default function ProductManagerEngine({
     : '__all__';
 
   const loadSortOrder = useCallback(async (baseRows) => {
-    if (!categoryKey || categoryKey === '__all__') return;
+    if (!categoryPath.length || categoryKey === '__all__') return;
     try {
-      const res = await fetch(`/api/category-sort-order?categoryKey=${encodeURIComponent(categoryKey)}`);
-      const json = await res.json();
+      const res = await fetch('/api/category-sort-order');
+      const store = await res.json();
       if (!res.ok) return;
-      setSortOrderMeta({ updatedAt: json.updatedAt });
-      if (json.skuOrder?.length && baseRows?.length) {
-        const orderMap = new Map(json.skuOrder.map((id, i) => [id, i]));
-        setReorderProducts([...baseRows].sort((a, b) => (orderMap.get(a.id) ?? 999999) - (orderMap.get(b.id) ?? 999999)));
+      const skuOrder = lookupSortOrder(store.orders || {}, categoryPath, tree);
+      const keys = sortOrderLookupKeys(categoryPath, tree);
+      const matchedKey = keys.find((k) => store.orders?.[k]?.skuOrder?.length);
+      setSortOrderMeta({ updatedAt: store.orders?.[matchedKey || categoryKey]?.updatedAt || null });
+      if (skuOrder?.length && baseRows?.length) {
+        setReorderProducts(applySkuOrder(baseRows, skuOrder));
       }
     } catch { /* ignore */ }
-  }, [categoryKey]);
+  }, [categoryPath, categoryKey, tree]);
 
   useEffect(() => {
     if (reorderMode && status === 'live' && rows.length && categoryKey !== '__all__') {
@@ -211,6 +213,7 @@ export default function ProductManagerEngine({
           categoryKey,
           skuOrder,
           expectedUpdatedAt: sortOrderMeta.updatedAt,
+          legacyKeys: sortOrderLookupKeys(categoryPath, tree).filter((k) => k !== categoryKey),
         }),
       });
       const json = await res.json();

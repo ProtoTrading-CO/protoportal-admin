@@ -134,6 +134,7 @@ export default function ReorderGrid({
   onEditSubcategory,
   onDeleteSubcategory,
   onPersistOrder,
+  autoPersist = false,
 }) {
   const scrollRef = useRef(null);
   const gridRef = useRef(null);
@@ -243,8 +244,8 @@ export default function ReorderGrid({
     setDraggingSet(new Set());
     document.body.classList.remove('adm-is-reorder-dragging');
 
-    if (hadDrag) onPersistOrder?.(orderRef.current);
-  }, [onPersistOrder]);
+    if (hadDrag && autoPersist) onPersistOrder?.(orderRef.current);
+  }, [onPersistOrder, autoPersist]);
 
   const onPointerMove = useCallback((e) => {
     pointerRef.current = { x: e.clientX, y: e.clientY };
@@ -313,15 +314,25 @@ export default function ReorderGrid({
       else if (e.key === 'ArrowLeft') direction = 'left';
 
       const cols = readGridColumnCount(gridRef.current);
-      const next = moveBlockGrid(products, selectedIds, direction, cols);
-      if (next === products) return;
+      let changed = false;
+      const nextGroups = groups.map((group) => {
+        if (changed) return group;
+        const inGroup = group.products.some((p) => selectedIds.has(p.id));
+        if (!inGroup) return group;
+        const reordered = moveBlockGrid(group.products, selectedIds, direction, cols);
+        if (reordered === group.products) return group;
+        changed = true;
+        return { ...group, products: reordered };
+      });
+
+      if (!changed) return;
+      const next = nextGroups.flatMap((g) => g.products);
       orderRef.current = next;
       onProductsChange(next);
-      scrollRef.current?.focus({ preventScroll: true });
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [dragDisabled, selectedIds, products, onProductsChange]);
+  }, [dragDisabled, selectedIds, groups, onProductsChange]);
 
   return (
     <div className="adm-reorder-content" ref={scrollRef} tabIndex={0}>

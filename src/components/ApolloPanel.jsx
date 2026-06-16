@@ -567,6 +567,15 @@ export default function ApolloPanel({ taxonomyTree, onShowToast, onGoToApproval,
 
             <div className="apollo-composer">
               {error && <p className="apollo-error">{error}</p>}
+              {!busy && messages.length > 0 && (
+                <div className="apollo-composer-starters">
+                  {STARTERS.slice(0, 3).map((s) => (
+                    <button key={s} type="button" className="apollo-starter apollo-starter--compact" onClick={() => void send(s)} disabled={busy}>
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              )}
               <form
                 className="apollo-input-row"
                 onSubmit={(e) => {
@@ -574,17 +583,25 @@ export default function ApolloPanel({ taxonomyTree, onShowToast, onGoToApproval,
                   void send(input);
                 }}
               >
-                <input
-                  className="apollo-input"
+                <textarea
+                  className="apollo-input apollo-input--textarea"
+                  rows={2}
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
-                  placeholder="Ask about orders, stock, customers — type /image for image gen…"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      void send(input);
+                    }
+                  }}
+                  placeholder="Ask Apollo anything — orders, stock, customers…  (/image for image gen)"
                   disabled={busy}
                 />
                 <button type="submit" className="apollo-send-btn" disabled={busy || !input.trim()} aria-label="Send">
                   {busy ? <Loader2 size={18} className="spin" /> : <Send size={18} />}
                 </button>
               </form>
+              <p className="apollo-composer-hint">Enter to send · Shift+Enter for a new line</p>
             </div>
           </div>
         </>

@@ -4,9 +4,11 @@ import { parseIntentHint, classifyIntent } from './apollo-intent.js';
 import { validateIntent, validateAnswer } from './apollo-validate.js';
 import { executeIntent, parseLimit } from './apollo-engine.js';
 
+const MODEL = 'google/gemini-2.5-flash';
+
 function isGreeting(query) {
   const q = String(query || '').trim();
-  return /^(hi|hello|hey|howdy|good\s+(morning|afternoon|evening))[\s!.,?]*$/i.test(q);
+  return /^(hi|hello|hey|howdy)(\s+there)?[\s!.,?]*$|^good\s+(morning|afternoon|evening)[\s!.,?]*$/i.test(q);
 }
 
 function greetingReply() {

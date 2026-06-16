@@ -25,7 +25,7 @@ export default function OrderWhatsappNotify({ orderId }) {
     setRetrying(true);
     setRetryMsg('');
     try {
-      const resp = await fetch('/api/order-notify-retry', {
+      const resp = await fetch('/api/order-notification', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ orderId }),

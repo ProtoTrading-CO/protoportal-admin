@@ -27,7 +27,7 @@ export default async function handler(req, res) {
 
   if (req.method === 'POST') {
     if (!requireAdminKey(req, res)) return;
-    const { categoryKey, skuOrder, expectedUpdatedAt } = req.body || {};
+    const { categoryKey, skuOrder, expectedUpdatedAt, legacyKeys = [] } = req.body || {};
     const key = String(categoryKey || '').trim();
     if (!key || !Array.isArray(skuOrder)) {
       return res.status(400).json({ error: 'categoryKey and skuOrder[] required' });
@@ -42,13 +42,13 @@ export default async function handler(req, res) {
         });
       }
       const now = new Date().toISOString();
-      const next = {
-        orders: {
-          ...(store.orders || {}),
-          [key]: { skuOrder: skuOrder.map(String), updatedAt: now },
-        },
-        updatedAt: now,
-      };
+      const nextOrders = { ...(store.orders || {}) };
+      for (const legacy of legacyKeys) {
+        const lk = String(legacy || '').trim();
+        if (lk && lk !== key) delete nextOrders[lk];
+      }
+      nextOrders[key] = { skuOrder: skuOrder.map(String), updatedAt: now };
+      const next = { orders: nextOrders, updatedAt: now };
       await writeSiteConfigJson(SORT_FILE, next);
       return res.status(200).json({ ok: true, categoryKey: key, updatedAt: now });
     } catch (err) {

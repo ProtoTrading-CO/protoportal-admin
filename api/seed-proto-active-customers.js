@@ -111,7 +111,14 @@ export default async function handler(req, res) {
       skippedDuplicates: skipped,
     });
   } catch (err) {
-    console.error('seed-proto-active-customers:', err?.message || err);
-    return res.status(500).json({ error: err.message || 'Seed failed' });
+    const msg = err?.message || String(err);
+    console.error('seed-proto-active-customers:', msg);
+    if (/proto_active_customers_account_code_unique/i.test(msg)) {
+      return res.status(409).json({
+        error: 'Database still has a unique index on account_code — multiple customers can share the same 6-letter code (e.g. FRIEND). Run migration 023 in Supabase SQL Editor, then sync again.',
+        sql: 'DROP INDEX IF EXISTS public.proto_active_customers_account_code_unique_idx;',
+      });
+    }
+    return res.status(500).json({ error: msg || 'Seed failed' });
   }
 }
