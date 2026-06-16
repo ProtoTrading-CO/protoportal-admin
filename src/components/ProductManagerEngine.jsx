@@ -15,18 +15,17 @@ import {
 } from 'lucide-react';
 import CategorySidebar from './CategorySidebar';
 import ReorderGrid from './ReorderGrid';
-import NewItemsPanel from './NewItemsPanel';
 import ApprovalPanel from './ApprovalPanel';
 import { useCatalogQuery, buildCatalogParams, CATALOG_STATUSES } from '../hooks/useCatalog';
 import { useCatalogMutations } from '../hooks/useCatalogMutations';
 import { queryClient } from '../lib/queryClient';
 import { queryKeys } from '../lib/queryKeys';
 import { subscribeImageBatch } from '../lib/imageBatchTracker';
+import { sortOrderCategoryKey } from '../lib/taxonomy';
 
 const STATUS_META = {
   live: { label: 'Live', icon: PackagePlus },
   archived: { label: 'Archived', icon: Archive },
-  'new-items': { label: 'New Items', icon: Sparkles },
   approval: { label: 'Approval', icon: CheckCircle },
   recycle: { label: 'Recycle Bin', icon: Trash2 },
 };
@@ -36,7 +35,6 @@ const ROW_COLUMNS = {
   archived: '32px 72px 2fr 140px 120px',
   approval: '32px 72px 2fr 120px',
   recycle: '32px 72px 2fr 120px',
-  'new-items': '32px 72px 2fr 120px',
 };
 
 const STOCK_STATUSES = new Set(['live', 'archived']);
@@ -100,8 +98,8 @@ export default function ProductManagerEngine({
   const [selected, setSelected] = useState(new Set());
   const [reorderProducts, setReorderProducts] = useState([]);
   const [sortOrderMeta, setSortOrderMeta] = useState({ updatedAt: null });
-  const newItemsExcelRef = useRef(null);
-  const newItemsFolderRef = useRef(null);
+  const [reorderDirty, setReorderDirty] = useState(false);
+  const [reorderSaving, setReorderSaving] = useState(false);
   const selectedRowsRef = useRef(new Map());
   const panelTopRef = useRef(null);
 
@@ -154,7 +152,9 @@ export default function ProductManagerEngine({
   const total = data?.total || 0;
   const tree = taxonomyTree.length ? taxonomyTree : (data?.tree || []);
 
-  const categoryKey = categoryPath.length ? categoryPath.join('/') : '__all__';
+  const categoryKey = categoryPath.length
+    ? sortOrderCategoryKey(categoryPath, tree)
+    : '__all__';
 
   const loadSortOrder = useCallback(async (baseRows) => {
     if (!categoryKey || categoryKey === '__all__') return;
@@ -173,9 +173,29 @@ export default function ProductManagerEngine({
   useEffect(() => {
     if (reorderMode && status === 'live' && rows.length && categoryKey !== '__all__') {
       setReorderProducts(rows);
+      setReorderDirty(false);
       void loadSortOrder(rows);
     }
   }, [reorderMode, categoryKey, rows, status, loadSortOrder]);
+
+  const handleReorderProductsChange = useCallback((nextOrFn) => {
+    setReorderProducts((prev) => (typeof nextOrFn === 'function' ? nextOrFn(prev) : nextOrFn));
+    setReorderDirty(true);
+  }, []);
+
+  const saveReorderOrder = async () => {
+    if (debouncedSearch) {
+      onShowToast?.('Clear search before saving sort order', 'error');
+      return;
+    }
+    setReorderSaving(true);
+    try {
+      await persistOrder(reorderProducts);
+      setReorderDirty(false);
+    } finally {
+      setReorderSaving(false);
+    }
+  };
 
   const persistOrder = async (next) => {
     if (!categoryKey || categoryKey === '__all__') {
@@ -297,7 +317,7 @@ export default function ProductManagerEngine({
           <button
             type="button"
             className={`adm-tab pm-reorder-tab${reorderMode ? ' adm-tab--active' : ''}`}
-            onClick={() => setReorderMode((v) => !v)}
+            onClick={() => { setReorderMode((v) => !v); setReorderDirty(false); }}
           >
             <Grip size={14} /> Reorder mode
           </button>
@@ -310,25 +330,6 @@ export default function ProductManagerEngine({
           onShowToast={onShowToast}
           onRefreshStats={onRefreshStats}
         />
-      ) : status === 'new-items' ? (
-        <div className="adm-panel-main pm-panel-body">
-          <NewItemsPanel
-          dormantRows={rows}
-          dormantSearch={searchInput}
-          onDormantSearchChange={setSearchInput}
-          dormantSelected={selected}
-          onDormantSelectedChange={setSelected}
-          saving={mutations.setLive.isPending}
-          onGoLive={(sku) => mutations.setLive.mutateAsync(sku).then(() => onRefreshStats?.())}
-          onGoLiveSelected={() => runBulk(mutations.setLive)}
-          onRemoveProduct={(product) => mutations.permanentDelete.mutateAsync(product?.id || product?.sku || product)}
-          onLoadDormant={() => queryClient.invalidateQueries({ queryKey: ['catalog'] })}
-          onShowToast={onShowToast}
-          taxonomyTree={tree}
-          excelInputRef={newItemsExcelRef}
-          imageFolderRef={newItemsFolderRef}
-          />
-        </div>
       ) : (
         <div className="adm-panel-split">
           <aside className="adm-panel-sidebar adm-reorder-tree-sidebar">
@@ -398,9 +399,24 @@ export default function ProductManagerEngine({
             </div>
 
             {showSkeleton ? <CatalogSkeleton /> : reorderMode && status === 'live' ? (
+              <>
+                <div className="adm-reorder-toolbar" style={{ marginBottom: 12 }}>
+                  <span className="adm-reorder-count">{reorderProducts.length} products in this view</span>
+                  {reorderDirty && <span className="adm-pill adm-pill--warn">Unsaved order</span>}
+                  {debouncedSearch && <span className="adm-muted" style={{ fontSize: 12 }}>Clear search to save</span>}
+                  <button
+                    type="button"
+                    className="adm-btn-red adm-btn--sm"
+                    style={{ marginLeft: 'auto' }}
+                    disabled={!reorderDirty || reorderSaving || !!debouncedSearch}
+                    onClick={() => void saveReorderOrder()}
+                  >
+                    {reorderSaving ? 'Saving…' : 'Save order'}
+                  </button>
+                </div>
               <ReorderGrid
                 products={reorderProducts}
-                onProductsChange={setReorderProducts}
+                onProductsChange={handleReorderProductsChange}
                 selectedIds={selected}
                 onToggleSelect={toggleSelect}
                 mainCategoryId={categoryPath[0] || tree[0]?.id}
@@ -411,8 +427,9 @@ export default function ProductManagerEngine({
                 onEditProduct={onEditProduct}
                 onEditSubcategory={onEditCategory}
                 onDeleteSubcategory={onDeleteSubcategory}
-                onPersistOrder={(next) => void persistOrder(next)}
+                autoPersist={false}
               />
+              </>
             ) : (
               <>
                 <div className="adm-list pm-list">

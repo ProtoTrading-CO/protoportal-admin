@@ -110,7 +110,6 @@ import WhatsappPanel from '../components/WhatsappPanel';
 import { fuzzyFilter } from '../lib/fuzzySearch';
 import ReorderGrid from '../components/ReorderGrid';
 import CategorySidebar from '../components/CategorySidebar';
-import NewItemsPanel from '../components/NewItemsPanel';
 import ComingSoonPanel from '../components/ComingSoonPanel';
 import ApprovalPanel from '../components/ApprovalPanel';
 import FulfillmentSettingsModal from '../components/FulfillmentSettingsModal';
@@ -124,6 +123,7 @@ import { queryClient } from '../lib/queryClient';
 import { queryKeys } from '../lib/queryKeys';
 import ApolloPanel from '../components/ApolloPanel';
 import CostTrackingPanel from '../components/CostTrackingPanel';
+import { sortOrderCategoryKey } from '../lib/taxonomy';
 import categories from '../data/categories.json';
 
 // ─── Reorder sort order — stored in localStorage, applied client-side ─────────
@@ -456,8 +456,6 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const [reprocessBusy, setReprocessBusy] = useState(false);
   const singleImageRef = useRef(null);
   const folderImageRef = useRef(null);
-  const newItemsExcelRef = useRef(null);
-  const newItemsFolderRef = useRef(null);
   const reprocessAbortRef = useRef(null);
   const [customerApproveBusy, setCustomerApproveBusy] = useState(false);
   const customerExcelRef = useRef(null);
@@ -506,6 +504,9 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   const [reorderCategoryPath, setReorderCategoryPath] = useState([]);
   const [reorderSearch, setReorderSearch] = useState('');
   const [reorderProducts, setReorderProducts] = useState([]);
+  const [reorderDirty, setReorderDirty] = useState(false);
+  const [reorderSaving, setReorderSaving] = useState(false);
+  const [reorderSortMeta, setReorderSortMeta] = useState({ updatedAt: null });
   const [taxonomyTree, setTaxonomyTree] = useState(categories);
   const [toast, setToast] = useState(null);
   const [moveModalOpen, setMoveModalOpen] = useState(false);
@@ -809,17 +810,37 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     } finally { setLoading(false); }
   };
 
+  const reorderCategoryKey = sortOrderCategoryKey(
+    reorderCategoryPath.length ? reorderCategoryPath : (reorderMainId ? [reorderMainId] : []),
+    taxonomyTree,
+  );
+
+  const applyServerSortOrder = async (rows, categoryKey) => {
+    if (!categoryKey) return rows;
+    try {
+      const res = await fetch(`/api/category-sort-order?categoryKey=${encodeURIComponent(categoryKey)}`);
+      const json = await res.json();
+      if (!res.ok) return rows;
+      setReorderSortMeta({ updatedAt: json.updatedAt || null });
+      if (!json.skuOrder?.length) return rows;
+      const orderMap = new Map(json.skuOrder.map((id, i) => [id, i]));
+      return [...rows].sort((a, b) => (orderMap.get(a.id) ?? 999999) - (orderMap.get(b.id) ?? 999999));
+    } catch {
+      return rows;
+    }
+  };
+
   const loadReorderProducts = async () => {
     setLoading(true);
     setLoadingError('');
     try {
-      // Always load the full main category; subcategory + search filter client-side
-      // so search spans every subcategory in the category.
       const rows = await fetchReorderProducts({
         mainCategory: reorderMainId,
         subcategoryId: null,
       });
-      setReorderProducts(applySavedOrder(rows, reorderMainId));
+      const ordered = await applyServerSortOrder(rows, reorderCategoryKey);
+      setReorderProducts(ordered);
+      setReorderDirty(false);
     } catch (err) {
       setLoadingError(err.message || 'Failed to load products');
     } finally { setLoading(false); }
@@ -1071,7 +1092,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
   useEffect(() => { if (activeSection === 'customers') void loadCustomers(); }, [activeSection, customerPage, customerTab, customerSearch]);
   useEffect(() => { if (activeSection === 'pricing') void loadCategoryWorkingSet(pricingCategory, 'pricing'); }, [activeSection, pricingCategory]);
   useEffect(() => { void reloadTaxonomy(); }, []);
-  useEffect(() => { if (activeSection === 'reorder') void loadReorderProducts(); }, [activeSection, reorderMainId]);
+  useEffect(() => { if (activeSection === 'reorder') void loadReorderProducts(); }, [activeSection, reorderMainId, reorderCategoryPath.join('/')]);
   useEffect(() => { if (activeSection === 'orders' && orders.length === 0) void loadOrders(); }, [activeSection]);
   useEffect(() => {
     if (activeSection !== 'orders') return undefined;
@@ -1732,18 +1753,53 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
 
   const handleReorderProductsChange = useCallback((nextOrFn) => {
     setReorderProducts((prev) => {
-      let merged;
-      if (typeof nextOrFn === 'function') merged = nextOrFn(prev);
-      else {
-        const pathFiltered = applyPathFilter(prev, reorderCategoryPath);
-        const q = reorderSearch.trim();
-        const currentVisible = q ? fuzzyFilter(pathFiltered, q) : pathFiltered;
-        merged = mergeVisibleReorder(prev, currentVisible, nextOrFn);
-      }
-      persistOrder(merged);
-      return merged;
+      if (typeof nextOrFn === 'function') return nextOrFn(prev);
+      const pathFiltered = applyPathFilter(prev, reorderCategoryPath);
+      const q = reorderSearch.trim();
+      const currentVisible = q ? fuzzyFilter(pathFiltered, q) : pathFiltered;
+      return mergeVisibleReorder(prev, currentVisible, nextOrFn);
     });
-  }, [reorderCategoryPath, reorderSearch, reorderMainId]);
+    setReorderDirty(true);
+  }, [reorderCategoryPath, reorderSearch]);
+
+  const saveReorderOrder = async () => {
+    if (reorderSearchActive) {
+      showToast('Clear search before saving sort order', 'error');
+      return;
+    }
+    if (!reorderCategoryKey) {
+      showToast('Select a category before saving sort order', 'error');
+      return;
+    }
+    const visible = applyPathFilter(reorderProducts, reorderCategoryPath);
+    const skuOrder = visible.map((p) => p.id);
+    if (!skuOrder.length) return;
+
+    setReorderSaving(true);
+    try {
+      const res = await fetch('/api/category-sort-order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          categoryKey: reorderCategoryKey,
+          skuOrder,
+          expectedUpdatedAt: reorderSortMeta.updatedAt,
+        }),
+      });
+      const json = await res.json();
+      if (res.status === 409) {
+        showToast(json.error || 'Someone else changed this order — refresh and try again', 'error');
+        await loadReorderProducts();
+        return;
+      }
+      if (!res.ok) throw new Error(json.error || 'Save failed');
+      setReorderSortMeta({ updatedAt: json.updatedAt });
+      setReorderDirty(false);
+      showToast('Sort order saved — live site updates within ~30s', 'success');
+    } catch (err) {
+      showToast(err.message || 'Save failed', 'error');
+    } finally { setReorderSaving(false); }
+  };
 
   const toggleSelectAllReorder = () => {
     const ids = visibleReorderProducts.map((p) => p.id);
@@ -2010,21 +2066,14 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     } finally { setSaving(''); }
   };
 
-  const persistOrder = (next) => {
-    const updates = next.map((p, i) => ({ websiteSku: p.id, sortOrder: i + 1 }));
-    saveSortOrder(updates).catch(console.error);
-    saveCategoryOrder(reorderMainId, next.map((p) => p.id));
-  };
-
   const moveSelectedToTop = () => {
     if (!selectedIds.size) return;
     setReorderProducts((prev) => {
       const moving = prev.filter((p) => selectedIds.has(p.id));
       const rest = prev.filter((p) => !selectedIds.has(p.id));
-      const next = [...moving, ...rest];
-      persistOrder(next);
-      return next;
+      return [...moving, ...rest];
     });
+    setReorderDirty(true);
     setSelectedIds(new Set());
   };
 
@@ -2058,7 +2107,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
 
   const closeCustomerProfile = () => { setProfileCustomer(null); setProfileOrders([]); setProfileEditing(false); };
 
-  const SPEND_BANDS = ['R0 – R5,000', 'R5,000 – R10,000', 'R10,000 – R500,000', 'R500,000 – R1,000,000', 'R1,000,000+'];
+  const SPEND_BANDS = ['R0 – R5,000', 'R5,000 – R10,000', 'R10,000 – R25,000', 'R25,000 – R50,000', 'R50,000+'];
   const startEditProfile = () => {
     setProfileForm({
       name: profileCustomer.name || '',
@@ -2350,29 +2399,6 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
 
             {activeSection === 'cost-tracking' && (
               <CostTrackingPanel onShowToast={showToast} />
-            )}
-
-            {false && activeSection === 'new-items' && (
-              <NewItemsPanel
-                dormantRows={dormantRows}
-                dormantSearch={dormantSearch}
-                onDormantSearchChange={setDormantSearch}
-                dormantSelected={dormantSelected}
-                onDormantSelectedChange={setDormantSelected}
-                saving={saving}
-                onGoLive={goLive}
-                onGoLiveSelected={goLiveSelected}
-                onRemoveProduct={removeDormantProduct}
-                onLoadDormant={loadDormant}
-                onShowToast={showToast}
-                onReprocessBusyChange={setReprocessBusy}
-                excelInputRef={newItemsExcelRef}
-                imageFolderRef={newItemsFolderRef}
-                onLegacyUpload={processUploadFiles}
-                singleImageRef={singleImageRef}
-                folderImageRef={folderImageRef}
-                taxonomyTree={taxonomyTree}
-              />
             )}
 
             {false && activeSection === 'approval' && (
@@ -3015,15 +3041,25 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                 <div className="adm-section-head adm-section-head--reorder">
                   <div>
                     <h2 className="adm-section-title">Reorder Grid</h2>
-                    <p className="adm-section-note">Select products for bulk actions, or drag by the grip handle to reorder live. Check one or more products, then use ↑ ↓ arrow keys to move them.</p>
+                    <p className="adm-section-note">Drag by the grip handle or use arrow keys within a subcategory row. Click <strong>Save order</strong> when done — changes go live on the trade portal within ~30s.</p>
                   </div>
-                  <button
-                    onClick={() => { setSelectedIds(new Set()); invalidateAdminCache(); void loadReorderProducts(); }}
-                    className="adm-btn-ghost"
-                    type="button"
-                  >
-                    <RefreshCw size={14} /> Refresh
-                  </button>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                    <button
+                      type="button"
+                      onClick={() => void saveReorderOrder()}
+                      className="adm-btn-red"
+                      disabled={!reorderDirty || reorderSaving || reorderSearchActive}
+                    >
+                      {reorderSaving ? 'Saving…' : 'Save order'}
+                    </button>
+                    <button
+                      onClick={() => { setSelectedIds(new Set()); setReorderDirty(false); invalidateAdminCache(); void loadReorderProducts(); }}
+                      className="adm-btn-ghost"
+                      type="button"
+                    >
+                      <RefreshCw size={14} /> Refresh
+                    </button>
+                  </div>
                 </div>
 
                 <div className="adm-reorder-toolbar">
@@ -3051,10 +3087,8 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                     <span className="adm-reorder-count">
                       {visibleReorderProducts.length} {reorderSearchActive ? `match${visibleReorderProducts.length === 1 ? '' : 'es'}` : 'live products'}
                     </span>
-                    {reorderSearchActive && (
-                      <span className="adm-muted" style={{ fontSize: 12 }}>
-                        Drag-reorder is paused while searching
-                      </span>
+                    {reorderDirty && !reorderSearchActive && (
+                      <span className="adm-pill adm-pill--warn">Unsaved order</span>
                     )}
                   </div>
                 </div>
@@ -3116,7 +3150,8 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                     onEditProduct={openContentEdit}
                     onEditSubcategory={setEditTaxonomyModal}
                     onDeleteSubcategory={(sub) => void openDeleteSubcategory(sub)}
-                    onPersistOrder={(merged) => persistOrder(merged)}
+                    onPersistOrder={() => {}}
+                    autoPersist={false}
                   />
                 </div>
 

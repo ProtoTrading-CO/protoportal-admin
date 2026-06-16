@@ -19,23 +19,6 @@ async function countTable(sb, table, filter) {
   return count || 0;
 }
 
-async function countNewItems(sb) {
-  const liveSkus = new Set();
-  let from = 0;
-  while (true) {
-    const { data } = await sb.from('website_stock').select('sku').range(from, from + 999);
-    for (const r of data || []) liveSkus.add(r.sku);
-    if ((data || []).length < 1000) break;
-    from += 1000;
-  }
-  const { data, error } = await sb
-    .from('archived_products')
-    .select('sku')
-    .eq('archived_by', 'new-products');
-  if (error) throw error;
-  return (data || []).filter((r) => !liveSkus.has(r.sku)).length;
-}
-
 async function countApproval(sb) {
   const { data: staged, error } = await sb
     .from('archived_products')
@@ -68,7 +51,6 @@ export default async function handler(req, res) {
     const [
       liveProducts,
       archivedProducts,
-      newItems,
       approvalPending,
       recycleBin,
       uncategorized,
@@ -78,7 +60,6 @@ export default async function handler(req, res) {
       countTable(stockSb, 'website_stock'),
       countTable(stockSb, 'archived_products', (q) =>
         q.not('archived_by', 'in', '("new-products","recycle-bin")')),
-      countNewItems(stockSb),
       countApproval(stockSb),
       countTable(stockSb, 'archived_products', (q) => q.eq('archived_by', 'recycle-bin')),
       countTable(stockSb, 'website_stock', (q) => q.or('category.is.null,category.eq.')),
@@ -90,7 +71,6 @@ export default async function handler(req, res) {
     return res.status(200).json({
       liveProducts,
       archivedProducts,
-      newItems,
       approvalPending,
       recycleBin,
       uncategorized,
