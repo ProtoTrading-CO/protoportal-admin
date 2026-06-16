@@ -123,33 +123,8 @@ import { queryClient } from '../lib/queryClient';
 import { queryKeys } from '../lib/queryKeys';
 import ApolloPanel from '../components/ApolloPanel';
 import CostTrackingPanel from '../components/CostTrackingPanel';
-import { sortOrderCategoryKey } from '../lib/taxonomy';
+import { applySkuOrder, lookupSortOrder, sortOrderCategoryKey, sortOrderLookupKeys } from '../lib/taxonomy';
 import categories from '../data/categories.json';
-
-// ─── Reorder sort order — stored in localStorage, applied client-side ─────────
-const SORT_STORE_KEY = 'proto_sort_v1';
-
-function saveCategoryOrder(category, ids) {
-  try {
-    const all = JSON.parse(localStorage.getItem(SORT_STORE_KEY) || '{}');
-    all[category] = ids;
-    localStorage.setItem(SORT_STORE_KEY, JSON.stringify(all));
-  } catch {}
-}
-
-function loadCategoryOrder(category) {
-  try {
-    const all = JSON.parse(localStorage.getItem(SORT_STORE_KEY) || '{}');
-    return Array.isArray(all[category]) ? all[category] : null;
-  } catch { return null; }
-}
-
-function applySavedOrder(products, category) {
-  const saved = loadCategoryOrder(category);
-  if (!saved || !saved.length) return products;
-  const orderMap = new Map(saved.map((id, i) => [id, i]));
-  return [...products].sort((a, b) => (orderMap.get(a.id) ?? 999999) - (orderMap.get(b.id) ?? 999999));
-}
 
 /** Merge a reordered visible slice back into the full product list (arrow-key reorder). */
 function mergeVisibleReorder(prev, currentVisible, nextVisible) {
@@ -810,21 +785,23 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
     } finally { setLoading(false); }
   };
 
-  const reorderCategoryKey = sortOrderCategoryKey(
-    reorderCategoryPath.length ? reorderCategoryPath : (reorderMainId ? [reorderMainId] : []),
-    taxonomyTree,
-  );
+  const reorderNavPath = reorderCategoryPath.length
+    ? reorderCategoryPath
+    : (reorderMainId ? [reorderMainId] : []);
 
-  const applyServerSortOrder = async (rows, categoryKey) => {
-    if (!categoryKey) return rows;
+  const reorderCategoryKey = sortOrderCategoryKey(reorderNavPath, taxonomyTree);
+
+  const applyServerSortOrder = async (rows, navPath) => {
+    if (!navPath?.length) return rows;
     try {
-      const res = await fetch(`/api/category-sort-order?categoryKey=${encodeURIComponent(categoryKey)}`);
-      const json = await res.json();
+      const res = await fetch('/api/category-sort-order');
+      const store = await res.json();
       if (!res.ok) return rows;
-      setReorderSortMeta({ updatedAt: json.updatedAt || null });
-      if (!json.skuOrder?.length) return rows;
-      const orderMap = new Map(json.skuOrder.map((id, i) => [id, i]));
-      return [...rows].sort((a, b) => (orderMap.get(a.id) ?? 999999) - (orderMap.get(b.id) ?? 999999));
+      const skuOrder = lookupSortOrder(store.orders || {}, navPath, taxonomyTree);
+      const keys = sortOrderLookupKeys(navPath, taxonomyTree);
+      const matchedKey = keys.find((k) => store.orders?.[k]?.skuOrder?.length);
+      setReorderSortMeta({ updatedAt: store.orders?.[matchedKey || reorderCategoryKey]?.updatedAt || null });
+      return skuOrder?.length ? applySkuOrder(rows, skuOrder) : rows;
     } catch {
       return rows;
     }
@@ -838,7 +815,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
         mainCategory: reorderMainId,
         subcategoryId: null,
       });
-      const ordered = await applyServerSortOrder(rows, reorderCategoryKey);
+      const ordered = await applyServerSortOrder(rows, reorderNavPath);
       setReorderProducts(ordered);
       setReorderDirty(false);
     } catch (err) {
@@ -1784,6 +1761,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
           categoryKey: reorderCategoryKey,
           skuOrder,
           expectedUpdatedAt: reorderSortMeta.updatedAt,
+          legacyKeys: sortOrderLookupKeys(reorderNavPath, taxonomyTree).filter((k) => k !== reorderCategoryKey),
         }),
       });
       const json = await res.json();
@@ -3734,7 +3712,7 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                 <div className="adm-section-head">
                   <div>
                     <h2 className="adm-section-title">Banner Editor</h2>
-                    <p className="adm-section-note">Edit the logged-in portal hero banner. Image is resized to 1774 × 887 px on upload.</p>
+                    <p className="adm-section-note">The uploaded image is the <strong>entire</strong> home-page banner (full-bleed). Upload at <strong>3200 × 640 px</strong> (displays at 1600 × 320, 5:1 ratio). Click <strong>Save banner</strong> — the portal updates immediately.</p>
                   </div>
                   <button type="button" onClick={() => void loadBannerEditor()} className="adm-btn-ghost"><RefreshCw size={15} /><span className="adm-btn-text">Refresh</span></button>
                 </div>
@@ -3749,23 +3727,21 @@ export default function AdminPage({ customer, onLogout, onViewPortal }) {
                       <textarea className="adm-field-input" style={{ width: '100%', minHeight: 120 }} value={bannerForm.body} onChange={(e) => setBannerForm((p) => ({ ...p, body: e.target.value }))} />
                     </div>
                     <div>
-                      <label className="adm-muted" style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Banner image</label>
+                      <label className="adm-muted" style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Banner image — required size 3200 × 640 px (5:1)</label>
                       <label className="adm-btn-ghost" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-                        <ImagePlus size={15} /> {bannerUploading ? 'Uploading…' : 'Upload image (1774×887)'}
+                        <ImagePlus size={15} /> {bannerUploading ? 'Uploading…' : 'Upload banner (3200 × 640)'}
                         <input type="file" accept="image/*" hidden onChange={(e) => { void handleBannerImage(e.target.files?.[0]); e.target.value = ''; }} />
                       </label>
                     </div>
                     <button type="button" className="adm-btn-red" disabled={bannerSaving} onClick={() => void saveBannerEditor()}>{bannerSaving ? 'Saving…' : 'Save banner'}</button>
                   </div>
-                  <div style={{ border: '1px solid #e5e7eb', borderRadius: 16, overflow: 'hidden', background: '#050505' }}>
-                    <div style={{ padding: 24 }}>
-                      <span style={{ fontSize: 11, color: '#9ca3af', textTransform: 'uppercase' }}>Established 1987 | Wholesale supply</span>
-                      <h3 style={{ color: '#fff', margin: '12px 0', fontSize: 22, lineHeight: 1.2 }}>{bannerForm.title || 'Banner title'}</h3>
-                      <p style={{ color: '#9ca3af', fontSize: 14, lineHeight: 1.5 }}>{bannerForm.body || 'Banner body text'}</p>
+                  <div>
+                    <span className="adm-muted" style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Live preview (5:1)</span>
+                    <div style={{ border: '1px solid #e5e7eb', borderRadius: 16, overflow: 'hidden', background: '#050505', aspectRatio: '5 / 1', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      {bannerForm.imageUrl
+                        ? <img src={bannerForm.imageUrl} alt="Banner preview" style={{ width: '100%', height: '100%', display: 'block', objectFit: 'cover' }} />
+                        : <span className="adm-muted">No banner uploaded — upload a 3200 × 640 image</span>}
                     </div>
-                    {bannerForm.imageUrl && (
-                      <img src={bannerForm.imageUrl} alt="Banner preview" style={{ width: '100%', display: 'block', objectFit: 'cover' }} />
-                    )}
                   </div>
                 </div>
               </div>

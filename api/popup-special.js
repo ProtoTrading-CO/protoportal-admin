@@ -24,6 +24,7 @@ export default async function handler(req, res) {
         active: Boolean(body.active),
         imageUrl: String(body.imageUrl || '').trim(),
         title: String(body.title || '').trim(),
+        updatedAt: new Date().toISOString(),
       });
       return res.status(200).json({ ok: true, ...saved });
     } catch (err) {

@@ -5,8 +5,8 @@ import { createClient } from '@supabase/supabase-js';
 export const config = { api: { bodyParser: { sizeLimit: '20mb' } } };
 
 const BUCKET = 'product-images';
-const TARGET_W = 1774;
-const TARGET_H = 887;
+const TARGET_W = 3200;
+const TARGET_H = 640;
 
 function getStockAdminClient() {
   return createClient(

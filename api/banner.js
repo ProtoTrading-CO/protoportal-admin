@@ -28,6 +28,8 @@ export default async function handler(req, res) {
         title: String(body.title || DEFAULTS.title).trim(),
         body: String(body.body || DEFAULTS.body).trim(),
         imageUrl: String(body.imageUrl || DEFAULTS.imageUrl).trim(),
+        // Bumped on every save so the portal busts its cached banner image.
+        updatedAt: new Date().toISOString(),
       });
       return res.status(200).json({ ok: true, ...saved });
     } catch (err) {
