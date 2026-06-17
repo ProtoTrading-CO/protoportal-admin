@@ -1,9 +1,6 @@
-import { requireAdminKey } from './_admin-auth.js';
-
-/** Validates the dashboard key supplied at login. */
-export default async function handler(req, res) {
+/** Legacy login endpoint — dashboard auth removed; always OK. */
+export default async function handler(_req, res) {
   res.setHeader('Cache-Control', 'no-store');
-  if (req.method !== 'POST') return res.status(405).end();
-  if (!requireAdminKey(req, res)) return;
+  if (_req.method !== 'POST') return res.status(405).end();
   return res.status(200).json({ ok: true });
 }

@@ -3,6 +3,8 @@ import {
   Archive,
   ArchiveRestore,
   CheckCircle,
+  FileSpreadsheet,
+  FolderPlus,
   Grip,
   Loader2,
   PackagePlus,
@@ -22,6 +24,7 @@ import { queryClient } from '../lib/queryClient';
 import { queryKeys } from '../lib/queryKeys';
 import { subscribeImageBatch } from '../lib/imageBatchTracker';
 import { sortOrderCategoryKey, lookupSortOrder, applySkuOrder, sortOrderLookupKeys } from '../lib/taxonomy';
+import { exportLiveProductsXlsx } from '../lib/exportLiveProducts';
 
 const STATUS_META = {
   live: { label: 'Live', icon: PackagePlus },
@@ -80,8 +83,10 @@ export default function ProductManagerEngine({
   onEditProduct,
   onImageFix,
   onEditCategory,
+  onAddCategory,
   onAddSubcategory,
   onDeleteSubcategory,
+  onDeleteNode,
   initialStatus = 'live',
 }) {
   const [status, setStatus] = useState(initialStatus);
@@ -100,6 +105,7 @@ export default function ProductManagerEngine({
   const [sortOrderMeta, setSortOrderMeta] = useState({ updatedAt: null });
   const [reorderDirty, setReorderDirty] = useState(false);
   const [reorderSaving, setReorderSaving] = useState(false);
+  const [exportingLive, setExportingLive] = useState(false);
   const selectedRowsRef = useRef(new Map());
   const panelTopRef = useRef(null);
 
@@ -159,7 +165,7 @@ export default function ProductManagerEngine({
   const loadSortOrder = useCallback(async (baseRows) => {
     if (!categoryPath.length || categoryKey === '__all__') return;
     try {
-      const res = await fetch('/api/category-sort-order');
+      const res = await fetch(`/api/category-sort-order?_=${Date.now()}`);
       const store = await res.json();
       if (!res.ok) return;
       const skuOrder = lookupSortOrder(store.orders || {}, categoryPath, tree);
@@ -212,7 +218,6 @@ export default function ProductManagerEngine({
         body: JSON.stringify({
           categoryKey,
           skuOrder,
-          expectedUpdatedAt: sortOrderMeta.updatedAt,
           legacyKeys: sortOrderLookupKeys(categoryPath, tree).filter((k) => k !== categoryKey),
         }),
       });
@@ -283,6 +288,18 @@ export default function ProductManagerEngine({
     { onSuccess: () => onRefreshStats?.() },
   );
 
+  const handleExportLive = async () => {
+    setExportingLive(true);
+    try {
+      await exportLiveProductsXlsx(taxonomyTree);
+      onShowToast?.('Live products exported to Excel', 'success');
+    } catch (err) {
+      onShowToast?.(err.message || 'Export failed', 'error');
+    } finally {
+      setExportingLive(false);
+    }
+  };
+
   const showSkeleton = isLoading && !isPlaceholderData && !data;
   const addSubParentId = categoryPath[0] || tree[0]?.id || '';
 
@@ -294,6 +311,17 @@ export default function ProductManagerEngine({
           <p className="adm-section-note">In-stock products are live on the site. Filter by status or use reorder mode for sort order.</p>
         </div>
         <div className="pm-engine-head-actions">
+          {status === 'live' && !reorderMode && (
+            <button
+              type="button"
+              className="adm-btn-ghost adm-btn--sm"
+              disabled={exportingLive}
+              onClick={() => void handleExportLive()}
+            >
+              {exportingLive ? <Loader2 size={14} className="spin" /> : <FileSpreadsheet size={14} />}
+              {exportingLive ? 'Exporting…' : 'Export Excel'}
+            </button>
+          )}
           {isFetching && !isLoading && <Loader2 size={16} className="spin" aria-label="Refreshing" />}
           <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => queryClient.invalidateQueries({ queryKey: ['catalog'] })}>
             <RefreshCw size={14} /> Refresh
@@ -338,22 +366,35 @@ export default function ProductManagerEngine({
           <aside className="adm-panel-sidebar adm-reorder-tree-sidebar">
             <div className="adm-reorder-cat-heading">
               <span>Categories</span>
-              {onAddSubcategory && addSubParentId && (
-                <button
-                  type="button"
-                  className="adm-taxonomy-add-btn"
-                  title="Add subcategory"
-                  onClick={() => onAddSubcategory(addSubParentId)}
-                >
-                  <Plus size={16} strokeWidth={2.5} />
-                </button>
-              )}
+              <span style={{ display: 'inline-flex', gap: 4, marginLeft: 'auto' }}>
+                {onAddSubcategory && addSubParentId && (
+                  <button
+                    type="button"
+                    className="adm-taxonomy-add-btn"
+                    title="Add subcategory to selected category"
+                    onClick={() => onAddSubcategory(addSubParentId)}
+                  >
+                    <Plus size={16} strokeWidth={2.5} />
+                  </button>
+                )}
+                {onAddCategory && (
+                  <button
+                    type="button"
+                    className="adm-taxonomy-add-btn"
+                    title="Add new category"
+                    onClick={() => onAddCategory()}
+                  >
+                    <FolderPlus size={16} strokeWidth={2.5} />
+                  </button>
+                )}
+              </span>
             </div>
             <CategorySidebar
               tree={tree}
               selectedPath={categoryPath}
               onSelectPath={setCategoryPath}
               onEditNode={onEditCategory}
+              onDeleteNode={onDeleteNode}
             />
           </aside>
           <div className="adm-panel-main">

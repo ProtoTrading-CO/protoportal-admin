@@ -84,6 +84,7 @@ import {
 import {
   categoryLabelFromTree,
   countSubcategoryProducts,
+  createCategory,
   createSubcategory,
   deleteTaxonomyNode,
   fetchTaxonomy,
@@ -103,6 +104,7 @@ import OrderWorkflowBadge from '../components/OrderWorkflowBadge';
 import { fetchFulfillmentUsers, loadActiveUserId } from '../lib/fulfillmentUsers';
 import { fetchSpecials, saveSpecials } from '../lib/specials';
 import { fetchBanner, saveBanner, uploadBannerImage } from '../lib/banner';
+import { BANNER_LABEL, BANNER_ASPECT_CSS } from '../lib/bannerSpec';
 import { fetchPopupSpecial, savePopupSpecial, uploadPopupImage } from '../lib/popupSpecial';
 import CrmContactsModal from '../components/CrmContactsModal';
 import WhatsappPanel from '../components/WhatsappPanel';
@@ -122,6 +124,7 @@ import { queryClient } from '../lib/queryClient';
 import { queryKeys } from '../lib/queryKeys';
 import ApolloPanel from '../components/ApolloPanel';
 import CostTrackingPanel from '../components/CostTrackingPanel';
+import ImageIntakePanel from '../components/ImageIntakePanel';
 import { applySkuOrder, lookupSortOrder, sortOrderCategoryKey, sortOrderLookupKeys } from '../lib/taxonomy';
 import categories from '../data/categories.json';
 
@@ -489,6 +492,7 @@ export default function AdminPage({ customer, onViewPortal }) {
   const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false);
   const [editTaxonomyModal, setEditTaxonomyModal] = useState(null);
   const [newSubModal, setNewSubModal] = useState(null);
+  const [newCategoryModal, setNewCategoryModal] = useState(null);
   const [deleteSubModal, setDeleteSubModal] = useState(null);
   const [taxonomySaving, setTaxonomySaving] = useState(false);
   const [selectedIds, setSelectedIds] = useState(new Set());
@@ -793,7 +797,7 @@ export default function AdminPage({ customer, onViewPortal }) {
   const applyServerSortOrder = async (rows, navPath) => {
     if (!navPath?.length) return rows;
     try {
-      const res = await fetch('/api/category-sort-order');
+      const res = await fetch(`/api/category-sort-order?_=${Date.now()}`);
       const store = await res.json();
       if (!res.ok) return rows;
       const skuOrder = lookupSortOrder(store.orders || {}, navPath, taxonomyTree);
@@ -1631,7 +1635,18 @@ export default function AdminPage({ customer, onViewPortal }) {
     setBannerUploading(true);
     try {
       const { url } = await uploadBannerImage(file);
-      setBannerForm((prev) => ({ ...prev, imageUrl: url }));
+      const next = { ...bannerForm, imageUrl: url };
+      setBannerForm(next);
+      setBannerSaving(true);
+      try {
+        const saved = await saveBanner(next);
+        setBannerForm({ title: saved.title || '', body: saved.body || '', imageUrl: saved.imageUrl || url });
+        showToast('Banner uploaded and saved — refresh the trade portal to see it.');
+      } catch (e) {
+        showToast(e.message || 'Uploaded but save failed — click Save banner', 'error');
+      } finally {
+        setBannerSaving(false);
+      }
     } catch (e) { alert(e.message || 'Failed to upload image'); }
     finally { setBannerUploading(false); }
   };
@@ -1774,7 +1789,6 @@ export default function AdminPage({ customer, onViewPortal }) {
         body: JSON.stringify({
           categoryKey: reorderCategoryKey,
           skuOrder,
-          expectedUpdatedAt: reorderSortMeta.updatedAt,
           legacyKeys: sortOrderLookupKeys(reorderNavPath, taxonomyTree).filter((k) => k !== reorderCategoryKey),
         }),
       });
@@ -1879,13 +1893,28 @@ export default function AdminPage({ customer, onViewPortal }) {
     } finally { setTaxonomySaving(false); }
   };
 
+  const saveNewCategory = async () => {
+    if (!newCategoryModal?.label?.trim()) return;
+    setTaxonomySaving(true);
+    try {
+      const json = await createCategory(newCategoryModal.label.trim());
+      await reloadTaxonomy();
+      queryClient.invalidateQueries({ queryKey: ['catalog'] });
+      setNewCategoryModal(null);
+      showToast(json.created ? 'Category created' : 'Category already exists');
+    } catch (err) {
+      showToast(err.message || 'Create failed', 'error');
+    } finally { setTaxonomySaving(false); }
+  };
+
   const openDeleteSubcategory = async (sub) => {
     setTaxonomySaving(true);
     try {
       const productCount = await countSubcategoryProducts(sub.id);
       setDeleteSubModal({ ...sub, productCount });
     } catch (err) {
-      showToast(err.message || 'Could not check subcategory', 'error');
+      // Counting is best-effort — still let the user delete (products are kept).
+      setDeleteSubModal({ ...sub, productCount: 0 });
     } finally { setTaxonomySaving(false); }
   };
 
@@ -1899,8 +1928,9 @@ export default function AdminPage({ customer, onViewPortal }) {
       if (reorderCategoryPath.includes(deleteSubModal.id)) setReorderCategoryPath((prev) => prev.filter((id) => id !== deleteSubModal.id));
       invalidateAdminCache();
       await loadReorderProducts();
+      const isCat = deleteSubModal.type === 'category';
       setDeleteSubModal(null);
-      showToast('Subcategory deleted');
+      showToast(isCat ? 'Category deleted' : 'Subcategory deleted');
     } catch (err) {
       showToast(err.message || 'Delete failed', 'error');
     } finally { setTaxonomySaving(false); }
@@ -2353,8 +2383,10 @@ export default function AdminPage({ customer, onViewPortal }) {
                 initialStatus={catalogStatus}
                 onEditProduct={(item) => openEditProduct(item)}
                 onEditCategory={setEditTaxonomyModal}
+                onAddCategory={() => setNewCategoryModal({ label: '' })}
                 onAddSubcategory={(parentId) => setNewSubModal({ parentId, label: '' })}
                 onDeleteSubcategory={(sub) => void openDeleteSubcategory(sub)}
+                onDeleteNode={(node) => void openDeleteSubcategory(node)}
                 onImageFix={(products) => {
                   setImageFixRequest({ id: Date.now(), products });
                   setActiveSection('apollo');
@@ -2369,6 +2401,10 @@ export default function AdminPage({ customer, onViewPortal }) {
 
             {activeSection === 'analytics' && (
               <AnalyticsHub />
+            )}
+
+            {activeSection === 'image-intake' && (
+              <ImageIntakePanel onShowToast={showToast} />
             )}
 
             {/* Apollo — keep mounted so chat survives tab switches */}
@@ -3253,14 +3289,14 @@ export default function AdminPage({ customer, onViewPortal }) {
                   <div className="adm-modal-backdrop" onClick={() => setDeleteSubModal(null)}>
                     <div className="adm-modal adm-modal--form" onClick={(e) => e.stopPropagation()}>
                       <div className="adm-modal-header">
-                        <h3 className="adm-modal-title">Delete subcategory?</h3>
+                        <h3 className="adm-modal-title">Delete {deleteSubModal.type === 'category' ? 'category' : 'subcategory'}?</h3>
                         <button type="button" className="adm-modal-close" onClick={() => setDeleteSubModal(null)} aria-label="Close"><X size={18} /></button>
                       </div>
                       <p className="adm-modal-note">
                         Remove <strong>{deleteSubModal.label}</strong> from the catalogue structure.
                         {deleteSubModal.productCount > 0
-                          ? ` ${deleteSubModal.productCount} product(s) still use this subcategory — move them first.`
-                          : ' No live products are assigned to it.'}
+                          ? ` ${deleteSubModal.productCount} product(s) will stay but become uncategorised.`
+                          : ' No products are assigned to it.'}
                       </p>
                       <div className="adm-modal-footer adm-modal-footer--end">
                         <div className="adm-modal-footer__actions">
@@ -3269,7 +3305,7 @@ export default function AdminPage({ customer, onViewPortal }) {
                             type="button"
                             className="adm-btn-red"
                             onClick={() => void confirmDeleteSubcategory()}
-                            disabled={taxonomySaving || deleteSubModal.productCount > 0}
+                            disabled={taxonomySaving}
                           >
                             {taxonomySaving ? 'Deleting…' : 'Delete'}
                           </button>
@@ -3725,7 +3761,7 @@ export default function AdminPage({ customer, onViewPortal }) {
                 <div className="adm-section-head">
                   <div>
                     <h2 className="adm-section-title">Banner Editor</h2>
-                    <p className="adm-section-note">The uploaded image is the <strong>entire</strong> home-page banner (full-bleed). Upload at <strong>3200 × 640 px</strong> (displays at 1600 × 320, 5:1 ratio). Click <strong>Save banner</strong> — the portal updates immediately.</p>
+                    <p className="adm-section-note">The uploaded image is the <strong>entire</strong> home-page banner (full-bleed). Upload at <strong>{BANNER_LABEL}</strong>. Images are auto-saved after upload — the portal updates immediately.</p>
                   </div>
                   <button type="button" onClick={() => void loadBannerEditor()} className="adm-btn-ghost"><RefreshCw size={15} /><span className="adm-btn-text">Refresh</span></button>
                 </div>
@@ -3740,20 +3776,20 @@ export default function AdminPage({ customer, onViewPortal }) {
                       <textarea className="adm-field-input" style={{ width: '100%', minHeight: 120 }} value={bannerForm.body} onChange={(e) => setBannerForm((p) => ({ ...p, body: e.target.value }))} />
                     </div>
                     <div>
-                      <label className="adm-muted" style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Banner image — required size 3200 × 640 px (5:1)</label>
+                      <label className="adm-muted" style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Banner image — {BANNER_LABEL}</label>
                       <label className="adm-btn-ghost" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-                        <ImagePlus size={15} /> {bannerUploading ? 'Uploading…' : 'Upload banner (3200 × 640)'}
+                        <ImagePlus size={15} /> {bannerUploading ? 'Uploading…' : `Upload banner (${BANNER_LABEL})`}
                         <input type="file" accept="image/*" hidden onChange={(e) => { void handleBannerImage(e.target.files?.[0]); e.target.value = ''; }} />
                       </label>
                     </div>
                     <button type="button" className="adm-btn-red" disabled={bannerSaving} onClick={() => void saveBannerEditor()}>{bannerSaving ? 'Saving…' : 'Save banner'}</button>
                   </div>
                   <div>
-                    <span className="adm-muted" style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Live preview (5:1)</span>
-                    <div style={{ border: '1px solid #e5e7eb', borderRadius: 16, overflow: 'hidden', background: '#050505', aspectRatio: '5 / 1', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <span className="adm-muted" style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Live preview ({BANNER_ASPECT_CSS.replace(' / ', '∶')})</span>
+                    <div style={{ border: '1px solid #e5e7eb', borderRadius: 16, overflow: 'hidden', background: '#050505', aspectRatio: BANNER_ASPECT_CSS, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                       {bannerForm.imageUrl
                         ? <img src={bannerForm.imageUrl} alt="Banner preview" style={{ width: '100%', height: '100%', display: 'block', objectFit: 'cover' }} />
-                        : <span className="adm-muted">No banner uploaded — upload a 3200 × 640 image</span>}
+                        : <span className="adm-muted">No banner uploaded — upload a {BANNER_LABEL} image</span>}
                     </div>
                   </div>
                 </div>
@@ -3944,14 +3980,14 @@ export default function AdminPage({ customer, onViewPortal }) {
         <div className="adm-modal-backdrop" onClick={() => setDeleteSubModal(null)}>
           <div className="adm-modal adm-modal--form" onClick={(e) => e.stopPropagation()}>
             <div className="adm-modal-header">
-              <h3 className="adm-modal-title">Delete subcategory?</h3>
+              <h3 className="adm-modal-title">Delete {deleteSubModal.type === 'category' ? 'category' : 'subcategory'}?</h3>
               <button type="button" className="adm-modal-close" onClick={() => setDeleteSubModal(null)} aria-label="Close"><X size={18} /></button>
             </div>
             <p className="adm-modal-note">
               Remove <strong>{deleteSubModal.label}</strong> from the catalogue structure.
               {deleteSubModal.productCount > 0
-                ? ` ${deleteSubModal.productCount} product(s) still use this subcategory — move them first.`
-                : ' No live products are assigned to it.'}
+                ? ` ${deleteSubModal.productCount} product(s) will stay but become uncategorised.`
+                : ' No products are assigned to it.'}
             </p>
             <div className="adm-modal-footer adm-modal-footer--end">
               <div className="adm-modal-footer__actions">
@@ -3960,7 +3996,7 @@ export default function AdminPage({ customer, onViewPortal }) {
                   type="button"
                   className="adm-btn-red"
                   onClick={() => void confirmDeleteSubcategory()}
-                  disabled={taxonomySaving || deleteSubModal.productCount > 0}
+                  disabled={taxonomySaving}
                 >
                   {taxonomySaving ? 'Deleting…' : 'Delete'}
                 </button>
@@ -4003,6 +4039,38 @@ export default function AdminPage({ customer, onViewPortal }) {
               <div className="adm-modal-footer__actions">
                 <button type="button" className="adm-btn-ghost" onClick={() => setNewSubModal(null)}>Cancel</button>
                 <button type="button" className="adm-btn-red" onClick={() => void saveNewSubcategory()} disabled={taxonomySaving}>
+                  {taxonomySaving ? 'Creating…' : 'Create'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {newCategoryModal && (
+        <div className="adm-modal-backdrop" onClick={() => setNewCategoryModal(null)}>
+          <div className="adm-modal adm-modal--form" onClick={(e) => e.stopPropagation()}>
+            <div className="adm-modal-header">
+              <h3 className="adm-modal-title">New category</h3>
+              <button type="button" className="adm-modal-close" onClick={() => setNewCategoryModal(null)} aria-label="Close"><X size={18} /></button>
+            </div>
+            <div className="adm-modal-body">
+              <label className="adm-field">
+                <span className="adm-field-label">Category name</span>
+                <input
+                  value={newCategoryModal.label}
+                  onChange={(e) => setNewCategoryModal((m) => ({ ...m, label: e.target.value }))}
+                  className="adm-field-input"
+                  placeholder="e.g. Outdoor & Camping"
+                  autoFocus
+                  onKeyDown={(e) => { if (e.key === 'Enter') void saveNewCategory(); }}
+                />
+              </label>
+            </div>
+            <div className="adm-modal-footer adm-modal-footer--end">
+              <div className="adm-modal-footer__actions">
+                <button type="button" className="adm-btn-ghost" onClick={() => setNewCategoryModal(null)}>Cancel</button>
+                <button type="button" className="adm-btn-red" onClick={() => void saveNewCategory()} disabled={taxonomySaving}>
                   {taxonomySaving ? 'Creating…' : 'Create'}
                 </button>
               </div>

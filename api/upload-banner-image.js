@@ -5,8 +5,9 @@ import { createClient } from '@supabase/supabase-js';
 export const config = { api: { bodyParser: { sizeLimit: '20mb' } } };
 
 const BUCKET = 'product-images';
-const TARGET_W = 3200;
-const TARGET_H = 640;
+/** Reference banner ratio 1000×534 — 2× for retina. */
+const TARGET_W = 2000;
+const TARGET_H = 1068;
 
 function getStockAdminClient() {
   return createClient(

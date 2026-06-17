@@ -1,29 +1,6 @@
-const KEY_STORAGE = 'proto_admin_key';
-
-export function getStoredAdminKey() {
-  try { return localStorage.getItem(KEY_STORAGE) || ''; } catch { return ''; }
-}
-
-export function storeAdminKey(key) {
-  try { localStorage.setItem(KEY_STORAGE, key); } catch {}
-}
-
-export function clearAdminKey() {
-  try { localStorage.removeItem(KEY_STORAGE); } catch {}
-}
-
-export async function verifyAdminKey(key) {
-  const res = await fetch('/api/auth-check', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-admin-key': key },
-  });
-  return res.ok;
-}
-
 /**
- * Read the order id + signed token from the current URL.
- * Supports both the short link (/f/<orderId>/<token>) and the legacy query
- * form (?id=...&k=... or ?o=...&k=...).
+ * Patches window.fetch for fulfillment order links (/f/<orderId>/<token>).
+ * Dashboard login was removed — no admin key is stored or sent.
  */
 export function getOrderAccessFromUrl() {
   try {
@@ -33,18 +10,11 @@ export function getOrderAccessFromUrl() {
     const params = new URLSearchParams(window.location.search);
     const orderId = params.get('o') || params.get('id') || '';
     const token = params.get('k') || '';
-    // Dashboard opens /fulfillment?id=<uuid> with admin-key auth — token is optional.
     if (orderId) return { orderId, token };
   } catch {}
   return { orderId: '', token: '' };
 }
 
-/**
- * Patches window.fetch so every same-origin /api/ call carries:
- *  - x-admin-key (dashboard key, when stored)
- *  - x-order-id + x-order-token (fulfillment short links and legacy ?id=&k=)
- * Call once at startup.
- */
 export function installAuthFetch() {
   if (window.__protoAuthFetchInstalled) return;
   window.__protoAuthFetchInstalled = true;
@@ -56,10 +26,6 @@ export function installAuthFetch() {
     if (!isApiCall) return originalFetch(input, init);
 
     const headers = new Headers(init.headers || (typeof input !== 'string' ? input.headers : undefined) || {});
-
-    const adminKey = getStoredAdminKey();
-    if (adminKey && !headers.has('x-admin-key')) headers.set('x-admin-key', adminKey);
-
     const { orderId, token } = getOrderAccessFromUrl();
     if (orderId && !headers.has('x-order-id')) headers.set('x-order-id', orderId);
     if (token && !headers.has('x-order-token')) headers.set('x-order-token', token);

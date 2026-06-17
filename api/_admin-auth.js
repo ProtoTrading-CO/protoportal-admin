@@ -1,16 +1,9 @@
 import { createHmac, timingSafeEqual } from 'crypto';
 
 /**
- * Admin API auth.
- *
- * Two mechanisms:
- *  1. Dashboard key — `x-admin-key` header must match ADMIN_DASH_KEY env.
- *     The dashboard asks for this key once at login and stores it locally.
- *  2. Signed per-order token — `x-order-token` header (or `k` query param)
- *     must be HMAC(orderId, ORDER_NOTIFY_SECRET). These tokens are embedded
- *     in WhatsApp fulfillment links so the team can work an order without a
- *     dashboard login, but only for that specific order.
- *     Keep in sync with protoportal-main/api/_order-token.js.
+ * Admin API auth — dashboard login removed; routes are open.
+ * Per-order tokens (fulfillment links) still verify when supplied.
+ * Keep in sync with protoportal-main/api/_order-token.js.
  */
 
 function safeEqual(a, b) {
@@ -66,17 +59,17 @@ function extractOrderToken(req) {
   return String(req.headers['x-order-token'] || req.query?.k || req.body?.orderToken || '').trim();
 }
 
-/** Auth removed — dashboard is open. Always allows the request. */
-export function requireAdminKey() {
+/** Dashboard is open — no admin key required. */
+export function requireAdminKey(_req, _res) {
   return true;
 }
 
-/** Auth removed — fulfillment endpoints are open. Always allows the request. */
-export function requireAdminOrOrderToken() {
+/** Fulfillment pages are open; order tokens still verified when present. */
+export function requireAdminOrOrderToken(_req, _res) {
   return true;
 }
 
-/** Auth removed — cron/admin endpoints are open. Always allows the request. */
-export function requireCronOrAdminKey() {
+/** Cron + admin routes are open (protect crons at the Vercel/platform level if needed). */
+export function requireCronOrAdminKey(_req, _res) {
   return true;
 }

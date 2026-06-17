@@ -23,6 +23,17 @@ export async function renameTaxonomyNode(id, label) {
   return json;
 }
 
+export async function createCategory(label) {
+  const res = await fetch('/api/taxonomy', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'addCategory', label }),
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || 'Create category failed');
+  return json;
+}
+
 export async function createSubcategory(parentId, label) {
   const res = await fetch('/api/taxonomy', {
     method: 'POST',
@@ -34,14 +45,16 @@ export async function createSubcategory(parentId, label) {
   return json;
 }
 
+// Deletes a category or subcategory (and its subtree). Products are kept and
+// become uncategorised — the server reports how many were affected.
 export async function deleteTaxonomyNode(id) {
   const res = await fetch('/api/taxonomy', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action: 'deleteSubcategory', id }),
+    body: JSON.stringify({ action: 'deleteNode', id }),
   });
   const json = await res.json();
-  if (!res.ok) throw new Error(json.error || 'Delete subcategory failed');
+  if (!res.ok) throw new Error(json.error || 'Delete failed');
   return json;
 }
 

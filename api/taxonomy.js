@@ -1,9 +1,11 @@
 import { requireAdminKey } from './_admin-auth.js';
 import { createClient } from '@supabase/supabase-js';
 import {
+  addCategoryNode,
   addSubcategoryNode,
   buildRenameFilter,
   countProductsForNode,
+  deleteNodeCascade,
   deleteSubcategoryNode,
   findNodeContext,
   loadTaxonomy,
@@ -63,6 +65,13 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, id, label: label.trim() });
     }
 
+    if (action === 'addCategory') {
+      const { label } = req.body;
+      const { tree: next, node, created } = addCategoryNode(tree, label);
+      if (created) await saveTaxonomy(next);
+      return res.status(200).json({ ok: true, node, created });
+    }
+
     if (action === 'addSubcategory') {
       const { parentId, label } = req.body;
       const { tree: next, node, created } = addSubcategoryNode(tree, parentId, label);
@@ -92,6 +101,20 @@ export default async function handler(req, res) {
       const { tree: next } = deleteSubcategoryNode(tree, id);
       await saveTaxonomy(next);
       return res.status(200).json({ ok: true, id, productCount: 0 });
+    }
+
+    if (action === 'deleteNode') {
+      // Delete a category or subcategory (and its subtree). Products are kept —
+      // they just become uncategorised. We still report how many are affected.
+      const { id } = req.body;
+      if (!id) return res.status(400).json({ error: 'id required' });
+      const ctx = findNodeContext(tree, id);
+      if (!ctx) return res.status(404).json({ error: 'Category not found' });
+      let productCount = 0;
+      try { productCount = await countProductsForNode(supabase, ctx); } catch { /* best effort */ }
+      const { tree: next } = deleteNodeCascade(tree, id);
+      await saveTaxonomy(next);
+      return res.status(200).json({ ok: true, id, productCount });
     }
 
     if (action === 'countSubcategoryProducts') {

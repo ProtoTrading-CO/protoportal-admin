@@ -150,6 +150,24 @@ export function buildRenameFilter(ctx, oldLabel) {
   return { column: col, filters };
 }
 
+export function addCategoryNode(tree, label) {
+  const trimmed = String(label || '').trim();
+  if (!trimmed) throw new Error('Category name is required');
+  const id = labelToSlug(trimmed);
+  if (!id) throw new Error('Invalid category name');
+
+  const existing = tree.find((c) => c.id === id);
+  if (existing) {
+    if (existing.label !== trimmed) {
+      throw new Error(`Slug collision: "${existing.label}" and "${trimmed}" both map to "${id}"`);
+    }
+    return { tree, node: existing, created: false };
+  }
+
+  const node = { id, label: trimmed, children: [] };
+  return { tree: [...tree, node], node, created: true };
+}
+
 export function addSubcategoryNode(tree, parentId, label) {
   const trimmed = String(label || '').trim();
   if (!trimmed) throw new Error('Subcategory name is required');
@@ -192,6 +210,22 @@ export function deleteSubcategoryNode(tree, id) {
   if (ctx.node.children?.length) {
     throw new Error('Remove nested subcategories first');
   }
+  ctx.parent.children = (ctx.parent.children || []).filter((child) => child.id !== id);
+  return { tree: [...tree], ctx };
+}
+
+/**
+ * Delete a node at any depth (category or subcategory) together with its whole
+ * subtree. Products are left untouched — their stored labels remain, so they
+ * simply fall back to slug-of-label and show as uncategorised.
+ */
+export function deleteNodeCascade(tree, id) {
+  const ctx = findNodeContext(tree, id);
+  if (!ctx) throw new Error('Category not found');
+  if (ctx.depth === 0) {
+    return { tree: tree.filter((n) => n.id !== id), ctx };
+  }
+  if (!ctx.parent) throw new Error('Parent category not found');
   ctx.parent.children = (ctx.parent.children || []).filter((child) => child.id !== id);
   return { tree: [...tree], ctx };
 }
