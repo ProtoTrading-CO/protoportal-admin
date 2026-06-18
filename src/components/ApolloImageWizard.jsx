@@ -674,6 +674,15 @@ export default function ApolloImageWizard({
                       >
                         {selected ? <><Check size={12} /> Selected</> : 'Use as reference'}
                       </button>
+                      {selected && (
+                        <button
+                          type="button"
+                          className="apollo-ref-gallery-deselect"
+                          onClick={() => setReferenceUrl('')}
+                        >
+                          Deselect
+                        </button>
+                      )}
                     </div>
                   );
                 })}

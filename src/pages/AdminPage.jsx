@@ -278,6 +278,8 @@ const PRODUCT_IMAGE_SLOTS = [
 const emptyForm = {
   code: '',
   name: '',
+  description: '',
+  packDescription: '',
   image: '',
   secondaryImage: '',
   imageThree: '',
@@ -395,6 +397,8 @@ function productToForm(product, tree = categories) {
   return {
     code: product.code || '',
     name: product.name || '',
+    description: product.description || '',
+    packDescription: product.packDescription || '',
     image: product.image || product.images?.[0] || '',
     secondaryImage: product.secondaryImage || product.images?.[1] || '',
     imageThree: product.imageThree || product.images?.[2] || '',
@@ -438,7 +442,7 @@ export default function AdminPage({ customer, onViewPortal }) {
   const [savingProfile, setSavingProfile] = useState(false);
 
   const [contentEditProduct, setContentEditProduct] = useState(null);
-  const [contentEditForm, setContentEditForm] = useState({ image: '', description: '', code: '' });
+  const [contentEditForm, setContentEditForm] = useState({ image: '', description: '', packDescription: '', code: '' });
   const [contentEditSaving, setContentEditSaving] = useState(false);
   const [contentEditError, setContentEditError] = useState('');
   const [imageUploading, setImageUploading] = useState(false);
@@ -512,6 +516,9 @@ export default function AdminPage({ customer, onViewPortal }) {
   const [moveChild2Id, setMoveChild2Id] = useState('');
   const [moveChild3Id, setMoveChild3Id] = useState('');
   const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false);
+  const [bulkFieldEditOpen, setBulkFieldEditOpen] = useState(false);
+  const [bulkFieldEditType, setBulkFieldEditType] = useState('description');
+  const [bulkFieldEditValue, setBulkFieldEditValue] = useState('');
   const [editTaxonomyModal, setEditTaxonomyModal] = useState(null);
   const [newSubModal, setNewSubModal] = useState(null);
   const [newCategoryModal, setNewCategoryModal] = useState(null);
@@ -1331,6 +1338,7 @@ export default function AdminPage({ customer, onViewPortal }) {
     setContentEditForm({
       image: product.image || '',
       description: product.description || '',
+      packDescription: product.packDescription || '',
       code: product.code || product.barcode || '',
     });
     setContentEditError('');
@@ -1346,12 +1354,14 @@ export default function AdminPage({ customer, onViewPortal }) {
       await updateProduct(contentEditProduct.id, {
         image: contentEditForm.image.trim(),
         description: contentEditForm.description,
+        packDescription: contentEditForm.packDescription,
         code: contentEditForm.code?.trim() || '',
       });
       // Update local lists so image/description reflects the change without a full reload
       const patch = {
         image: contentEditForm.image.trim(),
         description: contentEditForm.description,
+        packDescription: contentEditForm.packDescription,
         code: contentEditForm.code?.trim() || '',
         barcode: contentEditForm.code.trim(),
       };
@@ -1395,6 +1405,8 @@ export default function AdminPage({ customer, onViewPortal }) {
     const payload = {
       code: productForm.code.trim(),
       name: productForm.name.trim(),
+      description: productForm.description,
+      packDescription: productForm.packDescription,
       image: productForm.image.trim(),
       secondaryImage: productForm.secondaryImage.trim(),
       imageThree: productForm.imageThree.trim(),
@@ -1775,10 +1787,9 @@ export default function AdminPage({ customer, onViewPortal }) {
   const reorderSearchActive = reorderSearch.trim().length > 0;
 
   const visibleReorderProducts = useMemo(() => {
-    let rows = applyPathFilter(reorderProducts, reorderCategoryPath);
     const q = reorderSearch.trim();
-    if (q) rows = fuzzyFilter(rows, q);
-    return rows;
+    if (q) return fuzzyFilter(reorderProducts, q);
+    return applyPathFilter(reorderProducts, reorderCategoryPath);
   }, [reorderProducts, reorderCategoryPath, reorderSearch]);
 
   const handleReorderProductsChange = useCallback((nextOrFn) => {
@@ -1865,6 +1876,27 @@ export default function AdminPage({ customer, onViewPortal }) {
       showToast(`Moved ${count} product(s)`);
     } catch (err) {
       showToast(err.message || 'Move failed', 'error');
+    } finally { setSaving(''); }
+  };
+
+  const confirmBulkFieldEdit = async () => {
+    if (!selectedIds.size || !bulkFieldEditValue.trim()) {
+      showToast('Enter a value to apply', 'error');
+      return;
+    }
+    setSaving('bulk-field-edit');
+    const skus = [...selectedIds];
+    const field = bulkFieldEditType;
+    const value = bulkFieldEditValue.trim();
+    try {
+      await Promise.all(skus.map((sku) => updateProduct(sku, { [field]: value })));
+      const patch = { [field]: value };
+      setReorderProducts((prev) => prev.map((p) => selectedIds.has(p.id) ? { ...p, ...patch } : p));
+      setBulkFieldEditOpen(false);
+      setBulkFieldEditValue('');
+      showToast(`Updated ${skus.length} product(s)`);
+    } catch (err) {
+      showToast(err.message || 'Bulk edit failed', 'error');
     } finally { setSaving(''); }
   };
 
@@ -3173,6 +3205,12 @@ export default function AdminPage({ customer, onViewPortal }) {
                       </button>
                     </div>
                     <div className="adm-bulk-bar__actions">
+                      <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => { setBulkFieldEditType('description'); setBulkFieldEditValue(''); setBulkFieldEditOpen(true); }} disabled={!!saving}>
+                        Edit description
+                      </button>
+                      <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => { setBulkFieldEditType('code'); setBulkFieldEditValue(''); setBulkFieldEditOpen(true); }} disabled={!!saving}>
+                        Edit barcode
+                      </button>
                       <button type="button" className="adm-btn-red adm-btn--sm" onClick={openMoveModal} disabled={!!saving}>
                         <ArrowLeftRight size={15} /> Move
                       </button>
@@ -3321,6 +3359,52 @@ export default function AdminPage({ customer, onViewPortal }) {
                           <button type="button" className="adm-btn-ghost" onClick={() => setArchiveConfirmOpen(false)}>Cancel</button>
                           <button type="button" className="adm-btn-red" onClick={() => void confirmBulkArchive()} disabled={saving === 'bulk-archive'}>
                             {saving === 'bulk-archive' ? 'Archiving…' : 'Archive'}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {bulkFieldEditOpen && (
+                  <div className="adm-modal-backdrop" onClick={() => setBulkFieldEditOpen(false)}>
+                    <div className="adm-modal adm-modal--form" onClick={(e) => e.stopPropagation()}>
+                      <div className="adm-modal-header">
+                        <h3 className="adm-modal-title">
+                          Edit {bulkFieldEditType === 'description' ? 'description' : 'barcode'} for {selectedIds.size} product{selectedIds.size === 1 ? '' : 's'}
+                        </h3>
+                        <button type="button" className="adm-modal-close" onClick={() => setBulkFieldEditOpen(false)} aria-label="Close"><X size={18} /></button>
+                      </div>
+                      <p className="adm-modal-note">This value will overwrite the existing {bulkFieldEditType === 'description' ? 'description' : 'barcode'} on every selected product.</p>
+                      <div className="adm-modal-body">
+                        <label className="adm-field">
+                          <span className="adm-field-label">{bulkFieldEditType === 'description' ? 'Description' : 'Barcode'}</span>
+                          {bulkFieldEditType === 'description' ? (
+                            <textarea
+                              value={bulkFieldEditValue}
+                              onChange={(e) => setBulkFieldEditValue(e.target.value)}
+                              className="adm-field-input"
+                              rows={4}
+                              style={{ resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }}
+                              autoFocus
+                              placeholder="New description for all selected products…"
+                            />
+                          ) : (
+                            <input
+                              value={bulkFieldEditValue}
+                              onChange={(e) => setBulkFieldEditValue(e.target.value)}
+                              className="adm-field-input"
+                              autoFocus
+                              placeholder="New barcode / code for all selected products…"
+                            />
+                          )}
+                        </label>
+                      </div>
+                      <div className="adm-modal-footer adm-modal-footer--end">
+                        <div className="adm-modal-footer__actions">
+                          <button type="button" className="adm-btn-ghost" onClick={() => setBulkFieldEditOpen(false)}>Cancel</button>
+                          <button type="button" className="adm-btn-red" onClick={() => void confirmBulkFieldEdit()} disabled={saving === 'bulk-field-edit'}>
+                            {saving === 'bulk-field-edit' ? 'Saving…' : 'Apply to all'}
                           </button>
                         </div>
                       </div>
@@ -4214,19 +4298,30 @@ export default function AdminPage({ customer, onViewPortal }) {
               />
             </label>
 
-            <label style={{ display: 'grid', gap: 5, marginBottom: 18 }}>
-              <span style={{ fontWeight: 700, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Barcode</span>
-              <input
-                value={contentEditForm.code || ''}
-                onChange={(e) => setContentEditForm((f) => ({ ...f, code: e.target.value }))}
-                className="adm-field-input"
-                placeholder="Product barcode"
-                style={{ fontSize: 12 }}
-              />
-            </label>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 18 }}>
+              <label style={{ display: 'grid', gap: 5 }}>
+                <span style={{ fontWeight: 700, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Website SKU (WSK)</span>
+                <input
+                  value={contentEditProduct?.websiteSku || ''}
+                  readOnly
+                  className="adm-field-input"
+                  style={{ fontSize: 12, background: '#f8fafc', color: '#64748b', cursor: 'default' }}
+                />
+              </label>
+              <label style={{ display: 'grid', gap: 5 }}>
+                <span style={{ fontWeight: 700, fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Barcode (BC)</span>
+                <input
+                  value={contentEditForm.code || ''}
+                  onChange={(e) => setContentEditForm((f) => ({ ...f, code: e.target.value }))}
+                  className="adm-field-input"
+                  placeholder="Product barcode"
+                  style={{ fontSize: 12 }}
+                />
+              </label>
+            </div>
 
             {/* Description */}
-            <label style={{ display: 'grid', gap: 6, marginBottom: 20 }}>
+            <label style={{ display: 'grid', gap: 6, marginBottom: 14 }}>
               <span style={{ fontWeight: 700, fontSize: 13 }}>Description</span>
               <textarea
                 value={contentEditForm.description}
@@ -4234,6 +4329,18 @@ export default function AdminPage({ customer, onViewPortal }) {
                 className="adm-field-input"
                 rows={4}
                 placeholder="Product description shown to customers…"
+                style={{ resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }}
+              />
+            </label>
+
+            <label style={{ display: 'grid', gap: 6, marginBottom: 20 }}>
+              <span style={{ fontWeight: 700, fontSize: 13 }}>Pack Description</span>
+              <textarea
+                value={contentEditForm.packDescription || ''}
+                onChange={(e) => setContentEditForm((f) => ({ ...f, packDescription: e.target.value }))}
+                className="adm-field-input"
+                rows={2}
+                placeholder="Pack / carton description…"
                 style={{ resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }}
               />
             </label>
@@ -4422,7 +4529,7 @@ export default function AdminPage({ customer, onViewPortal }) {
       {/* Product editor modal */}
       {editorOpen && (
         <div className="adm-modal-backdrop" onClick={closeEditor}>
-          <div className="adm-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 760, maxHeight: '88vh', display: 'flex', flexDirection: 'column' }}>
+          <div className="adm-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 900, maxHeight: '92vh', display: 'flex', flexDirection: 'column' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexShrink: 0 }}>
               <div>
                 <h3 style={{ margin: 0, fontSize: 22, fontFamily: 'Outfit, sans-serif' }}>{editingProduct ? 'Edit product' : 'Add product'}</h3>
@@ -4448,7 +4555,7 @@ export default function AdminPage({ customer, onViewPortal }) {
               />
             ))}
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 14 }}>
               <AdminField label="Product code"><input value={productForm.code} onChange={(e) => setProductForm((p) => ({ ...p, code: e.target.value }))} className="adm-field-input" /></AdminField>
               <AdminField label="Product type">
                 <select value={productForm.productType} onChange={(e) => setProductForm((p) => ({ ...p, productType: e.target.value }))} className="adm-field-input">
@@ -4456,6 +4563,12 @@ export default function AdminPage({ customer, onViewPortal }) {
                 </select>
               </AdminField>
               <AdminField label="Product name" full><input value={productForm.name} onChange={(e) => setProductForm((p) => ({ ...p, name: e.target.value }))} className="adm-field-input" /></AdminField>
+              <AdminField label="Description" full>
+                <textarea value={productForm.description} onChange={(e) => setProductForm((p) => ({ ...p, description: e.target.value }))} className="adm-field-input" rows={3} style={{ resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }} placeholder="Product description shown to customers…" />
+              </AdminField>
+              <AdminField label="Pack Description" full>
+                <textarea value={productForm.packDescription} onChange={(e) => setProductForm((p) => ({ ...p, packDescription: e.target.value }))} className="adm-field-input" rows={2} style={{ resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }} placeholder="Pack / carton description…" />
+              </AdminField>
 
               <AdminField label="Product images (up to 4)" full>
                 <p className="adm-muted" style={{ fontSize: 12, margin: '0 0 10px' }}>

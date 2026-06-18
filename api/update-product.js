@@ -19,6 +19,7 @@ export default async function handler(req, res) {
     expectedUpdatedAt,
     image,
     description,
+    packDescription,
     title,
     name,
     price,
@@ -44,6 +45,7 @@ export default async function handler(req, res) {
   if (barcode !== undefined) patch.barcode = String(barcode).trim();
   if (code !== undefined) patch.barcode = String(code).trim();
   if (description !== undefined) patch.original_description = String(description).trim();
+  if (packDescription !== undefined) patch.pack_description = String(packDescription).trim();
   if (title !== undefined) patch.title = String(title).trim();
   if (name !== undefined) patch.title = String(name).trim();
   if (price !== undefined) patch.price = Number(price) || 0;

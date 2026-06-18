@@ -103,6 +103,7 @@ function adapt(row, { archived = false, tree = null } = {}) {
     title: row.title,
     description: row.original_description || '',
     originalDescription: row.original_description || '',
+    packDescription: row.pack_description || '',
     price: Number(row.price) || 0,
     images,
     image: images[0] || '',
@@ -504,6 +505,7 @@ export async function updateProduct(sku, payload) {
   }
   if (payload.code !== undefined) body.barcode = String(payload.code).trim();
   if (payload.description !== undefined) body.description = payload.description;
+  if (payload.packDescription !== undefined) body.packDescription = payload.packDescription;
   if (payload.name !== undefined) body.title = payload.name;
   if (payload.price !== undefined) body.price = Number(payload.price) || 0;
   if (payload.categoryPath?.length) Object.assign(body, pathToWriteFields(payload.categoryPath));
