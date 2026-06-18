@@ -96,18 +96,20 @@ export async function runReprocessBatch(products, {
   signal,
 } = {}) {
   const queue = buildWorkItems(products, { fillSlots });
-  const results = { done: 0, failed: 0, items: [] };
+  const results = { done: 0, failed: 0, items: Array(queue.length).fill(null) };
 
-  for (let i = 0; i < queue.length; i++) {
-    if (signal?.aborted) break;
-    const item = queue[i];
-
+  // Mark every item as in-progress immediately so the UI shows all cards as generating
+  queue.forEach((item, i) => {
     onItemUpdate?.(i, {
       status: 'transforming',
       message: styleMessage(imageStyle, item.slot),
       slot: item.slot,
     });
+  });
 
+  // Run all slots in parallel — each item fires its own API call simultaneously
+  await Promise.all(queue.map(async (item, i) => {
+    if (signal?.aborted) return;
     try {
       const json = await reprocessOneToDormant(item.sku, {
         prompt,
@@ -118,7 +120,7 @@ export async function runReprocessBatch(products, {
         batchId,
       });
       results.done += 1;
-      results.items.push({ sku: item.sku, slot: item.slot, ok: true, imageUrl: json.imageUrl });
+      results.items[i] = { sku: item.sku, slot: item.slot, ok: true, imageUrl: json.imageUrl };
       onItemUpdate?.(i, {
         status: 'done',
         message: json.stillLive ? 'Preview staged ✓' : 'Staged ✓',
@@ -126,18 +128,16 @@ export async function runReprocessBatch(products, {
         sourceUrl: json.sourceUrl,
         slot: item.slot,
       });
-      // Brief pause between items so concurrent batches don't stampede the lock store.
-      if (i < queue.length - 1) await sleep(350);
     } catch (err) {
       results.failed += 1;
-      results.items.push({ sku: item.sku, slot: item.slot, ok: false, error: err.message });
+      results.items[i] = { sku: item.sku, slot: item.slot, ok: false, error: err.message };
       onItemUpdate?.(i, {
         status: 'error',
         message: err.message,
         slot: item.slot,
       });
     }
-  }
+  }));
 
   return results;
 }
