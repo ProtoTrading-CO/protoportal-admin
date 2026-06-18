@@ -395,6 +395,7 @@ export default function ProductManagerEngine({
               onSelectPath={setCategoryPath}
               onEditNode={onEditCategory}
               onDeleteNode={onDeleteNode}
+              onAddChild={onAddSubcategory}
             />
           </aside>
           <div className="adm-panel-main">

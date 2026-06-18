@@ -299,6 +299,14 @@ function subcategoryOptions(categoryId, tree = categories) {
   return subcategoryOptionsFromTree(tree, categoryId);
 }
 
+/** Flatten every node in the tree to [{id, label, depth}] for parent-picker dropdowns. */
+function allNodesFlat(nodes, depth = 0) {
+  return (nodes || []).flatMap((n) => [
+    { id: n.id, label: n.label, depth },
+    ...allNodesFlat(n.children, depth + 1),
+  ]);
+}
+
 /** Look up the children of a node by id within an arbitrary tree. */
 function childrenOf(tree, id) {
   if (!id) return [];
@@ -3163,6 +3171,7 @@ export default function AdminPage({ customer, onViewPortal }) {
                       tree={taxonomyTree}
                       selectedPath={reorderCategoryPath}
                       onSelectPath={(path) => { setReorderCategoryPath(path); setSelectedIds(new Set()); setReorderSearch(''); }}
+                      onAddChild={(parentId) => setNewSubModal({ parentId, label: '' })}
                     />
                   </aside>
 
@@ -3310,47 +3319,6 @@ export default function AdminPage({ customer, onViewPortal }) {
                             disabled={taxonomySaving}
                           >
                             {taxonomySaving ? 'Deleting…' : 'Delete'}
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {newSubModal && (
-                  <div className="adm-modal-backdrop" onClick={() => setNewSubModal(null)}>
-                    <div className="adm-modal adm-modal--form" onClick={(e) => e.stopPropagation()}>
-                      <div className="adm-modal-header">
-                        <h3 className="adm-modal-title">New subcategory</h3>
-                        <button type="button" className="adm-modal-close" onClick={() => setNewSubModal(null)} aria-label="Close"><X size={18} /></button>
-                      </div>
-                      <div className="adm-modal-body">
-                        <label className="adm-field">
-                          <span className="adm-field-label">Under category</span>
-                          <select
-                            value={newSubModal.parentId}
-                            onChange={(e) => setNewSubModal((m) => ({ ...m, parentId: e.target.value }))}
-                            className="adm-field-input"
-                          >
-                            {mainCategories.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
-                          </select>
-                        </label>
-                        <label className="adm-field">
-                          <span className="adm-field-label">Subcategory name</span>
-                          <input
-                            value={newSubModal.label}
-                            onChange={(e) => setNewSubModal((m) => ({ ...m, label: e.target.value }))}
-                            className="adm-field-input"
-                            placeholder="e.g. Seasonal Items"
-                            autoFocus
-                          />
-                        </label>
-                      </div>
-                      <div className="adm-modal-footer adm-modal-footer--end">
-                        <div className="adm-modal-footer__actions">
-                          <button type="button" className="adm-btn-ghost" onClick={() => setNewSubModal(null)}>Cancel</button>
-                          <button type="button" className="adm-btn-red" onClick={() => void saveNewSubcategory()} disabled={taxonomySaving}>
-                            {taxonomySaving ? 'Creating…' : 'Create'}
                           </button>
                         </div>
                       </div>
@@ -4012,18 +3980,20 @@ export default function AdminPage({ customer, onViewPortal }) {
         <div className="adm-modal-backdrop" onClick={() => setNewSubModal(null)}>
           <div className="adm-modal adm-modal--form" onClick={(e) => e.stopPropagation()}>
             <div className="adm-modal-header">
-              <h3 className="adm-modal-title">New subcategory</h3>
+              <h3 className="adm-modal-title">Add child category</h3>
               <button type="button" className="adm-modal-close" onClick={() => setNewSubModal(null)} aria-label="Close"><X size={18} /></button>
             </div>
             <div className="adm-modal-body">
               <label className="adm-field">
-                <span className="adm-field-label">Under category</span>
+                <span className="adm-field-label">Under</span>
                 <select
                   value={newSubModal.parentId}
                   onChange={(e) => setNewSubModal((m) => ({ ...m, parentId: e.target.value }))}
                   className="adm-field-input"
                 >
-                  {mainCategories.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+                  {allNodesFlat(taxonomyTree).map(({ id, label, depth }) => (
+                    <option key={id} value={id}>{'  '.repeat(depth * 2)}{depth > 0 ? '└ ' : ''}{label}</option>
+                  ))}
                 </select>
               </label>
               <label className="adm-field">
