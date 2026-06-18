@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ChevronDown, ChevronRight, FolderTree, Pencil } from 'lucide-react';
+import { ChevronDown, ChevronRight, FolderTree, Pencil, Trash2 } from 'lucide-react';
 
 function buildPathFromRoot(tree, targetId, path = []) {
   for (const node of tree) {
@@ -13,7 +13,7 @@ function buildPathFromRoot(tree, targetId, path = []) {
   return null;
 }
 
-function TreeBranch({ node, depth, selectedPath, onSelectPath, isOpen, onToggle, ancestors, onEditNode }) {
+function TreeBranch({ node, depth, selectedPath, onSelectPath, isOpen, onToggle, ancestors, onEditNode, onDeleteNode }) {
   const hasChildren = node.children?.length > 0;
   const pathHere = [...ancestors, node.id];
   const isSelected = selectedPath.length > 0 && selectedPath[selectedPath.length - 1] === node.id;
@@ -52,6 +52,16 @@ function TreeBranch({ node, depth, selectedPath, onSelectPath, isOpen, onToggle,
             <Pencil size={11} />
           </button>
         )}
+        {onDeleteNode && (
+          <button
+            type="button"
+            className="adm-reorder-cat-edit adm-reorder-cat-edit--danger"
+            title="Delete subcategory"
+            onClick={() => onDeleteNode({ id: node.id, label: node.label, type: 'subcategory' })}
+          >
+            <Trash2 size={11} />
+          </button>
+        )}
       </div>
       {hasChildren && open && node.children.map((child) => (
         <TreeBranch
@@ -64,6 +74,7 @@ function TreeBranch({ node, depth, selectedPath, onSelectPath, isOpen, onToggle,
           onToggle={onToggle}
           ancestors={pathHere}
           onEditNode={onEditNode}
+          onDeleteNode={onDeleteNode}
         />
       ))}
     </div>
@@ -71,7 +82,7 @@ function TreeBranch({ node, depth, selectedPath, onSelectPath, isOpen, onToggle,
 }
 
 /** Expandable category tree — up to 4 sub-levels under each main category. */
-export default function CategorySidebar({ tree = [], selectedPath = [], onSelectPath, showUncategorized = false, uncategorizedCount = 0, onEditNode }) {
+export default function CategorySidebar({ tree = [], selectedPath = [], onSelectPath, showUncategorized = false, uncategorizedCount = 0, onEditNode, onDeleteNode }) {
   const [expanded, setExpanded] = useState(() => new Set());
   const [collapsed, setCollapsed] = useState(() => new Set());
 
@@ -164,6 +175,16 @@ export default function CategorySidebar({ tree = [], selectedPath = [], onSelect
                 <Pencil size={11} />
               </button>
             )}
+            {onDeleteNode && (
+              <button
+                type="button"
+                className="adm-reorder-cat-edit adm-reorder-cat-edit--danger"
+                title="Delete category"
+                onClick={() => onDeleteNode({ id: node.id, label: node.label, type: 'category' })}
+              >
+                <Trash2 size={11} />
+              </button>
+            )}
           </div>
           {node.children?.length && isOpen(node.id) && node.children.map((child) => (
             <TreeBranch
@@ -176,6 +197,7 @@ export default function CategorySidebar({ tree = [], selectedPath = [], onSelect
               onToggle={toggle}
               ancestors={[node.id]}
               onEditNode={onEditNode}
+              onDeleteNode={onDeleteNode}
             />
           ))}
         </div>
