@@ -170,6 +170,8 @@ function ImageBatchNotice({ batch, onDismiss, onRefresh }) {
   return null;
 }
 
+const POLL_INTERVAL = 12_000;
+
 export default function ApprovalPanel({ onShowToast, onRefreshStats, embedded = false }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -177,23 +179,36 @@ export default function ApprovalPanel({ onShowToast, onRefreshStats, embedded = 
   const [busy, setBusy] = useState(false);
   const [lightbox, setLightbox] = useState(null);
   const [imageBatch, setImageBatch] = useState(null);
+  const [lastUpdated, setLastUpdated] = useState(null);
+  const busyRef = useRef(false);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true);
     try {
-      const res = await fetch('/api/list-approval-staging');
+      const res = await fetch('/api/list-approval-staging', { cache: 'no-store' });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Failed to load');
       setItems(json.items || []);
-      setSelected(new Set());
+      setLastUpdated(Date.now());
+      if (!silent) setSelected(new Set());
     } catch (err) {
-      onShowToast?.(err.message, 'error');
+      if (!silent) onShowToast?.(err.message, 'error');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [onShowToast]);
 
   useEffect(() => { void load(); }, [load]);
+
+  // Auto-poll so any user sees images staged by another user without manual refresh
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (!busyRef.current) void load({ silent: true });
+    }, POLL_INTERVAL);
+    return () => clearInterval(id);
+  }, [load]);
+
+  useEffect(() => { busyRef.current = busy; }, [busy]);
 
   useEffect(() => subscribeImageBatch(setImageBatch), []);
 
@@ -274,19 +289,25 @@ export default function ApprovalPanel({ onShowToast, onRefreshStats, embedded = 
         <div className="adm-section-head">
           <div>
             <h2 className="adm-section-title"><CheckCircle size={18} /> Approval</h2>
-            <p className="adm-section-note">Review staged images before publishing. Click any thumbnail for full-size view and click-through.</p>
+            <p className="adm-section-note">
+              Review staged images before publishing. Auto-refreshes every 12s — all users see changes live.
+              {lastUpdated && <span className="approval-last-updated"> · Last updated {new Date(lastUpdated).toLocaleTimeString()}</span>}
+            </p>
           </div>
           <button type="button" className="adm-btn-ghost" onClick={() => void load()} disabled={loading || busy}>
-            Refresh
+            Refresh now
           </button>
         </div>
       )}
 
       {embedded && (
         <div className="approval-embedded-toolbar">
-          <p className="adm-section-note">Review staged images before publishing — click thumbnails or <strong>View all images</strong> for full-size.</p>
+          <p className="adm-section-note">
+            Review staged images before publishing — auto-refreshes every 12s.
+            {lastUpdated && <span className="approval-last-updated"> · {new Date(lastUpdated).toLocaleTimeString()}</span>}
+          </p>
           <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => void load()} disabled={loading || busy}>
-            Refresh
+            Refresh now
           </button>
         </div>
       )}

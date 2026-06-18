@@ -5911,6 +5911,7 @@ html, body { background: #f5f5f5; color: #111827; }
 }
 .approval-embedded-toolbar .adm-section-note { margin: 0; flex: 1; }
 .approval-empty { padding: 24px; text-align: center; }
+.approval-last-updated { color: #9ca3af; font-size: 11px; }
 .approval-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 14px; }
 .approval-card {
   border: 1px solid #e2e8f0; border-radius: 14px; padding: 16px; background: #fff;
