@@ -1087,7 +1087,9 @@ export default function AdminPage({ customer, onViewPortal }) {
   useEffect(() => { if (activeSection === 'customers') void loadCustomers(); }, [activeSection, customerPage, customerTab, customerSearch]);
   useEffect(() => { if (activeSection === 'pricing') void loadCategoryWorkingSet(pricingCategory, 'pricing'); }, [activeSection, pricingCategory]);
   useEffect(() => { void reloadTaxonomy(); }, []);
-  useEffect(() => { if (activeSection === 'reorder') void loadReorderProducts(); }, [activeSection, reorderMainId, reorderCategoryPath.join('/')]);
+  // reorderCategoryKey is derived from taxonomyTree — adding it as a dep ensures
+  // the grid reloads when the live taxonomy resolves to a different sort key.
+  useEffect(() => { if (activeSection === 'reorder') void loadReorderProducts(); }, [activeSection, reorderMainId, reorderCategoryPath.join('/'), reorderCategoryKey]);
   useEffect(() => { if (activeSection === 'orders' && orders.length === 0) void loadOrders(); }, [activeSection]);
   useEffect(() => {
     if (activeSection !== 'orders') return undefined;
