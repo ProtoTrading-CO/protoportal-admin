@@ -307,6 +307,18 @@ function allNodesFlat(nodes, depth = 0) {
   ]);
 }
 
+/** Return array of ancestor IDs from root down to (but not including) targetId. */
+function findNodePath(tree, targetId, path = []) {
+  for (const node of (tree || [])) {
+    if (node.id === targetId) return path;
+    if (node.children?.length) {
+      const found = findNodePath(node.children, targetId, [...path, node.id]);
+      if (found !== null) return found;
+    }
+  }
+  return null;
+}
+
 /** Look up the children of a node by id within an arbitrary tree. */
 function childrenOf(tree, id) {
   if (!id) return [];
@@ -495,8 +507,10 @@ export default function AdminPage({ customer, onViewPortal }) {
   const [taxonomyTree, setTaxonomyTree] = useState(categories);
   const [toast, setToast] = useState(null);
   const [moveModalOpen, setMoveModalOpen] = useState(false);
-  const [moveTargetCategory, setMoveTargetCategory] = useState('');
-  const [moveTargetSubcategory, setMoveTargetSubcategory] = useState('');
+  const [moveCategoryId, setMoveCategoryId] = useState('');
+  const [moveChild1Id, setMoveChild1Id] = useState('');
+  const [moveChild2Id, setMoveChild2Id] = useState('');
+  const [moveChild3Id, setMoveChild3Id] = useState('');
   const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false);
   const [editTaxonomyModal, setEditTaxonomyModal] = useState(null);
   const [newSubModal, setNewSubModal] = useState(null);
@@ -1824,14 +1838,17 @@ export default function AdminPage({ customer, onViewPortal }) {
   };
 
   const openMoveModal = () => {
-    setMoveTargetCategory(reorderMainId || mainCategories[0]?.id || '');
-    setMoveTargetSubcategory('');
+    setMoveCategoryId(reorderMainId || mainCategories[0]?.id || '');
+    setMoveChild1Id('');
+    setMoveChild2Id('');
+    setMoveChild3Id('');
     setMoveModalOpen(true);
   };
 
   const confirmBulkMove = async () => {
-    if (!selectedIds.size || !moveTargetCategory || !moveTargetSubcategory) {
-      showToast('Choose a main category and subcategory', 'error');
+    const finalSubId = moveChild3Id || moveChild2Id || moveChild1Id;
+    if (!selectedIds.size || !moveCategoryId || !finalSubId) {
+      showToast('Choose a main category and at least one child category', 'error');
       return;
     }
     setSaving('bulk-move');
@@ -1839,8 +1856,8 @@ export default function AdminPage({ customer, onViewPortal }) {
     try {
       await bulkMoveProducts({
         skus: [...selectedIds],
-        categoryId: moveTargetCategory,
-        subcategoryId: moveTargetSubcategory,
+        categoryId: moveCategoryId,
+        subcategoryId: finalSubId,
       });
       setMoveModalOpen(false);
       setSelectedIds(new Set());
@@ -1892,8 +1909,12 @@ export default function AdminPage({ customer, onViewPortal }) {
       await reloadTaxonomy();
       queryClient.invalidateQueries({ queryKey: ['catalog'] });
       if (json.node?.id) {
-        setMoveTargetCategory(newSubModal.parentId);
-        setMoveTargetSubcategory(json.node.id);
+        const parentPath = findNodePath(taxonomyTree, newSubModal.parentId) || [];
+        const newId = json.node.id;
+        setMoveCategoryId(parentPath[0] || newSubModal.parentId);
+        setMoveChild1Id(parentPath.length === 0 ? newId : (parentPath[1] || newSubModal.parentId));
+        setMoveChild2Id(parentPath.length === 1 ? newId : (parentPath.length >= 2 ? newSubModal.parentId : ''));
+        setMoveChild3Id(parentPath.length >= 2 ? newId : '');
       }
       setNewSubModal(null);
       if (selectedIds.size > 0) setMoveModalOpen(true);
@@ -3203,57 +3224,89 @@ export default function AdminPage({ customer, onViewPortal }) {
                   />
                 </div>
 
-                {moveModalOpen && (
-                  <div className="adm-modal-backdrop" onClick={() => setMoveModalOpen(false)}>
-                    <div className="adm-modal adm-modal--form" onClick={(e) => e.stopPropagation()}>
-                      <div className="adm-modal-header">
-                        <h3 className="adm-modal-title">Move {selectedIds.size} product{selectedIds.size === 1 ? '' : 's'}</h3>
-                        <button type="button" className="adm-modal-close" onClick={() => setMoveModalOpen(false)} aria-label="Close"><X size={18} /></button>
-                      </div>
-                      <p className="adm-modal-note">Choose where these products should live in the catalogue.</p>
-                      <div className="adm-modal-body">
-                        <label className="adm-field">
-                          <span className="adm-field-label">Main category</span>
-                          <select
-                            value={moveTargetCategory}
-                            onChange={(e) => { setMoveTargetCategory(e.target.value); setMoveTargetSubcategory(''); }}
-                            className="adm-select adm-select--enhanced"
+                {moveModalOpen && (() => {
+                  const child1Options = subcategoryOptions(moveCategoryId, taxonomyTree);
+                  const child2Options = childrenOf(taxonomyTree, moveChild1Id);
+                  const child3Options = childrenOf(taxonomyTree, moveChild2Id);
+                  const deepestId = moveChild3Id || moveChild2Id || moveChild1Id;
+                  return (
+                    <div className="adm-modal-backdrop" onClick={() => setMoveModalOpen(false)}>
+                      <div className="adm-modal adm-modal--form" onClick={(e) => e.stopPropagation()}>
+                        <div className="adm-modal-header">
+                          <h3 className="adm-modal-title">Move {selectedIds.size} product{selectedIds.size === 1 ? '' : 's'}</h3>
+                          <button type="button" className="adm-modal-close" onClick={() => setMoveModalOpen(false)} aria-label="Close"><X size={18} /></button>
+                        </div>
+                        <p className="adm-modal-note">Choose the destination category for these products.</p>
+                        <div className="adm-modal-body">
+                          <label className="adm-field">
+                            <span className="adm-field-label">Main category</span>
+                            <select
+                              value={moveCategoryId}
+                              onChange={(e) => { setMoveCategoryId(e.target.value); setMoveChild1Id(''); setMoveChild2Id(''); setMoveChild3Id(''); }}
+                              className="adm-select adm-select--enhanced"
+                            >
+                              {mainCategories.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+                            </select>
+                          </label>
+                          {child1Options.length > 0 && (
+                            <label className="adm-field">
+                              <span className="adm-field-label">Child category 1</span>
+                              <select
+                                value={moveChild1Id}
+                                onChange={(e) => { setMoveChild1Id(e.target.value); setMoveChild2Id(''); setMoveChild3Id(''); }}
+                                className="adm-select adm-select--enhanced"
+                              >
+                                <option value="">— None —</option>
+                                {child1Options.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+                              </select>
+                            </label>
+                          )}
+                          {moveChild1Id && child2Options.length > 0 && (
+                            <label className="adm-field">
+                              <span className="adm-field-label">Child category 2</span>
+                              <select
+                                value={moveChild2Id}
+                                onChange={(e) => { setMoveChild2Id(e.target.value); setMoveChild3Id(''); }}
+                                className="adm-select adm-select--enhanced"
+                              >
+                                <option value="">— None —</option>
+                                {child2Options.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+                              </select>
+                            </label>
+                          )}
+                          {moveChild2Id && child3Options.length > 0 && (
+                            <label className="adm-field">
+                              <span className="adm-field-label">Child category 3</span>
+                              <select
+                                value={moveChild3Id}
+                                onChange={(e) => setMoveChild3Id(e.target.value)}
+                                className="adm-select adm-select--enhanced"
+                              >
+                                <option value="">— None —</option>
+                                {child3Options.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+                              </select>
+                            </label>
+                          )}
+                        </div>
+                        <div className="adm-modal-footer">
+                          <button
+                            type="button"
+                            className="adm-modal-link-btn adm-modal-link-btn--add"
+                            onClick={() => { setMoveModalOpen(false); setNewSubModal({ parentId: deepestId || moveCategoryId, label: '' }); }}
                           >
-                            {mainCategories.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
-                          </select>
-                        </label>
-                        <label className="adm-field">
-                          <span className="adm-field-label">Subcategory</span>
-                          <select
-                            value={moveTargetSubcategory}
-                            onChange={(e) => setMoveTargetSubcategory(e.target.value)}
-                            className="adm-select adm-select--enhanced"
-                          >
-                            <option value="">Select subcategory…</option>
-                            {flattenSubcategories(subcategoryOptions(moveTargetCategory, taxonomyTree)).map((s) => (
-                              <option key={s.id} value={s.id}>{s.path}</option>
-                            ))}
-                          </select>
-                        </label>
-                      </div>
-                      <div className="adm-modal-footer">
-                        <button
-                          type="button"
-                          className="adm-modal-link-btn adm-modal-link-btn--add"
-                          onClick={() => { setMoveModalOpen(false); setNewSubModal({ parentId: moveTargetCategory, label: '' }); }}
-                        >
-                          <Plus size={15} strokeWidth={2.5} /> New subcategory
-                        </button>
-                        <div className="adm-modal-footer__actions">
-                          <button type="button" className="adm-btn-ghost" onClick={() => setMoveModalOpen(false)}>Cancel</button>
-                          <button type="button" className="adm-btn-red" onClick={() => void confirmBulkMove()} disabled={saving === 'bulk-move'}>
-                            {saving === 'bulk-move' ? 'Moving…' : 'Confirm move'}
+                            <Plus size={15} strokeWidth={2.5} /> New subcategory
                           </button>
+                          <div className="adm-modal-footer__actions">
+                            <button type="button" className="adm-btn-ghost" onClick={() => setMoveModalOpen(false)}>Cancel</button>
+                            <button type="button" className="adm-btn-red" onClick={() => void confirmBulkMove()} disabled={saving === 'bulk-move'}>
+                              {saving === 'bulk-move' ? 'Moving…' : 'Confirm move'}
+                            </button>
+                          </div>
                         </div>
                       </div>
                     </div>
-                  </div>
-                )}
+                  );
+                })()}
 
                 {archiveConfirmOpen && (
                   <div className="adm-modal-backdrop" onClick={() => setArchiveConfirmOpen(false)}>
