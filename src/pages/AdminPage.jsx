@@ -3124,6 +3124,16 @@ export default function AdminPage({ customer, onViewPortal }) {
                     <span className="adm-reorder-count">
                       {visibleReorderProducts.length} {reorderSearchActive ? `match${visibleReorderProducts.length === 1 ? '' : 'es'}` : 'live products'}
                     </span>
+                    <button
+                      type="button"
+                      className="adm-btn-ghost adm-btn--sm"
+                      onClick={toggleSelectAllReorder}
+                      disabled={!visibleReorderProducts.length}
+                    >
+                      {visibleReorderProducts.length > 0 && visibleReorderProducts.every((p) => selectedIds.has(p.id))
+                        ? 'Deselect all'
+                        : `Select all (${visibleReorderProducts.length})`}
+                    </button>
                     {reorderDirty && !reorderSearchActive && (
                       <span className="adm-pill adm-pill--warn">Unsaved order</span>
                     )}
