@@ -417,7 +417,7 @@ function WhatsappOptIn({ value }) {
     : <X size={16} color="#dc2626" strokeWidth={3} aria-label="WhatsApp no" />;
 }
 
-export default function AdminPage({ customer, onViewPortal }) {
+export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   const [activeSection, setActiveSection] = useState('catalogue');
   const [catalogStatus, setCatalogStatus] = useState('live');
   const [imageFixRequest, setImageFixRequest] = useState(null);
@@ -575,7 +575,7 @@ export default function AdminPage({ customer, onViewPortal }) {
   const [crmMeta, setCrmMeta] = useState({ total: 0, totalFiltered: 0, page: 1, pageSize: 25, summary: null });
   const [crmContactsOpen, setCrmContactsOpen] = useState(false);
 
-  const [bannerForm, setBannerForm] = useState({ title: '', body: '', imageUrl: '' });
+  const [bannerForm, setBannerForm] = useState({ imageUrl: '' });
   const [bannerSaving, setBannerSaving] = useState(false);
   const [bannerUploading, setBannerUploading] = useState(false);
 
@@ -814,6 +814,8 @@ export default function AdminPage({ customer, onViewPortal }) {
       if (target === 'reorder') {
         await loadReorderProducts();
       }
+    } catch (err) {
+      showToast(err.message || 'Failed to load products', 'error');
     } finally { setLoading(false); }
   };
 
@@ -869,8 +871,13 @@ export default function AdminPage({ customer, onViewPortal }) {
 
   const loadOrders = async () => {
     setLoading(true);
-    try { setOrders(await fetchAllOrdersAdmin(150)); }
-    finally { setLoading(false); }
+    try {
+      setOrders(await fetchAllOrdersAdmin(150));
+    } catch (err) {
+      showToast(err.message || 'Failed to load orders', 'error');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const activeFulfillmentUser = useMemo(
@@ -1652,18 +1659,8 @@ export default function AdminPage({ customer, onViewPortal }) {
   const loadBannerEditor = async () => {
     try {
       const data = await fetchBanner({ force: true });
-      setBannerForm({ title: data.title || '', body: data.body || '', imageUrl: data.imageUrl || '' });
+      setBannerForm({ imageUrl: data.imageUrl || '' });
     } catch (e) { alert(e.message || 'Failed to load banner'); }
-  };
-
-  const saveBannerEditor = async () => {
-    setBannerSaving(true);
-    try {
-      const saved = await saveBanner(bannerForm);
-      setBannerForm({ title: saved.title || '', body: saved.body || '', imageUrl: saved.imageUrl || '' });
-      alert('Banner saved — refresh the trade portal (or switch back to its tab) to see changes.');
-    } catch (e) { alert(e.message || 'Failed to save banner'); }
-    finally { setBannerSaving(false); }
   };
 
   const handleBannerImage = async (file) => {
@@ -1676,7 +1673,7 @@ export default function AdminPage({ customer, onViewPortal }) {
       setBannerSaving(true);
       try {
         const saved = await saveBanner(next);
-        setBannerForm({ title: saved.title || '', body: saved.body || '', imageUrl: saved.imageUrl || url });
+        setBannerForm({ imageUrl: saved.imageUrl || url });
         showToast('Banner uploaded and saved — refresh the trade portal to see it.');
       } catch (e) {
         showToast(e.message || 'Uploaded but save failed — click Save banner', 'error');
@@ -2398,6 +2395,11 @@ export default function AdminPage({ customer, onViewPortal }) {
             <button type="button" onClick={goHome} className="adm-btn-ghost"><Home size={15} /><span className="adm-btn-text">Home</span></button>
             <button onClick={() => void refreshCurrentSection()} className="adm-btn-ghost"><RefreshCw size={15} /><span className="adm-btn-text">Refresh</span></button>
             <button onClick={onViewPortal} className="adm-btn-ghost"><ArrowLeftRight size={15} /><span className="adm-btn-text">Portal</span></button>
+            {onSignOut && (
+              <button type="button" onClick={onSignOut} className="adm-btn-ghost" title={customer?.email || 'Sign out'}>
+                <Lock size={15} /><span className="adm-btn-text">Sign out</span>
+              </button>
+            )}
           </div>
         </div>
       </header>
@@ -2450,6 +2452,7 @@ export default function AdminPage({ customer, onViewPortal }) {
                 onAddSubcategory={(parentId) => setNewSubModal({ parentId, label: '' })}
                 onDeleteSubcategory={(sub) => void openDeleteSubcategory(sub)}
                 onDeleteNode={(node) => void openDeleteSubcategory(node)}
+                onRefreshTaxonomy={reloadTaxonomy}
                 onImageFix={(products) => {
                   setImageFixRequest({ id: Date.now(), products });
                   setActiveSection('apollo');
@@ -2473,13 +2476,13 @@ export default function AdminPage({ customer, onViewPortal }) {
             {/* Apollo — keep mounted so chat survives tab switches */}
             <div style={{ display: activeSection === 'apollo' ? 'block' : 'none' }}>
               <ApolloPanel
+                isActive={activeSection === 'apollo'}
                 taxonomyTree={taxonomyTree}
                 onShowToast={showToast}
                 onGoToApproval={() => { setCatalogStatus('approval'); setActiveSection('catalogue'); window.scrollTo({ top: 0, behavior: 'instant' }); }}
                 onRefreshCatalog={() => {
-                  invalidateAdminCache();
-                  invalidateProductCache();
-                  queryClient.invalidateQueries({ queryKey: ['catalog'] });
+                  window.dispatchEvent(new CustomEvent('proto-approval-refresh'));
+                  queryClient.invalidateQueries({ queryKey: queryKeys.dashboardStats() });
                   refreshDashboardStats();
                 }}
                 imageFixRequest={imageFixRequest}
@@ -3706,6 +3709,17 @@ export default function AdminPage({ customer, onViewPortal }) {
                       >
                         <User size={16} /> Team
                       </button>
+                      <button
+                        type="button"
+                        className="adm-btn-ghost"
+                        onClick={() => void loadOrders()}
+                        disabled={loading}
+                        style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px' }}
+                        title="Refresh orders"
+                      >
+                        {loading ? <Loader2 size={15} className="spin" /> : <RefreshCw size={15} />}
+                        Refresh
+                      </button>
                       <label className="adm-search"><Search size={15} /><input value={orderSearch} onChange={(e) => setOrderSearch(e.target.value)} placeholder="Search orders" className="adm-search-input" /></label>
                     </div>
                   )}
@@ -3827,6 +3841,16 @@ export default function AdminPage({ customer, onViewPortal }) {
                       </div>
                     );
                   })}
+                  {loading && orders.length === 0 && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '20px 16px', color: '#6b7280', fontSize: 13 }}>
+                      <Loader2 size={16} className="spin" /> Loading orders…
+                    </div>
+                  )}
+                  {!loading && orderRows.length === 0 && (
+                    <div style={{ padding: '20px 16px', color: '#6b7280', fontSize: 13 }}>
+                      {orderSearch ? 'No orders match your search.' : orderTab === 'all' ? 'No orders yet.' : `No orders in the "${orderTab}" tab.`}
+                    </div>
+                  )}
                 </div>
                 </>
                 )}
@@ -3878,20 +3902,15 @@ export default function AdminPage({ customer, onViewPortal }) {
                 <div className="adm-section-head">
                   <div>
                     <h2 className="adm-section-title">Banner Editor</h2>
-                    <p className="adm-section-note">The uploaded image is the <strong>entire</strong> home-page banner (full-bleed). Upload at <strong>{BANNER_LABEL}</strong>. Images are auto-saved after upload — the portal updates immediately.</p>
+                    <p className="adm-section-note">
+                      Products page banner — upload a <strong>{BANNER_LABEL}</strong> image. It fills the full banner area on the trade portal.
+                      With no image uploaded, the site shows an empty space until you add one.
+                    </p>
                   </div>
                   <button type="button" onClick={() => void loadBannerEditor()} className="adm-btn-ghost"><RefreshCw size={15} /><span className="adm-btn-text">Refresh</span></button>
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, alignItems: 'start' }}>
                   <div style={{ display: 'grid', gap: 12 }}>
-                    <div>
-                      <label className="adm-muted" style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Title</label>
-                      <input className="adm-field-input" style={{ width: '100%' }} value={bannerForm.title} onChange={(e) => setBannerForm((p) => ({ ...p, title: e.target.value }))} />
-                    </div>
-                    <div>
-                      <label className="adm-muted" style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Body text</label>
-                      <textarea className="adm-field-input" style={{ width: '100%', minHeight: 120 }} value={bannerForm.body} onChange={(e) => setBannerForm((p) => ({ ...p, body: e.target.value }))} />
-                    </div>
                     <div>
                       <label className="adm-muted" style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Banner image — {BANNER_LABEL}</label>
                       <label className="adm-btn-ghost" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
@@ -3899,14 +3918,26 @@ export default function AdminPage({ customer, onViewPortal }) {
                         <input type="file" accept="image/*" hidden onChange={(e) => { void handleBannerImage(e.target.files?.[0]); e.target.value = ''; }} />
                       </label>
                     </div>
-                    <button type="button" className="adm-btn-red" disabled={bannerSaving} onClick={() => void saveBannerEditor()}>{bannerSaving ? 'Saving…' : 'Save banner'}</button>
+                    {bannerForm.imageUrl && (
+                      <button
+                        type="button"
+                        className="adm-btn-ghost"
+                        disabled={bannerSaving}
+                        onClick={() => {
+                          setBannerForm({ imageUrl: '' });
+                          void saveBanner({ imageUrl: '' }).then(() => showToast('Banner removed — trade portal will show empty space.')).catch((e) => showToast(e.message || 'Failed to remove banner', 'error'));
+                        }}
+                      >
+                        Remove banner
+                      </button>
+                    )}
                   </div>
                   <div>
                     <span className="adm-muted" style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Live preview ({BANNER_ASPECT_CSS.replace(' / ', '∶')})</span>
-                    <div style={{ border: '1px solid #e5e7eb', borderRadius: 16, overflow: 'hidden', background: '#050505', aspectRatio: BANNER_ASPECT_CSS, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <div style={{ border: '1px solid #e5e7eb', borderRadius: 16, overflow: 'hidden', background: '#f8fafc', aspectRatio: BANNER_ASPECT_CSS, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                       {bannerForm.imageUrl
                         ? <img src={bannerForm.imageUrl} alt="Banner preview" style={{ width: '100%', height: '100%', display: 'block', objectFit: 'cover' }} />
-                        : <span className="adm-muted">No banner uploaded — upload a {BANNER_LABEL} image</span>}
+                        : <span className="adm-muted">Empty — upload a {BANNER_LABEL} image</span>}
                     </div>
                   </div>
                 </div>

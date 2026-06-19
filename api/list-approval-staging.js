@@ -1,6 +1,6 @@
 import { requireAdminKey } from './_admin-auth.js';
 import { createClient } from '@supabase/supabase-js';
-import { mergeStagedImagesOntoLive, validateStockReady } from './_stage-dormant.js';
+import { batchValidateStockReady, mergeStagedImagesOntoLive } from './_stage-dormant.js';
 
 function getClient() {
   return createClient(
@@ -16,7 +16,7 @@ function splitUrl(val) {
 
 /** Staged image previews for live products awaiting Approval go-live. */
 export default async function handler(req, res) {
-  if (!requireAdminKey(req, res)) return;
+  if (!(await requireAdminKey(req, res))) return;
   res.setHeader('Cache-Control', 'no-store');
   if (req.method !== 'GET') return res.status(405).end();
 
@@ -39,12 +39,16 @@ export default async function handler(req, res) {
 
   const liveBySku = new Map((liveRows || []).map((r) => [r.sku, r]));
 
+  // Batch stock validation — single query instead of N sequential queries
+  const barcodes = (staged || []).map((r) => r.barcode || r.sku).filter(Boolean);
+  const stockChecks = await batchValidateStockReady(sb, barcodes);
+
   const items = [];
   for (const row of staged || []) {
     const live = liveBySku.get(row.sku);
     if (!live) continue;
 
-    const stockCheck = await validateStockReady(sb, row.barcode || row.sku);
+    const stockCheck = stockChecks.get(String(row.barcode || row.sku || '').trim()) || { ok: false, error: 'Missing barcode' };
     const { appliedSlots } = mergeStagedImagesOntoLive(row, live);
     if (!appliedSlots.length) continue;
 

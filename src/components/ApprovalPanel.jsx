@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Check, CheckCircle, ChevronLeft, ChevronRight, Loader2, Trash2, X, ZoomIn } from 'lucide-react';
+import { AlertCircle, Check, CheckCircle, ChevronLeft, ChevronRight, Loader2, Trash2, X, ZoomIn } from 'lucide-react';
 import { dismissImageBatch, subscribeImageBatch } from '../lib/imageBatchTracker';
 import { applyDormantLive } from '../lib/products';
 
@@ -170,7 +170,49 @@ function ImageBatchNotice({ batch, onDismiss, onRefresh }) {
   return null;
 }
 
+function SetLiveNotice({ notice, onDismiss }) {
+  if (!notice) return null;
+  const { type, applied, errorDetails } = notice;
+  return (
+    <div className={`approval-setlive-notice approval-setlive-notice--${type}`} role="status">
+      <div className="approval-setlive-notice-icon">
+        {type === 'success' ? <CheckCircle size={17} /> : <AlertCircle size={17} />}
+      </div>
+      <div className="approval-setlive-notice-body">
+        {type === 'success' && (
+          <strong>{applied} image{applied === 1 ? '' : 's'} set live — visible on trade site within ~90 seconds</strong>
+        )}
+        {type === 'warning' && applied > 0 && (
+          <strong>{applied} image{applied === 1 ? '' : 's'} set live — {errorDetails.length} issue{errorDetails.length === 1 ? '' : 's'} below</strong>
+        )}
+        {type === 'warning' && applied === 0 && (
+          <strong>Already up to date — no new images were applied</strong>
+        )}
+        {type === 'error' && (
+          <strong>Set live failed — no images were updated</strong>
+        )}
+        {errorDetails.length > 0 && (
+          <ul className="approval-setlive-errors">
+            {errorDetails.map((d) => <li key={d}>{d}</li>)}
+          </ul>
+        )}
+      </div>
+      <button type="button" className="adm-icon-btn" onClick={onDismiss} aria-label="Dismiss"><X size={14} /></button>
+    </div>
+  );
+}
+
 const POLL_INTERVAL = 12_000;
+
+function itemsSignature(list) {
+  return (list || []).map((item) => [
+    item.sku,
+    item.updatedAt,
+    ...(item.liveImages || []),
+    ...(item.stagedImages || []),
+    item.stockReady,
+  ].join('|')).join(';;');
+}
 
 export default function ApprovalPanel({ onShowToast, onRefreshStats, embedded = false }) {
   const [items, setItems] = useState([]);
@@ -180,32 +222,50 @@ export default function ApprovalPanel({ onShowToast, onRefreshStats, embedded = 
   const [lightbox, setLightbox] = useState(null);
   const [imageBatch, setImageBatch] = useState(null);
   const [lastUpdated, setLastUpdated] = useState(null);
+  const [setLiveNotice, setSetLiveNotice] = useState(null);
   const busyRef = useRef(false);
+  const itemsSigRef = useRef('');
 
   const load = useCallback(async ({ silent = false } = {}) => {
-    if (!silent) setLoading(true);
+    const showBlockingLoader = !silent && itemsSigRef.current === '';
+    if (showBlockingLoader) setLoading(true);
     try {
       const res = await fetch('/api/list-approval-staging', { cache: 'no-store' });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Failed to load');
-      setItems(json.items || []);
-      setLastUpdated(Date.now());
+      const next = json.items || [];
+      const sig = itemsSignature(next);
+      if (sig !== itemsSigRef.current) {
+        itemsSigRef.current = sig;
+        setItems(next);
+        setLastUpdated(Date.now());
+      }
       if (!silent) setSelected(new Set());
     } catch (err) {
       if (!silent) onShowToast?.(err.message, 'error');
     } finally {
-      if (!silent) setLoading(false);
+      if (showBlockingLoader) setLoading(false);
     }
   }, [onShowToast]);
 
   useEffect(() => { void load(); }, [load]);
 
-  // Auto-poll so any user sees images staged by another user without manual refresh
+  // Auto-poll when tab visible — multi-user staging updates
   useEffect(() => {
-    const id = setInterval(() => {
-      if (!busyRef.current) void load({ silent: true });
-    }, POLL_INTERVAL);
-    return () => clearInterval(id);
+    const tick = () => {
+      if (document.visibilityState !== 'visible' || busyRef.current) return;
+      void load({ silent: true });
+    };
+    const id = setInterval(tick, POLL_INTERVAL);
+    const onVis = () => { if (document.visibilityState === 'visible') tick(); };
+    document.addEventListener('visibilitychange', onVis);
+    const onRefresh = () => { void load({ silent: true }); };
+    window.addEventListener('proto-approval-refresh', onRefresh);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', onVis);
+      window.removeEventListener('proto-approval-refresh', onRefresh);
+    };
   }, [load]);
 
   useEffect(() => { busyRef.current = busy; }, [busy]);
@@ -232,7 +292,9 @@ export default function ApprovalPanel({ onShowToast, onRefreshStats, embedded = 
     const list = [...skus];
     if (!list.length) return;
     setBusy(true);
+    setSetLiveNotice(null);
     const errors = [];
+    const errorDetails = [];
     let ok = 0;
     let applied = 0;
     for (const sku of list) {
@@ -240,23 +302,34 @@ export default function ApprovalPanel({ onShowToast, onRefreshStats, embedded = 
         const result = await applyDormantLive(sku);
         ok += 1;
         if (result.mode === 'image_applied') applied += 1;
+        else if (result.mode === 'already_live') {
+          errorDetails.push(`${sku}: already up to date (no new images)`);
+        }
       } catch (err) {
-        errors.push(`${sku}: ${err.message}`);
+        errors.push(sku);
+        errorDetails.push(`${sku}: ${err.message}`);
       }
     }
     setSelected(new Set());
     await load();
     onRefreshStats?.();
-    if (errors.length) {
-      onShowToast?.(
-        `Set live: ${ok} ok, ${errors.length} failed${errors.length ? ` — ${errors.slice(0, 3).join('; ')}` : ''}`,
-        ok ? 'warning' : 'error',
-      );
+
+    if (errors.length === list.length) {
+      // All failed
+      setSetLiveNotice({ type: 'error', ok, applied, errors, errorDetails });
+      onShowToast?.(`Set live failed — ${errors.length} error${errors.length === 1 ? '' : 's'}`, 'error');
+    } else if (errors.length > 0) {
+      // Partial failure
+      setSetLiveNotice({ type: 'warning', ok, applied, errors, errorDetails });
+      onShowToast?.(`Set live: ${applied} image${applied === 1 ? '' : 's'} applied, ${errors.length} failed`, 'warning');
+    } else if (applied === 0) {
+      // All succeeded but no images actually changed (already_live)
+      setSetLiveNotice({ type: 'warning', ok, applied: 0, errors: [], errorDetails });
+      onShowToast?.('Already up to date — no new images were applied', 'warning');
     } else {
-      const note = applied
-        ? ' Trade site updates within ~1 minute (hard refresh if images look stale).'
-        : '';
-      onShowToast?.(`${ok} product${ok === 1 ? '' : 's'} set live.${note}`, 'success');
+      // Full success
+      setSetLiveNotice({ type: 'success', ok, applied, errors: [], errorDetails: [] });
+      onShowToast?.(`${applied} image${applied === 1 ? '' : 's'} set live — visible on trade site within ~90 seconds`, 'success');
     }
     setBusy(false);
   };
@@ -291,7 +364,11 @@ export default function ApprovalPanel({ onShowToast, onRefreshStats, embedded = 
             <h2 className="adm-section-title"><CheckCircle size={18} /> Approval</h2>
             <p className="adm-section-note">
               Review staged images before publishing. Auto-refreshes every 12s — all users see changes live.
-              {lastUpdated && <span className="approval-last-updated"> · Last updated {new Date(lastUpdated).toLocaleTimeString()}</span>}
+              {lastUpdated ? (
+                <span className="approval-last-updated" aria-live="off">
+                  {' '}· Updated {new Date(lastUpdated).toLocaleTimeString()}
+                </span>
+              ) : null}
             </p>
           </div>
           <button type="button" className="adm-btn-ghost" onClick={() => void load()} disabled={loading || busy}>
@@ -304,7 +381,11 @@ export default function ApprovalPanel({ onShowToast, onRefreshStats, embedded = 
         <div className="approval-embedded-toolbar">
           <p className="adm-section-note">
             Review staged images before publishing — auto-refreshes every 12s.
-            {lastUpdated && <span className="approval-last-updated"> · {new Date(lastUpdated).toLocaleTimeString()}</span>}
+            {lastUpdated ? (
+              <span className="approval-last-updated" aria-live="off">
+                {' '}· {new Date(lastUpdated).toLocaleTimeString()}
+              </span>
+            ) : null}
           </p>
           <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => void load()} disabled={loading || busy}>
             Refresh now
@@ -312,13 +393,16 @@ export default function ApprovalPanel({ onShowToast, onRefreshStats, embedded = 
         </div>
       )}
 
-      <ImageBatchNotice
-        batch={imageBatch}
-        onDismiss={() => dismissImageBatch()}
-        onRefresh={() => { void load(); onRefreshStats?.(); }}
-      />
+      <div className="approval-notices-stack">
+        <ImageBatchNotice
+          batch={imageBatch}
+          onDismiss={() => dismissImageBatch()}
+          onRefresh={() => { void load(); onRefreshStats?.(); }}
+        />
+        <SetLiveNotice notice={setLiveNotice} onDismiss={() => setSetLiveNotice(null)} />
+      </div>
 
-      {loading && (
+      {loading && !items.length && (
         <div className="adm-loading-inline"><Loader2 size={18} className="spin" /> Loading…</div>
       )}
 
@@ -326,17 +410,20 @@ export default function ApprovalPanel({ onShowToast, onRefreshStats, embedded = 
         <p className="adm-muted approval-empty">No staged previews waiting. Run image gen in Apollo (<code>/image</code>) and choose Send to Approval.</p>
       )}
 
-      {selected.size > 0 && (
-        <div className="adm-bulk-bar">
-          <span>{selected.size} selected</span>
-          <button type="button" className="adm-btn-red adm-btn--sm" disabled={busy} onClick={() => void applyLive(selectedList.map((i) => i.sku))}>
-            Set live
-          </button>
-          <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => setSelected(new Set())}>Clear</button>
-        </div>
-      )}
+      <div className={`approval-bulk-bar-slot${selected.size > 0 ? ' approval-bulk-bar-slot--visible' : ''}`}>
+        {selected.size > 0 && (
+          <div className="adm-bulk-bar">
+            <span>{selected.size} selected</span>
+            <button type="button" className="adm-btn-red adm-btn--sm" disabled={busy} onClick={() => void applyLive(selectedList.map((i) => i.sku))}>
+              Set live
+            </button>
+            <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => setSelected(new Set())}>Clear</button>
+          </div>
+        )}
+      </div>
 
-      <div className="approval-grid">
+      {items.length > 0 && (
+      <div className={`approval-grid${loading ? ' approval-grid--refreshing' : ''}`}>
         {items.map((item) => (
             <article key={item.sku} className={`approval-card${selected.has(item.sku) ? ' approval-card--selected' : ''}`}>
               <label className="approval-card-head">
@@ -378,6 +465,7 @@ export default function ApprovalPanel({ onShowToast, onRefreshStats, embedded = 
             </article>
         ))}
       </div>
+      )}
 
       {lightbox && (
         <ImageLightbox

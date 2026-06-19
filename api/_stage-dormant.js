@@ -21,6 +21,20 @@ function readSlotUrl(row, slot) {
   return String(row?.[field] || '').split(',')[0].trim();
 }
 
+/** Strip query/hash for reliable staged-vs-live comparison. */
+export function normalizeImageUrl(url) {
+  const raw = String(url || '').split(',')[0].trim();
+  if (!raw) return '';
+  try {
+    const u = new URL(raw);
+    u.search = '';
+    u.hash = '';
+    return u.toString().replace(/\/$/, '');
+  } catch {
+    return raw.split('?')[0].split('#')[0].replace(/\/$/, '');
+  }
+}
+
 export async function stageDormantSlotPreview(sb, liveRow, { slot = 1, imageUrl, mergeFromStaged = true } = {}) {
   const sku = String(liveRow.sku || '').trim();
   if (!sku) throw new Error('Missing SKU');
@@ -89,17 +103,22 @@ export { readSlotUrl, slotField };
 
 const IMAGE_FIELDS = ['image_url_one', 'image_url_two', 'image_url_three', 'image_url_four'];
 
-/** Merge staged image slots onto a live row — only non-empty staged URLs replace live values. */
+/** Merge staged image slots onto a live row — only changed / newly generated URLs apply. */
 export function mergeStagedImagesOntoLive(staged, live) {
   const merged = {};
   const appliedSlots = [];
   IMAGE_FIELDS.forEach((field, i) => {
     const slot = i + 1;
-    const stagedUrl = readSlotUrl(staged, slot);
-    const liveUrl = live ? readSlotUrl(live, slot) : '';
-    if (stagedUrl) {
-      merged[field] = stagedUrl;
-      if (stagedUrl !== liveUrl) appliedSlots.push(slot);
+    const stagedRaw = readSlotUrl(staged, slot);
+    const liveRaw = live ? readSlotUrl(live, slot) : '';
+    const stagedNorm = normalizeImageUrl(stagedRaw);
+    const liveNorm = normalizeImageUrl(liveRaw);
+
+    if (stagedRaw) {
+      merged[field] = stagedRaw;
+      if (stagedNorm !== liveNorm) {
+        appliedSlots.push(slot);
+      }
     } else if (live) {
       merged[field] = live[field] ?? null;
     } else {
@@ -141,6 +160,47 @@ export async function validateStockReady(sb, barcode) {
   return { ok: true, price, soh };
 }
 
+/**
+ * Batch version of validateStockReady — single DB query for all barcodes.
+ * Returns a Map<barcode, {ok, price?, soh?, error?}>.
+ */
+export async function batchValidateStockReady(sb, barcodes) {
+  const keys = [...new Set(barcodes.map((b) => String(b || '').trim()).filter(Boolean))];
+  const result = new Map();
+
+  if (!keys.length) return result;
+
+  const { data: products, error } = await sb
+    .from('products')
+    .select('sku, sell_price, available_stock, stock_qty')
+    .in('sku', keys);
+
+  if (error) throw new Error(error.message);
+
+  const byKey = new Map((products || []).map((p) => [p.sku, p]));
+
+  for (const key of keys) {
+    const product = byKey.get(key);
+    if (!product) {
+      result.set(key, { ok: false, error: `No stock record for "${key}" — add price and SOH in the stock system first` });
+      continue;
+    }
+    const price = readStock(product.sell_price);
+    if (price === null || price <= 0) {
+      result.set(key, { ok: false, error: `Missing or zero price for "${key}" in stock system` });
+      continue;
+    }
+    const soh = readStock(product.available_stock) ?? readStock(product.stock_qty);
+    if (soh === null) {
+      result.set(key, { ok: false, error: `Missing stock/SOH for "${key}" in stock system` });
+      continue;
+    }
+    result.set(key, { ok: true, price, soh });
+  }
+
+  return result;
+}
+
 /** Apply staged New Products image to live site, or unarchive brand-new dormant SKUs. */
 export async function applyDormantToLive(sb, sku) {
   const cleanSku = String(sku || '').trim();
@@ -166,14 +226,28 @@ export async function applyDormantToLive(sb, sku) {
     const { merged, appliedSlots } = mergeStagedImagesOntoLive(staged, live);
 
     if (appliedSlots.length) {
-      const { error: updateErr } = await sb
+      const patch = { updated_at: new Date().toISOString() };
+      for (const slot of appliedSlots) {
+        patch[slotField(slot)] = merged[slotField(slot)];
+      }
+
+      const { data: updated, error: updateErr } = await sb
         .from('website_stock')
-        .update({
-          ...merged,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('sku', cleanSku);
+        .update(patch)
+        .eq('sku', cleanSku)
+        .select('sku, image_url_one, image_url_two, image_url_three, image_url_four')
+        .maybeSingle();
       if (updateErr) throw new Error(updateErr.message);
+      if (!updated) throw new Error(`Could not update live product "${cleanSku}" — row missing or permission denied`);
+
+      for (const slot of appliedSlots) {
+        const field = slotField(slot);
+        const expected = normalizeImageUrl(merged[field]);
+        const actual = normalizeImageUrl(readSlotUrl(updated, slot));
+        if (expected && expected !== actual) {
+          throw new Error(`Image slot ${slot} did not persist for "${cleanSku}" — retry or check Supabase permissions`);
+        }
+      }
     }
 
     const { error: delErr } = await sb
