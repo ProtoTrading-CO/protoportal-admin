@@ -4,6 +4,7 @@ import {
   ArchiveRestore,
   CheckCircle,
   ChevronRight,
+  ChevronLeft,
   FileSpreadsheet,
   FolderPlus,
   FolderTree,
@@ -208,6 +209,7 @@ export default function ProductManagerEngine({
   const [exportingLive, setExportingLive] = useState(false);
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
   const [categoryDrawerOpen, setCategoryDrawerOpen] = useState(false);
+  const [categoryStackNav, setCategoryStackNav] = useState(null);
   const selectedRowsRef = useRef(new Map());
   const panelTopRef = useRef(null);
   const isMobile = useMediaQuery('(max-width: 900px)');
@@ -426,11 +428,21 @@ export default function ProductManagerEngine({
     : 'All categories';
 
   useEffect(() => {
+    if (!categoryDrawerOpen) {
+      setCategoryStackNav(null);
+    }
+  }, [categoryDrawerOpen]);
+
+  useEffect(() => {
     if (!categoryDrawerOpen) return undefined;
     const prev = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     return () => { document.body.style.overflow = prev; };
   }, [categoryDrawerOpen]);
+
+  const handleCategoryStackNavChange = useCallback((nav) => {
+    setCategoryStackNav(nav);
+  }, []);
 
   const handleCategorySelect = useCallback((path) => {
     setCategoryPath(path);
@@ -806,7 +818,13 @@ export default function ProductManagerEngine({
           />
           <div className="pm-cat-drawer" role="dialog" aria-modal="true" aria-label="Browse categories">
             <div className="pm-cat-drawer-head">
-              <strong>Categories</strong>
+              {categoryStackNav?.canGoBack ? (
+                <span className="pm-cat-drawer-head-title pm-cat-drawer-head-title--sub">
+                  {categoryStackNav.currentFolderLabel}
+                </span>
+              ) : (
+                <strong>Categories</strong>
+              )}
               <div className="pm-cat-drawer-head-actions">
                 {onAddSubcategory && addSubParentId && (
                   <button
@@ -838,6 +856,18 @@ export default function ProductManagerEngine({
                 </button>
               </div>
             </div>
+            {categoryStackNav?.canGoBack && (
+              <div className="pm-cat-drawer-nav">
+                <button
+                  type="button"
+                  className="pm-cat-drawer-back"
+                  onClick={categoryStackNav.goBack}
+                >
+                  <ChevronLeft size={22} strokeWidth={2.5} />
+                  <span>Back to {categoryStackNav.parentFolderLabel}</span>
+                </button>
+              </div>
+            )}
             <CategorySidebar
               tree={tree}
               selectedPath={categoryPath}
@@ -847,6 +877,8 @@ export default function ProductManagerEngine({
               onAddChild={onAddSubcategory}
               variant="stack"
               className="pm-cat-drawer-sidebar"
+              isActive={categoryDrawerOpen}
+              onStackNavChange={handleCategoryStackNavChange}
             />
           </div>
         </>

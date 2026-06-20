@@ -244,25 +244,12 @@ function StackNavigation({
   onAddChild,
   filterQuery,
   displayTree,
+  browsePath,
+  setBrowsePath,
 }) {
-  const [browsePath, setBrowsePath] = useState([]);
-
-  useEffect(() => {
-    if (filterQuery) return;
-    if (!selectedPath.length) {
-      setBrowsePath([]);
-      return;
-    }
-    setBrowsePath(selectedPath.slice(0, -1));
-  }, [filterQuery, selectedPath.join('|')]);
-
   const levelNodes = filterQuery ? displayTree : getCategoriesAtPath(tree, browsePath);
   const breadcrumbLabels = resolvePathLabels(tree, browsePath);
-  const parentPath = browsePath.slice(0, -1);
   const currentFolderLabel = breadcrumbLabels[breadcrumbLabels.length - 1] || '';
-  const parentFolderLabel = parentPath.length
-    ? resolvePathLabels(tree, parentPath).slice(-1)[0]
-    : 'All categories';
   const currentFilterPath = browsePath;
 
   const handleSelectRoot = (nodeId) => {
@@ -289,14 +276,6 @@ function StackNavigation({
 
       {!filterQuery && browsePath.length > 0 && (
         <div className="cat-sidebar-level-header">
-          <button
-            type="button"
-            className="cat-sidebar-stack-back"
-            onClick={() => setBrowsePath(parentPath)}
-          >
-            <ChevronLeft size={20} strokeWidth={2.2} />
-            <span>{parentFolderLabel}</span>
-          </button>
           {currentFolderLabel && (
             <h3 className="cat-sidebar-level-title">{currentFolderLabel}</h3>
           )}
@@ -402,10 +381,13 @@ export default function CategorySidebar({
   showSearch = true,
   variant = 'tree',
   className = '',
+  isActive = true,
+  onStackNavChange,
 }) {
   const [expanded, setExpanded] = useState(() => new Set());
   const [collapsed, setCollapsed] = useState(() => new Set());
   const [filter, setFilter] = useState('');
+  const [browsePath, setBrowsePath] = useState([]);
   const stackMode = variant === 'stack';
 
   const filterQuery = filter.trim().toLowerCase();
@@ -413,6 +395,37 @@ export default function CategorySidebar({
     () => (filterQuery ? filterTree(tree, filterQuery) : tree),
     [tree, filterQuery],
   );
+
+  useEffect(() => {
+    if (!isActive) {
+      setBrowsePath([]);
+      setFilter('');
+    }
+  }, [isActive]);
+
+  useEffect(() => {
+    if (!stackMode || filterQuery) return;
+    if (!selectedPath.length) {
+      setBrowsePath([]);
+      return;
+    }
+    setBrowsePath(selectedPath.slice(0, -1));
+  }, [stackMode, filterQuery, selectedPath.join('|')]);
+
+  useEffect(() => {
+    if (!stackMode || !onStackNavChange) return;
+    const parentPath = browsePath.slice(0, -1);
+    const parentFolderLabel = parentPath.length
+      ? resolvePathLabels(tree, parentPath).slice(-1)[0]
+      : 'All categories';
+    const currentFolderLabel = resolvePathLabels(tree, browsePath).slice(-1)[0] || '';
+    onStackNavChange({
+      canGoBack: browsePath.length > 0 && !filterQuery,
+      parentFolderLabel,
+      currentFolderLabel,
+      goBack: () => setBrowsePath(parentPath),
+    });
+  }, [stackMode, browsePath, filterQuery, tree, onStackNavChange]);
 
   useEffect(() => {
     if (!selectedPath.length) return;
@@ -508,13 +521,13 @@ export default function CategorySidebar({
             tree={tree}
             selectedPath={selectedPath}
             onSelectPath={onSelectPath}
-            showUncategorized={showUncategorized}
-            uncategorizedCount={uncategorizedCount}
             onEditNode={onEditNode}
             onDeleteNode={onDeleteNode}
             onAddChild={onAddChild}
             filterQuery={filterQuery}
             displayTree={displayTree}
+            browsePath={browsePath}
+            setBrowsePath={setBrowsePath}
           />
         ) : (
           displayTree.map((node) => (
