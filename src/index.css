@@ -6482,11 +6482,52 @@ html, body { background: #f5f5f5; color: #111827; }
 }
 .apollo-scope-preview--compact .apollo-scope-preview-grid { max-height: 140px; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
 .apollo-scope-preview-card {
-  display: flex; flex-direction: column; gap: 6px; padding: 8px; margin: 0;
-  border: 1px solid #e5e7eb; border-radius: 8px; background: #fafafa; cursor: pointer; text-align: left;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fafafa;
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 .apollo-scope-preview-card:hover { border-color: #cbd5e1; box-shadow: 0 2px 6px rgba(15, 23, 42, 0.06); }
+.apollo-scope-preview-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  padding: 8px;
+  margin: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+}
+.apollo-scope-preview-remove {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.78);
+  color: #fff;
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.2);
+  transition: background 0.12s, transform 0.12s;
+}
+.apollo-scope-preview-remove:hover {
+  background: #b91c1c;
+  transform: scale(1.05);
+}
 .apollo-scope-preview-thumbs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 3px; }
 .apollo-scope-preview-thumb {
   position: relative; aspect-ratio: 1; background: #f1f5f9; border-radius: 4px; overflow: hidden;

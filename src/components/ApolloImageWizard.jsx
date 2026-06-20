@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
   ArrowRight,
@@ -244,6 +244,18 @@ export default function ApolloImageWizard({
     })();
     return () => { cancelled = true; };
   }, [step, selectedIdsKey]);
+
+  const handleDeselectProduct = useCallback((sku) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      next.delete(sku);
+      if (next.size === 0) {
+        setStep(0);
+        onShowToast?.('All products removed — pick your scope again', 'warning');
+      }
+      return next;
+    });
+  }, [onShowToast]);
 
   const patchSlot = (slot, patch) => {
     setSlotPlans((prev) => ({
@@ -716,6 +728,7 @@ export default function ApolloImageWizard({
           loading={selectedProductsLoading}
           activeSlots={activeSlots}
           onEditSelection={step === 1 && !busy ? () => setStep(0) : undefined}
+          onDeselectProduct={step === 1 && !busy ? handleDeselectProduct : undefined}
           compact={step === 2}
         />
       )}
