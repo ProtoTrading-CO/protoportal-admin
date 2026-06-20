@@ -3,8 +3,10 @@ import {
   Archive,
   ArchiveRestore,
   CheckCircle,
+  ChevronRight,
   FileSpreadsheet,
   FolderPlus,
+  FolderTree,
   Grip,
   Loader2,
   PackagePlus,
@@ -14,13 +16,15 @@ import {
   Search,
   Sparkles,
   Trash2,
+  X,
 } from 'lucide-react';
-import CategorySidebar from './CategorySidebar';
+import CategorySidebar, { resolvePathLabels } from './CategorySidebar';
 import ReorderGrid from './ReorderGrid';
 import ApprovalPanel from './ApprovalPanel';
 import BulkProductEditModal from './BulkProductEditModal';
 import { useCatalogQuery, buildCatalogParams, CATALOG_STATUSES } from '../hooks/useCatalog';
 import { useCatalogMutations } from '../hooks/useCatalogMutations';
+import { useMediaQuery } from '../hooks/useMediaQuery';
 import { queryClient } from '../lib/queryClient';
 import { queryKeys } from '../lib/queryKeys';
 import { subscribeImageBatch } from '../lib/imageBatchTracker';
@@ -56,6 +60,100 @@ function CatalogSkeleton() {
         <div key={i} className="pm-skeleton-row" />
       ))}
     </div>
+  );
+}
+
+function PmMobileProductCard({
+  item,
+  status,
+  selected,
+  showStockColumn,
+  onToggleSelect,
+  onEditProduct,
+  mutations,
+  onRefreshStats,
+  recycleSku,
+  onShowToast,
+}) {
+  return (
+    <article className={`pm-mobile-card${selected.has(item.id) ? ' pm-mobile-card--selected' : ''}`}>
+      <div className="pm-mobile-card-top">
+        <input
+          type="checkbox"
+          checked={selected.has(item.id)}
+          onChange={() => onToggleSelect(item.id, item)}
+          style={{ accentColor: '#8B1A1A', cursor: 'pointer' }}
+          aria-label={`Select ${item.sku}`}
+        />
+        {item.image ? (
+          <img src={item.image} alt="" className="adm-product-thumb pm-mobile-card-thumb" />
+        ) : (
+          <div className="adm-product-thumb adm-product-thumb--placeholder pm-mobile-card-thumb">IMG</div>
+        )}
+        <div className="pm-mobile-card-main">
+          <strong>{item.title || item.name || item.sku}</strong>
+          {!item.image && (
+            <span className="pm-mobile-card-badge">No image</span>
+          )}
+          <div className="adm-muted pm-mobile-card-meta">
+            <span>BC: {item.barcode || item.code || '—'}</span>
+            {item.sku && <span>WSK: {item.sku}</span>}
+            {item.price > 0 && <span>R{Number(item.price).toFixed(2)}</span>}
+          </div>
+          {item.categoryLabel && (
+            <div className="adm-muted pm-mobile-card-cat">{item.categoryLabel}</div>
+          )}
+          {showStockColumn && (
+            <div className="pm-mobile-card-stock">
+              {formatStockUnits(item.stockQty, item.keepLiveWhenOos)}
+            </div>
+          )}
+        </div>
+      </div>
+      <div className="pm-mobile-card-actions">
+        {onEditProduct && (
+          <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => onEditProduct(item)}>
+            <Pencil size={14} /> Edit
+          </button>
+        )}
+        {status === 'live' && (
+          <>
+            <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => mutations.archive.mutate(item.sku, { onSuccess: () => onRefreshStats?.() })}>Archive</button>
+            <button type="button" className="adm-btn-red adm-btn--sm" onClick={() => recycleSku(item.sku, false)}>Recycle</button>
+          </>
+        )}
+        {status === 'archived' && (
+          <>
+            <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => mutations.unarchive.mutate(item.sku, { onSuccess: () => onRefreshStats?.() })}>Restore</button>
+            <button type="button" className="adm-btn-red adm-btn--sm" onClick={() => recycleSku(item.sku, true)}>Recycle</button>
+          </>
+        )}
+        {status === 'approval' && (
+          <>
+            <button
+              type="button"
+              className="adm-btn-red adm-btn--sm"
+              disabled={item.stockReady === false}
+              onClick={() => mutations.setLive.mutate(item.sku, {
+                onSuccess: () => onRefreshStats?.(),
+                onError: (err) => onShowToast?.(err.message, 'error'),
+              })}
+            >
+              Set live
+            </button>
+            <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => mutations.discardPreview.mutate(item.sku)}>Discard</button>
+          </>
+        )}
+        {status === 'recycle' && (
+          <>
+            <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => mutations.restoreRecycle.mutate(item.sku, { onSuccess: () => onRefreshStats?.() })}>
+              <ArchiveRestore size={14} /> Restore
+            </button>
+            <button type="button" className="adm-btn-red adm-btn--sm" onClick={() => mutations.permanentDelete.mutate(item.sku, { onSuccess: () => onRefreshStats?.() })}>Delete</button>
+          </>
+        )}
+      </div>
+    </article>
   );
 }
 
@@ -109,8 +207,10 @@ export default function ProductManagerEngine({
   const [reorderSaving, setReorderSaving] = useState(false);
   const [exportingLive, setExportingLive] = useState(false);
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
+  const [categoryDrawerOpen, setCategoryDrawerOpen] = useState(false);
   const selectedRowsRef = useRef(new Map());
   const panelTopRef = useRef(null);
+  const isMobile = useMediaQuery('(max-width: 900px)');
 
   const mutations = useCatalogMutations();
   const showStockColumn = STOCK_STATUSES.has(status);
@@ -320,6 +420,22 @@ export default function ProductManagerEngine({
 
   const showSkeleton = isLoading && !isPlaceholderData && !data;
   const addSubParentId = categoryPath[0] || tree[0]?.id || '';
+  const categoryLabels = useMemo(() => resolvePathLabels(tree, categoryPath), [tree, categoryPath]);
+  const categoryFilterLabel = categoryLabels.length
+    ? categoryLabels.join(' › ')
+    : 'All categories';
+
+  useEffect(() => {
+    if (!categoryDrawerOpen) return undefined;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, [categoryDrawerOpen]);
+
+  const handleCategorySelect = useCallback((path) => {
+    setCategoryPath(path);
+    if (isMobile) setCategoryDrawerOpen(false);
+  }, [isMobile]);
 
   return (
     <div ref={panelTopRef} className="adm-panel adm-panel-with-sidebar pm-engine">
@@ -381,7 +497,7 @@ export default function ProductManagerEngine({
         />
       ) : (
         <div className="adm-panel-split">
-          <aside className="adm-panel-sidebar adm-reorder-tree-sidebar">
+          <aside className={`adm-panel-sidebar adm-reorder-tree-sidebar${isMobile ? ' adm-panel-sidebar--desktop-only' : ''}`}>
             <div className="adm-reorder-cat-heading">
               <span>Categories</span>
               <span style={{ display: 'inline-flex', gap: 4, marginLeft: 'auto' }}>
@@ -410,13 +526,35 @@ export default function ProductManagerEngine({
             <CategorySidebar
               tree={tree}
               selectedPath={categoryPath}
-              onSelectPath={setCategoryPath}
+              onSelectPath={handleCategorySelect}
               onEditNode={onEditCategory}
               onDeleteNode={onDeleteNode}
               onAddChild={onAddSubcategory}
             />
           </aside>
           <div className="adm-panel-main">
+            {isMobile && (
+              <div className="pm-mobile-cat-bar">
+                <button
+                  type="button"
+                  className="pm-cat-trigger"
+                  onClick={() => setCategoryDrawerOpen(true)}
+                >
+                  <FolderTree size={18} />
+                  <span className="pm-cat-trigger-label">{categoryFilterLabel}</span>
+                  <ChevronRight size={18} className="pm-cat-trigger-chevron" />
+                </button>
+                {categoryPath.length > 0 && (
+                  <button
+                    type="button"
+                    className="pm-cat-clear"
+                    onClick={() => setCategoryPath([])}
+                  >
+                    Clear filter
+                  </button>
+                )}
+              </div>
+            )}
             <div className="adm-toolbar pm-toolbar">
               <label className="adm-search">
                 <Search size={15} />
@@ -504,6 +642,28 @@ export default function ProductManagerEngine({
               </>
             ) : (
               <>
+                {isMobile ? (
+                  <div className="pm-mobile-list">
+                    {rows.map((item) => (
+                      <PmMobileProductCard
+                        key={item.id}
+                        item={item}
+                        status={status}
+                        selected={selected}
+                        showStockColumn={showStockColumn}
+                        onToggleSelect={toggleSelect}
+                        onEditProduct={onEditProduct}
+                        mutations={mutations}
+                        onRefreshStats={onRefreshStats}
+                        recycleSku={recycleSku}
+                        onShowToast={onShowToast}
+                      />
+                    ))}
+                    {!rows.length && !isLoading && (
+                      <p className="adm-empty">No products in this view.</p>
+                    )}
+                  </div>
+                ) : (
                 <div className="adm-list pm-list">
                   <div
                     className="adm-list-head pm-list-head"
@@ -628,11 +788,68 @@ export default function ProductManagerEngine({
                     <p className="adm-empty">No products in this view.</p>
                   )}
                 </div>
+                )}
                 <Pager page={page} total={total} pageSize={pageSize} onPageChange={handlePageChange} />
               </>
             )}
           </div>
         </div>
+      )}
+
+      {isMobile && categoryDrawerOpen && (
+        <>
+          <button
+            type="button"
+            className="pm-cat-drawer-backdrop"
+            aria-label="Close categories"
+            onClick={() => setCategoryDrawerOpen(false)}
+          />
+          <div className="pm-cat-drawer" role="dialog" aria-modal="true" aria-label="Browse categories">
+            <div className="pm-cat-drawer-head">
+              <strong>Categories</strong>
+              <div className="pm-cat-drawer-head-actions">
+                {onAddSubcategory && addSubParentId && (
+                  <button
+                    type="button"
+                    className="adm-taxonomy-add-btn"
+                    title="Add subcategory"
+                    onClick={() => onAddSubcategory(addSubParentId)}
+                  >
+                    <Plus size={16} strokeWidth={2.5} />
+                  </button>
+                )}
+                {onAddCategory && (
+                  <button
+                    type="button"
+                    className="adm-taxonomy-add-btn"
+                    title="Add category"
+                    onClick={() => onAddCategory()}
+                  >
+                    <FolderPlus size={16} strokeWidth={2.5} />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="pm-cat-drawer-close"
+                  aria-label="Close"
+                  onClick={() => setCategoryDrawerOpen(false)}
+                >
+                  <X size={20} />
+                </button>
+              </div>
+            </div>
+            <CategorySidebar
+              tree={tree}
+              selectedPath={categoryPath}
+              onSelectPath={handleCategorySelect}
+              onEditNode={onEditCategory}
+              onDeleteNode={onDeleteNode}
+              onAddChild={onAddSubcategory}
+              variant="stack"
+              className="pm-cat-drawer-sidebar"
+            />
+          </div>
+        </>
       )}
 
       {bulkEditOpen && bulkEditProducts.length > 0 && (

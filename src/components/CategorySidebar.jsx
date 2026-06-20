@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ChevronDown, ChevronRight, FolderTree, MoreHorizontal, Pencil, Plus, Search, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, FolderTree, MoreHorizontal, Pencil, Plus, Search, Trash2 } from 'lucide-react';
 
 function buildPathFromRoot(tree, targetId, path = []) {
   for (const node of tree) {
@@ -11,6 +11,28 @@ function buildPathFromRoot(tree, targetId, path = []) {
     }
   }
   return null;
+}
+
+export function getCategoriesAtPath(tree, browsePath = []) {
+  let nodes = tree || [];
+  for (const id of browsePath) {
+    const found = nodes.find((node) => node.id === id);
+    if (!found?.children?.length) return [];
+    nodes = found.children;
+  }
+  return nodes;
+}
+
+export function resolvePathLabels(tree, path = []) {
+  const labels = [];
+  let nodes = tree || [];
+  for (const id of path) {
+    const found = nodes.find((node) => node.id === id);
+    if (!found) break;
+    labels.push(found.label);
+    nodes = found.children || [];
+  }
+  return labels;
 }
 
 function nodeMatches(node, query) {
@@ -108,16 +130,18 @@ function CategoryRow({
   onEditNode,
   onDeleteNode,
   onAddChild,
+  onDrillIn,
+  stackMode = false,
 }) {
   const isSelected = selectedPath.length > 0 && selectedPath[selectedPath.length - 1] === node.id;
   const isOnPath = selectedPath.includes(node.id);
 
   return (
     <div
-      className={`cat-sidebar-item-row${isSelected ? ' cat-sidebar-item-row--active' : ''}${isOnPath && !isSelected ? ' cat-sidebar-item-row--path' : ''}`}
+      className={`cat-sidebar-item-row${isSelected ? ' cat-sidebar-item-row--active' : ''}${isOnPath && !isSelected ? ' cat-sidebar-item-row--path' : ''}${stackMode ? ' cat-sidebar-item-row--stack' : ''}`}
       style={{ '--cat-depth': depth }}
     >
-      {hasChildren ? (
+      {!stackMode && (hasChildren ? (
         <button
           type="button"
           className="cat-sidebar-toggle"
@@ -128,7 +152,7 @@ function CategoryRow({
         </button>
       ) : (
         <span className="cat-sidebar-toggle cat-sidebar-toggle--spacer" aria-hidden="true" />
-      )}
+      ))}
       <button
         type="button"
         className="cat-sidebar-item"
@@ -137,6 +161,16 @@ function CategoryRow({
       >
         <span className="cat-sidebar-label">{node.label}</span>
       </button>
+      {stackMode && hasChildren && onDrillIn && (
+        <button
+          type="button"
+          className="cat-sidebar-drill"
+          aria-label={`Browse ${node.label} subcategories`}
+          onClick={(e) => { e.stopPropagation(); onDrillIn(); }}
+        >
+          <ChevronRight size={18} strokeWidth={2.2} />
+        </button>
+      )}
       <RowActions
         node={node}
         nodeType={nodeType}
@@ -201,6 +235,141 @@ function TreeBranch({
   );
 }
 
+function StackNavigation({
+  tree,
+  selectedPath,
+  onSelectPath,
+  showUncategorized,
+  uncategorizedCount,
+  onEditNode,
+  onDeleteNode,
+  onAddChild,
+  filterQuery,
+  displayTree,
+}) {
+  const [browsePath, setBrowsePath] = useState([]);
+
+  useEffect(() => {
+    if (filterQuery) return;
+    if (!selectedPath.length) {
+      setBrowsePath([]);
+      return;
+    }
+    setBrowsePath(selectedPath.slice(0, -1));
+  }, [filterQuery, selectedPath.join('|')]);
+
+  const levelNodes = filterQuery ? displayTree : getCategoriesAtPath(tree, browsePath);
+  const breadcrumbLabels = resolvePathLabels(tree, browsePath);
+  const parentPath = browsePath.slice(0, -1);
+
+  const handleSelectRoot = (nodeId) => {
+    const path = buildPathFromRoot(tree, nodeId) || [nodeId];
+    onSelectPath(path);
+  };
+
+  return (
+    <>
+      {!filterQuery && browsePath.length > 0 && (
+        <div className="cat-sidebar-stack-nav">
+          <button
+            type="button"
+            className="cat-sidebar-stack-back"
+            onClick={() => setBrowsePath(parentPath)}
+          >
+            <ChevronLeft size={18} />
+            Back
+          </button>
+          <div className="cat-sidebar-breadcrumbs" aria-label="Category path">
+            <button type="button" onClick={() => setBrowsePath([])}>All</button>
+            {browsePath.map((id, index) => {
+              const label = breadcrumbLabels[index] || id;
+              const pathToHere = browsePath.slice(0, index + 1);
+              const isLast = index === browsePath.length - 1;
+              return (
+                <span key={id} className="cat-sidebar-crumb">
+                  <span className="cat-sidebar-crumb-sep" aria-hidden="true">›</span>
+                  {isLast ? (
+                    <span className="cat-sidebar-crumb-current">{label}</span>
+                  ) : (
+                    <button type="button" onClick={() => setBrowsePath(pathToHere)}>{label}</button>
+                  )}
+                </span>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {filterQuery ? (
+        displayTree.map((node) => (
+          <div key={node.id} className="cat-sidebar-root">
+            <CategoryRow
+              node={node}
+              depth={0}
+              selectedPath={selectedPath}
+              pathHere={[node.id]}
+              hasChildren={!!node.children?.length}
+              open={false}
+              onToggle={() => {}}
+              onSelect={() => handleSelectRoot(node.id)}
+              nodeType="category"
+              onEditNode={onEditNode}
+              onDeleteNode={onDeleteNode}
+              onAddChild={onAddChild}
+              stackMode
+            />
+          </div>
+        ))
+      ) : browsePath.length === 0 ? (
+        tree.map((node) => (
+          <div key={node.id} className="cat-sidebar-root">
+            <CategoryRow
+              node={node}
+              depth={0}
+              selectedPath={selectedPath}
+              pathHere={[node.id]}
+              hasChildren={!!node.children?.length}
+              open={false}
+              onToggle={() => {}}
+              onSelect={() => handleSelectRoot(node.id)}
+              onDrillIn={node.children?.length ? () => setBrowsePath([node.id]) : undefined}
+              nodeType="category"
+              onEditNode={onEditNode}
+              onDeleteNode={onDeleteNode}
+              onAddChild={onAddChild}
+              stackMode
+            />
+          </div>
+        ))
+      ) : (
+        levelNodes.map((node) => {
+          const pathHere = [...browsePath, node.id];
+          return (
+            <div key={node.id} className="cat-sidebar-root">
+              <CategoryRow
+                node={node}
+                depth={0}
+                selectedPath={selectedPath}
+                pathHere={pathHere}
+                hasChildren={!!node.children?.length}
+                open={false}
+                onToggle={() => {}}
+                onSelect={() => onSelectPath(pathHere)}
+                onDrillIn={node.children?.length ? () => setBrowsePath(pathHere) : undefined}
+                nodeType="subcategory"
+                onEditNode={onEditNode}
+                onDeleteNode={onDeleteNode}
+                onAddChild={onAddChild}
+                stackMode
+              />
+            </div>
+          );
+        })
+      )}
+    </>
+  );
+}
+
 /** Expandable category tree — up to 4 sub-levels under each main category. */
 export default function CategorySidebar({
   tree = [],
@@ -212,10 +381,13 @@ export default function CategorySidebar({
   onDeleteNode,
   onAddChild,
   showSearch = true,
+  variant = 'tree',
+  className = '',
 }) {
   const [expanded, setExpanded] = useState(() => new Set());
   const [collapsed, setCollapsed] = useState(() => new Set());
   const [filter, setFilter] = useState('');
+  const stackMode = variant === 'stack';
 
   const filterQuery = filter.trim().toLowerCase();
   const displayTree = useMemo(
@@ -275,7 +447,7 @@ export default function CategorySidebar({
   };
 
   return (
-    <div className="cat-sidebar-wrap">
+    <div className={`cat-sidebar-wrap${stackMode ? ' cat-sidebar-wrap--stack' : ''}${className ? ` ${className}` : ''}`}>
       {showSearch && (
         <label className="cat-sidebar-search">
           <Search size={15} />
@@ -310,40 +482,55 @@ export default function CategorySidebar({
           </button>
         )}
 
-        {displayTree.map((node) => (
-          <div key={node.id} className="cat-sidebar-root">
-            <CategoryRow
-              node={node}
-              depth={0}
-              selectedPath={selectedPath}
-              pathHere={[node.id]}
-              hasChildren={!!node.children?.length}
-              open={isOpen(node.id)}
-              onToggle={() => toggle(node.id)}
-              onSelect={() => handleSelectRoot(node.id)}
-              nodeType="category"
-              onEditNode={onEditNode}
-              onDeleteNode={onDeleteNode}
-              onAddChild={onAddChild}
-            />
-            {node.children?.length && isOpen(node.id) && node.children.map((child) => (
-              <TreeBranch
-                key={child.id}
-                node={child}
-                depth={1}
+        {stackMode ? (
+          <StackNavigation
+            tree={tree}
+            selectedPath={selectedPath}
+            onSelectPath={onSelectPath}
+            showUncategorized={showUncategorized}
+            uncategorizedCount={uncategorizedCount}
+            onEditNode={onEditNode}
+            onDeleteNode={onDeleteNode}
+            onAddChild={onAddChild}
+            filterQuery={filterQuery}
+            displayTree={displayTree}
+          />
+        ) : (
+          displayTree.map((node) => (
+            <div key={node.id} className="cat-sidebar-root">
+              <CategoryRow
+                node={node}
+                depth={0}
                 selectedPath={selectedPath}
-                onSelectPath={onSelectPath}
-                isOpen={isOpen}
-                onToggle={toggle}
-                ancestors={[node.id]}
+                pathHere={[node.id]}
+                hasChildren={!!node.children?.length}
+                open={isOpen(node.id)}
+                onToggle={() => toggle(node.id)}
+                onSelect={() => handleSelectRoot(node.id)}
+                nodeType="category"
                 onEditNode={onEditNode}
                 onDeleteNode={onDeleteNode}
                 onAddChild={onAddChild}
-                forceOpen={!!filterQuery}
               />
-            ))}
-          </div>
-        ))}
+              {node.children?.length && isOpen(node.id) && node.children.map((child) => (
+                <TreeBranch
+                  key={child.id}
+                  node={child}
+                  depth={1}
+                  selectedPath={selectedPath}
+                  onSelectPath={onSelectPath}
+                  isOpen={isOpen}
+                  onToggle={toggle}
+                  ancestors={[node.id]}
+                  onEditNode={onEditNode}
+                  onDeleteNode={onDeleteNode}
+                  onAddChild={onAddChild}
+                  forceOpen={!!filterQuery}
+                />
+              ))}
+            </div>
+          ))
+        )}
 
         {filterQuery && !displayTree.length && (
           <p className="cat-sidebar-empty">No categories match &ldquo;{filter.trim()}&rdquo;</p>
