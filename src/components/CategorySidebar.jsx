@@ -239,8 +239,6 @@ function StackNavigation({
   tree,
   selectedPath,
   onSelectPath,
-  showUncategorized,
-  uncategorizedCount,
   onEditNode,
   onDeleteNode,
   onAddChild,
@@ -261,42 +259,54 @@ function StackNavigation({
   const levelNodes = filterQuery ? displayTree : getCategoriesAtPath(tree, browsePath);
   const breadcrumbLabels = resolvePathLabels(tree, browsePath);
   const parentPath = browsePath.slice(0, -1);
+  const currentFolderLabel = breadcrumbLabels[breadcrumbLabels.length - 1] || '';
+  const parentFolderLabel = parentPath.length
+    ? resolvePathLabels(tree, parentPath).slice(-1)[0]
+    : 'All categories';
+  const currentFilterPath = browsePath;
 
   const handleSelectRoot = (nodeId) => {
     const path = buildPathFromRoot(tree, nodeId) || [nodeId];
     onSelectPath(path);
   };
 
+  const handleDrillIn = (pathHere) => {
+    setBrowsePath(pathHere);
+  };
+
   return (
     <>
+      {!filterQuery && browsePath.length === 0 && (
+        <button
+          type="button"
+          className={`cat-sidebar-all${!selectedPath.length ? ' cat-sidebar-all--active' : ''}`}
+          onClick={() => onSelectPath([])}
+        >
+          <FolderTree size={16} strokeWidth={2.2} />
+          <span>All categories</span>
+        </button>
+      )}
+
       {!filterQuery && browsePath.length > 0 && (
-        <div className="cat-sidebar-stack-nav">
+        <div className="cat-sidebar-level-header">
           <button
             type="button"
             className="cat-sidebar-stack-back"
             onClick={() => setBrowsePath(parentPath)}
           >
-            <ChevronLeft size={18} />
-            Back
+            <ChevronLeft size={20} strokeWidth={2.2} />
+            <span>{parentFolderLabel}</span>
           </button>
-          <div className="cat-sidebar-breadcrumbs" aria-label="Category path">
-            <button type="button" onClick={() => setBrowsePath([])}>All</button>
-            {browsePath.map((id, index) => {
-              const label = breadcrumbLabels[index] || id;
-              const pathToHere = browsePath.slice(0, index + 1);
-              const isLast = index === browsePath.length - 1;
-              return (
-                <span key={id} className="cat-sidebar-crumb">
-                  <span className="cat-sidebar-crumb-sep" aria-hidden="true">›</span>
-                  {isLast ? (
-                    <span className="cat-sidebar-crumb-current">{label}</span>
-                  ) : (
-                    <button type="button" onClick={() => setBrowsePath(pathToHere)}>{label}</button>
-                  )}
-                </span>
-              );
-            })}
-          </div>
+          {currentFolderLabel && (
+            <h3 className="cat-sidebar-level-title">{currentFolderLabel}</h3>
+          )}
+          <button
+            type="button"
+            className="cat-sidebar-level-filter"
+            onClick={() => onSelectPath(currentFilterPath)}
+          >
+            Show products in {currentFolderLabel || 'this category'}
+          </button>
         </div>
       )}
 
@@ -331,8 +341,12 @@ function StackNavigation({
               hasChildren={!!node.children?.length}
               open={false}
               onToggle={() => {}}
-              onSelect={() => handleSelectRoot(node.id)}
-              onDrillIn={node.children?.length ? () => setBrowsePath([node.id]) : undefined}
+              onSelect={() => (
+                node.children?.length
+                  ? handleDrillIn([node.id])
+                  : handleSelectRoot(node.id)
+              )}
+              onDrillIn={node.children?.length ? () => handleDrillIn([node.id]) : undefined}
               nodeType="category"
               onEditNode={onEditNode}
               onDeleteNode={onDeleteNode}
@@ -344,6 +358,7 @@ function StackNavigation({
       ) : (
         levelNodes.map((node) => {
           const pathHere = [...browsePath, node.id];
+          const hasChildren = !!node.children?.length;
           return (
             <div key={node.id} className="cat-sidebar-root">
               <CategoryRow
@@ -351,11 +366,15 @@ function StackNavigation({
                 depth={0}
                 selectedPath={selectedPath}
                 pathHere={pathHere}
-                hasChildren={!!node.children?.length}
+                hasChildren={hasChildren}
                 open={false}
                 onToggle={() => {}}
-                onSelect={() => onSelectPath(pathHere)}
-                onDrillIn={node.children?.length ? () => setBrowsePath(pathHere) : undefined}
+                onSelect={() => (
+                  hasChildren
+                    ? handleDrillIn(pathHere)
+                    : onSelectPath(pathHere)
+                )}
+                onDrillIn={hasChildren ? () => handleDrillIn(pathHere) : undefined}
                 nodeType="subcategory"
                 onEditNode={onEditNode}
                 onDeleteNode={onDeleteNode}
@@ -463,6 +482,7 @@ export default function CategorySidebar({
       )}
 
       <nav className="cat-sidebar" aria-label="Category filter">
+        {!stackMode && (
         <button
           type="button"
           className={`cat-sidebar-all${!selectedPath.length ? ' cat-sidebar-all--active' : ''}`}
@@ -471,6 +491,7 @@ export default function CategorySidebar({
           <FolderTree size={16} strokeWidth={2.2} />
           <span>All categories</span>
         </button>
+        )}
 
         {showUncategorized && (
           <button
