@@ -27,7 +27,6 @@ const NAV_ITEMS = [
   { id: 'customers', label: 'Customer Management', icon: Users },
   { id: 'specials', label: 'Specials', icon: Star },
   { id: 'crm', label: 'WhatsApp', icon: MessageCircle },
-  { id: 'brevo-crm', label: 'CRM', icon: Users },
   { id: 'banner', label: 'Banner Editor', icon: Layout },
   { id: 'analytics', label: 'Analytics', icon: BarChart2 },
   { id: 'pricing', label: 'Pricing', icon: SlidersHorizontal },

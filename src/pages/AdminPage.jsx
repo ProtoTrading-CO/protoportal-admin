@@ -118,7 +118,6 @@ import OrderWhatsappNotify from '../components/OrderWhatsappNotify';
 import AnalyticsHub from '../components/AnalyticsHub';
 import ProductManagerEngine from '../components/ProductManagerEngine';
 import GroupedSidebar from '../components/GroupedSidebar';
-import CrmPanel from '../components/CrmPanel';
 import { useDashboardStats } from '../hooks/useDashboardStats';
 import { queryClient } from '../lib/queryClient';
 import { queryKeys } from '../lib/queryKeys';
@@ -2459,10 +2458,6 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                   window.scrollTo({ top: 0, behavior: 'instant' });
                 }}
               />
-            )}
-
-            {activeSection === 'brevo-crm' && (
-              <CrmPanel onShowToast={showToast} />
             )}
 
             {activeSection === 'analytics' && (
