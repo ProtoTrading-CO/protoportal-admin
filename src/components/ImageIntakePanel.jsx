@@ -1,173 +1,226 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { RefreshCw } from 'lucide-react';
-import { enqueueImageIntake, fetchImageIntakeQueue } from '../lib/imageIntake';
+import { useCallback, useEffect, useState } from 'react';
+import { CheckCircle2, ImageOff, Loader2, RefreshCw, Upload } from 'lucide-react';
+import {
+  fetchImageIntakeHistory,
+  previewImageIntake,
+  processImageIntake,
+} from '../lib/imageIntake';
 
-const STATUS_LABEL = {
-  pending: 'Pending',
-  processing: 'Processing',
-  completed: 'Completed',
-  failed: 'Failed',
-};
+function PreviewCard({ preview, loading }) {
+  if (loading) {
+    return (
+      <div className="adm-intake-preview adm-intake-preview--loading">
+        <Loader2 size={16} className="spin" /> Loading STMAST preview…
+      </div>
+    );
+  }
+  if (!preview) return null;
 
-function statusColor(status) {
-  if (status === 'completed') return '#065f46';
-  if (status === 'failed') return '#991b1b';
-  if (status === 'processing') return '#1d4ed8';
-  return '#64748b';
+  const blocked = !preview.sqlFound;
+
+  return (
+    <div className={`adm-intake-preview${blocked ? ' adm-intake-preview--blocked' : ''}`}>
+      <div className="adm-intake-preview-head">
+        <strong>{preview.filename}</strong>
+        <span className="adm-intake-preview-sku">{preview.sourceSku} · slot {preview.imageNumber}</span>
+      </div>
+      {blocked ? (
+        <p className="adm-intake-preview-error">{preview.blockedReason}</p>
+      ) : (
+        <dl className="adm-intake-preview-grid">
+          <div><dt>Action</dt><dd>{preview.action || (preview.productExists ? 'upload_to_existing_product' : 'create_product_then_upload')}</dd></div>
+          <div><dt>SQL title</dt><dd>{preview.sql?.title || '—'}</dd></div>
+          <div><dt>Price</dt><dd>R{Number(preview.sql?.price || 0).toFixed(2)}</dd></div>
+          <div><dt>On hand</dt><dd>{preview.sql?.onhand ?? 0}</dd></div>
+          <div><dt>Dept</dt><dd>{preview.sql?.dept || '—'}</dd></div>
+          <div><dt>Supabase</dt><dd>{preview.productExists ? 'Existing product' : 'Will create product'}</dd></div>
+          <div><dt>Storage</dt><dd className="adm-intake-mono">{preview.storagePath}</dd></div>
+        </dl>
+      )}
+    </div>
+  );
+}
+
+function ResultRow({ row }) {
+  const ok = row.ok;
+  return (
+    <div className={`adm-intake-result${ok ? ' adm-intake-result--ok' : ' adm-intake-result--fail'}`}>
+      <div className="adm-intake-result-head">
+        {ok ? <CheckCircle2 size={14} /> : <ImageOff size={14} />}
+        <strong>{row.file}</strong>
+      </div>
+      <p>{row.message || row.error}</p>
+      {row.imageUrl && <p className="adm-intake-mono">{row.imageUrl}</p>}
+    </div>
+  );
 }
 
 export default function ImageIntakePanel({ onShowToast }) {
   const [files, setFiles] = useState([]);
-  const [isUploading, setIsUploading] = useState(false);
-  const [uploadResults, setUploadResults] = useState([]);
-  const [queue, setQueue] = useState([]);
-  const [queueLoading, setQueueLoading] = useState(false);
-  const [statusFilter, setStatusFilter] = useState('');
+  const [previews, setPreviews] = useState({});
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [processing, setProcessing] = useState(false);
+  const [dryRun, setDryRun] = useState(false);
+  const [results, setResults] = useState([]);
+  const [history, setHistory] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
-  const fileCountLabel = useMemo(
-    () => `${files.length} file${files.length === 1 ? '' : 's'} selected`,
-    [files.length],
-  );
-
-  const loadQueue = useCallback(async () => {
-    setQueueLoading(true);
+  const loadHistory = useCallback(async () => {
+    setHistoryLoading(true);
     try {
-      const rows = await fetchImageIntakeQueue({ status: statusFilter, limit: 100 });
-      setQueue(rows);
+      const rows = await fetchImageIntakeHistory({ limit: 40 });
+      setHistory(rows);
     } catch (err) {
-      onShowToast?.(err.message || 'Failed to load queue', 'error');
+      onShowToast?.(err.message || 'Failed to load history', 'error');
     } finally {
-      setQueueLoading(false);
+      setHistoryLoading(false);
     }
-  }, [onShowToast, statusFilter]);
+  }, [onShowToast]);
 
   useEffect(() => {
-    void loadQueue();
-    const timer = setInterval(() => { void loadQueue(); }, 15000);
-    return () => clearInterval(timer);
-  }, [loadQueue]);
+    void loadHistory();
+  }, [loadHistory]);
 
-  const handleEnqueue = async () => {
+  const loadPreviews = useCallback(async (fileList) => {
+    setPreviewLoading(true);
+    const next = {};
+    for (const file of fileList) {
+      try {
+        next[file.name] = await previewImageIntake(file);
+      } catch (err) {
+        next[file.name] = { filename: file.name, sqlFound: false, blockedReason: err.message };
+      }
+    }
+    setPreviews(next);
+    setPreviewLoading(false);
+  }, []);
+
+  const onFilesSelected = (fileList) => {
+    const list = Array.from(fileList || []);
+    setFiles(list);
+    setResults([]);
+    if (list.length) void loadPreviews(list);
+    else setPreviews({});
+  };
+
+  const handleProcess = async () => {
     if (!files.length) {
-      onShowToast?.('Select at least one image file', 'error');
+      onShowToast?.('Select at least one image', 'error');
       return;
     }
-    setIsUploading(true);
-    const nextResults = [];
+    setProcessing(true);
+    const batch = [];
     let ok = 0;
     let failed = 0;
 
     for (const file of files) {
       try {
-        const result = await enqueueImageIntake(file);
-        nextResults.push({ file: file.name, ok: true, result });
+        const result = await processImageIntake(file, { dryRun });
+        batch.push({ file: file.name, ok: true, ...result });
         ok += 1;
       } catch (err) {
-        nextResults.push({ file: file.name, ok: false, error: err.message });
+        batch.push({ file: file.name, ok: false, error: err.message });
         failed += 1;
       }
-      setUploadResults([...nextResults]);
+      setResults([...batch]);
     }
 
-    setIsUploading(false);
+    setProcessing(false);
     setFiles([]);
-    await loadQueue();
+    setPreviews({});
+    await loadHistory();
     onShowToast?.(
-      `Queued ${ok} image(s)${failed ? `, ${failed} failed` : ''} — BLADERUNNER-PC worker will process.`,
+      dryRun
+        ? `Dry run complete — ${ok} preview(s)${failed ? `, ${failed} failed` : ''}`
+        : `Processed ${ok} image(s)${failed ? `, ${failed} failed` : ''}`,
       failed ? 'error' : 'success',
     );
   };
+
+  const readyCount = files.filter((f) => previews[f.name]?.canProcess).length;
 
   return (
     <div className="adm-panel">
       <div className="adm-section-head">
         <div>
-          <h2 className="adm-section-title">Image Intake Queue</h2>
+          <h2 className="adm-section-title">Image Intake</h2>
           <p className="adm-section-note">
-            Admin uploads images into a Supabase queue only. The website is <strong>not</strong> connected to SQL.
-            <strong> BLADERUNNER-PC</strong> runs the intake worker: reads queue → reads SQL (read-only) → creates/updates products → uploads images → updates queue status.
+            Uses George&apos;s <code>product_image_intake.py</code> logic: STMAST lookup → create product if missing
+            (sell_price = PRICE_A × 1.15, rounded to R0.50) → upload to Cloudflare R2{' '}
+            <code>proto-images/&#123;SKU&#125;/&#123;slot&#125;.jpg</code> when R2 env vars are set (otherwise Supabase{' '}
+            <code>product-images</code>). Catalogue rows on <code>website_stock</code> get the public image URL.
+            SQL runs on the office machine via <code>IMAGE_INTAKE_SERVICE_URL</code> when configured.
           </p>
         </div>
-        <button type="button" className="adm-btn-ghost" onClick={() => void loadQueue()} disabled={queueLoading}>
-          <RefreshCw size={14} /> {queueLoading ? 'Refreshing…' : 'Refresh queue'}
+        <button type="button" className="adm-btn-ghost" onClick={() => void loadHistory()} disabled={historyLoading}>
+          <RefreshCw size={14} /> {historyLoading ? 'Refreshing…' : 'Refresh'}
         </button>
       </div>
 
-      <div style={{ display: 'grid', gap: 16 }}>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-          <label className="adm-btn-ghost" style={{ cursor: 'pointer' }}>
-            Select image files
-            <input
-              type="file"
-              accept="image/*"
-              multiple
-              hidden
-              onChange={(e) => setFiles(Array.from(e.target.files || []))}
+      <div className="adm-intake-toolbar">
+        <label className="adm-btn-ghost adm-intake-file-btn">
+          <Upload size={14} /> Select images
+          <input type="file" accept="image/*" multiple hidden onChange={(e) => onFilesSelected(e.target.files)} />
+        </label>
+        <label className="adm-intake-dry">
+          <input type="checkbox" checked={dryRun} onChange={(e) => setDryRun(e.target.checked)} />
+          Dry run (preview only, no upload)
+        </label>
+        <button
+          type="button"
+          className="adm-btn-red"
+          disabled={processing || !files.length || (!dryRun && readyCount === 0)}
+          onClick={() => void handleProcess()}
+        >
+          {processing ? 'Processing…' : dryRun ? 'Dry run batch' : `Process ${readyCount || files.length} image(s)`}
+        </button>
+      </div>
+
+      <p className="adm-muted adm-intake-hint">
+        <strong>TBAG91.jpg</strong> → SKU TBAG91, slot 1 · <strong>8619000833-1.jpg</strong> → SKU 8619000833, slot 1
+      </p>
+
+      {!!files.length && (
+        <div className="adm-intake-preview-stack">
+          <h3 className="adm-intake-subhead">STMAST preview</h3>
+          {files.map((file) => (
+            <PreviewCard
+              key={file.name}
+              preview={previews[file.name]}
+              loading={previewLoading && !previews[file.name]}
             />
-          </label>
-          <span className="adm-muted" style={{ fontSize: 12 }}>{fileCountLabel}</span>
-          <button type="button" className="adm-btn-red" disabled={isUploading || !files.length} onClick={() => void handleEnqueue()}>
-            {isUploading ? 'Queuing…' : 'Queue for worker'}
-          </button>
+          ))}
         </div>
+      )}
 
-        <div style={{ fontSize: 12, color: '#475569' }}>
-          Filename format: <strong>03070010.jpg</strong> (slot 1) or <strong>03070010-2.jpg</strong> (slot 2–4).
+      {!!results.length && (
+        <div className="adm-intake-results">
+          <h3 className="adm-intake-subhead">Batch report</h3>
+          {results.map((row, i) => (
+            <ResultRow key={`${row.file}-${i}`} row={row} />
+          ))}
         </div>
+      )}
 
-        {!!uploadResults.length && (
-          <div style={{ border: '1px solid #e2e8f0', borderRadius: 10, overflow: 'hidden', maxWidth: 760 }}>
-            <div style={{ padding: '10px 12px', borderBottom: '1px solid #e2e8f0', background: '#f8fafc', fontSize: 12, fontWeight: 700 }}>
-              Last upload batch
-            </div>
-            {uploadResults.map((row, i) => (
-              <div key={`${row.file}-${i}`} style={{ padding: '10px 12px', borderBottom: '1px solid #f1f5f9', fontSize: 12 }}>
-                <div style={{ fontWeight: 700 }}>{row.file}</div>
-                {row.ok
-                  ? <div style={{ color: '#065f46' }}>Queued — {row.result.sourceSku} ({row.result.imageColumn})</div>
-                  : <div style={{ color: '#991b1b' }}>{row.error}</div>}
+      <div className="adm-intake-history">
+        <h3 className="adm-intake-subhead">Recent intake ({history.length})</h3>
+        {!history.length ? (
+          <p className="adm-muted">No intake history yet.</p>
+        ) : (
+          <div className="adm-intake-history-list">
+            {history.map((row) => (
+              <div key={row.id} className="adm-intake-history-row">
+                <div>
+                  <strong>{row.original_filename}</strong>
+                  <span className="adm-muted"> · {row.source_sku}</span>
+                </div>
+                <span className={`adm-intake-status adm-intake-status--${row.status}`}>{row.status}</span>
+                {row.error_message && <p className="adm-intake-preview-error">{row.error_message}</p>}
+                {row.final_image_url && <p className="adm-intake-mono">{row.final_image_url}</p>}
               </div>
             ))}
           </div>
         )}
-
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          <span className="adm-muted" style={{ fontSize: 12, fontWeight: 700 }}>Queue status</span>
-          {['', 'pending', 'processing', 'completed', 'failed'].map((value) => (
-            <button
-              key={value || 'all'}
-              type="button"
-              className={`adm-btn-ghost${statusFilter === value ? ' adm-tab--active' : ''}`}
-              style={{ fontSize: 12, padding: '4px 10px' }}
-              onClick={() => setStatusFilter(value)}
-            >
-              {value ? STATUS_LABEL[value] : 'All'}
-            </button>
-          ))}
-        </div>
-
-        <div style={{ border: '1px solid #e2e8f0', borderRadius: 10, overflow: 'hidden' }}>
-          <div style={{ padding: '10px 12px', borderBottom: '1px solid #e2e8f0', background: '#f8fafc', fontSize: 12, fontWeight: 700 }}>
-            Worker queue ({queue.length})
-          </div>
-          {!queue.length ? (
-            <div style={{ padding: 16, fontSize: 12, color: '#64748b' }}>No queue items yet.</div>
-          ) : (
-            <div style={{ maxHeight: 420, overflow: 'auto' }}>
-              {queue.map((row) => (
-                <div key={row.id} style={{ padding: '10px 12px', borderBottom: '1px solid #f1f5f9', fontSize: 12 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
-                    <strong>{row.original_filename}</strong>
-                    <span style={{ color: statusColor(row.status), fontWeight: 700 }}>{STATUS_LABEL[row.status] || row.status}</span>
-                  </div>
-                  <div className="adm-muted">SKU {row.source_sku} · {row.image_column}</div>
-                  {row.error_message && <div style={{ color: '#991b1b' }}>{row.error_message}</div>}
-                  {row.final_image_url && <div style={{ color: '#065f46' }}>Image live: {row.final_image_url}</div>}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
       </div>
     </div>
   );

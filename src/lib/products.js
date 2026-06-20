@@ -509,6 +509,7 @@ export async function updateProduct(sku, payload) {
   if (payload.name !== undefined) body.title = payload.name;
   if (payload.price !== undefined) body.price = Number(payload.price) || 0;
   if (payload.categoryPath?.length) Object.assign(body, pathToWriteFields(payload.categoryPath));
+  if (payload.newWebsiteSku !== undefined) body.newWebsiteSku = String(payload.newWebsiteSku).trim();
 
   if (Object.keys(body).length <= 1) {
     invalidateAdminCache();

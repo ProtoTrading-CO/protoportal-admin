@@ -15,7 +15,11 @@ export default function QueryProvider({ children }) {
         persister,
         maxAge: 24 * 60 * 60 * 1000,
         dehydrateOptions: {
-          shouldDehydrateQuery: (query) => query.state.status === 'success',
+          shouldDehydrateQuery: (query) => {
+            if (query.state.status !== 'success') return false;
+            const key = query.queryKey[0];
+            return key !== 'catalog';
+          },
         },
       }}
     >

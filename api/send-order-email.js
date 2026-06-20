@@ -191,7 +191,7 @@ function buildEmailHtml({
 }
 
 export default async function handler(req, res) {
-  if (!requireAdminOrOrderToken(req, res)) return;
+  if (!(await requireAdminOrOrderToken(req, res))) return;
   if (req.method !== 'POST') return res.status(405).end();
 
   const {

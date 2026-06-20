@@ -55,7 +55,7 @@ async function sendBroadcast({ templateName, broadcastName, businessTypes, joine
 }
 
 export default async function handler(req, res) {
-  if (!requireCronOrAdminKey(req, res)) return;
+  if (!(await requireCronOrAdminKey(req, res))) return;
   res.setHeader('Cache-Control', 'no-store');
   if (req.method !== 'GET' && req.method !== 'POST') return res.status(405).end();
 

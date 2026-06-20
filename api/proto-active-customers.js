@@ -11,7 +11,7 @@ function getAdminClient() {
 
 /** Paginated read + inline edit of proto active customer allowlist. */
 export default async function handler(req, res) {
-  if (!requireAdminKey(req, res)) return;
+  if (!(await requireAdminKey(req, res))) return;
 
   if (req.method === 'PATCH') {
     const { id, contact_name, first_name, name } = req.body || {};

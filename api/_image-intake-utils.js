@@ -1,7 +1,17 @@
 export const STAGING_BUCKET = 'intake-staging';
 export const LIVE_BUCKET = 'product-images';
 export const IMAGE_COLUMNS = ['image_url_one', 'image_url_two', 'image_url_three', 'image_url_four'];
-const FILENAME_WITH_IMAGE_NUMBER_PATTERN = /^(?<sku>.+)-(?<imageNumber>\d+)$/;
+const DEFAULT_FILENAME_PATTERN = /^(?<sku>.+)-(?<imageNumber>\d+)$/;
+
+function filenamePattern() {
+  const raw = String(process.env.SKU_REGEX || '').trim();
+  if (!raw) return DEFAULT_FILENAME_PATTERN;
+  try {
+    return new RegExp(raw);
+  } catch {
+    return DEFAULT_FILENAME_PATTERN;
+  }
+}
 
 export function parseIntakeFilename(filename) {
   const dot = String(filename || '').lastIndexOf('.');
@@ -9,14 +19,14 @@ export function parseIntakeFilename(filename) {
   const normalizedStem = stem.trim();
   if (!normalizedStem) return { sourceSku: '', imageNumber: 1, imageColumn: IMAGE_COLUMNS[0] };
 
-  const match = normalizedStem.match(FILENAME_WITH_IMAGE_NUMBER_PATTERN);
-  if (!match) {
+  const match = normalizedStem.match(filenamePattern());
+  if (!match?.groups?.sku) {
     const sourceSku = normalizedStem.toUpperCase();
     return { sourceSku, imageNumber: 1, imageColumn: IMAGE_COLUMNS[0] };
   }
 
-  const sourceSku = String(match.groups?.sku || '').trim().toUpperCase();
-  const imageNumber = Number.parseInt(match.groups?.imageNumber || '1', 10);
+  const sourceSku = String(match.groups.sku || '').trim().toUpperCase();
+  const imageNumber = Number.parseInt(match.groups.imageNumber || '1', 10);
   const slot = Number.isFinite(imageNumber) ? Math.min(4, Math.max(1, imageNumber)) : 1;
   return {
     sourceSku,
@@ -30,4 +40,9 @@ export function stagingObjectName(sourceSku, imageNumber, filename) {
   const safeExt = /^[a-z0-9]{2,5}$/.test(ext) ? ext : 'jpg';
   const safeSku = String(sourceSku || 'unknown').replace(/[^a-zA-Z0-9_-]/g, '_');
   return `${Date.now()}-${safeSku}-${imageNumber}.${safeExt}`;
+}
+
+/** Live bucket path — matches product_image_intake.py */
+export function storageObjectPath(sku, imageNumber) {
+  return `${sku}/${imageNumber}.jpg`;
 }

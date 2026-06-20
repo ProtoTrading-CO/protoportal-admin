@@ -84,7 +84,7 @@ async function callGemini(apiKey, base64, contentType) {
 }
 
 export default async function handler(req, res) {
-  if (!requireAdminKey(req, res)) return;
+  if (!(await requireAdminKey(req, res))) return;
   res.setHeader('Cache-Control', 'no-store');
   if (req.method !== 'POST') return res.status(405).end();
 

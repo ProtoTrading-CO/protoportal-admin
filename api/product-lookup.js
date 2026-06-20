@@ -11,7 +11,7 @@ function getStockClient() {
 }
 
 export default async function handler(req, res) {
-  if (!requireAdminOrOrderToken(req, res)) return;
+  if (!(await requireAdminOrOrderToken(req, res))) return;
   res.setHeader('Cache-Control', 'no-store');
   if (req.method !== 'POST') return res.status(405).end();
 

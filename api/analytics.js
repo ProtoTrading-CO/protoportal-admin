@@ -10,7 +10,7 @@ function getAdminClient() {
 }
 
 export default async function handler(req, res) {
-  if (!requireAdminKey(req, res)) return;
+  if (!(await requireAdminKey(req, res))) return;
   if (req.method !== 'GET') return res.status(405).end();
 
   const supabase = getAdminClient();

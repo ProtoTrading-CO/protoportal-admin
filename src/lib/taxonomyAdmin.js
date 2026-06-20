@@ -88,6 +88,17 @@ export function subcategoryOptionsFromTree(tree, categoryId) {
   return findInTree(tree, categoryId)?.children || [];
 }
 
+export function childrenOfTree(tree, id) {
+  if (!id) return [];
+  const stack = [...(tree || [])];
+  while (stack.length) {
+    const node = stack.shift();
+    if (node.id === id) return node.children || [];
+    if (node.children?.length) stack.push(...node.children);
+  }
+  return [];
+}
+
 export function flattenSubcategories(nodes, depth = 1, prefix = '') {
   const out = [];
   for (const node of nodes || []) {

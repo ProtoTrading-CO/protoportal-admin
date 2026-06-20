@@ -149,7 +149,7 @@ export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
 
   if (req.method === 'GET') {
-    if (!requireAdminKey(req, res)) return;
+    if (!(await requireAdminKey(req, res))) return;
 
     if (!process.env.VITE_SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
       return res.status(503).json({ error: 'Supabase env not configured on this deployment' });

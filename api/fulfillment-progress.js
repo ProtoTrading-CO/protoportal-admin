@@ -11,7 +11,7 @@ function emptyProgress(orderId) {
 }
 
 export default async function handler(req, res) {
-  if (!requireAdminOrOrderToken(req, res)) return;
+  if (!(await requireAdminOrOrderToken(req, res))) return;
   res.setHeader('Cache-Control', 'no-store');
   const { orderId } = req.method === 'GET' ? req.query : (req.body || {});
 

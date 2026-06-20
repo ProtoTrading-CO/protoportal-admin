@@ -110,7 +110,7 @@ function formatBucketLabel(key, periodDays) {
 }
 
 export default async function handler(req, res) {
-  if (!requireAdminKey(req, res)) return;
+  if (!(await requireAdminKey(req, res))) return;
   res.setHeader('Cache-Control', 'no-store');
 
   // DELETE — clear all tracked analytics events (product/category views).

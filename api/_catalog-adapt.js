@@ -81,6 +81,8 @@ export function adaptCatalogRow(row, tree, { archived = false } = {}) {
     title: row.title,
     description: row.original_description || '',
     originalDescription: row.original_description || '',
+    packDescription: row.pack_description || '',
+    unitsOfIssue: String(row.units_of_issue || '').trim(),
     price: Number(row.price) || 0,
     sellPrice: row.sell_price != null ? Number(row.sell_price) : null,
     images,

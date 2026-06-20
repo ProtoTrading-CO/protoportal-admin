@@ -1,6 +1,6 @@
 import { requireAdminKey } from './_admin-auth.js';
 import { loadTaxonomy } from './_taxonomy-utils.js';
-import { mergeStagedImagesOntoLive, validateStockReady } from './_stage-dormant.js';
+import { mergeStagedImagesOntoLive, batchValidateStockReady } from './_stage-dormant.js';
 import { getStockClient, enrichRowsWithProductStock } from './_stock-client.js';
 import {
   adaptCatalogRow,
@@ -89,13 +89,15 @@ async function loadApprovalRows(sb) {
   if (!skus.length) return [];
   const { data: liveRows } = await sb.from('website_stock').select('*').in('sku', skus);
   const liveBySku = new Map((liveRows || []).map((r) => [r.sku, r]));
+  const barcodes = (staged || []).map((r) => r.barcode || r.sku).filter(Boolean);
+  const stockChecks = await batchValidateStockReady(sb, barcodes);
   const rows = [];
   for (const row of staged || []) {
     const live = liveBySku.get(row.sku);
     if (!live) continue;
     const { appliedSlots } = mergeStagedImagesOntoLive(row, live);
     if (!appliedSlots.length) continue;
-    const stockCheck = await validateStockReady(sb, row.barcode || row.sku);
+    const stockCheck = stockChecks.get(String(row.barcode || row.sku || '').trim()) || { ok: false, error: 'Missing barcode' };
     rows.push({
       ...row,
       _live: live,
@@ -109,7 +111,7 @@ async function loadApprovalRows(sb) {
 
 /** Paginated catalogue read for unified Product Manager. */
 export default async function handler(req, res) {
-  if (!requireAdminKey(req, res)) return;
+  if (!(await requireAdminKey(req, res))) return;
   if (req.method !== 'GET') return res.status(405).end();
 
   const status = String(req.query.status || 'live').trim();
@@ -172,7 +174,6 @@ export default async function handler(req, res) {
       pageSize: result.pageSize,
       hasMore: result.hasMore,
       status,
-      tree,
     });
   } catch (err) {
     console.error('catalog:', err?.message || err);

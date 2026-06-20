@@ -2,7 +2,7 @@ import { requireAdminKey } from './_admin-auth.js';
 import { uploadTransformedImage } from './_image-pipeline.js';
 
 export default async function handler(req, res) {
-  if (!requireAdminKey(req, res)) return;
+  if (!(await requireAdminKey(req, res))) return;
   res.setHeader('Cache-Control', 'no-store');
   if (req.method !== 'POST') return res.status(405).end();
 

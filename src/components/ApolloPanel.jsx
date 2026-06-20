@@ -321,7 +321,7 @@ function RemoteBatchNotice({ batches, lockCount }) {
   );
 }
 
-export default function ApolloPanel({ taxonomyTree, onShowToast, onGoToApproval, onRefreshCatalog, imageFixRequest, onImageFixRequestHandled }) {
+export default function ApolloPanel({ isActive = true, taxonomyTree, onShowToast, onGoToApproval, onRefreshCatalog, imageFixRequest, onImageFixRequestHandled }) {
   const [messages, setMessages] = useState(loadApolloMessages);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
@@ -357,7 +357,9 @@ export default function ApolloPanel({ taxonomyTree, onShowToast, onGoToApproval,
   }, [imageFixRequest?.id]);
 
   useEffect(() => {
+    if (!isActive) return undefined;
     const poll = () => {
+      if (document.visibilityState !== 'visible') return;
       void fetch('/api/image-gen-costs?days=1&limit=5')
         .then((r) => r.json())
         .then((json) => {
@@ -367,9 +369,9 @@ export default function ApolloPanel({ taxonomyTree, onShowToast, onGoToApproval,
             const done = Number(b?.done || 0);
             const total = Number(b?.total || 0);
             const failed = Number(b?.failed || 0);
-            const pending = total > 0 && done + failed < total;       // items still left
+            const pending = total > 0 && done + failed < total;
             const fresh = Date.now() - new Date(b?.created_at || 0).getTime() < 20 * 60 * 1000;
-            return pending && fresh;                                  // genuinely running now
+            return pending && fresh;
           });
           setRemoteActive({ batches: others, locks: json.active?.locks?.length || 0 });
         })
@@ -378,7 +380,7 @@ export default function ApolloPanel({ taxonomyTree, onShowToast, onGoToApproval,
     poll();
     const timer = setInterval(poll, 15000);
     return () => clearInterval(timer);
-  }, []);
+  }, [isActive]);
 
   useEffect(() => {
     void fetch('/api/apollo')

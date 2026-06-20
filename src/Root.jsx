@@ -1,27 +1,23 @@
-import { lazy, Suspense } from 'react';
+import { useEffect, useState, lazy, Suspense } from 'react';
 import { installAuthFetch } from './lib/adminKey';
+import { getSession, isAllowedAdminEmail, onAuthStateChange, signOut } from './lib/auth';
 import QueryProvider from './components/QueryProvider';
+import AdminLoginPage from './components/AdminLoginPage';
 
 const AdminPage = lazy(() => import('./pages/AdminPage'));
 const FulfillmentPage = lazy(() => import('./pages/FulfillmentPage'));
 
 installAuthFetch();
 
-const adminUser = {
-  id: 'proto-admin',
-  role: 'admin',
-  name: 'Proto Admin',
-  email: 'admin@proto.co.za',
-};
-
 const loadingFallback = (
-  <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0f172a', color: '#f8fafc', fontFamily: 'Inter, sans-serif' }}>
-    <div style={{ color: '#e11d48', fontSize: '14px', fontWeight: 700 }}>Loading dashboard…</div>
+  <div className="adm-login-page">
+    <div className="adm-login-layout">
+      <div className="adm-login-card adm-login-card--loading">Loading dashboard…</div>
+    </div>
   </div>
 );
 
 export default function Root() {
-  // Match both /fulfillment (legacy) and /f/<orderId>/<token> (short link).
   const path = window.location.pathname;
   const isFulfillment = path === '/fulfillment' || path === '/f' || path.startsWith('/f/');
 
@@ -33,11 +29,60 @@ export default function Root() {
     );
   }
 
+  return <AdminGate />;
+}
+
+function AdminGate() {
+  const [session, setSession] = useState(null);
+  const [booting, setBooting] = useState(true);
+
+  useEffect(() => {
+    let mounted = true;
+    void getSession().then((s) => {
+      if (mounted) {
+        setSession(s);
+        setBooting(false);
+      }
+    });
+    const { data: { subscription } } = onAuthStateChange((s) => {
+      if (mounted) setSession(s);
+    });
+    const onUnauthorized = () => { void signOut().then(() => setSession(null)); };
+    window.addEventListener('proto-admin-unauthorized', onUnauthorized);
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+      window.removeEventListener('proto-admin-unauthorized', onUnauthorized);
+    };
+  }, []);
+
+  if (booting) return loadingFallback;
+
+  const email = session?.user?.email || '';
+  const allowed = session && isAllowedAdminEmail(email);
+
+  if (!allowed) {
+    return (
+      <AdminLoginPage
+        forbidden={!!session && !isAllowedAdminEmail(email)}
+        onSignedIn={() => void getSession().then(setSession)}
+      />
+    );
+  }
+
+  const customer = {
+    id: session.user.id,
+    role: 'admin',
+    name: session.user.user_metadata?.name || email.split('@')[0],
+    email,
+  };
+
   return (
     <QueryProvider>
       <Suspense fallback={loadingFallback}>
         <AdminPage
-          customer={adminUser}
+          customer={customer}
+          onSignOut={() => void signOut().then(() => setSession(null))}
           onViewPortal={() => { window.location.href = 'https://protoportal-main.vercel.app'; }}
         />
       </Suspense>

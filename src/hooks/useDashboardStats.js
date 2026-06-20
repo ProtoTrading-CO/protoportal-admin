@@ -13,6 +13,6 @@ export function useDashboardStats() {
     queryKey: queryKeys.dashboardStats(),
     queryFn: fetchDashboardStats,
     staleTime: 60_000,
-    refetchOnWindowFocus: true,
+    refetchOnWindowFocus: false,
   });
 }

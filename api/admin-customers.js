@@ -10,7 +10,7 @@ function getAdminClient() {
 }
 
 export default async function handler(req, res) {
-  if (!requireAdminKey(req, res)) return;
+  if (!(await requireAdminKey(req, res))) return;
   const supabase = getAdminClient();
 
   // GET — list customers by tab

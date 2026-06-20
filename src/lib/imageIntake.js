@@ -11,27 +11,43 @@ function fileToBase64(file) {
   });
 }
 
-export async function enqueueImageIntake(file) {
-  const base64 = await fileToBase64(file);
+async function postIntake(body) {
   const res = await fetch('/api/image-intake', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      filename: file.name,
-      contentType: file.type || 'application/octet-stream',
-      base64,
-    }),
+    body: JSON.stringify(body),
   });
   const json = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(json.error || 'Failed to queue image');
+  if (!res.ok) throw new Error(json.error || json.message || 'Image intake request failed');
   return json;
 }
 
-export async function fetchImageIntakeQueue({ status = '', limit = 50 } = {}) {
+export async function previewImageIntake(file) {
+  const base64 = await fileToBase64(file);
+  const json = await postIntake({
+    action: 'preview',
+    filename: file.name,
+    contentType: file.type || 'application/octet-stream',
+    base64,
+  });
+  return json.preview;
+}
+
+export async function processImageIntake(file, { dryRun = false } = {}) {
+  const base64 = await fileToBase64(file);
+  return postIntake({
+    action: 'process',
+    filename: file.name,
+    contentType: file.type || 'application/octet-stream',
+    base64,
+    dryRun,
+  });
+}
+
+export async function fetchImageIntakeHistory({ limit = 50 } = {}) {
   const params = new URLSearchParams({ limit: String(limit) });
-  if (status) params.set('status', status);
   const res = await fetch(`/api/image-intake?${params}`);
   const json = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(json.error || 'Failed to load queue');
+  if (!res.ok) throw new Error(json.error || 'Failed to load history');
   return json.rows || [];
 }

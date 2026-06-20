@@ -11,7 +11,7 @@ function getMainClient() {
 
 /** Paginated read from background-synced crm_contacts — never calls Brevo live. */
 export default async function handler(req, res) {
-  if (!requireAdminKey(req, res)) return;
+  if (!(await requireAdminKey(req, res))) return;
   if (req.method !== 'GET') return res.status(405).end();
 
   const page = Math.max(1, parseInt(req.query.page, 10) || 1);

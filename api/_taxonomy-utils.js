@@ -18,17 +18,42 @@ export function loadBundledTaxonomy() {
   return JSON.parse(readFileSync(BUNDLED_PATH, 'utf8'));
 }
 
-export async function loadTaxonomy() {
+let _taxonomyCache = null;
+let _taxonomyCachedAt = 0;
+const TAXONOMY_TTL_MS = 60_000;
+
+export function invalidateTaxonomyCache() {
+  _taxonomyCache = null;
+  _taxonomyCachedAt = 0;
+}
+
+export async function loadTaxonomy({ bypassCache = false } = {}) {
+  const now = Date.now();
+  if (!bypassCache && _taxonomyCache && now - _taxonomyCachedAt < TAXONOMY_TTL_MS) {
+    return _taxonomyCache;
+  }
   try {
     const stored = await readSiteConfigJson(TAXONOMY_FILE, null);
-    if (Array.isArray(stored)) return stored;
-    if (stored?.categories && Array.isArray(stored.categories)) return stored.categories;
+    if (Array.isArray(stored)) {
+      _taxonomyCache = stored;
+      _taxonomyCachedAt = now;
+      return stored;
+    }
+    if (stored?.categories && Array.isArray(stored.categories)) {
+      _taxonomyCache = stored.categories;
+      _taxonomyCachedAt = now;
+      return stored.categories;
+    }
   } catch { /* fall through */ }
-  return loadBundledTaxonomy();
+  const bundled = loadBundledTaxonomy();
+  _taxonomyCache = bundled;
+  _taxonomyCachedAt = now;
+  return bundled;
 }
 
 export async function saveTaxonomy(categories) {
   await writeSiteConfigJson(TAXONOMY_FILE, { categories });
+  invalidateTaxonomyCache();
   return categories;
 }
 

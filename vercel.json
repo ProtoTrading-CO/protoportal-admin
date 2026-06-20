@@ -11,6 +11,9 @@
   "functions": {
     "api/seed-proto-active-customers.js": {
       "includeFiles": "data/proto-active-customers.json"
+    },
+    "api/image-intake.js": {
+      "maxDuration": 60
     }
   },
   "crons": [

@@ -52,8 +52,12 @@ function styleMessage(imageStyle, slot) {
   return `Processing${slotNote}…`;
 }
 
-function buildWorkItems(products, { fillSlots = false } = {}) {
+/** @typedef {{ enabled?: boolean, style?: string, prompt?: string, referenceUrl?: string }} SlotPlan */
+
+function buildWorkItems(products, slotPlans = {}) {
+  const enabledSlots = [1, 2, 3, 4].filter((s) => slotPlans[s]?.enabled);
   const work = [];
+
   for (const p of products) {
     if (!p?.sku) continue;
     const images = p.images || p.imageUrls || [
@@ -66,16 +70,20 @@ function buildWorkItems(products, { fillSlots = false } = {}) {
       const idx = slot - 1;
       return !!(images[idx] || (slot === 1 && (p.imageUrl || p.image)));
     };
-    const expanded = fillSlots ? [1, 2, 3, 4] : (p.slots || [1]);
-    const uniqueSlots = [...new Set(expanded.length ? expanded : [1])];
-    const primarySource = hasImage(1) ? 1 : uniqueSlots.find((s) => hasImage(s));
-    for (const slot of uniqueSlots) {
+    const primarySource = hasImage(1) ? 1 : enabledSlots.find((s) => hasImage(s)) || 1;
+
+    for (const slot of enabledSlots) {
+      const plan = slotPlans[slot] || {};
+      const sourceForSlot = hasImage(slot) ? slot : primarySource;
       work.push({
         sku: p.sku,
         title: p.title || p.name || p.sku,
         thumbUrl: hasImage(slot) ? (images[slot - 1] || p.imageUrl || p.image) : (images[0] || p.imageUrl || p.image),
         slot,
-        sourceSlot: slot === 1 ? (primarySource || 1) : (primarySource || 1),
+        sourceSlot: sourceForSlot,
+        style: plan.style || 'shadow',
+        prompt: String(plan.prompt || '').trim(),
+        referenceUrl: String(plan.referenceUrl || '').trim(),
       });
     }
   }
@@ -83,40 +91,35 @@ function buildWorkItems(products, { fillSlots = false } = {}) {
 }
 
 /**
- * @param {{ sku: string, title?: string, imageUrl?: string, images?: string[], slots?: number[] }[]} products
- * @param {{ prompt?: string, imageStyle?: string, referenceImageUrl?: string, fillSlots?: boolean, onItemUpdate?: (index: number, patch: object) => void, signal?: AbortSignal }} opts
+ * @param {{ sku: string, title?: string, imageUrl?: string, images?: string[] }[]} products
+ * @param {{ slotPlans?: Record<number, SlotPlan>, onItemUpdate?: (index: number, patch: object) => void, signal?: AbortSignal, batchId?: string }} opts
  */
 export async function runReprocessBatch(products, {
-  prompt,
-  imageStyle,
-  referenceImageUrl,
-  fillSlots = false,
+  slotPlans,
   batchId,
   onItemUpdate,
   signal,
 } = {}) {
-  const queue = buildWorkItems(products, { fillSlots });
+  const queue = buildWorkItems(products, slotPlans);
   const results = { done: 0, failed: 0, items: Array(queue.length).fill(null) };
 
-  // Mark every item as in-progress immediately so the UI shows all cards as generating
   queue.forEach((item, i) => {
     onItemUpdate?.(i, {
       status: 'transforming',
-      message: styleMessage(imageStyle, item.slot),
+      message: styleMessage(item.style, item.slot),
       slot: item.slot,
     });
   });
 
-  // Run all slots in parallel — each item fires its own API call simultaneously
   await Promise.all(queue.map(async (item, i) => {
     if (signal?.aborted) return;
     try {
       const json = await reprocessOneToDormant(item.sku, {
-        prompt,
-        imageStyle,
+        prompt: item.prompt || undefined,
+        imageStyle: item.style,
         targetSlot: item.slot,
         sourceSlot: item.sourceSlot || 1,
-        referenceImageUrl,
+        referenceImageUrl: item.referenceUrl || undefined,
         batchId,
       });
       results.done += 1;
@@ -142,11 +145,28 @@ export async function runReprocessBatch(products, {
   return results;
 }
 
-/** Expand selected products into slot-aware batch for Apollo wizard. */
-export function expandProductSlots(products, { fillSlots = false, defaultSlots = [1] } = {}) {
+/** Expand selected products for Apollo wizard (slots come from slotPlans at batch time). */
+export function expandProductSlots(products, { defaultSlots = [1] } = {}) {
   return products.map((p) => {
     const images = p.images || [p.image, p.secondaryImage, p.imageThree, p.imageFour].filter(Boolean);
-    const slots = fillSlots ? [1, 2, 3, 4] : defaultSlots;
+    const slots = defaultSlots;
     return { ...p, images, slots };
   });
+}
+
+export function countRecipeJobs(productCount, slotPlans) {
+  const slots = [1, 2, 3, 4].filter((s) => slotPlans?.[s]?.enabled).length;
+  return productCount * slots;
+}
+
+export function recipeSummary(slotPlans) {
+  const STYLE_LABELS = { shadow: 'White BG', generative: 'Generative AI', measurements: 'Measurements' };
+  return [1, 2, 3, 4]
+    .filter((s) => slotPlans?.[s]?.enabled)
+    .map((s) => {
+      const p = slotPlans[s];
+      const style = STYLE_LABELS[p?.style] || p?.style || 'White BG';
+      const prompt = String(p?.prompt || '').trim();
+      return prompt ? `Image ${s} · ${style} · “${prompt.slice(0, 40)}${prompt.length > 40 ? '…' : ''}”` : `Image ${s} · ${style}`;
+    });
 }

@@ -11,7 +11,7 @@ function getAdminClient() {
 }
 
 export default async function handler(req, res) {
-  if (!requireAdminOrOrderToken(req, res)) return;
+  if (!(await requireAdminOrOrderToken(req, res))) return;
   const supabase = getAdminClient();
 
   // GET — list orders (service role bypasses RLS)

@@ -169,7 +169,7 @@ Max 10 chart labels. ZAR currency. Be direct and conversational.`,
 }
 
 export default async function handler(req, res) {
-  if (!requireAdminKey(req, res)) return;
+  if (!(await requireAdminKey(req, res))) return;
   res.setHeader('Cache-Control', 'no-store');
 
   if (req.method === 'GET') {

@@ -18,6 +18,7 @@ import {
 import CategorySidebar from './CategorySidebar';
 import ReorderGrid from './ReorderGrid';
 import ApprovalPanel from './ApprovalPanel';
+import BulkProductEditModal from './BulkProductEditModal';
 import { useCatalogQuery, buildCatalogParams, CATALOG_STATUSES } from '../hooks/useCatalog';
 import { useCatalogMutations } from '../hooks/useCatalogMutations';
 import { queryClient } from '../lib/queryClient';
@@ -87,6 +88,7 @@ export default function ProductManagerEngine({
   onAddSubcategory,
   onDeleteSubcategory,
   onDeleteNode,
+  onRefreshTaxonomy,
   initialStatus = 'live',
 }) {
   const [status, setStatus] = useState(initialStatus);
@@ -106,6 +108,7 @@ export default function ProductManagerEngine({
   const [reorderDirty, setReorderDirty] = useState(false);
   const [reorderSaving, setReorderSaving] = useState(false);
   const [exportingLive, setExportingLive] = useState(false);
+  const [bulkEditOpen, setBulkEditOpen] = useState(false);
   const selectedRowsRef = useRef(new Map());
   const panelTopRef = useRef(null);
 
@@ -119,7 +122,8 @@ export default function ProductManagerEngine({
   useEffect(() => {
     return subscribeImageBatch((batch) => {
       if (batch?.status === 'complete') {
-        queryClient.invalidateQueries({ queryKey: ['catalog'] });
+        window.dispatchEvent(new CustomEvent('proto-approval-refresh'));
+        queryClient.invalidateQueries({ queryKey: queryKeys.dashboardStats() });
         if (status === 'approval') {
           onShowToast?.('New images ready for approval', 'success');
         }
@@ -260,6 +264,20 @@ export default function ProductManagerEngine({
     onImageFix?.(products);
     setSelected(new Set());
     selectedRowsRef.current = new Map();
+  };
+
+  const bulkEditProducts = useMemo(
+    () => [...selected].map((id) => selectedRowsRef.current.get(id)).filter(Boolean),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [bulkEditOpen, selected],
+  );
+
+  const handleBulkEditSaved = () => {
+    setSelected(new Set());
+    selectedRowsRef.current = new Map();
+    setBulkEditOpen(false);
+    queryClient.invalidateQueries({ queryKey: ['catalog'] });
+    onRefreshStats?.();
   };
 
   const runBulk = async (action) => {
@@ -413,6 +431,15 @@ export default function ProductManagerEngine({
               {selected.size > 0 && (
                 <div className="pm-bulk-bar">
                   <span>{selected.size} selected</span>
+                  {(status === 'live' || status === 'archived') && (
+                    <button
+                      type="button"
+                      className="adm-btn-ghost adm-btn--sm"
+                      onClick={() => setBulkEditOpen(true)}
+                    >
+                      <Pencil size={14} /> Bulk edit
+                    </button>
+                  )}
                   {(status === 'live' || status === 'archived') && onImageFix && (
                     <button type="button" className="adm-btn-red adm-btn--sm" onClick={handleImageFix}>
                       <Sparkles size={14} /> Image fix
@@ -606,6 +633,17 @@ export default function ProductManagerEngine({
             )}
           </div>
         </div>
+      )}
+
+      {bulkEditOpen && bulkEditProducts.length > 0 && (
+        <BulkProductEditModal
+          products={bulkEditProducts}
+          taxonomyTree={tree}
+          onClose={() => setBulkEditOpen(false)}
+          onSaved={handleBulkEditSaved}
+          onShowToast={onShowToast}
+          onRefreshTaxonomy={onRefreshTaxonomy}
+        />
       )}
     </div>
   );

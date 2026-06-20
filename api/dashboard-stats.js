@@ -41,7 +41,7 @@ async function countApproval(sb) {
 
 /** Store-wide dashboard counts — never affected by search/filter state. */
 export default async function handler(req, res) {
-  if (!requireAdminKey(req, res)) return;
+  if (!(await requireAdminKey(req, res))) return;
   if (req.method !== 'GET') return res.status(405).end();
 
   try {

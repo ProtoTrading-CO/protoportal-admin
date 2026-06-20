@@ -1,113 +1,102 @@
 import { requireAdminKey } from './_admin-auth.js';
 import { getStockClient } from './_stock-client.js';
-import {
-  STAGING_BUCKET,
-  parseIntakeFilename,
-  stagingObjectName,
-} from './_image-intake-utils.js';
+import { parseIntakeFilename } from './_image-intake-utils.js';
+import { buildIntakePreview, processIntakeImage } from './_image-intake-process.js';
 
 export const config = { api: { bodyParser: { sizeLimit: '20mb' } } };
 
-async function uploadStagingImage(supabase, { filename, contentType, base64, sourceSku, imageNumber }) {
-  await supabase.storage.createBucket(STAGING_BUCKET, { public: true }).catch(() => {});
-  const stagingPath = stagingObjectName(sourceSku, imageNumber, filename);
-  const buffer = Buffer.from(base64, 'base64');
-  const { error } = await supabase.storage
-    .from(STAGING_BUCKET)
-    .upload(stagingPath, buffer, { contentType: contentType || 'application/octet-stream', upsert: false });
-  if (error) throw error;
-  const { data: { publicUrl } } = supabase.storage.from(STAGING_BUCKET).getPublicUrl(stagingPath);
-  return { stagingPath, stagingUrl: publicUrl };
-}
-
 /**
- * Image intake queue API.
- * Admin uploads enqueue only — no SQL, no direct product writes.
- * BLADERUNNER-PC worker processes pending rows.
+ * Admin Image Intake — synchronous flow (product_image_intake.py reference).
+ * POST action=preview | process
  */
 export default async function handler(req, res) {
-  if (!requireAdminKey(req, res)) return;
+  if (!(await requireAdminKey(req, res))) return;
   res.setHeader('Cache-Control', 'no-store');
 
   const supabase = getStockClient();
 
   if (req.method === 'GET') {
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 50));
-    const status = String(req.query.status || '').trim();
     try {
-      let q = supabase
+      const { data, error } = await supabase
         .from('image_intake_queue')
         .select('*')
         .order('created_at', { ascending: false })
         .limit(limit);
-      if (status) q = q.eq('status', status);
-      const { data, error } = await q;
-      if (error) {
-        if (/image_intake_queue/.test(error.message)) {
-          return res.status(503).json({
-            error: 'Queue table missing — run migration 025_image_intake_queue.sql on the stock Supabase project.',
-          });
-        }
-        throw error;
+      if (error && /image_intake_queue/.test(error.message)) {
+        return res.status(200).json({ rows: [] });
       }
+      if (error) throw error;
       return res.status(200).json({ rows: data || [] });
     } catch (err) {
-      return res.status(500).json({ error: err.message || 'Failed to load queue' });
+      return res.status(500).json({ error: err.message || 'Failed to load history' });
     }
   }
 
   if (req.method !== 'POST') return res.status(405).end();
 
-  const { filename, contentType, base64 } = req.body || {};
-  if (!filename || !base64) {
-    return res.status(400).json({ error: 'filename and base64 are required' });
+  const body = req.body || {};
+  const action = String(body.action || 'process').toLowerCase();
+  const { filename, contentType, base64 } = body;
+  const dryRun = body.dryRun === true || String(body.dryRun || '').toLowerCase() === 'true';
+
+  if (!filename) {
+    return res.status(400).json({ error: 'filename is required' });
   }
 
-  const { sourceSku, imageNumber, imageColumn } = parseIntakeFilename(filename);
-  if (!sourceSku) return res.status(400).json({ error: 'Could not parse SKU from filename' });
-
   try {
-    const { stagingPath, stagingUrl } = await uploadStagingImage(supabase, {
+    if (action === 'preview') {
+      const preview = await buildIntakePreview(supabase, filename, { contentType, base64 });
+      return res.status(200).json({ ok: true, preview });
+    }
+
+    if (action !== 'process') {
+      return res.status(400).json({ error: 'action must be preview or process' });
+    }
+
+    if (!base64 && !dryRun) {
+      return res.status(400).json({ error: 'base64 is required for process (unless dryRun=true)' });
+    }
+
+    const result = await processIntakeImage(supabase, {
       filename,
       contentType,
-      base64,
-      sourceSku,
-      imageNumber,
+      base64: base64 || '',
+      dryRun,
     });
 
     const now = new Date().toISOString();
-    const { data: row, error } = await supabase
-      .from('image_intake_queue')
-      .insert({
-        status: 'pending',
-        source_sku: sourceSku,
-        image_number: imageNumber,
-        image_column: imageColumn,
-        original_filename: filename,
-        content_type: contentType || null,
-        staging_path: stagingPath,
-        staging_url: stagingUrl,
-        created_at: now,
-        updated_at: now,
-      })
-      .select('*')
-      .single();
-
-    if (error) throw error;
-
-    return res.status(200).json({
-      ok: true,
-      queued: true,
-      queueId: row.id,
-      status: row.status,
-      sourceSku,
-      imageNumber,
-      imageColumn,
-      stagingUrl,
-      message: 'Queued for BLADERUNNER-PC worker — website is not connected to SQL.',
+    await supabase.from('image_intake_queue').insert({
+      status: result.status === 'completed' ? 'completed' : result.status === 'dry_run' ? 'pending' : 'failed',
+      source_sku: result.sourceSku || parseIntakeFilename(filename).sourceSku,
+      image_number: result.imageNumber || 1,
+      image_column: result.imageColumn || 'image_url_one',
+      original_filename: filename,
+      content_type: contentType || null,
+      staging_path: result.objectPath || `direct/${filename}`,
+      staging_url: result.imageUrl || null,
+      final_image_url: result.imageUrl || null,
+      product_sku: result.sourceSku || null,
+      sql_code: result.sql?.code || null,
+      sql_title: result.sql?.title || null,
+      sql_price: result.sql?.price ?? null,
+      sql_onhand: result.sql?.onhand ?? null,
+      sql_dept: result.sql?.dept || null,
+      error_message: result.ok ? null : (result.message || null),
+      processed_at: now,
+      created_at: now,
+      updated_at: now,
+    }).catch((err) => {
+      console.warn('image-intake history insert:', err?.message);
     });
+
+    if (!result.ok) {
+      return res.status(422).json(result);
+    }
+
+    return res.status(200).json(result);
   } catch (err) {
-    console.error('image-intake enqueue error:', err?.message || err);
-    return res.status(500).json({ error: err.message || 'Failed to enqueue image' });
+    console.error('image-intake error:', err?.message || err);
+    return res.status(500).json({ error: err.message || 'Image intake failed' });
   }
 }

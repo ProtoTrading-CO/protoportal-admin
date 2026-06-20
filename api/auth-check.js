@@ -1,6 +1,15 @@
-/** Legacy login endpoint — dashboard auth removed; always OK. */
-export default async function handler(_req, res) {
+import { requireAdminKey, verifyAdminUser } from './_admin-auth.js';
+
+/** Session probe for the admin SPA after Supabase login. */
+export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
-  if (_req.method !== 'POST') return res.status(405).end();
-  return res.status(200).json({ ok: true });
+  if (req.method !== 'GET' && req.method !== 'POST') return res.status(405).end();
+
+  if (!(await requireAdminKey(req, res))) return;
+
+  const user = await verifyAdminUser(req);
+  return res.status(200).json({
+    ok: true,
+    email: user?.email || null,
+  });
 }

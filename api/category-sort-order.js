@@ -10,7 +10,7 @@ async function readStore() {
 /** GET sort order for a category key; POST save with optimistic version check. */
 export default async function handler(req, res) {
   if (req.method === 'GET') {
-    if (!requireAdminKey(req, res)) return;
+    if (!(await requireAdminKey(req, res))) return;
     const categoryKey = String(req.query.categoryKey || '').trim();
     try {
       const store = await readStore();
@@ -27,7 +27,7 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'POST') {
-    if (!requireAdminKey(req, res)) return;
+    if (!(await requireAdminKey(req, res))) return;
     const { categoryKey, skuOrder, legacyKeys = [] } = req.body || {};
     const key = String(categoryKey || '').trim();
     if (!key || !Array.isArray(skuOrder)) {

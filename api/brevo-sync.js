@@ -24,7 +24,7 @@ async function brevoFetch(path, { params = {} } = {}) {
 
 /** Background sync — curated Brevo subset into crm_contacts. Cron: every 15 min. */
 export default async function handler(req, res) {
-  if (!requireCronOrAdminKey(req, res)) return;
+  if (!(await requireCronOrAdminKey(req, res))) return;
   if (req.method !== 'GET' && req.method !== 'POST') return res.status(405).end();
 
   const apiKey = process.env.BREVO_API_KEY;

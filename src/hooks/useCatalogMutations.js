@@ -19,9 +19,17 @@ async function stockMutate(body) {
   return json;
 }
 
-function invalidateCatalogAndStats(queryClient) {
-  queryClient.invalidateQueries({ queryKey: ['catalog'] });
+function invalidateCatalogAndStats(queryClient, statuses = []) {
+  for (const status of statuses) {
+    queryClient.invalidateQueries({
+      predicate: (q) => q.queryKey[0] === 'catalog' && q.queryKey[1]?.status === status,
+    });
+  }
   queryClient.invalidateQueries({ queryKey: queryKeys.dashboardStats() });
+}
+
+function refreshApproval() {
+  window.dispatchEvent(new CustomEvent('proto-approval-refresh'));
 }
 
 export function useCatalogMutations() {
@@ -29,17 +37,20 @@ export function useCatalogMutations() {
 
   const archive = useMutation({
     mutationFn: (sku) => archiveProduct(sku, true),
-    onSettled: () => invalidateCatalogAndStats(queryClient),
+    onSettled: () => invalidateCatalogAndStats(queryClient, ['live', 'archived']),
   });
 
   const unarchive = useMutation({
     mutationFn: (sku) => archiveProduct(sku, false),
-    onSettled: () => invalidateCatalogAndStats(queryClient),
+    onSettled: () => invalidateCatalogAndStats(queryClient, ['live', 'archived']),
   });
 
   const setLive = useMutation({
     mutationFn: (sku) => applyDormantLive(sku),
-    onSettled: () => invalidateCatalogAndStats(queryClient),
+    onSettled: () => {
+      invalidateCatalogAndStats(queryClient, ['live']);
+      refreshApproval();
+    },
   });
 
   const softDelete = useMutation({
@@ -48,22 +59,25 @@ export function useCatalogMutations() {
       const fromArchive = typeof arg === 'object' && arg?.fromArchive;
       return recycleProduct(sku, { fromArchive: !!fromArchive });
     },
-    onSettled: () => invalidateCatalogAndStats(queryClient),
+    onSettled: () => invalidateCatalogAndStats(queryClient, ['live', 'archived', 'recycle']),
   });
 
   const restoreRecycle = useMutation({
     mutationFn: (sku) => restoreRecycledProduct(sku),
-    onSettled: () => invalidateCatalogAndStats(queryClient),
+    onSettled: () => invalidateCatalogAndStats(queryClient, ['live', 'archived', 'recycle']),
   });
 
   const permanentDelete = useMutation({
     mutationFn: (sku) => deleteProduct(sku),
-    onSettled: () => invalidateCatalogAndStats(queryClient),
+    onSettled: () => invalidateCatalogAndStats(queryClient, ['live', 'archived', 'recycle']),
   });
 
   const discardPreview = useMutation({
     mutationFn: (sku) => stockMutate({ action: 'deleteStagedPreview', sku }),
-    onSettled: () => invalidateCatalogAndStats(queryClient),
+    onSettled: () => {
+      refreshApproval();
+      invalidateCatalogAndStats(queryClient, []);
+    },
   });
 
   return {
