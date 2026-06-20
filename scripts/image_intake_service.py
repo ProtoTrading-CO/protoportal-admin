@@ -1,8 +1,8 @@
 from pathlib import Path
-import os
 
 from product_image_intake import (
     DRY_RUN,
+    apply_image_to_website_stock,
     build_insert_payload,
     build_storage_path,
     build_supabase_context,
@@ -12,48 +12,18 @@ from product_image_intake import (
     create_product_in_supabase,
     decimal_to_float,
     get_product_from_sql,
+    image_column_for_slot,
     parse_filename,
+    preview_r2_paths,
     to_decimal,
     upload_product_image,
     validate_image_file,
-    utc_now,
 )
 
 
 def storage_display_path(sku: str, image_number: str) -> str:
-    path = build_storage_path(sku, image_number)
-    try:
-        from r2_storage import is_r2_configured
-        if is_r2_configured():
-            bucket = os.getenv("R2_BUCKET_NAME", "proto-images")
-            return f"{bucket}/{path}"
-    except ImportError:
-        pass
-    return path
-
-
-IMAGE_COLUMNS = ["image_url_one", "image_url_two", "image_url_three", "image_url_four"]
-
-
-def apply_image_to_website_stock(client, barcode: str, image_column: str, image_url: str) -> int:
-    if not barcode or not image_column or not image_url:
-        return 0
-    rows = client.table("website_stock").select("sku").eq("barcode", barcode).execute()
-    if not rows.data:
-        return 0
-    client.table("website_stock").update({
-        image_column: image_url,
-        "updated_at": utc_now(),
-    }).eq("barcode", barcode).execute()
-    return len(rows.data)
-
-
-def image_column_for_slot(image_number: str) -> str:
-    try:
-        slot = max(1, min(4, int(image_number)))
-    except (TypeError, ValueError):
-        slot = 1
-    return IMAGE_COLUMNS[slot - 1]
+    preview = preview_r2_paths(build_storage_path(sku, image_number))
+    return preview.get("display_path") or build_storage_path(sku, image_number)
 
 
 def preview_image_upload(filepath: str) -> dict:
@@ -65,6 +35,7 @@ def preview_image_upload(filepath: str) -> dict:
 
     context = build_supabase_context()
     action = "upload_to_existing_product" if sku in context["sku_map"] else "create_product_then_upload"
+    preview = preview_r2_paths(build_storage_path(sku, image_number))
 
     return {
         "sku": sku,
@@ -78,6 +49,8 @@ def preview_image_upload(filepath: str) -> dict:
         "department": clean_text(sql_row.get("DEPT")),
         "action": action,
         "storage_path": storage_display_path(sku, image_number),
+        "public_url": preview.get("public_url"),
+        "website_column": image_column_for_slot(image_number),
         "dry_run": DRY_RUN,
     }
 
@@ -93,6 +66,7 @@ def create_product_from_image(filepath: str) -> dict:
     client = context["client"]
     detected = context["detected_columns"]
     existing = context["sku_map"].get(sku)
+    image_column = image_column_for_slot(image_number)
 
     created_row = existing
     status = "existing_product_image_uploaded"
@@ -108,16 +82,36 @@ def create_product_from_image(filepath: str) -> dict:
     image_upload = {
         "bucket": None,
         "storage_path": build_storage_path(sku, image_number),
+        "display_path": storage_display_path(sku, image_number),
+        "public_url": None,
+        "backend": None,
     }
+    website_rows_updated = 0
+
     if not DRY_RUN:
         image_upload = upload_product_image(sku, image_number, path, client=client)
-        public_url = image_upload.get("public_url") or image_upload["storage_path"]
-        apply_image_to_website_stock(
+        website_result = apply_image_to_website_stock(
             client,
             barcode=sku,
-            image_column=image_column_for_slot(image_number),
-            image_url=public_url,
+            image_column=image_column,
+            image_url=image_upload.get("public_url") or "",
+            dry_run=False,
+            item={"log": []},
         )
+        website_rows_updated = website_result.get("rows_updated", 0)
+    else:
+        preview = preview_r2_paths(build_storage_path(sku, image_number))
+        image_upload["public_url"] = preview.get("public_url")
+        image_upload["display_path"] = preview.get("display_path")
+        website_result = apply_image_to_website_stock(
+            client,
+            barcode=sku,
+            image_column=image_column,
+            image_url=preview.get("public_url") or "",
+            dry_run=True,
+            item={"log": []},
+        )
+        website_rows_updated = website_result.get("rows_updated", 0)
 
     product_id = None
     if created_row:
@@ -130,4 +124,6 @@ def create_product_from_image(filepath: str) -> dict:
         "sku": sku,
         "image_number": image_number,
         "storage_backend": image_upload.get("backend"),
+        "website_column": image_column,
+        "website_rows_updated": website_rows_updated,
     }

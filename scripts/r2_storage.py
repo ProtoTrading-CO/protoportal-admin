@@ -22,6 +22,11 @@ def r2_public_url(object_key: str) -> str:
     return f"{base}/{key}"
 
 
+def r2_display_path(object_key: str) -> str:
+    bucket = os.getenv("R2_BUCKET_NAME", "proto-images")
+    return f"{bucket}/{object_key.lstrip('/')}"
+
+
 def upload_to_r2(object_key: str, body: bytes, content_type: str = "image/jpeg") -> dict:
     try:
         import boto3
@@ -48,4 +53,5 @@ def upload_to_r2(object_key: str, body: bytes, content_type: str = "image/jpeg")
         "bucket": bucket,
         "object_key": object_key,
         "public_url": r2_public_url(object_key),
+        "display_path": r2_display_path(object_key),
     }
