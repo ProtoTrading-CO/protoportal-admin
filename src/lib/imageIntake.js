@@ -49,5 +49,5 @@ export async function fetchImageIntakeHistory({ limit = 50 } = {}) {
   const res = await fetch(`/api/image-intake?${params}`);
   const json = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(json.error || 'Failed to load history');
-  return json.rows || [];
+  return { rows: json.rows || [], config: json.config || null };
 }

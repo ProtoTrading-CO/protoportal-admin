@@ -6,7 +6,12 @@
  */
 
 import { LIVE_BUCKET, parseIntakeFilename, storageObjectPath } from './_image-intake-utils.js';
-import { fetchStmastRow, sqlRowToPreview } from './_sql-stmast.js';
+import {
+  fetchStmastRow,
+  isStmastAccessConfigured,
+  sqlRowToPreview,
+  stmastSetupMessage,
+} from './_sql-stmast.js';
 import { isR2Configured, r2StorageLabel, uploadToR2 } from './_r2-storage.js';
 
 const SKU_COLUMNS = ['sku', 'product_sku', 'product_code', 'code'];
@@ -195,9 +200,59 @@ export async function buildIntakePreview(supabase, filename, { contentType = '',
   const { sourceSku, imageNumber, imageColumn } = parseIntakeFilename(filename);
   if (!sourceSku) throw new Error('Could not parse SKU from filename');
 
-  const sqlRow = await fetchStmastRow(sourceSku);
-  const exists = sqlRow ? await productExists(supabase, sourceSku) : false;
-  const action = exists ? 'upload_to_existing_product' : 'create_product_then_upload';
+  const exists = await productExists(supabase, sourceSku);
+  let sqlRow = null;
+  let sqlLookupError = null;
+
+  if (isStmastAccessConfigured()) {
+    try {
+      sqlRow = await fetchStmastRow(sourceSku);
+    } catch (err) {
+      sqlLookupError = err.message || String(err);
+    }
+  }
+
+  if (sqlRow) {
+    const action = exists ? 'upload_to_existing_product' : 'create_product_then_upload';
+    return {
+      filename,
+      sourceSku,
+      imageNumber,
+      imageColumn,
+      storagePath: previewStoragePath(sourceSku, imageNumber),
+      sql: sqlRowToPreview(sqlRow),
+      sqlFound: true,
+      productExists: exists,
+      action,
+      canProcess: true,
+      blockedReason: null,
+      viaService: false,
+    };
+  }
+
+  if (exists) {
+    return {
+      filename,
+      sourceSku,
+      imageNumber,
+      imageColumn,
+      storagePath: previewStoragePath(sourceSku, imageNumber),
+      sql: null,
+      sqlFound: false,
+      productExists: true,
+      action: 'upload_to_existing_product',
+      canProcess: true,
+      blockedReason: null,
+      uploadOnlyWithoutSql: true,
+      sqlWarning: sqlLookupError || stmastSetupMessage(),
+      viaService: false,
+    };
+  }
+
+  const blockedReason = sqlLookupError
+    || (isStmastAccessConfigured()
+      ? `SKU ${sourceSku} not found in POSWINSQL.dbo.STMAST`
+      : stmastSetupMessage());
 
   return {
     filename,
@@ -205,12 +260,12 @@ export async function buildIntakePreview(supabase, filename, { contentType = '',
     imageNumber,
     imageColumn,
     storagePath: previewStoragePath(sourceSku, imageNumber),
-    sql: sqlRowToPreview(sqlRow),
-    sqlFound: Boolean(sqlRow),
-    productExists: exists,
-    action,
-    canProcess: Boolean(sqlRow),
-    blockedReason: sqlRow ? null : `SKU ${sourceSku} not found in POSWINSQL.dbo.STMAST`,
+    sql: null,
+    sqlFound: false,
+    productExists: false,
+    action: 'create_product_then_upload',
+    canProcess: false,
+    blockedReason,
     viaService: false,
   };
 }
@@ -267,11 +322,14 @@ export async function processIntakeImage(supabase, { filename, contentType, base
     };
   }
 
-  const sqlRow = await fetchStmastRow(preview.sourceSku);
-  const detected = await detectProductColumns(supabase);
   const buffer = Buffer.from(base64, 'base64');
 
   if (!preview.productExists) {
+    const sqlRow = await fetchStmastRow(preview.sourceSku);
+    if (!sqlRow) {
+      throw new Error(`SKU ${preview.sourceSku} not found in POSWINSQL.dbo.STMAST`);
+    }
+    const detected = await detectProductColumns(supabase);
     const payload = buildInsertPayload(sqlRow, detected);
     const { error } = await supabase.from('products').insert(payload);
     if (error) throw error;

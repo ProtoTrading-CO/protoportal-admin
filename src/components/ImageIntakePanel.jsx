@@ -16,7 +16,8 @@ function PreviewCard({ preview, loading }) {
   }
   if (!preview) return null;
 
-  const blocked = !preview.sqlFound;
+  const blocked = preview.canProcess === false;
+  const uploadOnly = preview.uploadOnlyWithoutSql;
 
   return (
     <div className={`adm-intake-preview${blocked ? ' adm-intake-preview--blocked' : ''}`}>
@@ -24,12 +25,15 @@ function PreviewCard({ preview, loading }) {
         <strong>{preview.filename}</strong>
         <span className="adm-intake-preview-sku">{preview.sourceSku} · slot {preview.imageNumber}</span>
       </div>
+      {uploadOnly && (
+        <p className="adm-intake-preview-warn">Upload-only — product exists in Supabase; STMAST bridge not configured for new SKUs.</p>
+      )}
       {blocked ? (
         <p className="adm-intake-preview-error">{preview.blockedReason}</p>
       ) : (
         <dl className="adm-intake-preview-grid">
           <div><dt>Action</dt><dd>{preview.action || (preview.productExists ? 'upload_to_existing_product' : 'create_product_then_upload')}</dd></div>
-          <div><dt>SQL title</dt><dd>{preview.sql?.title || '—'}</dd></div>
+          <div><dt>SQL title</dt><dd>{preview.sql?.title || (uploadOnly ? '(skipped — upload only)' : '—')}</dd></div>
           <div><dt>Price</dt><dd>R{Number(preview.sql?.price || 0).toFixed(2)}</dd></div>
           <div><dt>On hand</dt><dd>{preview.sql?.onhand ?? 0}</dd></div>
           <div><dt>Dept</dt><dd>{preview.sql?.dept || '—'}</dd></div>
@@ -63,13 +67,15 @@ export default function ImageIntakePanel({ onShowToast }) {
   const [dryRun, setDryRun] = useState(false);
   const [results, setResults] = useState([]);
   const [history, setHistory] = useState([]);
+  const [intakeConfig, setIntakeConfig] = useState(null);
   const [historyLoading, setHistoryLoading] = useState(false);
 
   const loadHistory = useCallback(async () => {
     setHistoryLoading(true);
     try {
-      const rows = await fetchImageIntakeHistory({ limit: 40 });
+      const { rows, config } = await fetchImageIntakeHistory({ limit: 40 });
       setHistory(rows);
+      setIntakeConfig(config);
     } catch (err) {
       onShowToast?.(err.message || 'Failed to load history', 'error');
     } finally {
@@ -137,7 +143,7 @@ export default function ImageIntakePanel({ onShowToast }) {
     );
   };
 
-  const readyCount = files.filter((f) => previews[f.name]?.canProcess).length;
+  const readyCount = files.filter((f) => previews[f.name]?.canProcess !== false).length;
 
   return (
     <div className="adm-panel">
@@ -149,13 +155,22 @@ export default function ImageIntakePanel({ onShowToast }) {
             (sell_price = PRICE_A × 1.15, rounded to R0.50) → upload to Cloudflare R2{' '}
             <code>proto-images/&#123;SKU&#125;/&#123;slot&#125;.jpg</code> when R2 env vars are set (otherwise Supabase{' '}
             <code>product-images</code>). Catalogue rows on <code>website_stock</code> get the public image URL.
-            SQL runs on the office machine via <code>IMAGE_INTAKE_SERVICE_URL</code> when configured.
+            STMAST lookup needs <code>STOCK_SQL_BRIDGE_URL</code> (office SQL bridge) or{' '}
+            <code>IMAGE_INTAKE_SERVICE_URL</code> on Vercel — Vercel cannot reach BLADERUNNER-PC directly.
           </p>
         </div>
         <button type="button" className="adm-btn-ghost" onClick={() => void loadHistory()} disabled={historyLoading}>
           <RefreshCw size={14} /> {historyLoading ? 'Refreshing…' : 'Refresh'}
         </button>
       </div>
+
+      {intakeConfig && !intakeConfig.stmastAccess && (
+        <p className="adm-intake-config-warn">
+          STMAST bridge not configured — you can upload images for SKUs already in Supabase only.
+          On BLADERUNNER-PC run <code>python scripts/sql-stmast-bridge.py</code>, tunnel port 8765, then set{' '}
+          <code>STOCK_SQL_BRIDGE_URL</code> + <code>STOCK_SQL_BRIDGE_KEY</code> in Vercel.
+        </p>
+      )}
 
       <div className="adm-intake-toolbar">
         <label className="adm-btn-ghost adm-intake-file-btn">

@@ -1,9 +1,29 @@
 /**
  * Read-only STMAST lookup — same query as product_image_intake.py / Bladerunner sync.
  *
- * 1. STOCK_SQL_BRIDGE_URL (recommended on Vercel) — HTTP service on BLADERUNNER-PC
- * 2. Direct mssql (SQL_SERVER / SQL_PASSWORD) when the function can reach SQL Server
+ * Vercel cannot reach BLADERUNNER-PC on the office LAN. Use one of:
+ * 1. STOCK_SQL_BRIDGE_URL — sql-stmast-bridge.py on BLADERUNNER (port 8765), via tunnel
+ * 2. IMAGE_INTAKE_SERVICE_URL — full image_intake_http_server.py (port 8766)
+ * 3. SQL_PASSWORD — only when the function runs on a machine that can reach SQL Server
  */
+
+export function isStmastAccessConfigured() {
+  return Boolean(
+    String(process.env.STOCK_SQL_BRIDGE_URL || '').trim()
+    || String(process.env.IMAGE_INTAKE_SERVICE_URL || '').trim()
+    || String(process.env.SQL_PASSWORD || '').trim(),
+  );
+}
+
+export function stmastSetupMessage() {
+  return (
+    'STMAST lookup is not reachable from Vercel. On BLADERUNNER-PC run '
+    + 'python scripts/sql-stmast-bridge.py, expose port 8765 (Cloudflare Tunnel / Tailscale), '
+    + 'then set STOCK_SQL_BRIDGE_URL and STOCK_SQL_BRIDGE_KEY in Vercel. '
+    + 'Or set IMAGE_INTAKE_SERVICE_URL for the full office intake service. '
+    + 'Upload-only still works for SKUs already in Supabase products when the bridge is offline.'
+  );
+}
 
 const FORBIDDEN_SQL_TOKENS = new Set([
   'INSERT', 'UPDATE', 'DELETE', 'ALTER', 'DROP', 'CREATE', 'MERGE', 'TRUNCATE', 'EXEC', 'EXECUTE', 'BACKUP',
@@ -51,7 +71,7 @@ async function fetchViaBridge(sku) {
 async function fetchViaMssql(sku) {
   const password = String(process.env.SQL_PASSWORD || '').trim();
   if (!password) {
-    throw new Error('SQL_PASSWORD not configured — set STOCK_SQL_BRIDGE_URL or SQL credentials');
+    throw new Error(stmastSetupMessage());
   }
 
   const sql = (await import('mssql')).default;

@@ -2,6 +2,8 @@ import { requireAdminKey } from './_admin-auth.js';
 import { getStockClient } from './_stock-client.js';
 import { parseIntakeFilename } from './_image-intake-utils.js';
 import { buildIntakePreview, processIntakeImage } from './_image-intake-process.js';
+import { isR2Configured } from './_r2-storage.js';
+import { isStmastAccessConfigured } from './_sql-stmast.js';
 
 export const config = { api: { bodyParser: { sizeLimit: '20mb' } } };
 
@@ -27,7 +29,15 @@ export default async function handler(req, res) {
         return res.status(200).json({ rows: [] });
       }
       if (error) throw error;
-      return res.status(200).json({ rows: data || [] });
+      return res.status(200).json({
+        rows: data || [],
+        config: {
+          r2: isR2Configured(),
+          stmastBridge: Boolean(String(process.env.STOCK_SQL_BRIDGE_URL || '').trim()),
+          intakeService: Boolean(String(process.env.IMAGE_INTAKE_SERVICE_URL || '').trim()),
+          stmastAccess: isStmastAccessConfigured(),
+        },
+      });
     } catch (err) {
       return res.status(500).json({ error: err.message || 'Failed to load history' });
     }
