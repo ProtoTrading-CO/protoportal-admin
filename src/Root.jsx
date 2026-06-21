@@ -13,9 +13,6 @@ import AdminLoginPage from './components/AdminLoginPage';
 const AdminPage = lazy(() => import('./pages/AdminPage'));
 const FulfillmentPage = lazy(() => import('./pages/FulfillmentPage'));
 
-/** Primary URL — protoportal-admin.vercel.app is often blocked by Vercel DDoS mitigations. */
-const CANONICAL_ADMIN_ORIGIN = 'https://protopanel.co.za';
-
 installAuthFetch();
 
 const loadingFallback = (
@@ -154,5 +151,3 @@ function AdminGate() {
     </QueryProvider>
   );
 }
-
-export { CANONICAL_ADMIN_ORIGIN };

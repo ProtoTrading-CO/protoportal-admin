@@ -76,13 +76,6 @@ export default function AdminLoginPage({ forbidden = false, onSignedIn }) {
           <p className="adm-login-foot">
             <Lock size={12} /> Access restricted to Proto team accounts
           </p>
-          {typeof window !== 'undefined'
-            && window.location.hostname === 'protoportal-admin.vercel.app' && (
-            <p className="adm-login-hint">
-              This URL is blocked by Vercel. Use{' '}
-              <a href="https://protopanel.co.za">protopanel.co.za</a> instead.
-            </p>
-          )}
         </div>
       </div>
     </div>
