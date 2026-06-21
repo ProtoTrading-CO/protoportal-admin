@@ -2,6 +2,9 @@ import { imageGenHeaders } from './imageGenSession.js';
 
 /** Reprocess live catalogue products → Gemini image gen → staged preview. */
 
+/** Match server semaphore — avoid flooding API with 409 lock retries. */
+const BATCH_CONCURRENCY = 2;
+
 async function sleep(ms) {
   return new Promise((resolve) => { setTimeout(resolve, ms); });
 }
@@ -19,7 +22,7 @@ export async function reprocessOneToDormant(sku, {
   for (let attempt = 0; attempt < retries; attempt += 1) {
     const res = await fetch('/api/reprocess-live-to-dormant', {
       method: 'POST',
-      headers: imageGenHeaders(batchId),
+      headers: await imageGenHeaders(batchId),
       body: JSON.stringify({
         sku,
         prompt: prompt || undefined,
@@ -90,6 +93,19 @@ function buildWorkItems(products, slotPlans = {}) {
   return work;
 }
 
+async function runWithConcurrency(items, concurrency, worker, { signal } = {}) {
+  let nextIndex = 0;
+  const runners = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (nextIndex < items.length) {
+      if (signal?.aborted) return;
+      const i = nextIndex;
+      nextIndex += 1;
+      await worker(items[i], i);
+    }
+  });
+  await Promise.all(runners);
+}
+
 /**
  * @param {{ sku: string, title?: string, imageUrl?: string, images?: string[] }[]} products
  * @param {{ slotPlans?: Record<number, SlotPlan>, onItemUpdate?: (index: number, patch: object) => void, signal?: AbortSignal, batchId?: string }} opts
@@ -103,16 +119,13 @@ export async function runReprocessBatch(products, {
   const queue = buildWorkItems(products, slotPlans);
   const results = { done: 0, failed: 0, items: Array(queue.length).fill(null) };
 
-  queue.forEach((item, i) => {
+  await runWithConcurrency(queue, BATCH_CONCURRENCY, async (item, i) => {
+    if (signal?.aborted) return;
     onItemUpdate?.(i, {
       status: 'transforming',
       message: styleMessage(item.style, item.slot),
       slot: item.slot,
     });
-  });
-
-  await Promise.all(queue.map(async (item, i) => {
-    if (signal?.aborted) return;
     try {
       const json = await reprocessOneToDormant(item.sku, {
         prompt: item.prompt || undefined,
@@ -140,7 +153,7 @@ export async function runReprocessBatch(products, {
         slot: item.slot,
       });
     }
-  }));
+  }, { signal });
 
   return results;
 }

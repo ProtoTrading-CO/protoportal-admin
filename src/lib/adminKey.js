@@ -16,6 +16,21 @@ export function getOrderAccessFromUrl() {
   return { orderId: '', token: '' };
 }
 
+async function attachAuthHeaders(headers) {
+  if (headers.has('Authorization')) return;
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.access_token) {
+      headers.set('Authorization', `Bearer ${session.access_token}`);
+      return;
+    }
+    const { data } = await supabase.auth.refreshSession();
+    if (data.session?.access_token) {
+      headers.set('Authorization', `Bearer ${data.session.access_token}`);
+    }
+  } catch { /* ignore */ }
+}
+
 export function installAuthFetch() {
   if (window.__protoAuthFetchInstalled) return;
   window.__protoAuthFetchInstalled = true;
@@ -32,19 +47,24 @@ export function installAuthFetch() {
     if (orderId && !headers.has('x-order-id')) headers.set('x-order-id', orderId);
     if (token && !headers.has('x-order-token')) headers.set('x-order-token', token);
 
-    if (!headers.has('Authorization')) {
+    await attachAuthHeaders(headers);
+
+    let response = await originalFetch(input, { ...init, headers });
+
+    if (response.status === 401 && !getOrderAccessFromUrl().orderId) {
       try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session?.access_token) {
-          headers.set('Authorization', `Bearer ${session.access_token}`);
+        const { data } = await supabase.auth.refreshSession();
+        if (data.session?.access_token) {
+          headers.set('Authorization', `Bearer ${data.session.access_token}`);
+          response = await originalFetch(input, { ...init, headers });
         }
       } catch { /* ignore */ }
     }
 
-    const response = await originalFetch(input, { ...init, headers });
-
     if (response.status === 401 && !getOrderAccessFromUrl().orderId) {
       window.dispatchEvent(new CustomEvent('proto-admin-unauthorized'));
+    } else if (response.status === 403 && !getOrderAccessFromUrl().orderId) {
+      window.dispatchEvent(new CustomEvent('proto-admin-forbidden'));
     }
 
     return response;

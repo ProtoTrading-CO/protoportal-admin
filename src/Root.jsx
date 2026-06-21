@@ -48,11 +48,14 @@ function AdminGate() {
       if (mounted) setSession(s);
     });
     const onUnauthorized = () => { void signOut().then(() => setSession(null)); };
+    const onForbidden = () => { void signOut().then(() => setSession(null)); };
     window.addEventListener('proto-admin-unauthorized', onUnauthorized);
+    window.addEventListener('proto-admin-forbidden', onForbidden);
     return () => {
       mounted = false;
       subscription.unsubscribe();
       window.removeEventListener('proto-admin-unauthorized', onUnauthorized);
+      window.removeEventListener('proto-admin-forbidden', onForbidden);
     };
   }, []);
 

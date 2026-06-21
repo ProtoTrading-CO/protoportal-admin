@@ -32,6 +32,7 @@ import {
   createImageGenBatchId,
   registerImageGenBatch,
   syncImageGenBatchProgress,
+  flushImageGenBatchProgress,
 } from '../lib/imageGenSession';
 
 const STEPS = ['Scope', 'Recipe', 'Generate', 'Done'];
@@ -166,6 +167,15 @@ export default function ApolloImageWizard({
   useEffect(() => {
     setSameCodeSelected(new Set((sameCodeProducts || []).map((p) => p.sku)));
   }, [sameCodeProducts]);
+
+  useEffect(() => {
+    if (!busy) return;
+    const active = queue.find((q) => q.status === 'transforming')
+      || queue.find((q) => q.status === 'pending');
+    if (active) {
+      updateImageBatch({ currentSku: active.sku, currentLabel: active.name || active.sku });
+    }
+  }, [queue, busy]);
 
   const ensureAllLiveRows = async () => {
     if (allLiveRowsRef.current) return allLiveRowsRef.current;
@@ -480,9 +490,6 @@ export default function ApolloImageWizard({
         signal: ac.signal,
         onItemUpdate: (index, patch) => {
           const item = initial[index];
-          if (patch.status === 'transforming') {
-            updateImageBatch({ currentSku: item?.sku, currentLabel: item?.name });
-          }
           if (patch.status === 'done') {
             doneCount += 1;
             updateImageBatch({ done: doneCount, failed: failedCount });
@@ -494,21 +501,14 @@ export default function ApolloImageWizard({
             void syncImageGenBatchProgress(batchId, { done: doneCount, failed: failedCount });
           }
           if (backgroundRef.current) return;
-          setQueue((prev) => {
-            const next = prev.map((q, idx) => (idx === index ? { ...q, ...patch } : q));
-            if (patch.status === 'done' || patch.status === 'error') {
-              const doneItem = next[index];
-              return [doneItem, ...next.filter((_, idx) => idx !== index)];
-            }
-            return next;
-          });
+          setQueue((prev) => prev.map((q, idx) => (idx === index ? { ...q, ...patch } : q)));
         },
       });
 
       const aborted = ac.signal.aborted;
       finishImageBatch({ aborted });
       if (batchIdRef.current) {
-        void syncImageGenBatchProgress(batchIdRef.current, {
+        await flushImageGenBatchProgress(batchIdRef.current, {
           done: doneCount,
           failed: failedCount,
           status: aborted ? 'cancelled' : 'complete',

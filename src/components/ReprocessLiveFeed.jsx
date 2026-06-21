@@ -6,7 +6,8 @@ export default function ReprocessLiveFeed({ queue, busy, onDismiss, onOpenNewPro
 
   const done = queue.filter((q) => q.status === 'done').length;
   const failed = queue.filter((q) => q.status === 'error').length;
-  const active = queue.find((q) => q.status === 'transforming') || queue.find((q) => q.status === 'pending');
+  const active = queue.find((q) => q.status === 'transforming')
+    || queue.find((q) => q.status === 'pending');
   const history = queue.filter((q) => q.status === 'done' || q.status === 'error');
 
   return (
