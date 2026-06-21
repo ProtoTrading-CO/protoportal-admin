@@ -16,6 +16,27 @@ export async function getSession() {
   return session;
 }
 
+/** Validates JWT with Supabase — use on boot instead of getSession() alone. */
+export async function getVerifiedSession() {
+  const { data: { user }, error } = await supabase.auth.getUser();
+  if (error || !user?.email) return null;
+  if (!isAllowedAdminEmail(user.email)) {
+    await supabase.auth.signOut();
+    return null;
+  }
+  const { data: { session } } = await supabase.auth.getSession();
+  return session;
+}
+
+export async function verifyAdminSession() {
+  try {
+    const res = await fetch('/api/auth-check', { cache: 'no-store' });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 export async function getAccessToken() {
   const session = await getSession();
   return session?.access_token || '';

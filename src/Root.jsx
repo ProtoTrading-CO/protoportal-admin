@@ -1,11 +1,20 @@
 import { useEffect, useState, lazy, Suspense } from 'react';
 import { installAuthFetch } from './lib/adminKey';
-import { getSession, isAllowedAdminEmail, onAuthStateChange, signOut } from './lib/auth';
+import {
+  getVerifiedSession,
+  isAllowedAdminEmail,
+  onAuthStateChange,
+  signOut,
+  verifyAdminSession,
+} from './lib/auth';
 import QueryProvider from './components/QueryProvider';
 import AdminLoginPage from './components/AdminLoginPage';
 
 const AdminPage = lazy(() => import('./pages/AdminPage'));
 const FulfillmentPage = lazy(() => import('./pages/FulfillmentPage'));
+
+/** Primary URL — protoportal-admin.vercel.app is often blocked by Vercel DDoS mitigations. */
+const CANONICAL_ADMIN_ORIGIN = 'https://protopanel.co.za';
 
 installAuthFetch();
 
@@ -38,15 +47,54 @@ function AdminGate() {
 
   useEffect(() => {
     let mounted = true;
-    void getSession().then((s) => {
+
+    async function resolveSession() {
+      const verified = await getVerifiedSession();
+      if (!verified?.access_token) {
+        if (mounted) {
+          setSession(null);
+          setBooting(false);
+        }
+        return;
+      }
+      const ok = await verifyAdminSession();
+      if (!ok) {
+        await signOut();
+        if (mounted) {
+          setSession(null);
+          setBooting(false);
+        }
+        return;
+      }
       if (mounted) {
-        setSession(s);
+        setSession(verified);
         setBooting(false);
       }
+    }
+
+    void resolveSession();
+
+    const { data: { subscription } } = onAuthStateChange(async (s) => {
+      if (!mounted) return;
+      if (!s?.access_token) {
+        setSession(null);
+        return;
+      }
+      const email = s.user?.email || '';
+      if (!isAllowedAdminEmail(email)) {
+        await signOut();
+        setSession(null);
+        return;
+      }
+      const ok = await verifyAdminSession();
+      if (!ok) {
+        await signOut();
+        setSession(null);
+        return;
+      }
+      setSession(s);
     });
-    const { data: { subscription } } = onAuthStateChange((s) => {
-      if (mounted) setSession(s);
-    });
+
     const onUnauthorized = () => { void signOut().then(() => setSession(null)); };
     const onForbidden = () => { void signOut().then(() => setSession(null)); };
     window.addEventListener('proto-admin-unauthorized', onUnauthorized);
@@ -68,7 +116,21 @@ function AdminGate() {
     return (
       <AdminLoginPage
         forbidden={!!session && !isAllowedAdminEmail(email)}
-        onSignedIn={() => void getSession().then(setSession)}
+        onSignedIn={() => {
+          void getVerifiedSession().then(async (s) => {
+            if (!s) {
+              setSession(null);
+              return;
+            }
+            const ok = await verifyAdminSession();
+            if (!ok) {
+              await signOut();
+              setSession(null);
+              return;
+            }
+            setSession(s);
+          });
+        }}
       />
     );
   }
@@ -92,3 +154,5 @@ function AdminGate() {
     </QueryProvider>
   );
 }
+
+export { CANONICAL_ADMIN_ORIGIN };

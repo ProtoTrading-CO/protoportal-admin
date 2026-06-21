@@ -44,7 +44,7 @@ export default async function handler(req, res) {
   }
 
   const now = new Date().toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
-  const adminUrl = (process.env.ADMIN_PORTAL_URL || 'https://protoportal-admin.vercel.app').replace(/\/$/, '');
+  const adminUrl = (process.env.ADMIN_PORTAL_URL || 'https://protopanel.co.za').replace(/\/$/, '');
 
   const results = [];
   for (const r of recipients) {

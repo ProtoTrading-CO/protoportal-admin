@@ -6993,6 +6993,11 @@ html, body { background: #f5f5f5; color: #111827; }
   margin: 20px 0 0; text-align: center; font-size: 12px; color: #94a3b8;
   display: flex; align-items: center; justify-content: center; gap: 6px;
 }
+.adm-login-hint {
+  margin: 12px 0 0; text-align: center; font-size: 12px; color: #b45309;
+  line-height: 1.45;
+}
+.adm-login-hint a { color: #dc2626; font-weight: 600; }
 
 /* Image Intake panel */
 .adm-intake-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 8px; }
