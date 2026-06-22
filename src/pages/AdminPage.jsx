@@ -123,7 +123,6 @@ import { queryClient } from '../lib/queryClient';
 import { queryKeys } from '../lib/queryKeys';
 import ApolloPanel from '../components/ApolloPanel';
 import CostTrackingPanel from '../components/CostTrackingPanel';
-import ImageIntakePanel from '../components/ImageIntakePanel';
 import { applySkuOrder, lookupSortOrder, sortOrderCategoryKey, sortOrderLookupKeys } from '../lib/taxonomy';
 import categories from '../data/categories.json';
 
@@ -2463,10 +2462,6 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
 
             {activeSection === 'analytics' && (
               <AnalyticsHub />
-            )}
-
-            {activeSection === 'image-intake' && (
-              <ImageIntakePanel onShowToast={showToast} />
             )}
 
             {/* Apollo — keep mounted so chat survives tab switches */}

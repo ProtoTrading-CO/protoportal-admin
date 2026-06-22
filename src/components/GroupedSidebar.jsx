@@ -9,7 +9,6 @@ import {
   ShoppingBag,
   SlidersHorizontal,
   Star,
-  Upload,
   User,
   Users,
 } from 'lucide-react';
@@ -22,7 +21,6 @@ const NAV_ITEMS = [
   { id: 'apollo', label: 'Apollo', icon: Bot },
   { id: 'cost-tracking', label: 'Cost Tracking', icon: DollarSign },
   { id: 'catalogue', label: 'Product Manager', icon: PackagePlus },
-  { id: 'image-intake', label: 'Image Intake', icon: Upload },
   { id: 'reorder', label: 'Reorder Grid', icon: Grip },
   { id: 'customers', label: 'Customer Management', icon: Users },
   { id: 'specials', label: 'Specials', icon: Star },
