@@ -3,7 +3,7 @@ import { imageGenHeaders } from './imageGenSession.js';
 /** Reprocess live catalogue products → Gemini image gen → staged preview. */
 
 /** Match server semaphore — avoid flooding API with 409 lock retries. */
-const BATCH_CONCURRENCY = 2;
+const BATCH_CONCURRENCY = 3;
 
 async function sleep(ms) {
   return new Promise((resolve) => { setTimeout(resolve, ms); });

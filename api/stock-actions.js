@@ -1,6 +1,7 @@
 import { requireAdminKey } from './_admin-auth.js';
 import { loadTaxonomy } from './_taxonomy-utils.js';
 import { getStockClient, enrichRowsWithProductStock } from './_stock-client.js';
+import { collectImageUrlsFromRow, removeStagingObjects } from './_staging-storage.js';
 
 const PAGE_SIZE = 1000;
 
@@ -155,6 +156,15 @@ export default async function handler(req, res) {
     if (action === 'deleteStagedPreview') {
       const { sku } = req.body;
       if (!sku) return res.status(400).json({ error: 'sku required' });
+      const { data: staged } = await supabase
+        .from('archived_products')
+        .select('*')
+        .eq('sku', sku)
+        .eq('archived_by', 'new-products')
+        .maybeSingle();
+      if (staged) {
+        await removeStagingObjects(supabase, collectImageUrlsFromRow(staged));
+      }
       const { error } = await supabase
         .from('archived_products')
         .delete()

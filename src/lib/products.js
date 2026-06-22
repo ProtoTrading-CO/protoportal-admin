@@ -546,8 +546,12 @@ export async function applyDormantLive(sku) {
   });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(json.error || 'Go live failed');
-  invalidateProductCache();
-  invalidateAdminCache();
+  // Targeted refresh — avoid nuking the full admin catalogue cache (causes flashing load errors).
+  queryClient.invalidateQueries({
+    predicate: (q) => q.queryKey[0] === 'catalog' && q.queryKey[1]?.status === 'live',
+  });
+  queryClient.invalidateQueries({ queryKey: queryKeys.dashboardStats() });
+  window.dispatchEvent(new CustomEvent('proto-approval-refresh'));
   return json;
 }
 

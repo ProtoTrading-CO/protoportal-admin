@@ -14,10 +14,17 @@
     },
     "api/image-intake.js": {
       "maxDuration": 60
+    },
+    "api/reprocess-live-to-dormant.js": {
+      "maxDuration": 60
+    },
+    "api/apply-dormant-live.js": {
+      "maxDuration": 60
     }
   },
   "crons": [
     { "path": "/api/run-scheduled-broadcasts", "schedule": "0 * * * *" },
-    { "path": "/api/brevo-sync", "schedule": "*/15 * * * *" }
+    { "path": "/api/brevo-sync", "schedule": "*/15 * * * *" },
+    { "path": "/api/purge-expired-staging", "schedule": "0 3 * * *" }
   ]
 }

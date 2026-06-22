@@ -1,5 +1,6 @@
 import { requireAdminOrOrderToken } from './_admin-auth.js';
-import { readSiteConfigJson, writeSiteConfigJson, getPortalAdminClient } from './_site-config.js';
+import { readSiteConfigJson, getPortalAdminClient } from './_site-config.js';
+import { mutateSiteConfigJson } from './_site-config-mutate.js';
 import { advanceOrderStatus } from './_order-status.js';
 
 function progressFile(orderId) {
@@ -34,20 +35,21 @@ export default async function handler(req, res) {
 
     try {
       const file = progressFile(orderId);
-      const current = await readSiteConfigJson(file, null);
-      const base = current?.orderId === orderId ? current : emptyProgress(orderId);
+      const result = await mutateSiteConfigJson(file, emptyProgress(orderId), (current) => {
+        const store = current?.orderId === orderId ? current : emptyProgress(orderId);
+        store.sections = store.sections || {};
+        store.sections[categoryId] = {
+          userId,
+          userName: userName || userId,
+          items,
+          complete: Boolean(complete),
+          savedAt: new Date().toISOString(),
+        };
+        store.updatedAt = new Date().toISOString();
+        return { store };
+      });
 
-      base.sections = base.sections || {};
-      base.sections[categoryId] = {
-        userId,
-        userName: userName || userId,
-        items,
-        complete: Boolean(complete),
-        savedAt: new Date().toISOString(),
-      };
-      base.updatedAt = new Date().toISOString();
-
-      await writeSiteConfigJson(file, base);
+      const base = result?.store ?? result;
 
       if (Boolean(complete)) {
         try {

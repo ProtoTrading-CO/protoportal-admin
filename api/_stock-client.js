@@ -1,10 +1,18 @@
 import { createClient } from '@supabase/supabase-js';
 
-/** Stock Supabase client — prefers transaction pooler URL under load. */
+/**
+ * Stock Supabase client for serverless API routes.
+ * Uses STOCK_SUPABASE_POOLER_URL when set — this must be the HTTPS REST URL
+ * (https://[ref].supabase.co), not a postgres:// pooler connection string.
+ * PostgREST pools DB connections server-side; this env separates server routes
+ * from the VITE_* client bundle URL.
+ */
 export function getStockClient() {
   const url = process.env.STOCK_SUPABASE_POOLER_URL
+    || process.env.STOCK_SUPABASE_URL
     || process.env.VITE_STOCK_SUPABASE_URL;
-  const key = process.env.VITE_STOCK_SUPABASE_KEY;
+  const key = process.env.STOCK_SUPABASE_KEY
+    || process.env.VITE_STOCK_SUPABASE_KEY;
   if (!url || !key) throw new Error('Missing stock Supabase env vars');
   return createClient(url, key, {
     auth: { autoRefreshToken: false, persistSession: false },

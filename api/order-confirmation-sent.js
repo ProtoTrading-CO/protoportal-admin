@@ -1,5 +1,6 @@
 import { requireAdminKey } from './_admin-auth.js';
-import { readSiteConfigJson, writeSiteConfigJson } from './_site-config.js';
+import { readSiteConfigJson } from './_site-config.js';
+import { mutateSiteConfigJson } from './_site-config-mutate.js';
 
 function metaPath(orderId) {
   return `orders/confirmation/${orderId}.json`;
@@ -32,9 +33,13 @@ export default async function handler(req, res) {
   if (req.method === 'POST') {
     const { orderId } = req.body || {};
     if (!orderId) return res.status(400).json({ error: 'orderId required' });
-    const meta = { orderId, sentAt: new Date().toISOString() };
-    await writeSiteConfigJson(metaPath(orderId), meta);
-    return res.status(200).json({ ok: true, ...meta });
+    const sentAt = new Date().toISOString();
+    await mutateSiteConfigJson(metaPath(orderId), { orderId }, () => ({
+      orderId,
+      sentAt,
+      updatedAt: sentAt,
+    }));
+    return res.status(200).json({ ok: true, orderId, sentAt });
   }
 
   return res.status(405).end();

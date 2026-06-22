@@ -10,7 +10,6 @@ import {
   getStockClient,
   logImageGenCost,
   releaseImageGenLock,
-  releaseTransformSemaphore,
 } from './_image-gen-cost.js';
 
 const LIVE_SELECT = `
@@ -57,12 +56,10 @@ export default async function handler(req, res) {
 
   const sb = getClient();
   let lockHeld = false;
-  let semHeld = false;
 
   try {
     if (batchId) {
-      const sem = await acquireTransformSemaphore(sb, { batchId, operator });
-      semHeld = sem.acquired && !sem.reentry;
+      await acquireTransformSemaphore(sb, { batchId, operator });
     }
 
     const lock = await acquireImageGenLock(sb, { sku: cleanSku, slot, batchId, operator });
@@ -98,6 +95,7 @@ export default async function handler(req, res) {
         productDescription: row.original_description,
         referenceImageUrl: referenceImageUrl || undefined,
         targetSlot: slot,
+        staging: true,
       });
       imageUrl = result.url;
       model = result.model;
@@ -142,7 +140,12 @@ export default async function handler(req, res) {
       status: 'ok',
     });
 
-    const { stillLive } = await stageDormantSlotPreview(sb, row, { slot, imageUrl });
+    const { stillLive } = await stageDormantSlotPreview(sb, row, {
+      slot,
+      imageUrl,
+      stagedBy: operator,
+      stagedBatchId: batchId,
+    });
 
     return res.status(200).json({
       ok: true,
@@ -170,6 +173,5 @@ export default async function handler(req, res) {
     return res.status(status).json({ error: err.message || 'Reprocess failed' });
   } finally {
     if (lockHeld) await releaseImageGenLock(sb, cleanSku, slot);
-    if (semHeld && batchId) await releaseTransformSemaphore(sb, batchId);
   }
 }

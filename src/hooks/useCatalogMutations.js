@@ -47,10 +47,6 @@ export function useCatalogMutations() {
 
   const setLive = useMutation({
     mutationFn: (sku) => applyDormantLive(sku),
-    onSettled: () => {
-      invalidateCatalogAndStats(queryClient, ['live']);
-      refreshApproval();
-    },
   });
 
   const softDelete = useMutation({

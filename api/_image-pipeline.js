@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { Jimp, HorizontalAlign, VerticalAlign, cssColorToHex } from 'jimp';
+import { buildStagingObjectPath } from './_staging-storage.js';
 
 const BUCKET = 'product-images';
 
@@ -303,15 +304,18 @@ export async function transformWithOpenRouter(base64, contentType, {
   };
 }
 
-export async function uploadTransformedImage(buffer, filename, contentType = 'image/png') {
+export async function uploadTransformedImage(buffer, filename, contentType = 'image/png', { staging = false, sku, slot } = {}) {
   const supabase = getStockAdminClient();
   await supabase.storage.createBucket(BUCKET, { public: true }).catch(() => {});
 
-  const safeName = `gen-${Date.now()}-${String(filename || 'product').replace(/[^a-zA-Z0-9._-]/g, '_').replace(/\.[^.]+$/, '')}.jpg`;
+  const safeName = staging
+    ? buildStagingObjectPath(sku, slot)
+    : `gen-${Date.now()}-${String(filename || 'product').replace(/[^a-zA-Z0-9._-]/g, '_').replace(/\.[^.]+$/, '')}.jpg`;
   const { error } = await supabase.storage.from(BUCKET).upload(safeName, buffer, { contentType, upsert: false });
   if (error) throw new Error(error.message);
 
   const { data: { publicUrl } } = supabase.storage.from(BUCKET).getPublicUrl(safeName);
+  if (staging) return { url: publicUrl, storagePath: safeName };
   return publicUrl;
 }
 
@@ -327,6 +331,7 @@ export async function fixImageFromUrl(imageUrl, {
   productDescription = '',
   referenceImageUrl = null,
   targetSlot = 1,
+  staging = false,
 } = {}) {
   const style = imageStyle || IMAGE_STYLES.standard;
   let refBase64 = null;
@@ -356,9 +361,16 @@ export async function fixImageFromUrl(imageUrl, {
     targetSlot,
   });
   const resized = await resizeTo800White(transformed.buffer);
-  const url = await uploadTransformedImage(resized, `${sku}-s${targetSlot}.jpg`, 'image/jpeg');
+  const uploadResult = await uploadTransformedImage(
+    resized,
+    `${sku}-s${targetSlot}.jpg`,
+    'image/jpeg',
+    { staging, sku, slot: targetSlot },
+  );
+  const url = typeof uploadResult === 'string' ? uploadResult : uploadResult.url;
   return {
     url,
+    storagePath: typeof uploadResult === 'object' ? uploadResult.storagePath : null,
     model: transformed.model,
     tokensIn: transformed.tokensIn,
     tokensOut: transformed.tokensOut,
@@ -382,7 +394,8 @@ export async function fixImageFromBase64(base64, contentType, filename = 'produc
     imageStyle: style,
   });
   const resized = await resizeTo800White(transformed.buffer);
-  const url = await uploadTransformedImage(resized, filename.replace(/\.[^.]+$/, '') + '.jpg', 'image/jpeg');
+  const uploadResult = await uploadTransformedImage(resized, filename.replace(/\.[^.]+$/, '') + '.jpg', 'image/jpeg');
+  const url = typeof uploadResult === 'string' ? uploadResult : uploadResult.url;
   return {
     url,
     base64: resized.toString('base64'),

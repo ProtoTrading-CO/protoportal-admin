@@ -2423,6 +2423,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                   return;
                 }
                 setActiveSection(id);
+                setLoadingError('');
                 setSidebarOpen(false);
                 if (id === 'catalogue' || id === 'reorder' || id === 'apollo') {
                   window.scrollTo({ top: 0, behavior: 'instant' });

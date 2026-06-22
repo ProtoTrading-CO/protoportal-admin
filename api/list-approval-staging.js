@@ -1,6 +1,7 @@
 import { requireAdminKey } from './_admin-auth.js';
 import { createClient } from '@supabase/supabase-js';
 import { batchValidateStockReady, mergeStagedImagesOntoLive } from './_stage-dormant.js';
+import { isExpiredStaging, buildLiveObjectPath, publicUrlForPath } from './_staging-storage.js';
 
 function getClient() {
   return createClient(
@@ -12,6 +13,10 @@ function getClient() {
 
 function splitUrl(val) {
   return String(val || '').split(',')[0].trim() || null;
+}
+
+function imageSlotFallback(sb, sku, slot) {
+  return publicUrlForPath(sb, buildLiveObjectPath(sku, slot));
 }
 
 /** Staged image previews for live products awaiting Approval go-live. */
@@ -45,6 +50,8 @@ export default async function handler(req, res) {
 
   const items = [];
   for (const row of staged || []) {
+    if (isExpiredStaging(row)) continue;
+
     const live = liveBySku.get(row.sku);
     if (!live) continue;
 
@@ -60,10 +67,13 @@ export default async function handler(req, res) {
       subcategories: [row.subcategory_one, row.subcategory_two, row.subcategory_three, row.subcategory_four].filter(Boolean),
       liveImages: [1, 2, 3, 4].map((s) => splitUrl(live[`image_url_${['one', 'two', 'three', 'four'][s - 1]}`])),
       stagedImages: [1, 2, 3, 4].map((s) => splitUrl(row[`image_url_${['one', 'two', 'three', 'four'][s - 1]}`])),
+      stagedImageFallbacks: [1, 2, 3, 4].map((s) => imageSlotFallback(sb, row.sku, s)),
       changedSlots: appliedSlots,
       stockReady: stockCheck.ok,
       stockError: stockCheck.ok ? null : stockCheck.error,
       updatedAt: row.updated_at,
+      expiresAt: row.staged_expires_at || null,
+      stagedBy: row.staged_by || null,
     });
   }
 

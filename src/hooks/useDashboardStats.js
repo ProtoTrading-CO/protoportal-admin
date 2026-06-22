@@ -12,7 +12,10 @@ export function useDashboardStats() {
   return useQuery({
     queryKey: queryKeys.dashboardStats(),
     queryFn: fetchDashboardStats,
-    staleTime: 60_000,
+    staleTime: 2 * 60_000,
+    gcTime: 5 * 60_000,
     refetchOnWindowFocus: false,
+    retry: 1,
+    retryDelay: 3000,
   });
 }

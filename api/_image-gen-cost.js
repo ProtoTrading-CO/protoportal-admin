@@ -1,6 +1,15 @@
 import { createClient } from '@supabase/supabase-js';
 import { randomUUID } from 'crypto';
 import { readSiteConfigJson, writeSiteConfigJson } from './_site-config.js';
+import {
+  acquireImageGenLockDb,
+  releaseImageGenLockDb,
+  acquireTransformSemaphoreDb,
+  releaseTransformSemaphoreDb,
+  registerImageGenBatchDb,
+  updateImageGenBatchDb,
+  listActiveImageGenStateDb,
+} from './_image-gen-db-locks.js';
 
 const USD_TO_ZAR_FALLBACK = 18.0;
 const COSTS_FILE = 'image-gen/cost-logs.json';
@@ -8,7 +17,7 @@ const LOCKS_FILE = 'image-gen/locks.json';
 const BATCHES_FILE = 'image-gen/batches.json';
 const SEMAPHORE_FILE = 'image-gen/semaphore.json';
 const MAX_LOGS = 500;
-const MAX_CONCURRENT_TRANSFORMS = 2;
+const MAX_CONCURRENT_TRANSFORMS = 3;
 
 /** Approximate OpenRouter pricing — image models often bill per call + tokens. */
 const MODEL_PRICING = {
@@ -170,6 +179,9 @@ export async function purgeExpiredLocksStore() {
 }
 
 export async function acquireTransformSemaphore(_sb, { batchId, operator, ttlSec = 300 } = {}) {
+  const db = await acquireTransformSemaphoreDb(_sb, { batchId, operator, ttlSec });
+  if (db) return db;
+
   const expiresAt = new Date(Date.now() + ttlSec * 1000).toISOString();
   try {
     const result = await mutateStore(SEMAPHORE_FILE, { slots: [] }, (store) => {
@@ -204,6 +216,7 @@ export async function acquireTransformSemaphore(_sb, { batchId, operator, ttlSec
 
 export async function releaseTransformSemaphore(_sb, batchId) {
   if (!batchId) return;
+  await releaseTransformSemaphoreDb(_sb, batchId);
   try {
     await mutateStore(SEMAPHORE_FILE, { slots: [] }, (store) => {
       const slots = (store.slots || []).filter((s) => s.batch_id !== batchId);
@@ -213,6 +226,9 @@ export async function releaseTransformSemaphore(_sb, batchId) {
 }
 
 export async function acquireImageGenLock(_sb, { sku, slot, batchId, operator, ttlSec = 180 } = {}) {
+  const db = await acquireImageGenLockDb(_sb, { sku, slot, batchId, operator, ttlSec });
+  if (db) return db;
+
   const cleanSku = String(sku || '').trim();
   const cleanSlot = Math.min(4, Math.max(1, Number(slot) || 1));
   if (!cleanSku) throw new Error('Missing SKU for lock');
@@ -262,6 +278,7 @@ export async function acquireImageGenLock(_sb, { sku, slot, batchId, operator, t
 }
 
 export async function releaseImageGenLock(_sb, sku, slot) {
+  await releaseImageGenLockDb(_sb, sku, slot);
   try {
     const cleanSku = String(sku || '').trim();
     const cleanSlot = Math.min(4, Math.max(1, Number(slot) || 1));
@@ -274,6 +291,7 @@ export async function releaseImageGenLock(_sb, sku, slot) {
 
 export async function registerImageGenBatch(_sb, { batchId, operator, total, style, productCount } = {}) {
   if (!batchId) return;
+  await registerImageGenBatchDb(_sb, { batchId, operator, total, style, productCount });
   try {
     await mutateStore(BATCHES_FILE, { batches: [] }, (store) => {
       const batches = (store.batches || []).filter((b) => b.id !== batchId);
@@ -298,6 +316,10 @@ export async function registerImageGenBatch(_sb, { batchId, operator, total, sty
 
 export async function updateImageGenBatch(_sb, batchId, patch = {}) {
   if (!batchId) return;
+  await updateImageGenBatchDb(_sb, batchId, patch);
+  if (patch.status === 'complete' || patch.status === 'cancelled') {
+    await releaseTransformSemaphore(_sb, batchId);
+  }
   try {
     await mutateStore(BATCHES_FILE, { batches: [] }, (store) => {
       const batches = (store.batches || []).map((b) => {
@@ -327,6 +349,9 @@ export async function listImageGenCosts(_sb, { days = 30, limit = 200 } = {}) {
 }
 
 export async function listActiveImageGenState(_sb) {
+  const dbState = await listActiveImageGenStateDb(_sb);
+  if (dbState) return dbState;
+
   const locks = await purgeExpiredLocksStore();
   const store = await readStore(BATCHES_FILE, { batches: [] });
   const batches = (store.batches || []).filter((b) => b.status === 'running');
