@@ -125,6 +125,7 @@ export default function ApolloImageWizard({
   onShowToast,
   onGoToApproval,
   onRefreshCatalog,
+  stopRef = null,
 }) {
   const prefillIds = useMemo(
     () => (prefillProducts?.length ? new Set(prefillProducts.map((p) => p.id || p.sku)) : null),
@@ -445,6 +446,7 @@ export default function ApolloImageWizard({
     generatedProductsRef.current = [];
     const ac = new AbortController();
     abortRef.current = ac;
+    if (stopRef) stopRef.current = () => ac.abort();
 
     try {
       const products = selectedProducts.length
@@ -537,6 +539,7 @@ export default function ApolloImageWizard({
     } finally {
       setBusy(false);
       abortRef.current = null;
+      if (stopRef) stopRef.current = null;
     }
   };
 

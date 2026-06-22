@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { jsPDF } from 'jspdf';
-import { Bot, CheckCircle, FileDown, Loader2, Send, Sparkles, User, Users, Wrench } from 'lucide-react';
+import { Bot, CheckCircle, FileDown, Loader2, Send, Sparkles, Square, User, Users, Wrench } from 'lucide-react';
 import ApolloImageWizard from './ApolloImageWizard';
 import { getActiveImageBatch, subscribeImageBatch } from '../lib/imageBatchTracker';
 import { getImageGenOperator } from '../lib/imageGenSession';
@@ -260,7 +260,7 @@ function loadApolloMessages() {
   }
 }
 
-function ImageBatchBanner({ batch, onOpenApproval, onBackToWizard }) {
+function ImageBatchBanner({ batch, onOpenApproval, onBackToWizard, onStop }) {
   if (!batch) return null;
   const processed = (batch.done || 0) + (batch.failed || 0);
   const pct = batch.total ? Math.round((processed / batch.total) * 100) : 0;
@@ -281,6 +281,11 @@ function ImageBatchBanner({ batch, onOpenApproval, onBackToWizard }) {
         <div className="apollo-batch-banner-actions">
           <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={onBackToWizard}>View batch</button>
           <button type="button" className="adm-btn-red adm-btn--sm" onClick={onOpenApproval}>Approval</button>
+          {onStop && (
+            <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={onStop} title="Stop image generation">
+              <Square size={12} fill="currentColor" /> Stop
+            </button>
+          )}
         </div>
       </div>
     );
@@ -334,6 +339,7 @@ export default function ApolloPanel({ isActive = true, taxonomyTree, onShowToast
   const [imageBatch, setImageBatch] = useState(() => getActiveImageBatch());
   const [remoteActive, setRemoteActive] = useState({ batches: [], locks: [] });
   const scrollRef = useRef(null);
+  const wizardStopRef = useRef(null);
 
   useEffect(() => subscribeImageBatch(setImageBatch), []);
 
@@ -498,6 +504,7 @@ export default function ApolloPanel({ isActive = true, taxonomyTree, onShowToast
             onShowToast={onShowToast}
             onGoToApproval={() => { setWizardBackground(true); onGoToApproval?.(); }}
             onRefreshCatalog={onRefreshCatalog}
+            stopRef={wizardStopRef}
           />
         </div>
       )}
@@ -507,6 +514,7 @@ export default function ApolloPanel({ isActive = true, taxonomyTree, onShowToast
           batch={imageBatch}
           onOpenApproval={onGoToApproval}
           onBackToWizard={() => setWizardBackground(false)}
+          onStop={() => wizardStopRef.current?.()}
         />
       )}
 
