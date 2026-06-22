@@ -1,30 +1,27 @@
-/**
- * SQLProvider — abstraction over STMAST data sources.
- * Product Loader and future features consume this interface; connection
- * details stay isolated in _sql-stmast.js.
- *
- * Phase 2 stubs (searchProducts, getSupplierProducts) throw until implemented.
- */
-import {
-  fetchStmastRow,
-  isStmastAccessConfigured,
-  sqlRowToPreview,
-  stmastSetupMessage,
-} from './_sql-stmast.js';
+import { fetchStmastRow, isStmastAccessConfigured, sqlRowToPreview } from './_sql-stmast.js';
+import { fetchFromCache } from './_stmast-cache.js';
 
+// Always true — stmast_cache is available via existing Supabase credentials
 export function isSqlConfigured() {
-  return isStmastAccessConfigured();
-}
-
-export function getSqlSetupMessage() {
-  return stmastSetupMessage();
+  return true;
 }
 
 export async function getProductByCode(code) {
   const normalized = String(code || '').trim().toUpperCase();
   if (!normalized) return null;
-  const row = await fetchStmastRow(normalized);
-  return sqlRowToPreview(row);
+
+  // 1. Bridge / direct SQL (when STOCK_SQL_BRIDGE_URL or SQL_PASSWORD is configured)
+  if (isStmastAccessConfigured()) {
+    try {
+      const row = await fetchStmastRow(normalized);
+      if (row) return sqlRowToPreview(row);
+    } catch (_) {
+      // bridge unavailable — fall through to cache
+    }
+  }
+
+  // 2. Supabase stmast_cache (imported from Proto Master Items CSV)
+  return fetchFromCache(normalized);
 }
 
 export async function searchProducts(_term) {
