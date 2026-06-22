@@ -84,6 +84,7 @@ export default function ProductLoaderPanel({ taxonomyTree = categories, onShowTo
   const [code, setCode] = useState('');
   const [lookingUp, setLookingUp] = useState(false);
   const [lookupData, setLookupData] = useState(null);
+  const [matchedBy, setMatchedBy] = useState(null); // 'code' | 'barcode' | null
   const [lookupError, setLookupError] = useState('');
 
   const [fileObj, setFileObj] = useState(null);
@@ -125,11 +126,12 @@ export default function ProductLoaderPanel({ taxonomyTree = categories, onShowTo
   };
 
   const handleLookup = async () => {
-    const c = code.trim().toUpperCase();
+    const c = code.trim();
     if (!c) return;
     setLookingUp(true);
     setLookupError('');
     setLookupData(null);
+    setMatchedBy(null);
     resetLookupDependents();
 
     try {
@@ -137,6 +139,7 @@ export default function ProductLoaderPanel({ taxonomyTree = categories, onShowTo
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Lookup failed');
       setLookupData(json);
+      setMatchedBy(json.matchedBy || null);
 
       // Pre-fill from existing website row
       if (json.websiteRow) {
@@ -362,10 +365,10 @@ export default function ProductLoaderPanel({ taxonomyTree = categories, onShowTo
       {/* Code lookup */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
         <input
-          style={{ flex: 1, border: '1.5px solid #e2e8f0', borderRadius: 10, padding: '10px 14px', fontSize: 14, fontWeight: 600, textTransform: 'uppercase', outline: 'none', letterSpacing: '0.04em' }}
-          placeholder="Positill code (e.g. TBAG91)"
+          style={{ flex: 1, border: '1.5px solid #e2e8f0', borderRadius: 10, padding: '10px 14px', fontSize: 14, fontWeight: 600, outline: 'none', letterSpacing: '0.04em' }}
+          placeholder="Positill code (e.g. 8626100145, MM007-6, 233B)"
           value={code}
-          onChange={(e) => setCode(e.target.value.toUpperCase())}
+          onChange={(e) => setCode(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && !lookingUp && handleLookup()}
           disabled={lookingUp}
         />
@@ -384,10 +387,10 @@ export default function ProductLoaderPanel({ taxonomyTree = categories, onShowTo
         <div style={{ color: '#dc2626', fontSize: 13, marginBottom: 16 }}>{lookupError}</div>
       )}
 
-      {/* SQL unavailable notice */}
+      {/* SQL bridge offline notice */}
       {lookupData && !lookupData.sqlAvailable && (
-        <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 16, padding: '8px 12px', background: '#f8fafc', borderRadius: 8 }}>
-          STMAST bridge offline — showing website data only. Set up the bridge to see live Positill stock.
+        <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 8, padding: '8px 12px', background: '#f8fafc', borderRadius: 8 }}>
+          Positill bridge offline — price and stock figures from website data only.
         </div>
       )}
 
@@ -398,7 +401,12 @@ export default function ProductLoaderPanel({ taxonomyTree = categories, onShowTo
           <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: '14px 16px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
               <div>
-                <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 3 }}>Code: <strong style={{ color: '#475569' }}>{code}</strong></div>
+                <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 3 }}>
+                Code: <strong style={{ color: '#475569' }}>{websiteRow?.sku || code}</strong>
+                {matchedBy === 'barcode' && (
+                  <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 700, padding: '1px 6px', borderRadius: 4, background: '#fef9c3', color: '#854d0e' }}>matched via barcode</span>
+                )}
+              </div>
                 <div style={{ fontSize: 16, fontWeight: 700, color: '#111827', marginBottom: 6 }}>
                   {sqlRow?.title || websiteRow?.title || '—'}
                 </div>
