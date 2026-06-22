@@ -1,5 +1,7 @@
 /** Stage a processed image in New Products without removing the live catalogue row. */
 
+import { stagingExpiresAt, collectImageUrlsFromRow, removeStagingObjects, isExpiredStaging, resolveLiveImageUrl, storagePathFromPublicUrl, buildLiveObjectPath, publicUrlForPath, repairSkuLiveStagingUrls } from './_staging-storage.js';
+
 const LIVE_SELECT = `
   id, sku, barcode, title, original_description,
   image_url_one, image_url_two, image_url_three, image_url_four,
@@ -35,7 +37,13 @@ export function normalizeImageUrl(url) {
   }
 }
 
-export async function stageDormantSlotPreview(sb, liveRow, { slot = 1, imageUrl, mergeFromStaged = true } = {}) {
+export async function stageDormantSlotPreview(sb, liveRow, {
+  slot = 1,
+  imageUrl,
+  mergeFromStaged = true,
+  stagedBy = null,
+  stagedBatchId = null,
+} = {}) {
   const sku = String(liveRow.sku || '').trim();
   if (!sku) throw new Error('Missing SKU');
   const targetSlot = Math.min(4, Math.max(1, Number(slot) || 1));
@@ -43,17 +51,37 @@ export async function stageDormantSlotPreview(sb, liveRow, { slot = 1, imageUrl,
   if (!processedImageUrl) throw new Error('Missing image URL');
 
   const now = new Date().toISOString();
+  const expiresAt = stagingExpiresAt();
+  const stagingMeta = {
+    staged_expires_at: expiresAt,
+    staged_by: stagedBy || null,
+    staged_batch_id: stagedBatchId || null,
+  };
+
   const { data: existing } = await sb
     .from('archived_products')
     .select('*')
     .eq('sku', sku)
     .maybeSingle();
 
-  if (existing && existing.archived_by !== 'new-products') {
+  if (existing && isExpiredStaging(existing)) {
+    await removeStagingObjects(sb, collectImageUrlsFromRow(existing));
+    await sb.from('archived_products').delete().eq('sku', sku).eq('archived_by', 'new-products');
+  } else if (existing && existing.archived_by !== 'new-products') {
     throw new Error(`SKU "${sku}" is archived as "${existing.archived_by}" — cannot stage preview`);
   }
 
-  const base = existing && mergeFromStaged ? existing : liveRow;
+  const { data: existingFresh } = await sb
+    .from('archived_products')
+    .select('*')
+    .eq('sku', sku)
+    .maybeSingle();
+
+  if (existingFresh && existingFresh.archived_by !== 'new-products') {
+    throw new Error(`SKU "${sku}" is archived as "${existingFresh.archived_by}" — cannot stage preview`);
+  }
+
+  const base = existingFresh && mergeFromStaged ? existingFresh : liveRow;
   const payload = {
     sku,
     barcode: liveRow.barcode,
@@ -76,23 +104,35 @@ export async function stageDormantSlotPreview(sb, liveRow, { slot = 1, imageUrl,
     keep_live_when_oos: liveRow.keep_live_when_oos ?? false,
     archived_at: now,
     archived_by: 'new-products',
+    ...stagingMeta,
   };
   payload[slotField(targetSlot)] = processedImageUrl;
 
-  if (existing) {
+  const isMissingStagingColumn = (err) => /staged_(expires_at|by|batch_id)/i.test(String(err?.message || ''));
+
+  if (existingFresh) {
     const patch = {
       updated_at: now,
       [slotField(targetSlot)]: processedImageUrl,
+      ...stagingMeta,
     };
-    const { error } = await sb.from('archived_products').update(patch).eq('sku', sku);
+    let { error } = await sb.from('archived_products').update(patch).eq('sku', sku);
+    if (error && isMissingStagingColumn(error)) {
+      const { staged_expires_at, staged_by, staged_batch_id, ...patchWithoutMeta } = patch;
+      ({ error } = await sb.from('archived_products').update(patchWithoutMeta).eq('sku', sku));
+    }
     if (error) throw new Error(error.message);
   } else {
-    const { error } = await sb.from('archived_products').insert({ ...payload, id: liveRow.id });
+    let { error } = await sb.from('archived_products').insert({ ...payload, id: liveRow.id });
+    if (error && isMissingStagingColumn(error)) {
+      const { staged_expires_at, staged_by, staged_batch_id, ...payloadWithoutMeta } = payload;
+      ({ error } = await sb.from('archived_products').insert({ ...payloadWithoutMeta, id: liveRow.id }));
+    }
     if (error) throw new Error(error.message);
   }
 
   const { data: stillLive } = await sb.from('website_stock').select('sku').eq('sku', sku).maybeSingle();
-  return { stillLive: !!stillLive, slot: targetSlot, imageUrl: processedImageUrl };
+  return { stillLive: !!stillLive, slot: targetSlot, imageUrl: processedImageUrl, expiresAt };
 }
 
 export async function stageDormantPreview(sb, liveRow, processedImageUrl) {
@@ -213,7 +253,6 @@ export async function applyDormantToLive(sb, sku) {
     .eq('archived_by', 'new-products')
     .maybeSingle();
   if (stagedErr) throw new Error(stagedErr.message);
-  if (!staged) throw new Error(`No New Products preview for "${cleanSku}"`);
 
   const { data: live, error: liveErr } = await sb
     .from('website_stock')
@@ -222,14 +261,36 @@ export async function applyDormantToLive(sb, sku) {
     .maybeSingle();
   if (liveErr) throw new Error(liveErr.message);
 
+  if (!staged) {
+    if (live) {
+      const repaired = await repairSkuLiveStagingUrls(sb, live);
+      if (repaired.changed) {
+        return {
+          mode: 'image_applied',
+          sku: cleanSku,
+          imageUrl: repaired.patch?.image_url_one || readSlotUrl(live, 1),
+          appliedSlots: [1, 2, 3, 4].filter((s) => repaired.patch?.[slotField(s)] != null),
+        };
+      }
+    }
+    throw new Error(`No staged preview for "${cleanSku}" — run image gen again or refresh Approval`);
+  }
+
   if (live) {
     const { merged, appliedSlots } = mergeStagedImagesOntoLive(staged, live);
 
     if (appliedSlots.length) {
       const patch = { updated_at: new Date().toISOString() };
-      for (const slot of appliedSlots) {
-        patch[slotField(slot)] = merged[slotField(slot)];
-      }
+      await Promise.all(appliedSlots.map(async (slot) => {
+        const field = slotField(slot);
+        const stagedUrl = merged[field];
+        const resolved = await resolveLiveImageUrl(sb, stagedUrl, cleanSku, slot);
+        if (!resolved) {
+          throw new Error(`Image slot ${slot} for "${cleanSku}" is missing — re-run image gen for this product`);
+        }
+        merged[field] = resolved;
+        patch[field] = resolved;
+      }));
 
       const { data: updated, error: updateErr } = await sb
         .from('website_stock')
@@ -257,6 +318,8 @@ export async function applyDormantToLive(sb, sku) {
       .eq('archived_by', 'new-products');
     if (delErr) throw new Error(delErr.message);
 
+    await removeStagingObjects(sb, collectImageUrlsFromRow(staged));
+
     const primaryUrl = merged.image_url_one || readSlotUrl(live, 1);
     return {
       mode: appliedSlots.length ? 'image_applied' : 'already_live',
@@ -268,6 +331,14 @@ export async function applyDormantToLive(sb, sku) {
 
   const stockCheck = await validateStockReady(sb, staged.barcode || cleanSku);
   if (!stockCheck.ok) throw new Error(stockCheck.error);
+
+  for (let s = 1; s <= 4; s += 1) {
+    const field = slotField(s);
+    const url = readSlotUrl(staged, s);
+    if (url && storagePathFromPublicUrl(url)?.startsWith('staging/')) {
+      staged[field] = await resolveLiveImageUrl(sb, url, cleanSku, s);
+    }
+  }
 
   const { error: unarchiveErr } = await sb.rpc('unarchive_product', { p_sku: cleanSku });
   if (unarchiveErr) throw new Error(unarchiveErr.message);

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertCircle, Check, CheckCircle, ChevronLeft, ChevronRight, Loader2, Trash2, X, ZoomIn } from 'lucide-react';
+import { AlertCircle, Check, CheckCircle, ChevronLeft, ChevronRight, ImageOff, Loader2, Trash2, X, ZoomIn } from 'lucide-react';
 import { dismissImageBatch, subscribeImageBatch } from '../lib/imageBatchTracker';
 import { applyDormantLive } from '../lib/products';
 
@@ -11,8 +11,9 @@ function buildGallery(item) {
     }
   });
   [0, 1, 2, 3].forEach((i) => {
-    if (item.stagedImages?.[i]) {
-      list.push({ url: item.stagedImages[i], label: `Staged · Image ${i + 1}`, type: 'staged', slot: i + 1 });
+    const url = item.stagedImages?.[i] || item.stagedImageFallbacks?.[i];
+    if (url) {
+      list.push({ url, label: `Staged · Image ${i + 1}`, type: 'staged', slot: i + 1 });
     }
   });
   return list;
@@ -23,7 +24,34 @@ function galleryIndexForSlot(item, type, slot) {
   return gallery.findIndex((g) => g.type === type && g.slot === slot);
 }
 
-function ImageStrip({ urls, label, type, item, onOpenLightbox }) {
+function ApprovalImage({ url, fallbackUrl, alt = '' }) {
+  const candidates = useRef([url, fallbackUrl].filter(Boolean));
+  const [idx, setIdx] = useState(0);
+
+  useEffect(() => {
+    candidates.current = [url, fallbackUrl].filter(Boolean);
+    setIdx(0);
+  }, [url, fallbackUrl]);
+
+  const src = candidates.current[idx];
+  if (!src) {
+    return <span className="approval-img-empty"><ImageOff size={16} /></span>;
+  }
+
+  return (
+    <img
+      src={src}
+      alt={alt}
+      loading="lazy"
+      decoding="async"
+      onError={() => {
+        if (idx < candidates.current.length - 1) setIdx((i) => i + 1);
+      }}
+    />
+  );
+}
+
+function ImageStrip({ urls, fallbacks = [], label, type, item, onOpenLightbox }) {
   return (
     <div className="approval-img-strip">
       <span className="approval-img-strip-label">{label}</span>
@@ -32,17 +60,17 @@ function ImageStrip({ urls, label, type, item, onOpenLightbox }) {
           <button
             key={i}
             type="button"
-            className={`approval-img-slot${urls[i] ? ' approval-img-slot--clickable' : ''}`}
-            disabled={!urls[i]}
+            className={`approval-img-slot${(urls[i] || fallbacks[i]) ? ' approval-img-slot--clickable' : ''}`}
+            disabled={!urls[i] && !fallbacks[i]}
             onClick={() => {
               const idx = galleryIndexForSlot(item, type, i + 1);
               if (idx >= 0) onOpenLightbox(item, idx);
             }}
             aria-label={urls[i] ? `View ${label} image ${i + 1}` : `Empty ${label} slot ${i + 1}`}
           >
-            {urls[i] ? (
+            {urls[i] || fallbacks[i] ? (
               <>
-                <img src={urls[i]} alt="" />
+                <ApprovalImage url={urls[i]} fallbackUrl={fallbacks[i]} alt={`${label} ${i + 1}`} />
                 <span className="approval-img-zoom"><ZoomIn size={14} /></span>
               </>
             ) : (
@@ -295,23 +323,33 @@ export default function ApprovalPanel({ onShowToast, onRefreshStats, embedded = 
     setSetLiveNotice(null);
     const errors = [];
     const errorDetails = [];
+    const succeeded = new Set();
     let ok = 0;
     let applied = 0;
-    for (const sku of list) {
-      try {
-        const result = await applyDormantLive(sku);
+    const results = await Promise.allSettled(list.map((sku) => applyDormantLive(sku)));
+    results.forEach((r, i) => {
+      const sku = list[i];
+      if (r.status === 'fulfilled') {
         ok += 1;
-        if (result.mode === 'image_applied') applied += 1;
-        else if (result.mode === 'already_live') {
+        succeeded.add(sku);
+        if (r.value.mode === 'image_applied') applied += 1;
+        else if (r.value.mode === 'already_live') {
           errorDetails.push(`${sku}: already up to date (no new images)`);
         }
-      } catch (err) {
+      } else {
         errors.push(sku);
-        errorDetails.push(`${sku}: ${err.message}`);
+        errorDetails.push(`${sku}: ${r.reason?.message}`);
       }
+    });
+    if (succeeded.size) {
+      setItems((prev) => prev.filter((item) => !succeeded.has(item.sku)));
+      setSelected((prev) => {
+        const next = new Set(prev);
+        succeeded.forEach((sku) => next.delete(sku));
+        return next;
+      });
     }
-    setSelected(new Set());
-    await load();
+    await load({ silent: true });
     onRefreshStats?.();
 
     if (errors.length === list.length) {
@@ -345,7 +383,7 @@ export default function ApprovalPanel({ onShowToast, onRefreshStats, embedded = 
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Discard failed');
-      await load();
+      await load({ silent: true });
       onShowToast?.('Preview discarded', 'success');
     } catch (err) {
       onShowToast?.(err.message, 'error');
@@ -441,8 +479,15 @@ export default function ApprovalPanel({ onShowToast, onRefreshStats, embedded = 
               {item.subcategories?.length > 0 && (
                 <p className="approval-breadcrumb">{item.subcategories.join(' › ')}</p>
               )}
-              <ImageStrip urls={item.liveImages} label="Live" type="live" item={item} onOpenLightbox={openLightbox} />
-              <ImageStrip urls={item.stagedImages} label="Staged" type="staged" item={item} onOpenLightbox={openLightbox} />
+              {(item.stagedBy || item.expiresAt) && (
+                <p className="approval-staging-meta adm-muted">
+                  {item.stagedBy ? `Staged by ${item.stagedBy}` : null}
+                  {item.stagedBy && item.expiresAt ? ' · ' : null}
+                  {item.expiresAt ? `Expires ${new Date(item.expiresAt).toLocaleDateString()}` : null}
+                </p>
+              )}
+              <ImageStrip urls={item.liveImages} fallbacks={[]} label="Live" type="live" item={item} onOpenLightbox={openLightbox} />
+              <ImageStrip urls={item.stagedImages} fallbacks={item.stagedImageFallbacks || []} label="Staged" type="staged" item={item} onOpenLightbox={openLightbox} />
               <button
                 type="button"
                 className="approval-view-all"

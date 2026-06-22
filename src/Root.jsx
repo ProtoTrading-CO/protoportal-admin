@@ -7,6 +7,7 @@ import {
   signOut,
   verifyAdminSession,
 } from './lib/auth';
+import { setImageGenOperator } from './lib/imageGenSession';
 import QueryProvider from './components/QueryProvider';
 import AdminLoginPage from './components/AdminLoginPage';
 
@@ -46,26 +47,34 @@ function AdminGate() {
     let mounted = true;
 
     async function resolveSession() {
-      const verified = await getVerifiedSession();
-      if (!verified?.access_token) {
+      try {
+        const verified = await getVerifiedSession();
+        if (!verified?.access_token) {
+          if (mounted) {
+            setSession(null);
+            setBooting(false);
+          }
+          return;
+        }
+        const ok = await verifyAdminSession();
+        if (!ok) {
+          await signOut();
+          if (mounted) {
+            setSession(null);
+            setBooting(false);
+          }
+          return;
+        }
+        if (mounted) {
+          setSession(verified);
+          if (verified.user?.email) setImageGenOperator(verified.user.email);
+          setBooting(false);
+        }
+      } catch {
         if (mounted) {
           setSession(null);
           setBooting(false);
         }
-        return;
-      }
-      const ok = await verifyAdminSession();
-      if (!ok) {
-        await signOut();
-        if (mounted) {
-          setSession(null);
-          setBooting(false);
-        }
-        return;
-      }
-      if (mounted) {
-        setSession(verified);
-        setBooting(false);
       }
     }
 
@@ -90,10 +99,18 @@ function AdminGate() {
         return;
       }
       setSession(s);
+      if (email) setImageGenOperator(email);
     });
 
     const onUnauthorized = () => { void signOut().then(() => setSession(null)); };
-    const onForbidden = () => { void signOut().then(() => setSession(null)); };
+    // 403 means the server rejected this user's email — sign out so they can re-auth with a valid account
+    const onForbidden = () => {
+      void getVerifiedSession().then((s) => {
+        if (!s || !isAllowedAdminEmail(s.user?.email || '')) {
+          void signOut().then(() => setSession(null));
+        }
+      });
+    };
     window.addEventListener('proto-admin-unauthorized', onUnauthorized);
     window.addEventListener('proto-admin-forbidden', onForbidden);
     return () => {
@@ -126,6 +143,7 @@ function AdminGate() {
               return;
             }
             setSession(s);
+            if (s.user?.email) setImageGenOperator(s.user.email);
           });
         }}
       />

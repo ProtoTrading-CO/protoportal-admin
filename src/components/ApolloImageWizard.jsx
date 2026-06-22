@@ -599,15 +599,15 @@ export default function ApolloImageWizard({
     setApplyingLive(true);
     let applied = 0;
     const errors = [];
-    for (const sku of skus) {
-      try {
-        const result = await applyDormantLive(sku);
-        if (result.mode === 'image_applied') applied += 1;
-        else errors.push(`${sku}: already up to date`);
-      } catch (err) {
-        errors.push(`${sku}: ${err.message}`);
+    const results = await Promise.allSettled(skus.map((sku) => applyDormantLive(sku)));
+    results.forEach((r, i) => {
+      if (r.status === 'fulfilled') {
+        if (r.value.mode === 'image_applied') applied += 1;
+        else errors.push(`${skus[i]}: already up to date`);
+      } else {
+        errors.push(`${skus[i]}: ${r.reason?.message}`);
       }
-    }
+    });
     setApplyingLive(false);
     onRefreshCatalog?.();
     if (errors.length && applied === 0) onShowToast?.(`Set live failed — ${errors[0]}`, 'error');
