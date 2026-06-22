@@ -387,12 +387,6 @@ export default function ProductLoaderPanel({ taxonomyTree = categories, onShowTo
         <div style={{ color: '#dc2626', fontSize: 13, marginBottom: 16 }}>{lookupError}</div>
       )}
 
-      {/* SQL bridge offline notice */}
-      {lookupData && !lookupData.sqlAvailable && (
-        <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 8, padding: '8px 12px', background: '#f8fafc', borderRadius: 8 }}>
-          Positill bridge offline — price and stock figures from website data only.
-        </div>
-      )}
 
       {lookupData && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20, marginTop: 8 }}>

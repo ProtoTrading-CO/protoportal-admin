@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { requireAdminKey } from './_admin-auth.js';
-import { getProductByCode, getSqlSetupMessage, isSqlConfigured } from './_sql-provider.js';
+import { getProductByCode, isSqlConfigured } from './_sql-provider.js';
 
 function getStockClient() {
   return createClient(
@@ -28,17 +28,16 @@ export default async function handler(req, res) {
   const sqlAvailable = isSqlConfigured();
   const sb = getStockClient();
 
-  // Step 1: exact CODE / sku match (primary key in both systems)
-  const [sqlResult, websiteBySkuResult] = await Promise.allSettled([
-    sqlAvailable ? getProductByCode(code) : Promise.resolve(null),
+  // Step 1: website_stock (primary) + SQL provider (optional enrichment) — run in parallel
+  const [websiteBySkuResult, sqlResult] = await Promise.allSettled([
     sb.from('website_stock').select(WEBSITE_STOCK_COLS).eq('sku', code).maybeSingle(),
+    sqlAvailable ? getProductByCode(code) : Promise.resolve(null),
   ]);
 
-  const sqlRow = sqlResult.status === 'fulfilled' ? sqlResult.value : null;
   let websiteRow = websiteBySkuResult.status === 'fulfilled' ? (websiteBySkuResult.value?.data || null) : null;
   let matchedBy = websiteRow ? 'code' : null;
 
-  // Step 2: barcode fallback — only if exact CODE/sku match returned nothing in website_stock
+  // Step 2: barcode fallback in website_stock only if sku miss
   if (!websiteRow) {
     const barcodeResult = await sb
       .from('website_stock')
@@ -50,6 +49,10 @@ export default async function handler(req, res) {
       matchedBy = 'barcode';
     }
   }
+
+  // SQL enriches price/stock when available — website_stock is always the base
+  const sqlRow = sqlResult.status === 'fulfilled' ? sqlResult.value : null;
+  const dataSource = sqlRow ? 'sql' : 'website_stock';
 
   const existingImages = SLOT_FIELDS.map((f) => websiteRow?.[f]).filter(Boolean);
 
@@ -66,8 +69,8 @@ export default async function handler(req, res) {
     websiteRow,
     existingImages,
     matchedBy,
+    dataSource,
     sqlAvailable,
-    sqlSetupMessage: sqlAvailable ? null : getSqlSetupMessage(),
     warnings,
   });
 }
