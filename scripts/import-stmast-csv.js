@@ -52,7 +52,11 @@ const rows = lines.slice(1).map(line => {
   };
 }).filter(Boolean);
 
-console.log(`Parsed ${rows.length} rows from ${CSV_PATH}`);
+// Deduplicate — keep last occurrence of each code
+const deduped = Object.values(
+  Object.fromEntries(rows.map(r => [r.code, r]))
+);
+console.log(`Parsed ${rows.length} rows, ${deduped.length} unique codes from ${CSV_PATH}`);
 
 const sb = createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { autoRefreshToken: false, persistSession: false },
@@ -60,8 +64,8 @@ const sb = createClient(SUPABASE_URL, SUPABASE_KEY, {
 
 const BATCH = 500;
 let done = 0;
-for (let i = 0; i < rows.length; i += BATCH) {
-  const batch = rows.slice(i, i + BATCH);
+for (let i = 0; i < deduped.length; i += BATCH) {
+  const batch = deduped.slice(i, i + BATCH);
   const { error } = await sb
     .from('stmast_cache')
     .upsert(batch, { onConflict: 'code' });
@@ -70,6 +74,6 @@ for (let i = 0; i < rows.length; i += BATCH) {
     process.exit(1);
   }
   done += batch.length;
-  process.stdout.write(`\r${done}/${rows.length}`);
+  process.stdout.write(`\r${done}/${deduped.length}`);
 }
 console.log('\nDone.');
