@@ -6,6 +6,7 @@ import {
   Layout,
   MessageCircle,
   PackagePlus,
+  ScanLine,
   ShoppingBag,
   SlidersHorizontal,
   Star,
@@ -18,6 +19,7 @@ import { buildCatalogParams } from '../hooks/useCatalog';
 
 const NAV_ITEMS = [
   { id: 'orders', label: 'Order Requests', icon: ShoppingBag },
+  { id: 'product-loader', label: 'Product Loader', icon: ScanLine },
   { id: 'apollo', label: 'Apollo', icon: Bot },
   { id: 'cost-tracking', label: 'Cost Tracking', icon: DollarSign },
   { id: 'catalogue', label: 'Product Manager', icon: PackagePlus },

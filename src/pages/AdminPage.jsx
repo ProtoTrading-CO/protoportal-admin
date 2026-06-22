@@ -123,6 +123,7 @@ import { queryClient } from '../lib/queryClient';
 import { queryKeys } from '../lib/queryKeys';
 import ApolloPanel from '../components/ApolloPanel';
 import CostTrackingPanel from '../components/CostTrackingPanel';
+import ProductLoaderPanel from '../components/ProductLoaderPanel';
 import { applySkuOrder, lookupSortOrder, sortOrderCategoryKey, sortOrderLookupKeys } from '../lib/taxonomy';
 import categories from '../data/categories.json';
 
@@ -2483,6 +2484,10 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
 
             {activeSection === 'cost-tracking' && (
               <CostTrackingPanel onShowToast={showToast} />
+            )}
+
+            {activeSection === 'product-loader' && (
+              <ProductLoaderPanel taxonomyTree={taxonomyTree} onShowToast={showToast} />
             )}
 
             {false && activeSection === 'approval' && (
