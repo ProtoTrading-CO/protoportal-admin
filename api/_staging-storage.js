@@ -35,7 +35,7 @@ async function storageObjectExists(supabase, path) {
   return (data || []).some((f) => f.name === name);
 }
 
-/** Copy staging/* object to permanent SKU/slot.jpg — never publish staging URLs live. */
+/** Move staging/* object to permanent SKU/slot.jpg via server-side rename (no download). */
 export async function promoteStagingUrlToLive(supabase, url, sku, slot = 1) {
   const raw = String(url || '').split(',')[0].trim();
   if (!raw) return null;
@@ -46,22 +46,15 @@ export async function promoteStagingUrlToLive(supabase, url, sku, slot = 1) {
   const livePath = buildLiveObjectPath(sku, slot);
   const bucket = supabase.storage.from(BUCKET);
 
-  const res = await fetch(raw);
-  if (!res.ok) {
+  const { error: moveErr } = await bucket.move(stagingPath, livePath);
+  if (moveErr) {
+    // Staging file may already have been moved — check if live path exists
     if (await storageObjectExists(supabase, livePath)) {
       return publicUrlForPath(supabase, livePath);
     }
-    throw new Error(`Staging file missing: ${stagingPath}`);
+    throw new Error(`Could not promote staging image: ${moveErr.message}`);
   }
 
-  const buffer = Buffer.from(await res.arrayBuffer());
-  const { error: uploadErr } = await bucket.upload(livePath, buffer, {
-    contentType: res.headers.get('content-type')?.split(';')[0] || 'image/jpeg',
-    upsert: true,
-  });
-  if (uploadErr) throw new Error(uploadErr.message);
-
-  await bucket.remove([stagingPath]).catch(() => {});
   return publicUrlForPath(supabase, livePath);
 }
 
