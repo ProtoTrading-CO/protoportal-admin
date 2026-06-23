@@ -247,6 +247,7 @@ export default function ApprovalPanel({ onShowToast, onRefreshStats, embedded = 
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState(new Set());
   const [busy, setBusy] = useState(false);
+  const [busySkus, setBusySkus] = useState(new Set());
   const [lightbox, setLightbox] = useState(null);
   const [imageBatch, setImageBatch] = useState(null);
   const [lastUpdated, setLastUpdated] = useState(null);
@@ -320,6 +321,7 @@ export default function ApprovalPanel({ onShowToast, onRefreshStats, embedded = 
     const list = [...skus];
     if (!list.length) return;
     setBusy(true);
+    setBusySkus(new Set(list));
     setSetLiveNotice(null);
     const errors = [];
     const errorDetails = [];
@@ -370,6 +372,7 @@ export default function ApprovalPanel({ onShowToast, onRefreshStats, embedded = 
       onShowToast?.(`${applied} image${applied === 1 ? '' : 's'} set live — visible on trade site within ~90 seconds`, 'success');
     }
     setBusy(false);
+    setBusySkus(new Set());
   };
 
   const discard = async (sku) => {
@@ -453,7 +456,7 @@ export default function ApprovalPanel({ onShowToast, onRefreshStats, embedded = 
           <div className="adm-bulk-bar">
             <span>{selected.size} selected</span>
             <button type="button" className="adm-btn-red adm-btn--sm" disabled={busy} onClick={() => void applyLive(selectedList.map((i) => i.sku))}>
-              Set live
+              {busy ? <><Loader2 size={13} className="spin" /> Setting live…</> : `Set ${selected.size} live`}
             </button>
             <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => setSelected(new Set())}>Clear</button>
           </div>
@@ -498,7 +501,7 @@ export default function ApprovalPanel({ onShowToast, onRefreshStats, embedded = 
               </button>
               <div className="approval-card-actions">
                 <button type="button" className="adm-btn-red adm-btn--sm" disabled={busy} onClick={() => void applyLive([item.sku])}>
-                  Set live
+                  {busySkus.has(item.sku) ? <><Loader2 size={13} className="spin" /> Setting live…</> : 'Set live'}
                 </button>
                 <button type="button" className="adm-btn-ghost adm-btn--sm adm-btn-ghost--danger" disabled={busy} onClick={() => void discard(item.sku)}>
                   <Trash2 size={13} /> Discard

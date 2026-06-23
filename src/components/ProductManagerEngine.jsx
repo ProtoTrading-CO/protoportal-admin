@@ -28,7 +28,7 @@ import { useCatalogMutations } from '../hooks/useCatalogMutations';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { queryClient } from '../lib/queryClient';
 import { queryKeys } from '../lib/queryKeys';
-import { subscribeImageBatch } from '../lib/imageBatchTracker';
+import { getActiveImageBatch, subscribeImageBatch } from '../lib/imageBatchTracker';
 import { sortOrderCategoryKey, lookupSortOrder, applySkuOrder, sortOrderLookupKeys } from '../lib/taxonomy';
 import { exportLiveProductsXlsx } from '../lib/exportLiveProducts';
 
@@ -96,6 +96,9 @@ function PmMobileProductCard({
           {!item.image && (
             <span className="pm-mobile-card-badge">No image</span>
           )}
+          {item.isNew && (
+            <span className="pm-mobile-card-badge" style={{ background: '#0f766e', color: '#fff' }}>New arrival</span>
+          )}
           <div className="adm-muted pm-mobile-card-meta">
             <span>BC: {item.barcode || item.code || '—'}</span>
             {item.sku && <span>WSK: {item.sku}</span>}
@@ -119,6 +122,24 @@ function PmMobileProductCard({
         )}
         {status === 'live' && (
           <>
+            <button
+              type="button"
+              className="adm-btn-ghost adm-btn--sm"
+              title={item.isNew ? 'Remove from New Arrivals' : 'Add to New Arrivals'}
+              style={{ color: item.isNew ? '#0f766e' : undefined }}
+              onClick={() => mutations.setNewArrival.mutate(
+                { sku: item.sku, isNewArrival: !item.isNew },
+                {
+                  onSuccess: () => {
+                    onRefreshStats?.();
+                    onShowToast?.(item.isNew ? 'Removed from New Arrivals' : 'Added to New Arrivals');
+                  },
+                  onError: (err) => onShowToast?.(err.message, 'error'),
+                },
+              )}
+            >
+              <Sparkles size={14} />
+            </button>
             <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => mutations.archive.mutate(item.sku, { onSuccess: () => onRefreshStats?.() })}>Archive</button>
             <button type="button" className="adm-btn-red adm-btn--sm" onClick={() => recycleSku(item.sku, false)}>Recycle</button>
           </>
@@ -222,14 +243,19 @@ export default function ProductManagerEngine({
   }, []);
 
   useEffect(() => {
+    // Seed prevStatus from current state so we never fire on initial subscribe —
+    // only a genuine running → complete transition should show the toast.
+    let prevStatus = getActiveImageBatch()?.status ?? null;
     return subscribeImageBatch((batch) => {
-      if (batch?.status === 'complete') {
+      const nextStatus = batch?.status ?? null;
+      if (prevStatus === 'running' && nextStatus === 'complete') {
         window.dispatchEvent(new CustomEvent('proto-approval-refresh'));
         queryClient.invalidateQueries({ queryKey: queryKeys.dashboardStats() });
         if (status === 'approval') {
           onShowToast?.('New images ready for approval', 'success');
         }
       }
+      prevStatus = nextStatus;
     });
   }, [status, onShowToast]);
 
@@ -454,7 +480,7 @@ export default function ProductManagerEngine({
       <div className="adm-section-head">
         <div>
           <h2 className="adm-section-title">Product Manager</h2>
-          <p className="adm-section-note">In-stock products are live on the site. Filter by status or use reorder mode for sort order.</p>
+          <p className="adm-section-note">In-stock products are live on the site. Use ✨ to add products to New Arrivals on the trade homepage.</p>
         </div>
         <div className="pm-engine-head-actions">
           {status === 'live' && !reorderMode && (
@@ -715,6 +741,9 @@ export default function ProductManagerEngine({
                           {!item.image && (
                             <span style={{ fontSize: 10, fontWeight: 700, color: '#92400e', background: '#fef3c7', borderRadius: 4, padding: '1px 5px' }}>No image</span>
                           )}
+                          {item.isNew && (
+                            <span style={{ fontSize: 10, fontWeight: 700, color: '#fff', background: '#0f766e', borderRadius: 4, padding: '1px 5px' }}>New arrival</span>
+                          )}
                         </div>
                         <div className="adm-muted" style={{ fontSize: 11 }}>
                           <span title="Barcode">BC: {item.barcode || item.code || '—'}</span>
@@ -754,6 +783,24 @@ export default function ProductManagerEngine({
                         )}
                         {status === 'live' && (
                           <>
+                            <button
+                              type="button"
+                              className="adm-btn-ghost adm-btn--sm"
+                              title={item.isNew ? 'Remove from New Arrivals' : 'Add to New Arrivals'}
+                              style={{ color: item.isNew ? '#0f766e' : undefined }}
+                              onClick={() => mutations.setNewArrival.mutate(
+                                { sku: item.sku, isNewArrival: !item.isNew },
+                                {
+                                  onSuccess: () => {
+                                    onRefreshStats?.();
+                                    onShowToast?.(item.isNew ? 'Removed from New Arrivals' : 'Added to New Arrivals');
+                                  },
+                                  onError: (err) => onShowToast?.(err.message, 'error'),
+                                },
+                              )}
+                            >
+                              <Sparkles size={14} />
+                            </button>
                             <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => mutations.archive.mutate(item.sku, { onSuccess: () => onRefreshStats?.() })}>Archive</button>
                             <button type="button" className="adm-btn-red adm-btn--sm" onClick={() => recycleSku(item.sku, false)}>To recycle</button>
                           </>
