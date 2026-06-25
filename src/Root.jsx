@@ -13,7 +13,8 @@ import AdminLoginPage from './components/AdminLoginPage';
 
 const AdminPage = lazy(() => import('./pages/AdminPage'));
 const FulfillmentPage = lazy(() => import('./pages/FulfillmentPage'));
-const PreRegisterPage = lazy(() => import('./pages/PreRegisterPage'));
+
+const TRADE_PORTAL_REGISTER_URL = 'https://protoportal-main.vercel.app/#lp-apply';
 
 installAuthFetch();
 
@@ -31,11 +32,8 @@ export default function Root() {
   const isPreRegister = path === '/register' || path === '/pre-register';
 
   if (isPreRegister) {
-    return (
-      <Suspense fallback={loadingFallback}>
-        <PreRegisterPage />
-      </Suspense>
-    );
+    window.location.replace(TRADE_PORTAL_REGISTER_URL);
+    return loadingFallback;
   }
 
   if (isFulfillment) {
