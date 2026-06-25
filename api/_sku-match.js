@@ -1,14 +1,21 @@
-/** ERP SKU match candidates — leading zeros, Numbers float artifacts, etc. */
+/** ERP SKU match candidates — case, leading zeros, Numbers float artifacts. */
 export function skuLookupVariants(raw) {
   const s = String(raw ?? '').trim();
   if (!s) return [];
-  const variants = new Set([s]);
+  const variants = new Set([s, s.toUpperCase(), s.toLowerCase()]);
   if (/^\d+\.0+$/.test(s)) variants.add(s.replace(/\.0+$/, ''));
   const stripped = s.replace(/^0+(?=\d)/, '');
-  if (stripped && stripped !== s) variants.add(stripped);
+  if (stripped && stripped !== s) {
+    variants.add(stripped);
+    variants.add(stripped.toUpperCase());
+    variants.add(stripped.toLowerCase());
+  }
   if (/^\d+$/.test(stripped)) {
     for (const len of [4, 5, 6, 7, 8, 10, 12]) {
-      variants.add(stripped.padStart(len, '0'));
+      const padded = stripped.padStart(len, '0');
+      variants.add(padded);
+      variants.add(padded.toUpperCase());
+      variants.add(padded.toLowerCase());
     }
   }
   return [...variants];

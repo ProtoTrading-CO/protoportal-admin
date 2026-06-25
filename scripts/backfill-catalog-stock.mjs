@@ -53,17 +53,20 @@ async function backfillTable(table, rows) {
   const keys = rows.map((r) => r.barcode || r.sku).filter(Boolean);
   const lookupMap = await fetchProductLookupMap(sb, keys, 'sku, sell_price, stock_qty, available_stock');
   let updated = 0;
-  let skipped = 0;
+  let zeroed = 0;
 
   for (let i = 0; i < rows.length; i += BATCH) {
     const chunk = rows.slice(i, i + BATCH);
     await Promise.all(chunk.map(async (row) => {
       const product = findProductBySku(lookupMap, row.barcode || row.sku);
-      const patch = patchFromProduct(row, product);
-      if (!patch) {
-        skipped++;
-        return;
-      }
+      const patch = product
+        ? patchFromProduct(row, product)
+        : {
+            stock_qty: 0,
+            available_stock: 0,
+            updated_at: new Date().toISOString(),
+          };
+      if (!product) zeroed++;
       const { error } = await sb.from(table).update(patch).eq('sku', row.sku);
       if (error) throw error;
       updated++;
@@ -71,7 +74,7 @@ async function backfillTable(table, rows) {
     console.log(`${table}: ${Math.min(i + BATCH, rows.length)}/${rows.length}`);
   }
 
-  return { updated, skipped };
+  return { updated, zeroed };
 }
 
 async function main() {

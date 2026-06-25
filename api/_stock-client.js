@@ -84,11 +84,19 @@ export async function enrichRowsWithProductStock(supabase, rows, { includePrice 
 
   return rows.map((r, i) => {
     const product = findProductBySku(lookupMap, rawKeys[i]);
-    if (!product) return r;
+    const stockQty = product?.stock_qty ?? 0;
+    const availableStock = product?.available_stock ?? product?.stock_qty ?? 0;
+    if (!product) {
+      return {
+        ...r,
+        stock_qty: r.stock_qty ?? 0,
+        available_stock: r.available_stock ?? r.stock_qty ?? 0,
+      };
+    }
     return {
       ...r,
-      stock_qty: product.stock_qty,
-      available_stock: product.available_stock,
+      stock_qty: stockQty,
+      available_stock: availableStock,
       ...(includePrice ? { sell_price: product.sell_price } : {}),
       ...(includePrice && product.sell_price != null && !Number(r.price) ? { price: product.sell_price } : {}),
     };
