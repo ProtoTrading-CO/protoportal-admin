@@ -1,4 +1,5 @@
 import { requireAdminKey } from './_admin-auth.js';
+import { toSqlPreview } from './_sql-stmast.js';
 
 export default async function handler(req, res) {
   if (!(await requireAdminKey(req, res))) return;
@@ -52,7 +53,7 @@ export default async function handler(req, res) {
           sqlError = json.error || json.message || `Bridge HTTP ${bridgeRes.status}`;
         } else {
           sqlConnectionTest = true;
-          sqlResult = json.row || json;
+          sqlResult = toSqlPreview(json.row || json);
         }
       } else if (sqlPassword) {
         const sql = (await import('mssql')).default;
@@ -70,7 +71,7 @@ export default async function handler(req, res) {
             .input('code', sql.VarChar(64), code)
             .query('SELECT TOP 1 CODE, DESCR FROM dbo.STMAST WHERE CODE = @code');
           sqlConnectionTest = true;
-          sqlResult = result.recordset?.[0] || null;
+          sqlResult = toSqlPreview(result.recordset?.[0] || null);
         } finally {
           await pool.close();
         }

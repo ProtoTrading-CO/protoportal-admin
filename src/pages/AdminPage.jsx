@@ -880,6 +880,8 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     setLiveTaxonomyTree(newTree);
     try {
       await replaceFullTaxonomy(newTree);
+      invalidateAdminCache();
+      queryClient.invalidateQueries({ queryKey: ['catalog'] });
     } catch (err) {
       showToast(err.message || 'Failed to save category order', 'error');
       // Revert on failure
@@ -1115,6 +1117,15 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
       });
       const emailData = await emailRes.json();
       if (!emailRes.ok) throw new Error(emailData.error || 'Email send failed');
+      if (normalizeOrderStatus(order.status) !== 'order sent') {
+        await advanceOrderWorkflow(order.id, 'order sent', {
+          senderUserId: activeFulfillmentUser?.id,
+          senderName: activeFulfillmentUser?.name,
+        });
+        setOrders((prev) => prev.map((item) => (
+          item.id === order.id ? { ...item, status: 'order sent' } : item
+        )));
+      }
       const sentMeta = await markConfirmationSent(order.id);
       setConfirmationSent((prev) => ({ ...prev, [order.id]: sentMeta }));
       setOrderTab('paid');
@@ -1983,6 +1994,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     try {
       const json = await createSubcategory(newSubModal.parentId, newSubModal.label.trim());
       await reloadTaxonomy();
+      invalidateAdminCache();
       queryClient.invalidateQueries({ queryKey: ['catalog'] });
       if (json.node?.id) {
         const parentPath = findNodePath(taxonomyTree, newSubModal.parentId) || [];
@@ -2007,6 +2019,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     try {
       const json = await createCategory(newCategoryModal.label.trim());
       await reloadTaxonomy();
+      invalidateAdminCache();
       queryClient.invalidateQueries({ queryKey: ['catalog'] });
       setNewCategoryModal(null);
       showToast(json.created ? 'Category created' : 'Category already exists');
@@ -2424,9 +2437,12 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
       await updateOrder(fulfillmentOrder, {
         final_items: finalItems,
         order_change_notes: fulfillmentNotes,
+        advanceWorkflow: 'order sent',
       });
       closeFulfillment();
-      showToast('Order saved');
+      showToast('Order saved and moved to Order Confirmation');
+    } catch {
+      // updateOrder already surfaces the error toast
     } finally { setFulfillmentSaving(false); }
   };
 

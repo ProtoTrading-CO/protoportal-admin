@@ -18,6 +18,19 @@ function normalizeAssignedCategoryIds(categoryIds = []) {
   return [...out];
 }
 
+function canonicalCategoryIdsForSave(categoryIds = [], taxonomyTree = []) {
+  const validIds = new Set((taxonomyTree || []).map((c) => c.id));
+  validIds.add('uncategorized');
+  const out = new Set();
+  for (const id of categoryIds) {
+    if (!id) continue;
+    const mapped = LEGACY_NAV_ALIASES[id] || id;
+    if (validIds.has(mapped)) out.add(mapped);
+    else if (validIds.has(id)) out.add(id);
+  }
+  return [...out];
+}
+
 function buildMainCategories(taxonomyTree) {
   const mains = (taxonomyTree || []).map((c) => ({ id: c.id, label: c.label }));
   if (!mains.some((c) => c.id === 'uncategorized')) {
@@ -105,7 +118,7 @@ export default function FulfillmentSettingsModal({ open, onClose, taxonomyTree =
         name: u.name.trim(),
         whatsapp: toWatiPhone(u.whatsapp),
         isAdmin: Boolean(u.isAdmin),
-        categoryIds: (u.categoryIds || []).filter(Boolean),
+        categoryIds: canonicalCategoryIdsForSave(u.categoryIds, taxonomyTree),
       }));
       if (payload.some((u) => !u.name)) throw new Error('Every team member needs a name.');
       const badPhone = payload.find((u) => !isValidWatiPhone(u.whatsapp));

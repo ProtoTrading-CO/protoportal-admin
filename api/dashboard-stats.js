@@ -41,13 +41,22 @@ async function fetchLiveBySkus(sb, skus) {
 }
 
 async function countApproval(sb) {
-  const { data: staged, error } = await sb
-    .from('archived_products')
-    .select(STAGED_COLS)
-    .eq('archived_by', 'new-products');
-  if (error) throw error;
+  const staged = [];
+  let from = 0;
+  const PAGE = 1000;
+  while (true) {
+    const { data, error } = await sb
+      .from('archived_products')
+      .select(STAGED_COLS)
+      .eq('archived_by', 'new-products')
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+    staged.push(...(data || []));
+    if ((data || []).length < PAGE) break;
+    from += PAGE;
+  }
 
-  const active = (staged || []).filter((row) => !isExpiredStaging(row));
+  const active = staged.filter((row) => !isExpiredStaging(row));
   const skus = active.map((r) => r.sku).filter(Boolean);
   if (!skus.length) return 0;
 
