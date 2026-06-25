@@ -202,10 +202,20 @@ export function resolveCategoryIdsFromTree(row, tree) {
   return { categoryId: path[0] || '', categoryPath: path };
 }
 
+function findMainNode(tree, navMainId) {
+  const direct = (tree || []).find((c) => c.id === navMainId);
+  if (direct) return direct;
+  const mapped = LEGACY_NAV_ALIASES[navMainId];
+  if (mapped) return (tree || []).find((c) => c.id === mapped) || null;
+  return null;
+}
+
 /** True when an adapted product matches a taxonomy nav path (node ids). */
 export function productMatchesNavPath(product, tree, navPath) {
   if (!Array.isArray(navPath) || !navPath.length) return true;
-  if (navPath[0] === '__uncategorized__') return !product.categoryLabel && !product.category;
+  if (navPath[0] === '__uncategorized__') {
+    return !String(product.categoryLabel || '').trim() && !String(product.category || '').trim();
+  }
 
   const row = {
     category: product.categoryLabel || '',
@@ -215,7 +225,7 @@ export function productMatchesNavPath(product, tree, navPath) {
     subcategory_four: product.subcategoryLabels?.[3] ?? null,
   };
 
-  const main = (tree || []).find((c) => c.id === navPath[0]);
+  const main = findMainNode(tree, navPath[0]);
   if (!main) return false;
   if (normalizeLabel(row.category) !== normalizeLabel(main.label)) return false;
 

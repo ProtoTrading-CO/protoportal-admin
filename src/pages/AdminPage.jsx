@@ -851,8 +851,11 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     setLoading(true);
     setLoadingError('');
     try {
+      const fetchCategory = reorderCategoryPath.length
+        ? reorderCategoryPath[0]
+        : 'all';
       const rows = await fetchReorderProducts({
-        mainCategory: reorderMainId,
+        mainCategory: fetchCategory,
         subcategoryId: null,
       });
       const ordered = await applyServerSortOrder(rows, reorderNavPath);

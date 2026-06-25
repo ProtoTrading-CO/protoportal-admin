@@ -1,16 +1,30 @@
 import { adminProductSearch, fuzzyFilter } from './fuzzySearch';
-import { labelToSlug, resolveCategoryIdsFromTree, slugToLabel, slugToLabelFromTree, productMatchesNavPath } from './taxonomy';
+import { labelToSlug, resolveCategoryIdsFromTree, slugToLabel, slugToLabelFromTree, productMatchesNavPath, LEGACY_NAV_ALIASES } from './taxonomy';
 import { queryClient } from './queryClient';
 import { queryKeys } from './queryKeys';
 
+function categoryMainIdMatches(productMainId, targetMainId) {
+  if (!targetMainId || !productMainId) return false;
+  if (productMainId === targetMainId) return true;
+  if (LEGACY_NAV_ALIASES[productMainId] === targetMainId) return true;
+  if (LEGACY_NAV_ALIASES[targetMainId] === productMainId) return true;
+  return false;
+}
+
 function matchesMainCategory(product, mainCategory) {
   if (!mainCategory || mainCategory === 'all') return true;
+  if (mainCategory === '__uncategorized__') {
+    return !product.category && !product.categoryLabel;
+  }
+  const productMain = product.categoryPath?.[0] || product.category || '';
+  if (categoryMainIdMatches(productMain, mainCategory)) return true;
   const resolvedLabel = slugToLabel(mainCategory);
   return (
     product.category === mainCategory
     || product.categoryLabel === mainCategory
     || product.categoryLabel === resolvedLabel
     || labelToSlug(product.categoryLabel || '') === mainCategory
+    || categoryMainIdMatches(labelToSlug(product.categoryLabel || ''), mainCategory)
   );
 }
 

@@ -13,6 +13,26 @@ function deepestGroupKey(product, mainCategoryId, selectedPath = []) {
   return path[1] || '__other__';
 }
 
+function groupByMainCategory(products, tree) {
+  const labelById = new Map((tree || []).map((c) => [c.id, c.label]));
+  const groups = new Map();
+  for (const product of products) {
+    const mainId = product.categoryPath?.[0] || product.category || '__uncategorized__';
+    const bucket = LEGACY_NAV_ALIASES[mainId] || mainId;
+    if (!groups.has(bucket)) groups.set(bucket, []);
+    groups.get(bucket).push(product);
+  }
+  return [...groups.entries()]
+    .map(([id, prods]) => ({
+      id,
+      label: id === '__uncategorized__'
+        ? 'Uncategorized'
+        : (labelById.get(id) || id.replace(/-/g, ' ')),
+      products: prods,
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
+
 function groupBySubcategory(products, mainCategoryId, tree, selectedPath = []) {
   const subs = subcategoryOptionsFromTree(tree, mainCategoryId);
   const allSubs = new Map();
@@ -153,10 +173,12 @@ export default function ReorderGrid({
   const [overId, setOverId] = useState(null);
   const [draggingSet, setDraggingSet] = useState(() => new Set());
 
-  const groups = useMemo(
-    () => groupBySubcategory(products, mainCategoryId, taxonomyTree, selectedPath),
-    [products, mainCategoryId, taxonomyTree, selectedPath],
-  );
+  const groups = useMemo(() => {
+    if (!selectedPath.length) {
+      return groupByMainCategory(products, taxonomyTree);
+    }
+    return groupBySubcategory(products, mainCategoryId, taxonomyTree, selectedPath);
+  }, [products, mainCategoryId, taxonomyTree, selectedPath]);
 
   const getMoveSet = useCallback((id) => (
     selectedIds.has(id) ? new Set(selectedIds) : new Set([id])
