@@ -76,6 +76,7 @@ import {
   restoreRecycledProduct,
   saveSortOrder,
   setKeepLiveWhenOos,
+  setNewArrival,
   setLiveTaxonomyTree,
   updateProduct,
   uploadDormantImage,
@@ -270,7 +271,7 @@ const PRODUCT_IMAGE_SLOTS = [
 ];
 
 // The product edit form mirrors the four taxonomy levels stored in the DB
-// (category, subcategory_one, subcategory_two, subcategory_three). Every
+// (category, subcategory_one … subcategory_four). Every `child*Id` is a slug
 // `child*Id` is a slug from the taxonomy tree at that level — empty string
 // means "no value at this level". Saving collapses these into the
 // `categoryPath` array, which the API maps back to the DB columns.
@@ -289,6 +290,7 @@ const emptyForm = {
   childOneId: categories[0]?.children?.[0]?.id || '',
   childTwoId: '',
   childThreeId: '',
+  childFourId: '',
   productType: 'General product',
 };
 
@@ -350,6 +352,7 @@ function categoryFormFromPath(categoryPath = [], tree = categories) {
     childOneId: categoryPath[1] || '',
     childTwoId: categoryPath[2] || '',
     childThreeId: categoryPath[3] || '',
+    childFourId: categoryPath[4] || '',
   };
 }
 
@@ -420,6 +423,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   const [activeSection, setActiveSection] = useState('catalogue');
   const [catalogStatus, setCatalogStatus] = useState('live');
   const [imageFixRequest, setImageFixRequest] = useState(null);
+  const [productLoaderCode, setProductLoaderCode] = useState('');
   const { data: dashStats } = useDashboardStats();
   const [loading, setLoading] = useState(false);
   const [loadingProgress, setLoadingProgress] = useState(null);
@@ -514,6 +518,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   const [moveChild1Id, setMoveChild1Id] = useState('');
   const [moveChild2Id, setMoveChild2Id] = useState('');
   const [moveChild3Id, setMoveChild3Id] = useState('');
+  const [moveChild4Id, setMoveChild4Id] = useState('');
   const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false);
   const [bulkFieldEditOpen, setBulkFieldEditOpen] = useState(false);
   const [bulkFieldEditType, setBulkFieldEditType] = useState('description');
@@ -525,6 +530,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   const [taxonomySaving, setTaxonomySaving] = useState(false);
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [productSelectedIds, setProductSelectedIds] = useState(new Set());
+  const lastProductClickIdxRef = useRef(null);
   const [productArchiveConfirmOpen, setProductArchiveConfirmOpen] = useState(false);
   const [productDeleteConfirmOpen, setProductDeleteConfirmOpen] = useState(false);
   const [archiveSelectedIds, setArchiveSelectedIds] = useState(new Set());
@@ -1303,6 +1309,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
       childOneId: firstChild,
       childTwoId: '',
       childThreeId: '',
+      childFourId: '',
     });
     setEditorError('');
     setEditorImageUploading(false);
@@ -1401,6 +1408,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
       productForm.childOneId,
       productForm.childTwoId,
       productForm.childThreeId,
+      productForm.childFourId,
     ].filter(Boolean);
 
     if (!categoryPath.length) {
@@ -1569,6 +1577,20 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
       showToast(next ? 'Product will stay on site when out of stock' : 'Product will auto-archive when out of stock');
     } catch (err) {
       showToast(err.message || 'Could not update keep-live setting', 'error');
+    } finally { setSaving(''); }
+  };
+
+  const toggleNewArrival = async (product) => {
+    const next = !product.isNew;
+    setSaving(`new-${product.id}`);
+    try {
+      await setNewArrival(product.id, next);
+      await refreshDashboardStats();
+      if (activeSection === 'products') await loadProducts();
+      else if (activeSection === 'archive') await loadArchive();
+      showToast(next ? 'Added to New Arrivals' : 'Removed from New Arrivals');
+    } catch (err) {
+      showToast(err.message || 'Could not update New Arrivals', 'error');
     } finally { setSaving(''); }
   };
 
@@ -1849,12 +1871,20 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     setMoveChild1Id('');
     setMoveChild2Id('');
     setMoveChild3Id('');
+    setMoveChild4Id('');
     setMoveModalOpen(true);
   };
 
   const confirmBulkMove = async () => {
-    const finalSubId = moveChild3Id || moveChild2Id || moveChild1Id;
-    if (!selectedIds.size || !moveCategoryId || !finalSubId) {
+    const categoryPathIds = [
+      moveCategoryId,
+      moveChild1Id,
+      moveChild2Id,
+      moveChild3Id,
+      moveChild4Id,
+    ].filter(Boolean);
+    const finalSubId = moveChild4Id || moveChild3Id || moveChild2Id || moveChild1Id;
+    if (!selectedIds.size || categoryPathIds.length < 2) {
       showToast('Choose a main category and at least one child category', 'error');
       return;
     }
@@ -1865,10 +1895,13 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
         skus: [...selectedIds],
         categoryId: moveCategoryId,
         subcategoryId: finalSubId,
+        categoryPathIds,
       });
       setMoveModalOpen(false);
       setSelectedIds(new Set());
+      setReorderCategoryPath(categoryPathIds);
       await loadReorderProducts();
+      queryClient.invalidateQueries({ queryKey: ['catalog'] });
       showToast(`Moved ${count} product(s)`);
     } catch (err) {
       showToast(err.message || 'Move failed', 'error');
@@ -1942,7 +1975,8 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
         setMoveCategoryId(parentPath[0] || newSubModal.parentId);
         setMoveChild1Id(parentPath.length === 0 ? newId : (parentPath[1] || newSubModal.parentId));
         setMoveChild2Id(parentPath.length === 1 ? newId : (parentPath.length >= 2 ? newSubModal.parentId : ''));
-        setMoveChild3Id(parentPath.length >= 2 ? newId : '');
+        setMoveChild3Id(parentPath.length === 2 ? newId : (parentPath.length >= 3 ? newSubModal.parentId : ''));
+        setMoveChild4Id(parentPath.length >= 3 ? newId : '');
       }
       setNewSubModal(null);
       if (selectedIds.size > 0) setMoveModalOpen(true);
@@ -2004,13 +2038,22 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     });
   };
 
-  const toggleSelectProduct = (id) => {
+  const toggleSelectProduct = (id, idx, shiftKey = false) => {
     setProductSelectedIds((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      if (shiftKey && lastProductClickIdxRef.current !== null && idx !== lastProductClickIdxRef.current) {
+        const start = Math.min(lastProductClickIdxRef.current, idx);
+        const end = Math.max(lastProductClickIdxRef.current, idx);
+        const rangeIds = productRows.slice(start, end + 1).map((p) => p.id);
+        const allSelected = rangeIds.every((rid) => next.has(rid));
+        rangeIds.forEach((rid) => (allSelected ? next.delete(rid) : next.add(rid)));
+      } else {
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+      }
       return next;
     });
+    lastProductClickIdxRef.current = idx ?? null;
   };
 
   const toggleSelectAllProducts = () => {
@@ -2472,6 +2515,10 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                 taxonomyTree={taxonomyTree}
                 onShowToast={showToast}
                 onGoToApproval={() => { setCatalogStatus('approval'); setActiveSection('catalogue'); window.scrollTo({ top: 0, behavior: 'instant' }); }}
+                onGoToProductLoader={(code) => {
+                  setProductLoaderCode(String(code || '').trim());
+                  setActiveSection('product-loader');
+                }}
                 onRefreshCatalog={() => {
                   window.dispatchEvent(new CustomEvent('proto-approval-refresh'));
                   queryClient.invalidateQueries({ queryKey: queryKeys.dashboardStats() });
@@ -2487,7 +2534,12 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
             )}
 
             {activeSection === 'product-loader' && (
-              <ProductLoaderPanel taxonomyTree={taxonomyTree} onShowToast={showToast} />
+              <ProductLoaderPanel
+                taxonomyTree={taxonomyTree}
+                onShowToast={showToast}
+                initialCode={productLoaderCode}
+                onInitialCodeConsumed={() => setProductLoaderCode('')}
+              />
             )}
 
             {false && activeSection === 'approval' && (
@@ -2626,7 +2678,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                           <input
                             type="checkbox"
                             checked={productSelectedIds.has(product.id)}
-                            onChange={() => toggleSelectProduct(product.id)}
+                            onChange={(e) => toggleSelectProduct(product.id, i, e.nativeEvent.shiftKey)}
                             style={{ accentColor: '#8B1A1A', cursor: 'pointer' }}
                             aria-label={`Select ${product.name}`}
                           />
@@ -2641,6 +2693,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                             {product.name}
                             {!product.image && <span style={{ fontSize: 10, fontWeight: 700, color: '#92400e', background: '#fef3c7', borderRadius: 4, padding: '1px 5px' }}>No image</span>}
                             {specialsSet.has(product.id) && <span style={{ fontSize: 10, fontWeight: 700, color: '#fff', background: '#8B1A1A', borderRadius: 4, padding: '1px 5px' }}>Special</span>}
+                            {product.isNew && <span style={{ fontSize: 10, fontWeight: 700, color: '#fff', background: '#0f766e', borderRadius: 4, padding: '1px 5px' }}>New arrival</span>}
                           </div>
                           <div className="adm-muted" style={{ fontSize: 11 }}>
                             <span title="Barcode (customer code)">BC: {product.barcode || product.code}</span>
@@ -2660,6 +2713,15 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                             title={specialsSet.has(product.id) ? 'Remove from specials' : 'Add to specials'}
                           >
                             <Star size={14} className={specialsSet.has(product.id) ? 'star-spinning' : ''} style={{ color: specialsSet.has(product.id) ? '#f59e0b' : undefined }} />
+                          </button>
+                          <button
+                            onClick={() => void toggleNewArrival(product)}
+                            className="adm-icon-btn"
+                            title={product.isNew ? 'Remove from New Arrivals' : 'Add to New Arrivals'}
+                            disabled={saving === `new-${product.id}`}
+                            style={{ color: product.isNew ? '#0f766e' : undefined }}
+                          >
+                            <Sparkles size={14} />
                           </button>
                           <button
                             onClick={() => void toggleKeepLiveWhenOos(product)}
@@ -3265,7 +3327,8 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                   const child1Options = subcategoryOptions(moveCategoryId, taxonomyTree);
                   const child2Options = childrenOf(taxonomyTree, moveChild1Id);
                   const child3Options = childrenOf(taxonomyTree, moveChild2Id);
-                  const deepestId = moveChild3Id || moveChild2Id || moveChild1Id;
+                  const child4Options = childrenOf(taxonomyTree, moveChild3Id);
+                  const deepestId = moveChild4Id || moveChild3Id || moveChild2Id || moveChild1Id;
                   return (
                     <div className="adm-modal-backdrop" onClick={() => setMoveModalOpen(false)}>
                       <div className="adm-modal adm-modal--form" onClick={(e) => e.stopPropagation()}>
@@ -3279,7 +3342,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                             <span className="adm-field-label">Main category</span>
                             <select
                               value={moveCategoryId}
-                              onChange={(e) => { setMoveCategoryId(e.target.value); setMoveChild1Id(''); setMoveChild2Id(''); setMoveChild3Id(''); }}
+                              onChange={(e) => { setMoveCategoryId(e.target.value); setMoveChild1Id(''); setMoveChild2Id(''); setMoveChild3Id(''); setMoveChild4Id(''); }}
                               className="adm-select adm-select--enhanced"
                             >
                               {mainCategories.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
@@ -3290,7 +3353,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                               <span className="adm-field-label">Child category 1</span>
                               <select
                                 value={moveChild1Id}
-                                onChange={(e) => { setMoveChild1Id(e.target.value); setMoveChild2Id(''); setMoveChild3Id(''); }}
+                                onChange={(e) => { setMoveChild1Id(e.target.value); setMoveChild2Id(''); setMoveChild3Id(''); setMoveChild4Id(''); }}
                                 className="adm-select adm-select--enhanced"
                               >
                                 <option value="">— None —</option>
@@ -3303,7 +3366,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                               <span className="adm-field-label">Child category 2</span>
                               <select
                                 value={moveChild2Id}
-                                onChange={(e) => { setMoveChild2Id(e.target.value); setMoveChild3Id(''); }}
+                                onChange={(e) => { setMoveChild2Id(e.target.value); setMoveChild3Id(''); setMoveChild4Id(''); }}
                                 className="adm-select adm-select--enhanced"
                               >
                                 <option value="">— None —</option>
@@ -3316,11 +3379,24 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                               <span className="adm-field-label">Child category 3</span>
                               <select
                                 value={moveChild3Id}
-                                onChange={(e) => setMoveChild3Id(e.target.value)}
+                                onChange={(e) => { setMoveChild3Id(e.target.value); setMoveChild4Id(''); }}
                                 className="adm-select adm-select--enhanced"
                               >
                                 <option value="">— None —</option>
                                 {child3Options.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+                              </select>
+                            </label>
+                          )}
+                          {moveChild3Id && child4Options.length > 0 && (
+                            <label className="adm-field">
+                              <span className="adm-field-label">Child category 4</span>
+                              <select
+                                value={moveChild4Id}
+                                onChange={(e) => setMoveChild4Id(e.target.value)}
+                                className="adm-select adm-select--enhanced"
+                              >
+                                <option value="">— None —</option>
+                                {child4Options.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
                               </select>
                             </label>
                           )}
@@ -4697,7 +4773,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
               <AdminField label="Price"><input value={productForm.price} onChange={(e) => setProductForm((p) => ({ ...p, price: e.target.value }))} className="adm-field-input" /></AdminField>
               <AdminField label="Stock on hand"><input value={productForm.stockOnHand} onChange={(e) => setProductForm((p) => ({ ...p, stockOnHand: e.target.value }))} className="adm-field-input" /></AdminField>
               {/*
-                Cascading category pickers — Main → Child 1 → Child 2 → Child 3.
+                Cascading category pickers — Main → Child 1 → Child 2 → Child 3 → Child 4.
                 Each deeper level only shows up when its parent has children
                 in the live taxonomy. We always reset deeper levels when a
                 shallower one changes so the saved categoryPath stays
@@ -4715,6 +4791,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                       childOneId: firstChild,
                       childTwoId: '',
                       childThreeId: '',
+                      childFourId: '',
                     }));
                   }}
                   className="adm-field-input"
@@ -4736,6 +4813,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                         childOneId: e.target.value,
                         childTwoId: '',
                         childThreeId: '',
+                        childFourId: '',
                       }))}
                       className="adm-field-input"
                     >
@@ -4758,6 +4836,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                         ...p,
                         childTwoId: e.target.value,
                         childThreeId: '',
+                        childFourId: '',
                       }))}
                       className="adm-field-input"
                     >
@@ -4771,16 +4850,36 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
               {(() => {
                 const rawOptions = childrenOf(taxonomyTree, productForm.childTwoId);
                 const childThreeOptions = withCurrentOption(rawOptions, productForm.childThreeId);
-                if (!productForm.childTwoId || !childThreeOptions.length) return null;
+                if (!productForm.childTwoId) return null;
+                if (!childThreeOptions.length && !productForm.childThreeId) return null;
                 return (
                   <AdminField label="Child category 3">
                     <select
                       value={productForm.childThreeId}
-                      onChange={(e) => setProductForm((p) => ({ ...p, childThreeId: e.target.value }))}
+                      onChange={(e) => setProductForm((p) => ({ ...p, childThreeId: e.target.value, childFourId: '' }))}
                       className="adm-field-input"
                     >
                       <option value="">— None —</option>
                       {childThreeOptions.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+                    </select>
+                  </AdminField>
+                );
+              })()}
+
+              {(() => {
+                const rawOptions = childrenOf(taxonomyTree, productForm.childThreeId);
+                const childFourOptions = withCurrentOption(rawOptions, productForm.childFourId);
+                if (!productForm.childThreeId) return null;
+                if (!childFourOptions.length && !productForm.childFourId) return null;
+                return (
+                  <AdminField label="Child category 4">
+                    <select
+                      value={productForm.childFourId}
+                      onChange={(e) => setProductForm((p) => ({ ...p, childFourId: e.target.value }))}
+                      className="adm-field-input"
+                    >
+                      <option value="">— None —</option>
+                      {childFourOptions.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
                     </select>
                   </AdminField>
                 );

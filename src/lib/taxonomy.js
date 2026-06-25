@@ -50,7 +50,16 @@ export function slugToLabelFromTree(slug, tree) {
 
 /** Legacy nav ids whose slug no longer matches labelToSlug(label) after a rename. */
 const LEGACY_NAV_ALIASES = {
-  'arts-crafts-stationery': 'art-supplies-and-stationery',
+  // Pre-restructure aliases — keep old slugs resolving to new top-level ids
+  'arts-crafts-stationery': 'stationery',
+  'art-supplies-and-stationery': 'stationery',
+  'beads-jewellery-accessories': 'beads',
+  'events-parties': 'party-events-seasonals',
+  'food-drinks': 'confectionery',
+  'homeware-kitchen': 'homeware',
+  'motarro': 'stationery',
+  'packaging': 'packaging-storage',
+  'toys-games-kids': 'kids-toys-games',
 };
 
 /**
@@ -150,6 +159,22 @@ function normalizeLabel(label) {
   return String(label || '').trim().toLowerCase();
 }
 
+const SUB_COLS = ['subcategory_one', 'subcategory_two', 'subcategory_three', 'subcategory_four'];
+
+function resolvePathFromLabels(nodes, labels, path) {
+  if (!labels.length) return path;
+  const [head, ...tail] = labels;
+  const target = normalizeLabel(head);
+  const matches = (nodes || []).filter((n) => normalizeLabel(n.label) === target);
+  if (!matches.length) return [...path, labelToSlug(head)];
+  for (const node of matches) {
+    const result = resolvePathFromLabels(node.children || [], tail, [...path, node.id]);
+    if (!tail.length) return result;
+    if (result.length > path.length + 1) return result;
+  }
+  return [...path, labelToSlug(head)];
+}
+
 /**
  * Resolve a product row's labels to the *current* taxonomy node ids.
  * Taxonomy ids stay stable across rename, but product rows store the live
@@ -159,7 +184,7 @@ export function resolveCategoryIdsFromTree(row, tree) {
   const fallback = () => {
     const ids = [];
     if (row.category) ids.push(labelToSlug(row.category));
-    for (const col of ['subcategory_one', 'subcategory_two', 'subcategory_three', 'subcategory_four']) {
+    for (const col of SUB_COLS) {
       if (row[col]) ids.push(labelToSlug(row[col])); else break;
     }
     return { categoryId: ids[0] || '', categoryPath: ids };
@@ -167,21 +192,43 @@ export function resolveCategoryIdsFromTree(row, tree) {
 
   if (!Array.isArray(tree) || !tree.length) return fallback();
 
-  const labels = [row.category, row.subcategory_one, row.subcategory_two, row.subcategory_three, row.subcategory_four];
-  const ids = [];
-  let level = tree;
-  for (const rawLabel of labels) {
-    if (!rawLabel) break;
-    const target = normalizeLabel(rawLabel);
-    const node = (level || []).find((n) => normalizeLabel(n.label) === target);
-    if (!node) {
-      ids.push(labelToSlug(rawLabel));
-      break;
-    }
-    ids.push(node.id);
-    level = node.children || [];
+  const labels = [row.category, ...SUB_COLS.map((f) => row[f])].filter((v) => v != null && String(v).trim());
+  if (!labels.length) return { categoryId: '', categoryPath: [] };
+
+  const main = tree.find((c) => normalizeLabel(c.label) === normalizeLabel(labels[0]));
+  if (!main) return fallback();
+
+  const path = resolvePathFromLabels(main.children || [], labels.slice(1), [main.id]);
+  return { categoryId: path[0] || '', categoryPath: path };
+}
+
+/** True when an adapted product matches a taxonomy nav path (node ids). */
+export function productMatchesNavPath(product, tree, navPath) {
+  if (!Array.isArray(navPath) || !navPath.length) return true;
+  if (navPath[0] === '__uncategorized__') return !product.categoryLabel && !product.category;
+
+  const row = {
+    category: product.categoryLabel || '',
+    subcategory_one: product.subcategoryLabels?.[0] ?? null,
+    subcategory_two: product.subcategoryLabels?.[1] ?? null,
+    subcategory_three: product.subcategoryLabels?.[2] ?? null,
+    subcategory_four: product.subcategoryLabels?.[3] ?? null,
+  };
+
+  const main = (tree || []).find((c) => c.id === navPath[0]);
+  if (!main) return false;
+  if (normalizeLabel(row.category) !== normalizeLabel(main.label)) return false;
+
+  const rowSubs = SUB_COLS.map((f) => row[f]).filter((v) => v != null && String(v).trim());
+  let children = main.children || [];
+
+  for (let i = 1; i < navPath.length; i += 1) {
+    const node = (children || []).find((n) => n.id === navPath[i]);
+    if (!node) return false;
+    if (normalizeLabel(rowSubs[i - 1]) !== normalizeLabel(node.label)) return false;
+    children = node.children || [];
   }
-  return { categoryId: ids[0] || '', categoryPath: ids };
+  return true;
 }
 
 export { categories };
