@@ -1,5 +1,5 @@
 import { adminProductSearch, fuzzyFilter } from './fuzzySearch';
-import { labelToSlug, resolveCategoryIdsFromTree, slugToLabel, slugToLabelFromTree } from './taxonomy';
+import { labelToSlug, resolveCategoryIdsFromTree, slugToLabel, slugToLabelFromTree, productMatchesNavPath } from './taxonomy';
 import { queryClient } from './queryClient';
 import { queryKeys } from './queryKeys';
 
@@ -121,7 +121,7 @@ function adapt(row, { archived = false, tree = null } = {}) {
     subcategoryLabels: subLabels,
     tags: [],
     badges: [],
-    isNew: false,
+    isNew: !!row.is_new_arrival,
     isSpecial: false,
     isArchived: archived,
     sortOrder: 0,
@@ -229,6 +229,10 @@ export function invalidateAdminCache() {
 
 function applyPathFilter(products, categoryPath) {
   if (!Array.isArray(categoryPath) || !categoryPath.length) return products;
+  const tree = _liveTaxonomyTree || [];
+  if (tree.length) {
+    return products.filter((p) => productMatchesNavPath(p, tree, categoryPath));
+  }
   return products.filter((p) => {
     const cp = p.categoryPath || [];
     const depth = Math.min(cp.length, categoryPath.length);
@@ -555,6 +559,13 @@ export async function applyDormantLive(sku) {
   return json;
 }
 
+/** Toggle curated New Arrivals placement on the trade site homepage. */
+export async function setNewArrival(sku, isNewArrival) {
+  await stockAction({ action: 'setNewArrival', sku, isNewArrival: !!isNewArrival });
+  invalidateProductCache();
+  invalidateAdminCache();
+}
+
 /** Keep a product on the live site even when source stock is zero (opts out of auto-oos archive). */
 export async function setKeepLiveWhenOos(sku, keepLive) {
   await stockAction({ action: 'setKeepLive', sku, keepLive: !!keepLive });
@@ -611,11 +622,17 @@ export async function fetchReorderProducts({
   return products.sort((a, b) => a.name.localeCompare(b.name));
 }
 
-export async function bulkMoveProducts({ skus, categoryId, subcategoryId }) {
+export async function bulkMoveProducts({ skus, categoryId, subcategoryId, categoryPathIds }) {
   const res = await fetch('/api/bulk-products', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action: 'move', skus, categoryId, subcategoryId }),
+    body: JSON.stringify({
+      action: 'move',
+      skus,
+      categoryId,
+      subcategoryId,
+      categoryPathIds,
+    }),
   });
   const json = await res.json();
   if (!res.ok && res.status !== 207) throw new Error(json.error || 'Bulk move failed');

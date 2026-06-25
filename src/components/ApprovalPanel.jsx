@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertCircle, Check, CheckCircle, ChevronLeft, ChevronRight, ImageOff, Loader2, Trash2, X, ZoomIn } from 'lucide-react';
 import { dismissImageBatch, subscribeImageBatch } from '../lib/imageBatchTracker';
 import { applyDormantLive } from '../lib/products';
+import { mapWithConcurrency } from '../lib/concurrency';
 
 function buildGallery(item) {
   const list = [];
@@ -230,7 +231,8 @@ function SetLiveNotice({ notice, onDismiss }) {
   );
 }
 
-const POLL_INTERVAL = 12_000;
+const POLL_INTERVAL = 30_000;
+const APPLY_LIVE_CONCURRENCY = 2;
 
 function itemsSignature(list) {
   return (list || []).map((item) => [
@@ -328,9 +330,16 @@ export default function ApprovalPanel({ onShowToast, onRefreshStats, embedded = 
     const succeeded = new Set();
     let ok = 0;
     let applied = 0;
-    const results = await Promise.allSettled(list.map((sku) => applyDormantLive(sku)));
-    results.forEach((r, i) => {
-      const sku = list[i];
+    const settled = await mapWithConcurrency(list, APPLY_LIVE_CONCURRENCY, async (sku) => {
+      try {
+        const value = await applyDormantLive(sku);
+        return { sku, status: 'fulfilled', value };
+      } catch (reason) {
+        return { sku, status: 'rejected', reason };
+      }
+    });
+    settled.forEach((r) => {
+      const { sku } = r;
       if (r.status === 'fulfilled') {
         ok += 1;
         succeeded.add(sku);

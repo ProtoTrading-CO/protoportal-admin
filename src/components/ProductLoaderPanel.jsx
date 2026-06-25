@@ -1,14 +1,19 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   AlertTriangle,
   CheckCircle,
+  FolderOpen,
+  ImagePlus,
   Loader2,
   PackagePlus,
   RefreshCw,
   Sparkles,
+  Trash2,
   Upload,
+  X,
 } from 'lucide-react';
 import categories from '../data/categories.json';
+import { isImageFile } from '../lib/parseIntakeFilename.js';
 
 // Maps Gemini's category labels to taxonomy IDs
 const GEMINI_CATEGORY_MAP = {
@@ -26,6 +31,60 @@ const GEMINI_CATEGORY_MAP = {
 };
 
 const SLOT_FIELDS = ['image_url_one', 'image_url_two', 'image_url_three', 'image_url_four'];
+
+function categoryLabelsFromIds(tree, categoryId, sub1Id, sub2Id, sub3Id = '', sub4Id = '') {
+  const catNode = findNode(tree, categoryId);
+  const sub1Node = findNode(tree, sub1Id);
+  const sub2Node = findNode(tree, sub2Id);
+  const sub3Node = findNode(tree, sub3Id);
+  const sub4Node = findNode(tree, sub4Id);
+  return {
+    category: catNode?.label || '',
+    subcategoryOne: sub1Node?.label || catNode?.label || '',
+    subcategoryTwo: sub2Node?.label || null,
+    subcategoryThree: sub3Node?.label || null,
+    subcategoryFour: sub4Node?.label || null,
+  };
+}
+
+function normalizeRowLabel(label) {
+  return String(label || '').trim().toLowerCase();
+}
+
+function idsFromRowLabels(tree, row) {
+  const out = { categoryId: '', sub1Id: '', sub2Id: '', sub3Id: '', sub4Id: '' };
+  const cat = tree.find((c) => normalizeRowLabel(c.label) === normalizeRowLabel(row.category));
+  if (!cat) return out;
+  out.categoryId = cat.id;
+
+  const labels = [
+    row.subcategoryOne ?? row.subcategory_one,
+    row.subcategoryTwo ?? row.subcategory_two,
+    row.subcategoryThree ?? row.subcategory_three,
+    row.subcategoryFour ?? row.subcategory_four,
+  ].filter(Boolean);
+
+  let children = cat.children || [];
+  const keys = ['sub1Id', 'sub2Id', 'sub3Id', 'sub4Id'];
+  for (let i = 0; i < labels.length && i < keys.length; i += 1) {
+    const child = children.find((c) => normalizeRowLabel(c.label) === normalizeRowLabel(labels[i]));
+    if (!child) break;
+    out[keys[i]] = child.id;
+    children = child.children || [];
+  }
+  return out;
+}
+
+async function dormantApi(body) {
+  const res = await fetch('/api/product-loader-dormant', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json.error || 'Dormant request failed');
+  return json;
+}
 
 function findNode(tree, id) {
   for (const n of tree) {
@@ -78,8 +137,63 @@ function SectionHead({ title, action }) {
   );
 }
 
-export default function ProductLoaderPanel({ taxonomyTree = categories, onShowToast }) {
+export default function ProductLoaderPanel({
+  taxonomyTree = categories,
+  onShowToast,
+  initialCode = '',
+  onInitialCodeConsumed,
+}) {
   const fileRef = useRef(null);
+  const folderRef = useRef(null);
+
+  const [batchItems, setBatchItems] = useState([]);
+  const [batchScanning, setBatchScanning] = useState(false);
+  const [batchProcessing, setBatchProcessing] = useState(false);
+  const [batchProgress, setBatchProgress] = useState({ done: 0, total: 0, current: '' });
+  const [batchDefaultCategoryId, setBatchDefaultCategoryId] = useState('');
+  const [batchDefaultSub1Id, setBatchDefaultSub1Id] = useState('');
+  const [batchOverwrite, setBatchOverwrite] = useState(false);
+  const [batchError, setBatchError] = useState('');
+  const [sqlLiveStatus, setSqlLiveStatus] = useState(null);
+
+  const [dormantRows, setDormantRows] = useState([]);
+  const [dormantEdits, setDormantEdits] = useState({});
+  const [dormantLoading, setDormantLoading] = useState(false);
+  const [dormantSaving, setDormantSaving] = useState('');
+  const singleProductRef = useRef(null);
+
+  const loadDormant = async () => {
+    setDormantLoading(true);
+    try {
+      const res = await fetch('/api/product-loader-dormant');
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Failed to load dormant queue');
+      const rows = json.rows || [];
+      setDormantRows(rows);
+      const edits = {};
+      for (const row of rows) {
+        edits[row.sku] = idsFromRowLabels(taxonomyTree, row);
+      }
+      setDormantEdits(edits);
+    } catch (err) {
+      onShowToast?.(err.message || 'Failed to load dormant products', 'error');
+    } finally {
+      setDormantLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadDormant();
+  }, [taxonomyTree]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/product-loader-diag?code=8626100145')
+      .then((r) => r.json())
+      .then((json) => { if (!cancelled) setSqlLiveStatus(json); })
+      .catch(() => { if (!cancelled) setSqlLiveStatus(null); });
+    return () => { cancelled = true; };
+  }, []);
 
   const [code, setCode] = useState('');
   const [lookingUp, setLookingUp] = useState(false);
@@ -99,6 +213,8 @@ export default function ProductLoaderPanel({ taxonomyTree = categories, onShowTo
   const [categoryId, setCategoryId] = useState('');
   const [sub1Id, setSub1Id] = useState('');
   const [sub2Id, setSub2Id] = useState('');
+  const [sub3Id, setSub3Id] = useState('');
+  const [sub4Id, setSub4Id] = useState('');
   const [analyzing, setAnalyzing] = useState(false);
   const [categorySource, setCategorySource] = useState('manual');
 
@@ -118,6 +234,8 @@ export default function ProductLoaderPanel({ taxonomyTree = categories, onShowTo
     setCategoryId('');
     setSub1Id('');
     setSub2Id('');
+    setSub3Id('');
+    setSub4Id('');
     setCategorySource('manual');
     setOverwriteConfirmed(false);
     setPriceZeroConfirmed(false);
@@ -125,9 +243,284 @@ export default function ProductLoaderPanel({ taxonomyTree = categories, onShowTo
     setPublishError('');
   };
 
-  const handleLookup = async () => {
-    const c = code.trim();
+  const handleFolderSelect = async (fileList) => {
+    const files = [...(fileList || [])].filter(isImageFile);
+    if (!files.length) {
+      setBatchError('No image files found in that folder.');
+      return;
+    }
+
+    setBatchScanning(true);
+    setBatchError('');
+    setBatchItems([]);
+
+    try {
+      const res = await fetch('/api/product-loader-batch-lookup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filenames: files.map((f) => f.name) }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Folder scan failed');
+
+      const fileByName = new Map(files.map((f) => [f.name, f]));
+      const merged = (json.items || []).map((item) => ({
+        ...item,
+        file: fileByName.get(item.filename) || null,
+        status: item.warnings?.includes('not_in_catalog') ? 'unmatched' : 'ready',
+        processError: '',
+      }));
+
+      setBatchItems(merged);
+      onShowToast?.(`Matched ${json.summary?.matched ?? 0} of ${json.summary?.total ?? merged.length} images`, 'success');
+    } catch (err) {
+      setBatchError(err.message || 'Folder scan failed');
+    } finally {
+      setBatchScanning(false);
+    }
+  };
+
+  const handleBatchPublish = async () => {
+    const ready = batchItems.filter((i) => i.status === 'ready' && i.file && i.code);
+    if (!ready.length) return;
+
+    const needsCategory = ready.some((i) => !i.websiteRow?.category);
+    if (needsCategory && !batchDefaultCategoryId) {
+      setBatchError('Pick a default category for products not already on the website.');
+      return;
+    }
+
+    setBatchProcessing(true);
+    setBatchError('');
+    setBatchProgress({ done: 0, total: ready.length, current: '' });
+
+    let ok = 0;
+    let failed = 0;
+
+    for (let idx = 0; idx < ready.length; idx += 1) {
+      const item = ready[idx];
+      setBatchProgress({ done: idx, total: ready.length, current: item.filename });
+      setBatchItems((prev) => prev.map((row) => (
+        row.filename === item.filename ? { ...row, status: 'processing' } : row
+      )));
+
+      try {
+        const b64 = await fileToBase64(item.file);
+        const uploadRes = await fetch('/api/upload-product-image', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            filename: item.filename,
+            contentType: item.file.type || 'image/jpeg',
+            base64: b64,
+            sku: item.code,
+            imageSlot: item.imageSlot,
+          }),
+        });
+        const uploadJson = await uploadRes.json();
+        if (!uploadRes.ok) throw new Error(uploadJson.error || 'Upload failed');
+
+        const catId = item.websiteRow?.category
+          ? (taxonomyTree.find((c) => c.label === item.websiteRow.category)?.id || batchDefaultCategoryId)
+          : batchDefaultCategoryId;
+        const sub1IdForItem = item.websiteRow?.subcategory_one
+          ? ((findNode(taxonomyTree, catId)?.children || []).find((c) => c.label === item.websiteRow.subcategory_one)?.id || batchDefaultSub1Id)
+          : batchDefaultSub1Id;
+
+        const catNode = findNode(taxonomyTree, catId);
+        const sub1Node = findNode(taxonomyTree, sub1IdForItem);
+        const categoryLabel = catNode?.label || item.websiteRow?.category || '';
+        const sub1Label = sub1Node?.label || item.websiteRow?.subcategory_one || categoryLabel;
+
+        if (!categoryLabel) throw new Error('No category available');
+
+        const publishRes = await fetch('/api/product-loader-publish', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            code: item.code,
+            title: item.title || item.sqlRow?.title || item.code,
+            price: item.price ?? item.sqlRow?.price ?? 0,
+            barcode: item.barcode || item.websiteRow?.barcode || item.code,
+            imageUrl: uploadJson.url,
+            imageSlot: item.imageSlot,
+            imageSource: 'upload',
+            overwriteImage: batchOverwrite || item.warnings?.includes('image_exists'),
+            category: categoryLabel,
+            subcategoryOne: sub1Label,
+            subcategoryTwo: item.websiteRow?.subcategory_two || null,
+            description: item.websiteRow?.original_description || item.sqlRow?.title || '',
+            categoryConfidence: item.websiteRow ? 1 : 0.5,
+            publishMode: 'direct',
+          }),
+        });
+        const publishJson = await publishRes.json();
+        if (!publishRes.ok) throw new Error(publishJson.error || 'Publish failed');
+
+        ok += 1;
+        setBatchItems((prev) => prev.map((row) => (
+          row.filename === item.filename ? { ...row, status: 'done', processError: '' } : row
+        )));
+      } catch (err) {
+        failed += 1;
+        setBatchItems((prev) => prev.map((row) => (
+          row.filename === item.filename ? { ...row, status: 'error', processError: err.message } : row
+        )));
+      }
+    }
+
+    setBatchProgress({ done: ready.length, total: ready.length, current: '' });
+    setBatchProcessing(false);
+    onShowToast?.(`Folder done: ${ok} published${failed ? `, ${failed} failed` : ''}`, failed ? 'error' : 'success');
+  };
+
+  const removeBatchItem = (filename) => {
+    setBatchItems((prev) => prev.filter((row) => row.filename !== filename));
+  };
+
+  const clearBatchList = () => {
+    setBatchItems([]);
+    setBatchError('');
+  };
+
+  const saveLookupToDormant = async () => {
+    if (!lookupData || !categoryId || !sub1Id) {
+      setPublishError('Pick a category and subcategory before saving to dormant.');
+      return;
+    }
+    const labels = categoryLabelsFromIds(taxonomyTree, categoryId, sub1Id, sub2Id, sub3Id, sub4Id);
+    setDormantSaving('single');
+    setPublishError('');
+    try {
+      await dormantApi({
+        action: 'save',
+        code: websiteRow?.sku || code,
+        title: sqlRow?.title || websiteRow?.title || code,
+        price: sqlRow?.price ?? websiteRow?.price ?? 0,
+        description: websiteRow?.original_description || sqlRow?.title || '',
+        ...labels,
+      });
+      await loadDormant();
+      onShowToast?.(`Saved ${websiteRow?.sku || code} to dormant queue`, 'success');
+    } catch (err) {
+      setPublishError(err.message);
+    } finally {
+      setDormantSaving('');
+    }
+  };
+
+  const saveBatchToDormant = async () => {
+    const ready = batchItems.filter((i) => i.status === 'ready' && i.code);
+    if (!ready.length) return;
+    if (!batchDefaultCategoryId || !batchDefaultSub1Id) {
+      setBatchError('Pick a default category and subcategory for dormant queue.');
+      return;
+    }
+    const labels = categoryLabelsFromIds(taxonomyTree, batchDefaultCategoryId, batchDefaultSub1Id, '');
+    setDormantSaving('batch');
+    setBatchError('');
+    let ok = 0;
+    try {
+      for (const item of ready) {
+        await dormantApi({
+          action: 'save',
+          code: item.code,
+          title: item.title || item.sqlRow?.title || item.code,
+          price: item.price ?? item.sqlRow?.price ?? 0,
+          description: item.websiteRow?.original_description || item.sqlRow?.title || '',
+          category: item.websiteRow?.category || labels.category,
+          subcategoryOne: item.websiteRow?.subcategory_one || labels.subcategoryOne,
+          subcategoryTwo: item.websiteRow?.subcategory_two || null,
+        });
+        ok += 1;
+      }
+      await loadDormant();
+      onShowToast?.(`Added ${ok} product${ok === 1 ? '' : 's'} to dormant queue`, 'success');
+    } catch (err) {
+      setBatchError(err.message);
+    } finally {
+      setDormantSaving('');
+    }
+  };
+
+  const removeDormantRow = async (sku) => {
+    if (!window.confirm(`Remove ${sku} from dormant queue?`)) return;
+    setDormantSaving(`rm-${sku}`);
+    try {
+      await dormantApi({ action: 'remove', code: sku });
+      setDormantRows((prev) => prev.filter((r) => r.sku !== sku));
+      onShowToast?.(`Removed ${sku} from dormant queue`, 'success');
+    } catch (err) {
+      onShowToast?.(err.message, 'error');
+    } finally {
+      setDormantSaving('');
+    }
+  };
+
+  const saveDormantCategories = async (sku) => {
+    const edit = dormantEdits[sku];
+    if (!edit?.categoryId || !edit?.sub1Id) {
+      onShowToast?.('Category and subcategory are required', 'error');
+      return;
+    }
+    const labels = categoryLabelsFromIds(taxonomyTree, edit.categoryId, edit.sub1Id, edit.sub2Id, edit.sub3Id, edit.sub4Id);
+    setDormantSaving(`cat-${sku}`);
+    try {
+      await dormantApi({ action: 'updateCategories', code: sku, ...labels });
+      await loadDormant();
+      onShowToast?.(`Updated categories for ${sku}`, 'success');
+    } catch (err) {
+      onShowToast?.(err.message, 'error');
+    } finally {
+      setDormantSaving('');
+    }
+  };
+
+  const sendDormantToImageGen = async (row) => {
+    const sku = row.sku;
+    setCode(sku);
+    setLookupData(null);
+    setLookupError('');
+    resetLookupDependents();
+
+    const edit = dormantEdits[sku] || idsFromRowLabels(taxonomyTree, row);
+    setCategoryId(edit.categoryId || '');
+    setSub1Id(edit.sub1Id || '');
+    setSub2Id(edit.sub2Id || '');
+    setSub3Id(edit.sub3Id || '');
+    setSub4Id(edit.sub4Id || '');
+    setCategorySource('existing');
+
+    setLookingUp(true);
+    try {
+      const res = await fetch(`/api/product-loader-lookup?code=${encodeURIComponent(sku)}`);
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Lookup failed');
+      setLookupData(json);
+      setMatchedBy(json.matchedBy || null);
+      if (json.websiteRow) {
+        const ws = json.websiteRow;
+        if (!edit.categoryId) {
+          setCategoryId(taxonomyTree.find((c) => c.label === ws.category)?.id || '');
+        }
+        if (json.existingImages.length) {
+          setImageUrl(json.existingImages[0]);
+          setImageSource('existing');
+        }
+      }
+      singleProductRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      onShowToast?.(`${sku} ready — upload or generate an image below`, 'success');
+    } catch (err) {
+      setLookupError(err.message || 'Lookup failed');
+    } finally {
+      setLookingUp(false);
+    }
+  };
+
+  const handleLookup = async (codeOverride) => {
+    const c = String(codeOverride ?? code).trim();
     if (!c) return;
+    if (codeOverride) setCode(c);
     setLookingUp(true);
     setLookupError('');
     setLookupData(null);
@@ -144,9 +537,18 @@ export default function ProductLoaderPanel({ taxonomyTree = categories, onShowTo
       // Pre-fill from existing website row
       if (json.websiteRow) {
         const ws = json.websiteRow;
-        setCategoryId(ws.category || '');
-        setSub1Id(ws.subcategory_one || '');
-        setSub2Id(ws.subcategory_two || '');
+        const resolved = idsFromRowLabels(taxonomyTree, {
+          category: ws.category,
+          subcategory_one: ws.subcategory_one,
+          subcategory_two: ws.subcategory_two,
+          subcategory_three: ws.subcategory_three,
+          subcategory_four: ws.subcategory_four,
+        });
+        setCategoryId(resolved.categoryId || '');
+        setSub1Id(resolved.sub1Id || '');
+        setSub2Id(resolved.sub2Id || '');
+        setSub3Id(resolved.sub3Id || '');
+        setSub4Id(resolved.sub4Id || '');
         setCategorySource('existing');
         const firstEmpty = SLOT_FIELDS.findIndex((f) => !ws[f]);
         const targetSlot = firstEmpty >= 0 ? firstEmpty + 1 : 1;
@@ -156,12 +558,21 @@ export default function ProductLoaderPanel({ taxonomyTree = categories, onShowTo
           setImageSource('existing');
         }
       }
+      if (codeOverride) {
+        singleProductRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
     } catch (err) {
       setLookupError(err.message || 'Lookup failed');
     } finally {
       setLookingUp(false);
     }
   };
+
+  useEffect(() => {
+    const c = String(initialCode || '').trim();
+    if (!c) return;
+    void handleLookup(c).finally(() => onInitialCodeConsumed?.());
+  }, [initialCode]);
 
   const handleFileSelect = async (file) => {
     if (!file?.type.startsWith('image/')) return;
@@ -255,6 +666,8 @@ export default function ProductLoaderPanel({ taxonomyTree = categories, onShowTo
         setCategoryId(suggestedId);
         setSub1Id(node?.children?.[0]?.id || '');
         setSub2Id('');
+        setSub3Id('');
+        setSub4Id('');
         setCategorySource('gemini');
       }
     } catch (err) {
@@ -272,6 +685,7 @@ export default function ProductLoaderPanel({ taxonomyTree = categories, onShowTo
     lookupData
     && imageUrl
     && categoryId
+    && sub1Id
     && (!warnings.includes('price_zero') || priceZeroConfirmed)
     && (!isOverwritingFilledSlot || overwriteConfirmed)
     && !publishing
@@ -286,6 +700,8 @@ export default function ProductLoaderPanel({ taxonomyTree = categories, onShowTo
     const catNode = findNode(taxonomyTree, categoryId);
     const sub1Node = findNode(taxonomyTree, sub1Id);
     const sub2Node = findNode(taxonomyTree, sub2Id);
+    const sub3Node = findNode(taxonomyTree, sub3Id);
+    const sub4Node = findNode(taxonomyTree, sub4Id);
 
     setPublishing(true);
     setPublishError('');
@@ -297,6 +713,7 @@ export default function ProductLoaderPanel({ taxonomyTree = categories, onShowTo
           code,
           title,
           price,
+          barcode: websiteRow?.barcode || sqlRow?.barcode || code,
           imageUrl,
           imageSlot,
           imageSource,
@@ -304,6 +721,8 @@ export default function ProductLoaderPanel({ taxonomyTree = categories, onShowTo
           category: catNode?.label || categoryId,
           subcategoryOne: sub1Node?.label || sub1Id || catNode?.label || categoryId,
           subcategoryTwo: sub2Node?.label || sub2Id || null,
+          subcategoryThree: sub3Node?.label || sub3Id || null,
+          subcategoryFour: sub4Node?.label || sub4Id || null,
           description: websiteRow?.original_description || sqlRow?.title || '',
           categoryConfidence: categorySource === 'gemini' ? 0.85 : 1.0,
           publishMode: 'direct',
@@ -312,6 +731,10 @@ export default function ProductLoaderPanel({ taxonomyTree = categories, onShowTo
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Publish failed');
       setPublishResult(json);
+      if (dormantRows.some((r) => r.sku === json.sku)) {
+        await dormantApi({ action: 'remove', code: json.sku }).catch(() => {});
+        setDormantRows((prev) => prev.filter((r) => r.sku !== json.sku));
+      }
       onShowToast?.(
         `${json.action === 'create' ? 'Published' : 'Updated'} ${code} successfully`,
         'success',
@@ -332,6 +755,11 @@ export default function ProductLoaderPanel({ taxonomyTree = categories, onShowTo
 
   const sub1Options = categoryId ? childrenOf(taxonomyTree, categoryId) : [];
   const sub2Options = sub1Id ? childrenOf(taxonomyTree, sub1Id) : [];
+  const sub3Options = sub2Id ? childrenOf(taxonomyTree, sub2Id) : [];
+  const sub4Options = sub3Id ? childrenOf(taxonomyTree, sub3Id) : [];
+  const batchSub1Options = batchDefaultCategoryId ? childrenOf(taxonomyTree, batchDefaultCategoryId) : [];
+  const batchReadyCount = batchItems.filter((i) => i.status === 'ready').length;
+  const batchUnmatchedCount = batchItems.filter((i) => i.status === 'unmatched').length;
 
   if (publishResult) {
     return (
@@ -353,14 +781,367 @@ export default function ProductLoaderPanel({ taxonomyTree = categories, onShowTo
   }
 
   return (
-    <div className="adm-panel" style={{ maxWidth: 680 }}>
+    <div className="adm-panel" style={{ maxWidth: 920 }}>
       {/* Header */}
       <div className="adm-section-head" style={{ marginBottom: 24 }}>
         <div>
           <h2 className="adm-section-title">Product Loader</h2>
-          <p className="adm-section-note">Publish products directly to the website from Positill.</p>
+          <p className="adm-section-note">Publish products from Positill — one at a time or upload a whole image folder.</p>
+          {sqlLiveStatus?.bridgeConfigured && (
+            <p style={{ fontSize: 12, marginTop: 6, fontWeight: 700, color: sqlLiveStatus.sqlConnectionTest ? '#15803d' : '#c2410c' }}>
+              {sqlLiveStatus.sqlConnectionTest
+                ? '● Live Positill SQL connected'
+                : '● Live SQL configured but bridge unreachable — check Cloudflare tunnel on BLADERUNNER'}
+            </p>
+          )}
         </div>
       </div>
+
+      {/* Folder batch */}
+      <section style={{ marginBottom: 28, paddingBottom: 24, borderBottom: '2px solid #e5e7eb' }}>
+        <SectionHead title="Image folder" />
+        <p style={{ fontSize: 13, color: '#64748b', margin: '0 0 12px', lineHeight: 1.5 }}>
+          Name each file with the product code — e.g. <code>8626100145.jpg</code> or <code>ME039-2-1.jpg</code> (code + image slot).
+          Lookups use {sqlLiveStatus?.bridgeConfigured ? 'live Positill SQL' : 'the master catalogue (~39k items)'} for title, price and stock.
+        </p>
+
+        <div
+          role="button"
+          tabIndex={0}
+          style={{
+            border: '2px dashed #cbd5e1', borderRadius: 10, padding: '18px 16px', textAlign: 'center',
+            cursor: batchScanning || batchProcessing ? 'wait' : 'pointer', background: '#f8fafc', marginBottom: 12,
+          }}
+          onClick={() => !batchScanning && !batchProcessing && folderRef.current?.click()}
+          onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && folderRef.current?.click()}
+        >
+          <input
+            ref={folderRef}
+            type="file"
+            accept="image/*"
+            multiple
+            webkitdirectory=""
+            directory=""
+            hidden
+            onChange={(e) => {
+              void handleFolderSelect(e.target.files);
+              e.target.value = '';
+            }}
+          />
+          {batchScanning ? (
+            <span style={{ fontSize: 13, color: '#64748b' }}><Loader2 size={16} className="spin" style={{ verticalAlign: 'middle', marginRight: 6 }} />Scanning folder…</span>
+          ) : (
+            <span style={{ fontSize: 13, color: '#475569' }}><FolderOpen size={16} style={{ verticalAlign: 'middle', marginRight: 6 }} />Choose image folder</span>
+          )}
+        </div>
+
+        {batchError && <div style={{ color: '#dc2626', fontSize: 13, marginBottom: 10 }}>{batchError}</div>}
+
+        {batchItems.length > 0 && (
+          <>
+            <div style={{ fontSize: 13, color: '#475569', marginBottom: 10 }}>
+              <strong>{batchReadyCount}</strong> ready
+              {batchUnmatchedCount > 0 && <> · <span style={{ color: '#dc2626' }}>{batchUnmatchedCount} not in catalogue</span></>}
+            </div>
+
+            <div style={{ maxHeight: 220, overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: 8, marginBottom: 12 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                <thead>
+                  <tr style={{ background: '#f8fafc', textAlign: 'left' }}>
+                    <th style={{ padding: '8px 10px' }}>File</th>
+                    <th style={{ padding: '8px 10px' }}>Code</th>
+                    <th style={{ padding: '8px 10px' }}>Product</th>
+                    <th style={{ padding: '8px 10px' }}>Slot</th>
+                    <th style={{ padding: '8px 10px' }}>Status</th>
+                    <th style={{ padding: '8px 10px', width: 40 }} />
+                  </tr>
+                </thead>
+                <tbody>
+                  {batchItems.map((row) => (
+                    <tr key={row.filename} style={{ borderTop: '1px solid #f1f5f9' }}>
+                      <td style={{ padding: '7px 10px', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.filename}</td>
+                      <td style={{ padding: '7px 10px', fontWeight: 700 }}>{row.code || '—'}</td>
+                      <td style={{ padding: '7px 10px', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={row.title}>{row.title || '—'}</td>
+                      <td style={{ padding: '7px 10px' }}>{row.imageSlot}</td>
+                      <td style={{ padding: '7px 10px', color: row.status === 'done' ? '#16a34a' : row.status === 'error' || row.status === 'unmatched' ? '#dc2626' : '#64748b' }}>
+                        {row.status === 'processing' ? '…' : row.status}
+                        {row.processError && ` — ${row.processError}`}
+                      </td>
+                      <td style={{ padding: '7px 6px' }}>
+                        <button
+                          type="button"
+                          className="adm-icon-btn"
+                          title="Remove from list"
+                          disabled={batchProcessing}
+                          onClick={() => removeBatchItem(row.filename)}
+                        >
+                          <X size={14} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
+              <div>
+                <label style={{ fontSize: 12, color: '#64748b', display: 'block', marginBottom: 4 }}>Default category (for new products)</label>
+                <select
+                  className="adm-select adm-select--enhanced"
+                  style={{ width: '100%' }}
+                  value={batchDefaultCategoryId}
+                  onChange={(e) => { setBatchDefaultCategoryId(e.target.value); setBatchDefaultSub1Id(''); }}
+                >
+                  <option value="">— Select if needed —</option>
+                  {taxonomyTree.map((cat) => (
+                    <option key={cat.id} value={cat.id}>{cat.label}</option>
+                  ))}
+                </select>
+              </div>
+              {batchSub1Options.length > 0 && (
+                <div>
+                  <label style={{ fontSize: 12, color: '#64748b', display: 'block', marginBottom: 4 }}>Default subcategory (required for dormant)</label>
+                  <select
+                    className="adm-select adm-select--enhanced"
+                    style={{ width: '100%' }}
+                    value={batchDefaultSub1Id}
+                    onChange={(e) => setBatchDefaultSub1Id(e.target.value)}
+                  >
+                    <option value="">— Optional —</option>
+                    {batchSub1Options.map((opt) => (
+                      <option key={opt.id} value={opt.id}>{opt.label}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer', userSelect: 'none' }}>
+                <input type="checkbox" checked={batchOverwrite} onChange={(e) => setBatchOverwrite(e.target.checked)} />
+                Replace images if slot already filled
+              </label>
+            </div>
+
+            {batchProcessing && (
+              <p style={{ fontSize: 12, color: '#64748b', marginBottom: 10 }}>
+                Processing {batchProgress.done + 1}/{batchProgress.total}
+                {batchProgress.current ? ` — ${batchProgress.current}` : ''}
+              </p>
+            )}
+
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              <button
+                type="button"
+                className="adm-btn-red"
+                onClick={() => void handleBatchPublish()}
+                disabled={batchProcessing || batchScanning || batchReadyCount === 0}
+              >
+                {batchProcessing ? <Loader2 size={15} className="spin" /> : <Upload size={15} />}
+                {batchProcessing ? 'Publishing folder…' : `Upload & publish ${batchReadyCount} image${batchReadyCount === 1 ? '' : 's'}`}
+              </button>
+              <button
+                type="button"
+                className="adm-btn-ghost"
+                onClick={() => void saveBatchToDormant()}
+                disabled={batchProcessing || batchScanning || batchReadyCount === 0 || dormantSaving === 'batch'}
+              >
+                {dormantSaving === 'batch' ? <Loader2 size={15} className="spin" /> : <PackagePlus size={15} />}
+                Add {batchReadyCount} to dormant
+              </button>
+              <button
+                type="button"
+                className="adm-btn-ghost"
+                onClick={clearBatchList}
+                disabled={batchProcessing || batchScanning}
+              >
+                Clear list
+              </button>
+            </div>
+          </>
+        )}
+      </section>
+
+      {/* Dormant queue */}
+      <section style={{ marginBottom: 28, paddingBottom: 24, borderBottom: '2px solid #e5e7eb' }}>
+        <SectionHead
+          title={`Dormant products (${dormantRows.length})`}
+          action={(
+            <button type="button" className="adm-btn-ghost adm-btn-sm" onClick={() => void loadDormant()} disabled={dormantLoading}>
+              {dormantLoading ? <Loader2 size={13} className="spin" /> : <RefreshCw size={13} />}
+              Refresh
+            </button>
+          )}
+        />
+        <p style={{ fontSize: 13, color: '#64748b', margin: '0 0 12px', lineHeight: 1.5 }}>
+          Products waiting for images — assign categories here, then send to image generation when ready.
+        </p>
+
+        {dormantLoading && !dormantRows.length && (
+          <p style={{ fontSize: 13, color: '#94a3b8' }}><Loader2 size={14} className="spin" style={{ verticalAlign: 'middle', marginRight: 6 }} />Loading…</p>
+        )}
+
+        {!dormantLoading && dormantRows.length === 0 && (
+          <p style={{ fontSize: 13, color: '#94a3b8', margin: 0 }}>No dormant products yet. Look up a code and use “Save to dormant” or add from a folder batch.</p>
+        )}
+
+        {dormantRows.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {dormantRows.map((row) => {
+              const edit = dormantEdits[row.sku] || { categoryId: '', sub1Id: '', sub2Id: '', sub3Id: '', sub4Id: '' };
+              const rowSub1Options = edit.categoryId ? childrenOf(taxonomyTree, edit.categoryId) : [];
+              const rowSub2Options = edit.sub1Id ? childrenOf(taxonomyTree, edit.sub1Id) : [];
+              const rowSub3Options = edit.sub2Id ? childrenOf(taxonomyTree, edit.sub2Id) : [];
+              const rowSub4Options = edit.sub3Id ? childrenOf(taxonomyTree, edit.sub3Id) : [];
+              const busy = dormantSaving === `rm-${row.sku}` || dormantSaving === `cat-${row.sku}`;
+
+              return (
+                <div
+                  key={row.sku}
+                  style={{
+                    border: '1px solid #e2e8f0', borderRadius: 10, padding: '12px 14px',
+                    background: '#fafafa', display: 'grid', gap: 10,
+                    gridTemplateColumns: '1fr auto',
+                    alignItems: 'start',
+                  }}
+                >
+                  <div>
+                    <div style={{ fontWeight: 800, fontSize: 14, color: '#111827', marginBottom: 2 }}>{row.title}</div>
+                    <div style={{ fontSize: 12, color: '#64748b', marginBottom: 10 }}>
+                      <strong>{row.sku}</strong>
+                      {row.price > 0 && <> · R{Number(row.price).toFixed(2)}</>}
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8 }}>
+                      <select
+                        className="adm-select adm-select--enhanced"
+                        value={edit.categoryId}
+                        disabled={busy}
+                        onChange={(e) => {
+                          const categoryId = e.target.value;
+                          setDormantEdits((prev) => ({
+                            ...prev,
+                            [row.sku]: { categoryId, sub1Id: '', sub2Id: '', sub3Id: '', sub4Id: '' },
+                          }));
+                        }}
+                      >
+                        <option value="">Category</option>
+                        {taxonomyTree.map((cat) => (
+                          <option key={cat.id} value={cat.id}>{cat.label}</option>
+                        ))}
+                      </select>
+                      {rowSub1Options.length > 0 && (
+                        <select
+                          className="adm-select adm-select--enhanced"
+                          value={edit.sub1Id}
+                          disabled={busy}
+                          onChange={(e) => {
+                            const sub1Id = e.target.value;
+                            setDormantEdits((prev) => ({
+                              ...prev,
+                              [row.sku]: { ...prev[row.sku], sub1Id, sub2Id: '', sub3Id: '', sub4Id: '' },
+                            }));
+                          }}
+                        >
+                          <option value="">Subcategory</option>
+                          {rowSub1Options.map((opt) => (
+                            <option key={opt.id} value={opt.id}>{opt.label}</option>
+                          ))}
+                        </select>
+                      )}
+                      {rowSub2Options.length > 0 && (
+                        <select
+                          className="adm-select adm-select--enhanced"
+                          value={edit.sub2Id}
+                          disabled={busy}
+                          onChange={(e) => {
+                            const sub2Id = e.target.value;
+                            setDormantEdits((prev) => ({
+                              ...prev,
+                              [row.sku]: { ...prev[row.sku], sub2Id, sub3Id: '', sub4Id: '' },
+                            }));
+                          }}
+                        >
+                          <option value="">Subcategory 2</option>
+                          {rowSub2Options.map((opt) => (
+                            <option key={opt.id} value={opt.id}>{opt.label}</option>
+                          ))}
+                        </select>
+                      )}
+                      {rowSub3Options.length > 0 && (
+                        <select
+                          className="adm-select adm-select--enhanced"
+                          value={edit.sub3Id}
+                          disabled={busy}
+                          onChange={(e) => {
+                            const sub3Id = e.target.value;
+                            setDormantEdits((prev) => ({
+                              ...prev,
+                              [row.sku]: { ...prev[row.sku], sub3Id, sub4Id: '' },
+                            }));
+                          }}
+                        >
+                          <option value="">Subcategory 3</option>
+                          {rowSub3Options.map((opt) => (
+                            <option key={opt.id} value={opt.id}>{opt.label}</option>
+                          ))}
+                        </select>
+                      )}
+                      {rowSub4Options.length > 0 && (
+                        <select
+                          className="adm-select adm-select--enhanced"
+                          value={edit.sub4Id}
+                          disabled={busy}
+                          onChange={(e) => {
+                            const sub4Id = e.target.value;
+                            setDormantEdits((prev) => ({
+                              ...prev,
+                              [row.sku]: { ...prev[row.sku], sub4Id },
+                            }));
+                          }}
+                        >
+                          <option value="">Subcategory 4</option>
+                          {rowSub4Options.map((opt) => (
+                            <option key={opt.id} value={opt.id}>{opt.label}</option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      className="adm-btn-ghost adm-btn-sm"
+                      style={{ marginTop: 8 }}
+                      disabled={busy}
+                      onClick={() => void saveDormantCategories(row.sku)}
+                    >
+                      Save categories
+                    </button>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-end' }}>
+                    <button
+                      type="button"
+                      className="adm-btn-red adm-btn-sm"
+                      disabled={busy}
+                      onClick={() => void sendDormantToImageGen(row)}
+                    >
+                      <ImagePlus size={14} /> Image gen
+                    </button>
+                    <button
+                      type="button"
+                      className="adm-btn-ghost adm-btn-sm"
+                      disabled={busy}
+                      onClick={() => void removeDormantRow(row.sku)}
+                      style={{ color: '#dc2626' }}
+                    >
+                      <Trash2 size={14} /> Remove
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
+      <div ref={singleProductRef}>
+      <SectionHead title="Single product" />
 
       {/* Code lookup */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
@@ -429,6 +1210,128 @@ export default function ProductLoaderPanel({ taxonomyTree = categories, onShowTo
               )}
             </div>
           )}
+
+          {/* Category — assign before dormant save or publish */}
+          <section>
+            <SectionHead
+              title="Category"
+              action={imageUrl ? (
+                <button
+                  type="button"
+                  className="adm-btn-ghost adm-btn-sm"
+                  onClick={handleAnalyze}
+                  disabled={analyzing}
+                  title="Ask Gemini to suggest a category based on the product image"
+                >
+                  {analyzing ? <Loader2 size={12} className="spin" /> : <Sparkles size={12} />}
+                  {analyzing ? 'Analysing…' : 'Suggest from image'}
+                </button>
+              ) : null}
+            />
+
+            {categorySource === 'gemini' && (
+              <div style={{ fontSize: 12, color: '#7c3aed', marginBottom: 8, fontWeight: 600 }}>
+                ✦ Gemini suggestion — adjust if needed
+              </div>
+            )}
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div>
+                <label style={{ fontSize: 12, color: '#64748b', display: 'block', marginBottom: 4 }}>Category *</label>
+                <select
+                  className="adm-select adm-select--enhanced"
+                  style={{ width: '100%' }}
+                  value={categoryId}
+                  onChange={(e) => { setCategoryId(e.target.value); setSub1Id(''); setSub2Id(''); setSub3Id(''); setSub4Id(''); setCategorySource('manual'); }}
+                >
+                  <option value="">— Select category —</option>
+                  {taxonomyTree.map((cat) => (
+                    <option key={cat.id} value={cat.id}>{cat.label}</option>
+                  ))}
+                </select>
+              </div>
+
+              {sub1Options.length > 0 && (
+                <div>
+                  <label style={{ fontSize: 12, color: '#64748b', display: 'block', marginBottom: 4 }}>Subcategory *</label>
+                  <select
+                    className="adm-select adm-select--enhanced"
+                    style={{ width: '100%' }}
+                    value={sub1Id}
+                    onChange={(e) => { setSub1Id(e.target.value); setSub2Id(''); setSub3Id(''); setSub4Id(''); }}
+                  >
+                    <option value="">— Select subcategory —</option>
+                    {sub1Options.map((opt) => (
+                      <option key={opt.id} value={opt.id}>{opt.label}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {sub2Options.length > 0 && (
+                <div>
+                  <label style={{ fontSize: 12, color: '#64748b', display: 'block', marginBottom: 4 }}>Subcategory 2 <span style={{ color: '#94a3b8' }}>(optional)</span></label>
+                  <select
+                    className="adm-select adm-select--enhanced"
+                    style={{ width: '100%' }}
+                    value={sub2Id}
+                    onChange={(e) => { setSub2Id(e.target.value); setSub3Id(''); setSub4Id(''); }}
+                  >
+                    <option value="">— None —</option>
+                    {sub2Options.map((opt) => (
+                      <option key={opt.id} value={opt.id}>{opt.label}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {sub3Options.length > 0 && (
+                <div>
+                  <label style={{ fontSize: 12, color: '#64748b', display: 'block', marginBottom: 4 }}>Subcategory 3 <span style={{ color: '#94a3b8' }}>(optional)</span></label>
+                  <select
+                    className="adm-select adm-select--enhanced"
+                    style={{ width: '100%' }}
+                    value={sub3Id}
+                    onChange={(e) => { setSub3Id(e.target.value); setSub4Id(''); }}
+                  >
+                    <option value="">— None —</option>
+                    {sub3Options.map((opt) => (
+                      <option key={opt.id} value={opt.id}>{opt.label}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {sub4Options.length > 0 && (
+                <div>
+                  <label style={{ fontSize: 12, color: '#64748b', display: 'block', marginBottom: 4 }}>Subcategory 4 <span style={{ color: '#94a3b8' }}>(optional)</span></label>
+                  <select
+                    className="adm-select adm-select--enhanced"
+                    style={{ width: '100%' }}
+                    value={sub4Id}
+                    onChange={(e) => setSub4Id(e.target.value)}
+                  >
+                    <option value="">— None —</option>
+                    {sub4Options.map((opt) => (
+                      <option key={opt.id} value={opt.id}>{opt.label}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {categoryId && sub1Id && (
+                <button
+                  type="button"
+                  className="adm-btn-ghost"
+                  onClick={() => void saveLookupToDormant()}
+                  disabled={dormantSaving === 'single'}
+                >
+                  {dormantSaving === 'single' ? <Loader2 size={14} className="spin" /> : <PackagePlus size={14} />}
+                  Save to dormant queue
+                </button>
+              )}
+            </div>
+          </section>
 
           {/* Image section */}
           <section>
@@ -553,86 +1456,8 @@ export default function ProductLoaderPanel({ taxonomyTree = categories, onShowTo
             )}
           </section>
 
-          {/* Category section — only shown once image is selected */}
-          {imageUrl && (
-            <section>
-              <SectionHead
-                title="Category"
-                action={(
-                  <button
-                    type="button"
-                    className="adm-btn-ghost adm-btn-sm"
-                    onClick={handleAnalyze}
-                    disabled={analyzing}
-                    title="Ask Gemini to suggest a category based on the product image"
-                  >
-                    {analyzing ? <Loader2 size={12} className="spin" /> : <Sparkles size={12} />}
-                    {analyzing ? 'Analysing…' : 'Suggest from image'}
-                  </button>
-                )}
-              />
-
-              {categorySource === 'gemini' && (
-                <div style={{ fontSize: 12, color: '#7c3aed', marginBottom: 8, fontWeight: 600 }}>
-                  ✦ Gemini suggestion — adjust if needed
-                </div>
-              )}
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <div>
-                  <label style={{ fontSize: 12, color: '#64748b', display: 'block', marginBottom: 4 }}>Category *</label>
-                  <select
-                    className="adm-select adm-select--enhanced"
-                    style={{ width: '100%' }}
-                    value={categoryId}
-                    onChange={(e) => { setCategoryId(e.target.value); setSub1Id(''); setSub2Id(''); setCategorySource('manual'); }}
-                  >
-                    <option value="">— Select category —</option>
-                    {taxonomyTree.map((cat) => (
-                      <option key={cat.id} value={cat.id}>{cat.label}</option>
-                    ))}
-                  </select>
-                </div>
-
-                {sub1Options.length > 0 && (
-                  <div>
-                    <label style={{ fontSize: 12, color: '#64748b', display: 'block', marginBottom: 4 }}>Subcategory</label>
-                    <select
-                      className="adm-select adm-select--enhanced"
-                      style={{ width: '100%' }}
-                      value={sub1Id}
-                      onChange={(e) => { setSub1Id(e.target.value); setSub2Id(''); }}
-                    >
-                      <option value="">— Select subcategory —</option>
-                      {sub1Options.map((opt) => (
-                        <option key={opt.id} value={opt.id}>{opt.label}</option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-
-                {sub2Options.length > 0 && (
-                  <div>
-                    <label style={{ fontSize: 12, color: '#64748b', display: 'block', marginBottom: 4 }}>Subcategory 2 <span style={{ color: '#94a3b8' }}>(optional)</span></label>
-                    <select
-                      className="adm-select adm-select--enhanced"
-                      style={{ width: '100%' }}
-                      value={sub2Id}
-                      onChange={(e) => setSub2Id(e.target.value)}
-                    >
-                      <option value="">— None —</option>
-                      {sub2Options.map((opt) => (
-                        <option key={opt.id} value={opt.id}>{opt.label}</option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-              </div>
-            </section>
-          )}
-
           {/* Confirmations + Publish */}
-          {imageUrl && categoryId && (
+          {imageUrl && categoryId && sub1Id && (
             <section>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16 }}>
                 {warnings.includes('price_zero') && (
@@ -656,6 +1481,8 @@ export default function ProductLoaderPanel({ taxonomyTree = categories, onShowTo
                 {findNode(taxonomyTree, categoryId)?.label || categoryId}
                 {sub1Id ? ` › ${findNode(taxonomyTree, sub1Id)?.label || sub1Id}` : ''}
                 {sub2Id ? ` › ${findNode(taxonomyTree, sub2Id)?.label || sub2Id}` : ''}
+                {sub3Id ? ` › ${findNode(taxonomyTree, sub3Id)?.label || sub3Id}` : ''}
+                {sub4Id ? ` › ${findNode(taxonomyTree, sub4Id)?.label || sub4Id}` : ''}
                 {' · '}Image {imageSlot} ({imageSource === 'existing' ? 'existing' : imageSource === 'upload_transformed' ? 'BG removed' : 'new'})
               </div>
 
@@ -677,6 +1504,7 @@ export default function ProductLoaderPanel({ taxonomyTree = categories, onShowTo
           )}
         </div>
       )}
+      </div>
     </div>
   );
 }

@@ -76,6 +76,11 @@ export function useCatalogMutations() {
     },
   });
 
+  const setNewArrival = useMutation({
+    mutationFn: ({ sku, isNewArrival }) => stockMutate({ action: 'setNewArrival', sku, isNewArrival: !!isNewArrival }),
+    onSettled: () => invalidateCatalogAndStats(queryClient, ['live', 'archived']),
+  });
+
   return {
     archive,
     unarchive,
@@ -84,5 +89,6 @@ export function useCatalogMutations() {
     restoreRecycle,
     permanentDelete,
     discardPreview,
+    setNewArrival,
   };
 }

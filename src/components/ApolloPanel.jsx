@@ -1,15 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { jsPDF } from 'jspdf';
-import { Bot, CheckCircle, FileDown, Loader2, Send, Sparkles, Square, User, Users, Wrench } from 'lucide-react';
+import { Bot, CheckCircle, FileDown, Loader2, PackagePlus, Send, Sparkles, Square, User, Users, Wrench } from 'lucide-react';
 import ApolloImageWizard from './ApolloImageWizard';
 import { getActiveImageBatch, subscribeImageBatch } from '../lib/imageBatchTracker';
 import { getImageGenOperator } from '../lib/imageGenSession';
 
 const STARTERS = [
-  'What are my best performing products by orders?',
+  'Create a report of my best performing products',
+  'Create a report of best sellers from Positill',
+  'Find code 8610100001',
+  'Positill report on 101 findings',
   'Which products have the lowest stock?',
-  'Give me 5 products with negative stock',
-  'Who are all my customers?',
 ];
 
 function renderInline(text) {
@@ -62,8 +63,23 @@ function SimpleMarkdown({ text }) {
     <div className="apollo-md">
       {lines.map((line, i) => {
         const trimmed = line.trim();
+        const imgMatch = trimmed.match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
+        if (imgMatch) {
+          return (
+            <img
+              key={i}
+              src={imgMatch[2]}
+              alt={imgMatch[1] || 'Product'}
+              className="apollo-md-img"
+              loading="lazy"
+            />
+          );
+        }
         if (trimmed.startsWith('## ')) return <h3 key={i}>{renderInline(trimmed.slice(3))}</h3>;
-        if (trimmed.startsWith('### ')) return <h4 key={i}>{renderInline(trimmed.slice(4))}</h4>;
+        if (trimmed.startsWith('### ')) return <h4 key={i} className="apollo-md-h4">{renderInline(trimmed.slice(4))}</h4>;
+        if (trimmed.startsWith('#### ')) return <h5 key={i} className="apollo-md-h5">{renderInline(trimmed.slice(5))}</h5>;
+        if (trimmed === '---') return <hr key={i} className="apollo-md-hr" />;
+        if (trimmed.startsWith('_') && trimmed.endsWith('_')) return <p key={i} className="apollo-md-muted">{renderInline(trimmed.slice(1, -1))}</p>;
         if (trimmed.startsWith('- ')) return <p key={i} className="apollo-md-bullet"><span className="apollo-md-dot">•</span>{renderInline(trimmed.slice(2))}</p>;
         if (/^\d+\.\s/.test(trimmed)) return <p key={i} className="apollo-md-bullet">{renderInline(trimmed)}</p>;
         return trimmed ? <p key={i}>{renderInline(trimmed)}</p> : null;
@@ -116,8 +132,8 @@ function ApolloWelcome({ onStarter, busy }) {
       <div className="apollo-welcome-copy">
         <h3>Hi, I'm <span className="apollo-welcome-name">Apollo</span></h3>
         <p>
-          Ask in plain English — every question is routed through live data first
-          (products, customers, orders, searches). Type <strong>/image</strong> to open the image generation wizard.
+          Ask in plain English — routed through live data (products, customers, orders, searches)
+          and **Positill + Nutstore** for code lookups and go-live prep. Type <strong>/image</strong> for the image wizard.
         </p>
       </div>
       <div className="apollo-welcome-starters">
@@ -150,9 +166,10 @@ function ImageFixProgress({ progress }) {
   );
 }
 
-function ChatMessage({ msg, isLastAssistant, onExportPdf, onFix, fixBusy }) {
+function ChatMessage({ msg, isLastAssistant, onExportPdf, onFix, fixBusy, onOpenProductLoader }) {
   const isUser = msg.role === 'user';
   const showFix = isLastAssistant && !isUser && msg.source !== 'live-index';
+  const batchAction = msg.batchAction;
   return (
     <div className={`apollo-msg-row apollo-msg-row--${msg.role}`}>
       <div className={`apollo-avatar apollo-avatar--${msg.role}`} aria-hidden="true">
@@ -187,7 +204,18 @@ function ChatMessage({ msg, isLastAssistant, onExportPdf, onFix, fixBusy }) {
             </button>
           </div>
         )}
-        {isLastAssistant && !isUser && !showFix && (
+        {batchAction?.type === 'open_product_loader' && batchAction.code && (
+          <div className="apollo-msg-actions">
+            <button
+              type="button"
+              className="apollo-action-btn"
+              onClick={() => onOpenProductLoader?.(batchAction.code)}
+            >
+              <PackagePlus size={13} /> Open in Product Loader — {batchAction.code}
+            </button>
+          </div>
+        )}
+        {isLastAssistant && !isUser && !showFix && !batchAction?.code && (
           <div className="apollo-msg-actions">
             <button type="button" className="apollo-action-btn apollo-action-btn--ghost" onClick={() => onExportPdf(msg.content)}>
               <FileDown size={13} /> Export PDF
@@ -326,7 +354,7 @@ function RemoteBatchNotice({ batches, lockCount }) {
   );
 }
 
-export default function ApolloPanel({ isActive = true, taxonomyTree, onShowToast, onGoToApproval, onRefreshCatalog, imageFixRequest, onImageFixRequestHandled }) {
+export default function ApolloPanel({ isActive = true, taxonomyTree, onShowToast, onGoToApproval, onGoToProductLoader, onRefreshCatalog, imageFixRequest, onImageFixRequestHandled }) {
   const [messages, setMessages] = useState(loadApolloMessages);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
@@ -557,6 +585,7 @@ export default function ApolloPanel({ isActive = true, taxonomyTree, onShowToast
                   onExportPdf={exportMessagePdf}
                   onFix={fixLastReply}
                   fixBusy={busy}
+                  onOpenProductLoader={onGoToProductLoader}
                 />
               ))}
               {busy && (

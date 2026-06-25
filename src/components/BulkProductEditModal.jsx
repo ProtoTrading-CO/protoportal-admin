@@ -31,12 +31,13 @@ function categoryPatchAfterNewSub(parentId, newId, tree) {
     categoryId: parentPath[0] || parentId,
     childOneId: parentPath.length === 0 ? newId : (parentPath[1] || parentId),
     childTwoId: parentPath.length === 1 ? newId : (parentPath.length >= 2 ? parentId : ''),
-    childThreeId: parentPath.length >= 2 ? newId : '',
+    childThreeId: parentPath.length === 2 ? newId : (parentPath.length >= 3 ? parentId : ''),
+    childFourId: parentPath.length >= 3 ? newId : '',
   };
 }
 
 function deepestCategoryParent(row) {
-  return row.childThreeId || row.childTwoId || row.childOneId || row.categoryId || '';
+  return row.childFourId || row.childThreeId || row.childTwoId || row.childOneId || row.categoryId || '';
 }
 
 function productToRow(product, tree) {
@@ -52,11 +53,12 @@ function productToRow(product, tree) {
     childOneId: path[1] || '',
     childTwoId: path[2] || '',
     childThreeId: path[3] || '',
+    childFourId: path[4] || '',
   };
 }
 
 function categoryPathFromRow(row) {
-  return [row.categoryId, row.childOneId, row.childTwoId, row.childThreeId].filter(Boolean);
+  return [row.categoryId, row.childOneId, row.childTwoId, row.childThreeId, row.childFourId].filter(Boolean);
 }
 
 function rowSnapshot(row) {
@@ -95,6 +97,7 @@ function CategoryFields({
   const child1Options = withCurrentOption(subcategoryOptionsFromTree(tree, row.categoryId), row.childOneId);
   const child2Options = withCurrentOption(childrenOfTree(tree, row.childOneId), row.childTwoId);
   const child3Options = withCurrentOption(childrenOfTree(tree, row.childTwoId), row.childThreeId);
+  const child4Options = withCurrentOption(childrenOfTree(tree, row.childThreeId), row.childFourId);
   const createParentId = deepestCategoryParent(row);
 
   return (
@@ -108,6 +111,7 @@ function CategoryFields({
             childOneId: '',
             childTwoId: '',
             childThreeId: '',
+            childFourId: '',
           })}
           className="adm-select adm-select--enhanced"
         >
@@ -125,6 +129,7 @@ function CategoryFields({
                 childOneId: e.target.value,
                 childTwoId: '',
                 childThreeId: '',
+                childFourId: '',
               })}
               className="adm-select adm-select--enhanced"
             >
@@ -138,7 +143,7 @@ function CategoryFields({
             <select
               value={row.childTwoId}
               disabled={!row.childOneId}
-              onChange={(e) => onChange({ childTwoId: e.target.value, childThreeId: '' })}
+              onChange={(e) => onChange({ childTwoId: e.target.value, childThreeId: '', childFourId: '' })}
               className="adm-select adm-select--enhanced"
               title={!row.childOneId ? 'Select child category 1 first' : undefined}
             >
@@ -147,12 +152,13 @@ function CategoryFields({
             </select>
           </label>
 
+          {(child3Options.length > 0 || row.childThreeId) && (
           <label className="pm-bulk-field">
             <span>Child category 3</span>
             <select
               value={row.childThreeId}
               disabled={!row.childTwoId}
-              onChange={(e) => onChange({ childThreeId: e.target.value })}
+              onChange={(e) => onChange({ childThreeId: e.target.value, childFourId: '' })}
               className="adm-select adm-select--enhanced"
               title={!row.childTwoId ? 'Select child category 2 first' : undefined}
             >
@@ -160,6 +166,23 @@ function CategoryFields({
               {child3Options.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
             </select>
           </label>
+          )}
+
+          {(child4Options.length > 0 || row.childFourId) && (
+          <label className="pm-bulk-field">
+            <span>Child category 4</span>
+            <select
+              value={row.childFourId}
+              disabled={!row.childThreeId}
+              onChange={(e) => onChange({ childFourId: e.target.value })}
+              className="adm-select adm-select--enhanced"
+              title={!row.childThreeId ? 'Select child category 3 first' : undefined}
+            >
+              <option value="">— None —</option>
+              {child4Options.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+            </select>
+          </label>
+          )}
         </>
       )}
 

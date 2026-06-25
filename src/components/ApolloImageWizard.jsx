@@ -21,6 +21,7 @@ import ApolloCompactProductList from './ApolloCompactProductList';
 import ApolloSelectedProductPreview from './ApolloSelectedProductPreview';
 import ReprocessLiveFeed from './ReprocessLiveFeed';
 import { compressImage, applyDormantLive } from '../lib/products';
+import { mapWithConcurrency } from '../lib/concurrency';
 import {
   countRecipeJobs,
   expandProductSlots,
@@ -602,13 +603,20 @@ export default function ApolloImageWizard({
     setApplyingLive(true);
     let applied = 0;
     const errors = [];
-    const results = await Promise.allSettled(skus.map((sku) => applyDormantLive(sku)));
-    results.forEach((r, i) => {
+    const settled = await mapWithConcurrency(skus, 2, async (sku) => {
+      try {
+        const value = await applyDormantLive(sku);
+        return { sku, status: 'fulfilled', value };
+      } catch (reason) {
+        return { sku, status: 'rejected', reason };
+      }
+    });
+    settled.forEach((r) => {
       if (r.status === 'fulfilled') {
         if (r.value.mode === 'image_applied') applied += 1;
-        else errors.push(`${skus[i]}: already up to date`);
+        else errors.push(`${r.sku}: already up to date`);
       } else {
-        errors.push(`${skus[i]}: ${r.reason?.message}`);
+        errors.push(`${r.sku}: ${r.reason?.message}`);
       }
     });
     setApplyingLive(false);
