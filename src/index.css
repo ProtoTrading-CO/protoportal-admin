@@ -7032,6 +7032,195 @@ html, body { background: #f5f5f5; color: #111827; }
   display: flex; align-items: center; justify-content: center; gap: 6px;
 }
 
+/* Trade pre-registration (public) */
+.pre-reg-page {
+  min-height: 100vh;
+  background: #f8fafc;
+  padding: 32px 20px 48px;
+}
+.pre-reg-shell {
+  width: min(920px, 100%);
+  margin: 0 auto;
+}
+.pre-reg-header {
+  display: grid;
+  gap: 24px;
+  margin-bottom: 28px;
+}
+.pre-reg-brand {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+.pre-reg-brand h1 {
+  margin: 0 0 8px;
+  font-size: clamp(24px, 4vw, 32px);
+  font-weight: 800;
+  color: #0f172a;
+  letter-spacing: -0.02em;
+}
+.pre-reg-kicker {
+  margin: 0 0 4px;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #64748b;
+}
+.pre-reg-lead {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.5;
+  color: #475569;
+  max-width: 52ch;
+}
+.pre-reg-quote {
+  margin: 0;
+  padding: 16px 18px;
+  border-left: 3px solid #0f172a;
+  background: #fff;
+  border-radius: 0 12px 12px 0;
+  color: #475569;
+}
+.pre-reg-quote p {
+  margin: 0 0 8px;
+  font-style: italic;
+  line-height: 1.55;
+}
+.pre-reg-quote footer {
+  font-size: 13px;
+  color: #94a3b8;
+  font-weight: 600;
+}
+.pre-reg-form {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  padding: 24px;
+  box-shadow: 0 4px 24px rgba(15, 23, 42, 0.05);
+}
+.pre-reg-section + .pre-reg-section {
+  margin-top: 28px;
+  padding-top: 24px;
+  border-top: 1px solid #f1f5f9;
+}
+.pre-reg-section h2 {
+  margin: 0 0 16px;
+  font-size: 15px;
+  font-weight: 800;
+  color: #0f172a;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.pre-reg-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 16px;
+}
+.pre-reg-grid .pre-reg-check--full,
+.pre-reg-grid .pre-reg-hint {
+  grid-column: 1 / -1;
+}
+.pre-reg-textarea {
+  resize: vertical;
+  min-height: 84px;
+}
+.pre-reg-required {
+  color: #dc2626;
+  margin-left: 2px;
+}
+.pre-reg-hint {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  color: #94a3b8;
+}
+.pre-reg-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #334155;
+  align-self: end;
+  padding-bottom: 4px;
+}
+.pre-reg-check input {
+  width: 16px;
+  height: 16px;
+}
+.pre-reg-actions {
+  margin-top: 28px;
+  padding-top: 20px;
+  border-top: 1px solid #f1f5f9;
+}
+.pre-reg-submit {
+  width: 100%;
+  justify-content: center;
+  min-height: 46px;
+  font-size: 15px;
+}
+.pre-reg-foot {
+  margin: 14px 0 0;
+  text-align: center;
+  font-size: 13px;
+  color: #64748b;
+}
+.pre-reg-foot a {
+  color: #0f172a;
+  font-weight: 700;
+}
+.pre-reg-honeypot {
+  position: absolute;
+  left: -9999px;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+.pre-reg-success {
+  max-width: 520px;
+  margin: 10vh auto 0;
+  padding: 40px 32px;
+  text-align: center;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  box-shadow: 0 8px 32px rgba(15, 23, 42, 0.08);
+}
+.pre-reg-success svg {
+  color: #16a34a;
+  margin-bottom: 16px;
+}
+.pre-reg-success h1 {
+  margin: 0 0 12px;
+  font-size: 28px;
+  font-weight: 800;
+  color: #0f172a;
+}
+.pre-reg-success p {
+  margin: 0 0 12px;
+  color: #475569;
+  line-height: 1.55;
+}
+.pre-reg-code {
+  font-size: 14px;
+  color: #334155;
+}
+.pre-reg-portal-btn {
+  display: inline-flex;
+  margin-top: 20px;
+  text-decoration: none;
+}
+@media (max-width: 720px) {
+  .pre-reg-grid {
+    grid-template-columns: 1fr;
+  }
+  .pre-reg-brand {
+    flex-direction: column;
+  }
+}
+
 /* Image Intake panel */
 .adm-intake-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 8px; }
 .adm-intake-file-btn { cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }

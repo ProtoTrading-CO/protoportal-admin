@@ -13,6 +13,7 @@ import AdminLoginPage from './components/AdminLoginPage';
 
 const AdminPage = lazy(() => import('./pages/AdminPage'));
 const FulfillmentPage = lazy(() => import('./pages/FulfillmentPage'));
+const PreRegisterPage = lazy(() => import('./pages/PreRegisterPage'));
 
 installAuthFetch();
 
@@ -27,6 +28,15 @@ const loadingFallback = (
 export default function Root() {
   const path = window.location.pathname;
   const isFulfillment = path === '/fulfillment' || path === '/f' || path.startsWith('/f/');
+  const isPreRegister = path === '/register' || path === '/pre-register';
+
+  if (isPreRegister) {
+    return (
+      <Suspense fallback={loadingFallback}>
+        <PreRegisterPage />
+      </Suspense>
+    );
+  }
 
   if (isFulfillment) {
     return (
