@@ -22,6 +22,7 @@ import {
   Plus,
   Globe,
   Grip,
+  GripVertical,
   Image,
   ImagePlus,
   Layout,
@@ -438,6 +439,9 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   const [editorImageUploading, setEditorImageUploading] = useState(false);
   const [editorImageDragOver, setEditorImageDragOver] = useState('');
   const editorImageFileInputRefs = useRef({});
+  const [editorSlotDragging, setEditorSlotDragging] = useState('');
+  const [editorSlotDragOver, setEditorSlotDragOver] = useState('');
+  const originalEditorImageRef = useRef('');
   const [profileCustomer, setProfileCustomer] = useState(null);
   const [profileOrders, setProfileOrders] = useState([]);
   const [profileOrdersLoading, setProfileOrdersLoading] = useState(false);
@@ -1329,6 +1333,9 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     setEditorError('');
     setEditorImageUploading(false);
     setEditorImageDragOver('');
+    setEditorSlotDragging('');
+    setEditorSlotDragOver('');
+    originalEditorImageRef.current = '';
     setEditorOpen(true);
   };
 
@@ -1338,6 +1345,9 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     setEditorError('');
     setEditorImageUploading(false);
     setEditorImageDragOver('');
+    setEditorSlotDragging('');
+    setEditorSlotDragOver('');
+    originalEditorImageRef.current = product?.image || '';
     setEditorOpen(true);
   };
 
@@ -1354,6 +1364,15 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
       ...current,
       image: current.secondaryImage || '',
       secondaryImage: current.image || '',
+    }));
+  };
+
+  const swapEditorSlots = (keyA, keyB) => {
+    if (keyA === keyB) return;
+    setProductForm((current) => ({
+      ...current,
+      [keyA]: current[keyB] || '',
+      [keyB]: current[keyA] || '',
     }));
   };
 
@@ -1395,6 +1414,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
       };
       setProductRows((prev) => prev.map((p) => p.id === contentEditProduct.id ? { ...p, ...patch } : p));
       setReorderProducts((prev) => prev.map((p) => p.id === contentEditProduct.id ? { ...p, ...patch } : p));
+      setArchiveRows((prev) => prev.map((p) => p.id === contentEditProduct.id ? { ...p, ...patch } : p));
       queryClient.invalidateQueries({ queryKey: ['catalog'] });
       invalidateProductCache();
       closeContentEdit();
@@ -2662,7 +2682,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                       >
                         <Trash2 size={15} /> Delete Selected
                       </button>
-                      <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => setProductSelectedIds(new Set())}>Clear</button>
+                      <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => setProductSelectedIds(new Set())}>✕ Deselect All</button>
                     </div>
                   </div>
                 )}
@@ -3034,7 +3054,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                       >
                         <Trash2 size={15} /> Delete Selected
                       </button>
-                      <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => setArchiveSelectedIds(new Set())}>Clear</button>
+                      <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => setArchiveSelectedIds(new Set())}>✕ Deselect All</button>
                     </div>
                   </div>
                 )}
@@ -3260,10 +3280,17 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                       onClick={toggleSelectAllReorder}
                       disabled={!visibleReorderProducts.length}
                     >
-                      {visibleReorderProducts.length > 0 && visibleReorderProducts.every((p) => selectedIds.has(p.id))
-                        ? 'Deselect all'
-                        : `Select all (${visibleReorderProducts.length})`}
+                      {`Select all (${visibleReorderProducts.length})`}
                     </button>
+                    {selectedIds.size > 0 && (
+                      <button
+                        type="button"
+                        className="adm-btn-ghost adm-btn--sm"
+                        onClick={() => setSelectedIds(new Set())}
+                      >
+                        ✕ Deselect All
+                      </button>
+                    )}
                     {reorderDirty && !reorderSearchActive && (
                       <span className="adm-pill adm-pill--warn">Unsaved order</span>
                     )}
@@ -3295,7 +3322,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                         <Archive size={15} /> Archive
                       </button>
                       <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={moveSelectedToTop} disabled={!!saving}>To top</button>
-                      <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => setSelectedIds(new Set())}>Clear</button>
+                      <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => setSelectedIds(new Set())}>✕ Deselect All</button>
                     </div>
                   </div>
                 )}
@@ -4696,29 +4723,66 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
                   {PRODUCT_IMAGE_SLOTS.map((slot) => {
                     const value = productForm[slot.key];
-                    const isDragOver = editorImageDragOver === slot.key;
+                    const isFileDragOver = editorImageDragOver === slot.key;
+                    const isSlotDragOver = editorSlotDragOver === slot.key;
+                    const isBeingDragged = editorSlotDragging === slot.key;
+                    const isOriginal = !!editingProduct && !!originalEditorImageRef.current && !!value && value === originalEditorImageRef.current;
                     return (
-                      <div key={slot.key} style={{ display: 'grid', gap: 8 }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-                          <span style={{ fontSize: 12, fontWeight: 700, color: '#334155' }}>{slot.label}</span>
-                          {slot.key === 'secondary' && productForm.secondaryImage && productForm.image && (
-                            <button
-                              type="button"
-                              onClick={swapEditorImages}
-                              className="adm-btn-ghost"
-                              style={{ padding: '6px 10px', fontSize: 12 }}
-                            >
-                              Swap 1 ↔ 2
-                            </button>
+                      <div
+                        key={slot.key}
+                        draggable
+                        onDragStart={(e) => {
+                          setEditorSlotDragging(slot.key);
+                          e.dataTransfer.setData('text/x-slot-key', slot.key);
+                          e.dataTransfer.effectAllowed = 'move';
+                        }}
+                        onDragEnd={() => { setEditorSlotDragging(''); setEditorSlotDragOver(''); }}
+                        onDragOver={(e) => {
+                          if (editorSlotDragging && editorSlotDragging !== slot.key) {
+                            e.preventDefault();
+                            setEditorSlotDragOver(slot.key);
+                          }
+                        }}
+                        onDragLeave={(e) => {
+                          if (!e.currentTarget.contains(e.relatedTarget)) {
+                            setEditorSlotDragOver((prev) => prev === slot.key ? '' : prev);
+                          }
+                        }}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          if (editorSlotDragging && editorSlotDragging !== slot.key) {
+                            swapEditorSlots(editorSlotDragging, slot.key);
+                          }
+                          setEditorSlotDragging('');
+                          setEditorSlotDragOver('');
+                        }}
+                        style={{
+                          display: 'grid',
+                          gap: 8,
+                          opacity: isBeingDragged ? 0.4 : 1,
+                          outline: isSlotDragOver ? '2px dashed #8B1A1A' : 'none',
+                          outlineOffset: 4,
+                          borderRadius: 12,
+                          transition: 'opacity 0.15s',
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <GripVertical size={14} style={{ color: '#94a3b8', cursor: 'grab', flexShrink: 0 }} title="Drag to reorder" />
+                          <span style={{ fontSize: 12, fontWeight: 700, color: '#334155', flex: 1 }}>{slot.label}</span>
+                          {isOriginal && (
+                            <span style={{ fontSize: 10, fontWeight: 700, color: '#1e7e34', background: '#d4edda', borderRadius: 4, padding: '1px 6px', whiteSpace: 'nowrap' }}>
+                              Original Image
+                            </span>
                           )}
                         </div>
                         <div
-                          onClick={() => !editorImageUploading && editorImageFileInputRefs.current[slot.key]?.click()}
-                          onDragEnter={(e) => { e.preventDefault(); setEditorImageDragOver(slot.key); }}
-                          onDragOver={(e) => { e.preventDefault(); setEditorImageDragOver(slot.key); }}
+                          onClick={() => !editorImageUploading && !editorSlotDragging && editorImageFileInputRefs.current[slot.key]?.click()}
+                          onDragEnter={(e) => { if (!editorSlotDragging) { e.preventDefault(); setEditorImageDragOver(slot.key); } }}
+                          onDragOver={(e) => { if (!editorSlotDragging) { e.preventDefault(); setEditorImageDragOver(slot.key); } }}
                           onDragLeave={(e) => { e.preventDefault(); if (editorImageDragOver === slot.key) setEditorImageDragOver(''); }}
                           onDrop={(e) => {
                             e.preventDefault();
+                            if (editorSlotDragging) return;
                             setEditorImageDragOver('');
                             const file = e.dataTransfer.files?.[0];
                             if (file) void uploadEditorImageFile(file, slot.key);
@@ -4727,8 +4791,8 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                             position: 'relative',
                             minHeight: 160,
                             borderRadius: 16,
-                            border: `2px dashed ${isDragOver ? '#8B1A1A' : value ? '#d1d5db' : '#cbd5e1'}`,
-                            background: isDragOver ? '#fff5f5' : '#f8fafc',
+                            border: `2px dashed ${isFileDragOver || isSlotDragOver ? '#8B1A1A' : value ? '#d1d5db' : '#cbd5e1'}`,
+                            background: isFileDragOver || isSlotDragOver ? '#fff5f5' : '#f8fafc',
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center',
@@ -4737,15 +4801,20 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                             transition: 'border-color 0.15s, background 0.15s',
                           }}
                         >
-                          {editorImageUploading && isDragOver ? (
+                          {editorImageUploading && isFileDragOver ? (
                             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, color: '#8B1A1A' }}>
                               <Loader2 size={32} className="spin" />
                               <span style={{ fontSize: 13, fontWeight: 600 }}>Uploading image…</span>
                             </div>
+                          ) : isSlotDragOver && editorSlotDragging ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, color: '#8B1A1A', pointerEvents: 'none' }}>
+                              <ArrowLeftRight size={28} />
+                              <span style={{ fontSize: 13, fontWeight: 600 }}>Move here</span>
+                            </div>
                           ) : value ? (
                             <>
                               <img src={value} alt={`${slot.label} preview`} style={{ maxWidth: '100%', maxHeight: 160, objectFit: 'contain' }} />
-                              <div style={{ position: 'absolute', inset: 0, background: 'rgba(15, 23, 42, 0.45)', display: isDragOver ? 'flex' : 'none', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 8, color: '#fff' }}>
+                              <div style={{ position: 'absolute', inset: 0, background: 'rgba(15, 23, 42, 0.45)', display: isFileDragOver ? 'flex' : 'none', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 8, color: '#fff' }}>
                                 <Upload size={28} />
                                 <span style={{ fontSize: 13, fontWeight: 600 }}>Drop to replace image</span>
                               </div>
@@ -4754,7 +4823,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                               </div>
                             </>
                           ) : (
-                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, color: isDragOver ? '#8B1A1A' : '#64748b', pointerEvents: 'none', textAlign: 'center', padding: 20 }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, color: isFileDragOver ? '#8B1A1A' : '#64748b', pointerEvents: 'none', textAlign: 'center', padding: 20 }}>
                               <Upload size={32} />
                               <div style={{ fontWeight: 700, fontSize: 15 }}>Drag & drop image here</div>
                               <div style={{ fontSize: 12 }}>or click to browse and upload it to Supabase</div>
