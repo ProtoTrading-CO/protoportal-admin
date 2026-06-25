@@ -1,0 +1,858 @@
+diff --git a/api/_customer-onboard.js b/api/_customer-onboard.js
+new file mode 100644
+index 0000000..058ee76
+--- /dev/null
++++ b/api/_customer-onboard.js
+@@ -0,0 +1,79 @@
++const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
++
++export async function lookupProtoActiveByEmail(supabase, email) {
++  const normalized = String(email || '').trim().toLowerCase();
++  if (!normalized) return null;
++  const { data } = await supabase
++    .from('proto_active_customers')
++    .select('account_code, name, contact_name, first_name, sales_last_12_months, invoice_count, last_purchase_date')
++    .ilike('email', normalized)
++    .maybeSingle();
++  return data || null;
++}
++
++export async function allocateCustomerCode(supabase, preferredCode = null) {
++  const preferred = String(preferredCode || '').trim().toUpperCase();
++  if (/^[A-Z0-9]{6}$/.test(preferred)) {
++    const { data } = await supabase
++      .from('customers')
++      .select('id')
++      .ilike('customer_code', preferred)
++      .maybeSingle();
++    if (!data) return preferred;
++  }
++
++  for (let attempt = 0; attempt < 60; attempt += 1) {
++    let code = '';
++    for (let i = 0; i < 6; i += 1) {
++      code += CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)];
++    }
++    const { data } = await supabase
++      .from('customers')
++      .select('id')
++      .ilike('customer_code', code)
++      .maybeSingle();
++    if (!data) return code;
++  }
++
++  throw new Error('Could not allocate a unique customer code — please try again');
++}
++
++export async function sendWelcomeWhatsapp(customer) {
++  if (customer?.accept_whatsapp === false || !customer?.phone) return;
++  const rawPhone = String(customer.phone).replace(/\D/g, '');
++  if (!rawPhone) return;
++  const watiPhone = rawPhone.startsWith('0') ? `27${rawPhone.slice(1)}` : rawPhone;
++  const watiBase = process.env.WATI_API_URL || 'https://live-mt-server.wati.io/10138950';
++  const watiToken = process.env.WATI_API_TOKEN;
++  if (!watiToken) return;
++
++  try {
++    await fetch(`${watiBase}/api/v1/addContact`, {
++      method: 'POST',
++      headers: { Authorization: `Bearer ${watiToken}`, 'Content-Type': 'application/json' },
++      body: JSON.stringify({
++        name: customer.name || customer.business_name || 'Customer',
++        phoneNumber: watiPhone,
++      }),
++    }).catch(() => {});
++
++    const waRes = await fetch(
++      `${watiBase}/api/v1/sendTemplateMessage?whatsappNumber=${watiPhone}`,
++      {
++        method: 'POST',
++        headers: { Authorization: `Bearer ${watiToken}`, 'Content-Type': 'application/json' },
++        body: JSON.stringify({
++          template_name: 'proto_welcome_',
++          broadcast_name: 'proto_welcome_',
++          parameters: [],
++        }),
++      },
++    );
++    if (!waRes.ok) {
++      const waBody = await waRes.json().catch(() => ({}));
++      console.error('WATI send error:', waRes.status, JSON.stringify(waBody));
++    }
++  } catch (err) {
++    console.error('WATI broadcast error:', err?.message || err);
++  }
++}
+diff --git a/api/register-trade.js b/api/register-trade.js
+index 5b8fa9d..bf97a18 100644
+--- a/api/register-trade.js
++++ b/api/register-trade.js
+@@ -1,6 +1,11 @@
+ import { createClient } from '@supabase/supabase-js';
+ import { escapeHtml } from './_escape-html.js';
+ import { normalizeWhatsapp } from './_wati-notify.js';
++import {
++  allocateCustomerCode,
++  lookupProtoActiveByEmail,
++  sendWelcomeWhatsapp,
++} from './_customer-onboard.js';
+ 
+ const BREVO_SENDER = {
+   name: process.env.BREVO_SENDER_NAME || 'Proto Trading Online',
+@@ -155,6 +160,7 @@ export default async function handler(req, res) {
+   const {
+     email,
+     password,
++    confirmPassword,
+     contactName,
+     businessName,
+     phone,
+@@ -169,12 +175,34 @@ export default async function handler(req, res) {
+     website,
+     acceptWhatsapp,
+     customerCode,
++    instantApproval,
++    company_fax: companyFax,
+   } = req.body || {};
+ 
++  const preRegister = instantApproval === true;
++
++  if (preRegister && String(companyFax || '').trim()) {
++    return res.status(200).json({ ok: true, instantAccess: true });
++  }
++
+   if (!email || !password || !contactName || !businessName || !phone || !companyAddress || !deliveryAddress) {
+     return res.status(400).json({ error: 'Please complete all required fields' });
+   }
+ 
++  if (preRegister && password !== confirmPassword) {
++    return res.status(400).json({ error: 'Passwords do not match' });
++  }
++
++  if (preRegister) {
++    const phoneDigits = String(phone).replace(/\D/g, '');
++    if (phoneDigits.length < 10) {
++      return res.status(400).json({ error: 'Enter a valid mobile number' });
++    }
++    if (!businessType || !province || !city) {
++      return res.status(400).json({ error: 'Please complete all required fields' });
++    }
++  }
++
+   const emailCheck = validateEmail(email);
+   if (!emailCheck.ok) {
+     return res.status(400).json({ error: emailCheck.error });
+@@ -200,15 +228,39 @@ export default async function handler(req, res) {
+ 
+   let protoActive = null;
+   try {
+-    const match = await findProtoActiveCustomer(supabase, normalizedEmail, customerCode);
+-    protoActive = match.row;
+-    if (match.emailUpdated) {
+-      console.info('proto_active email updated for code', protoActive?.account_code, '→', normalizedEmail);
++    if (preRegister) {
++      protoActive = await lookupProtoActiveByEmail(supabase, normalizedEmail);
++      if (!protoActive && customerCode) {
++        const match = await findProtoActiveCustomer(supabase, normalizedEmail, customerCode);
++        protoActive = match.row;
++        if (match.emailUpdated) {
++          console.info('proto_active email updated for code', protoActive?.account_code, '→', normalizedEmail);
++        }
++      }
++    } else {
++      const match = await findProtoActiveCustomer(supabase, normalizedEmail, customerCode);
++      protoActive = match.row;
++      if (match.emailUpdated) {
++        console.info('proto_active email updated for code', protoActive?.account_code, '→', normalizedEmail);
++      }
+     }
+   } catch (lookupErr) {
+     console.warn('proto_active_customers lookup:', lookupErr?.message || lookupErr);
+   }
+   const isProtoActive = Boolean(protoActive?.account_code);
++  const approveInstantly = preRegister || isProtoActive;
++
++  let allocatedCustomerCode = null;
++  if (preRegister) {
++    try {
++      allocatedCustomerCode = await allocateCustomerCode(
++        supabase,
++        isProtoActive ? protoActive.account_code : customerCode,
++      );
++    } catch (codeErr) {
++      return res.status(500).json({ error: codeErr.message || 'Failed to allocate customer code' });
++    }
++  }
+ 
+   // Create the user via admin API — skips Supabase's own confirmation email
+   const { data, error } = await supabase.auth.admin.createUser({
+@@ -260,8 +312,10 @@ export default async function handler(req, res) {
+       website: website || null,
+       accept_whatsapp: typeof acceptWhatsapp === 'boolean' ? acceptWhatsapp : null,
+       whatsapp_opt_in_at: acceptWhatsapp === true ? new Date().toISOString() : null,
+-      is_approved: isProtoActive,
+-      customer_code: isProtoActive ? String(protoActive.account_code).toUpperCase().slice(0, 6) : null,
++      is_approved: approveInstantly,
++      customer_code: preRegister
++        ? allocatedCustomerCode
++        : (isProtoActive ? String(protoActive.account_code).toUpperCase().slice(0, 6) : null),
+       sales_last_12_months: isProtoActive ? Number(protoActive.sales_last_12_months) || 0 : null,
+       invoice_count: isProtoActive ? Number(protoActive.invoice_count) || 0 : null,
+       last_purchase_date: isProtoActive ? protoActive.last_purchase_date : null,
+@@ -329,8 +383,17 @@ export default async function handler(req, res) {
+     }
+     profileVerification = savedProfile || null;
+ 
+-    // WhatsApp welcome for opted-in customers (not proto-active allowlist — they default to No)
+-    if (!isProtoActive && fullPayload.accept_whatsapp === true && normalizedPhone) {
++    if (preRegister && fullPayload.accept_whatsapp === true) {
++      await sendWelcomeWhatsapp({
++        ...fullPayload,
++        name: normalizedContactName,
++        business_name: fullPayload.business_name,
++        phone: normalizedPhone,
++      });
++    }
++
++    // WhatsApp welcome for opted-in customers (landing flow — not proto-active allowlist)
++    if (!preRegister && !isProtoActive && fullPayload.accept_whatsapp === true && normalizedPhone) {
+       const watiPhone = normalizeWhatsapp(normalizedPhone);
+       const watiBase = process.env.WATI_API_URL || 'https://live-mt-server.wati.io/10138950';
+       const watiToken = process.env.WATI_API_TOKEN;
+@@ -380,10 +443,10 @@ export default async function handler(req, res) {
+         body: JSON.stringify({
+           sender: BREVO_SENDER,
+           to: [{ email: normalizedEmail }],
+-          subject: isProtoActive
++          subject: approveInstantly
+             ? 'Your Proto Trading trade account is ready — log in now'
+             : 'We have received your request — you will hear from us within 24 hours',
+-          htmlContent: isProtoActive
++          htmlContent: approveInstantly
+             ? APPROVED_HTML(normalizedContactName || normalizedBusinessName || '')
+             : WELCOME_HTML(normalizedContactName || normalizedBusinessName || ''),
+         }),
+@@ -400,7 +463,8 @@ export default async function handler(req, res) {
+ 
+   return res.status(200).json({
+     ok: true,
+-    instantAccess: isProtoActive,
++    instantAccess: approveInstantly,
++    customerCode: preRegister ? allocatedCustomerCode : (isProtoActive ? String(protoActive.account_code).toUpperCase().slice(0, 6) : null),
+     profile: profileVerification
+       ? { id: profileVerification.id, acceptWhatsapp: profileVerification.accept_whatsapp }
+       : null,
+diff --git a/src/Root.jsx b/src/Root.jsx
+index 5e60435..c6e85d6 100644
+--- a/src/Root.jsx
++++ b/src/Root.jsx
+@@ -9,6 +9,7 @@ const App = lazyWithRetry(() => import('./App'), 'root-app');
+ const LoginModal = lazyWithRetry(() => import('./components/LoginModal'), 'root-login-modal');
+ const PoliciesPage = lazyWithRetry(() => import('./pages/PoliciesPage'), 'root-policies-page');
+ const ProfilePage = lazyWithRetry(() => import('./pages/ProfilePage'), 'root-profile-page');
++const RegisterPage = lazyWithRetry(() => import('./pages/RegisterPage'), 'root-register-page');
+ const ResetPasswordPage = lazyWithRetry(() => import('./pages/ResetPasswordPage'), 'root-reset-password-page');
+ const WorldClassPortal = lazyWithRetry(() => import('./worldclass/WorldClassPortal'), 'root-worldclass-portal');
+ 
+@@ -16,6 +17,8 @@ const PORTAL_URL = import.meta.env.VITE_PORTAL_URL || 'https://protoportal-main.
+ 
+ export default function Root() {
+   const adminHost = isAdminHost();
++  const pathname = typeof window !== 'undefined' ? window.location.pathname : '';
++  const isRegisterPath = pathname === '/register' || pathname === '/pre-register';
+   const [session, setSession] = useState(undefined);
+   const [customer, setCustomer] = useState(null);
+   const [customerLoading, setCustomerLoading] = useState(false);
+@@ -184,6 +187,26 @@ export default function Root() {
+     </div>
+   );
+ 
++  if (!adminHost && isRegisterPath) {
++    if (session === undefined) return authSurfaceFallback;
++    if (!session) {
++      return (
++        <Suspense fallback={authSurfaceFallback}>
++          <RegisterPage onLogin={() => setSurface('login')} />
++          {view === 'login' && (
++            <Suspense fallback={null}>
++              <LoginModal
++                onLogin={handleLogin}
++                onClose={() => { window.location.href = '/'; }}
++                onApply={() => { window.location.href = '/register'; }}
++              />
++            </Suspense>
++          )}
++        </Suspense>
++      );
++    }
++  }
++
+   if (!adminHost && route.startsWith('#/policies')) return <Suspense fallback={authSurfaceFallback}><PoliciesPage onLogin={() => setSurface('login')} /></Suspense>;
+   if (!adminHost && route.startsWith('#/worldclass')) return <Suspense fallback={authSurfaceFallback}><WorldClassPortal /></Suspense>;
+   if (!adminHost && route.startsWith('#/portal-preview')) return <Suspense fallback={authSurfaceFallback}><App customer={null} onLogout={handleLogout} /></Suspense>;
+diff --git a/src/landing.css b/src/landing.css
+index 40e0a81..2881051 100644
+--- a/src/landing.css
++++ b/src/landing.css
+@@ -3545,3 +3545,171 @@
+     padding: 18px 16px;
+   }
+ }
++
++/* Dedicated trade registration page */
++.lp-register-page {
++  min-height: 100vh;
++  background: #050505;
++  color: #fff;
++}
++
++.lp-register-topbar {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 16px;
++  padding: 20px clamp(20px, 5vw, 48px);
++  border-bottom: 1px solid rgba(255,255,255,0.06);
++}
++
++.lp-register-brand {
++  display: inline-flex;
++  align-items: center;
++  gap: 12px;
++  color: inherit;
++  text-decoration: none;
++}
++
++.lp-register-brand strong {
++  font-family: Outfit, sans-serif;
++  font-size: 20px;
++  font-weight: 800;
++  letter-spacing: -0.5px;
++}
++
++.lp-register-brand em {
++  font-family: Outfit, sans-serif;
++  font-size: 20px;
++  font-style: normal;
++  font-weight: 800;
++  color: var(--proto-red);
++  margin-left: 4px;
++}
++
++.lp-register-logo {
++  width: 40px;
++  height: 40px;
++  border-radius: 10px;
++  background: linear-gradient(135deg, var(--proto-red) 0%, var(--proto-red-dark) 100%);
++  display: inline-flex;
++  align-items: center;
++  justify-content: center;
++  font-weight: 900;
++  font-size: 20px;
++  color: #fff;
++  box-shadow: 0 4px 12px rgba(225, 29, 72, 0.3);
++}
++
++.lp-register-main {
++  max-width: 920px;
++  margin: 0 auto;
++  padding: 32px clamp(20px, 5vw, 48px) 64px;
++}
++
++.lp-register-intro {
++  margin-bottom: 28px;
++}
++
++.lp-register-kicker {
++  margin: 0 0 8px;
++  color: var(--proto-red);
++  font-size: 12px;
++  font-weight: 800;
++  letter-spacing: 0.12em;
++  text-transform: uppercase;
++}
++
++.lp-register-intro h1 {
++  margin: 0 0 10px;
++  font-family: Outfit, sans-serif;
++  font-size: clamp(30px, 5vw, 42px);
++  font-weight: 800;
++  letter-spacing: -0.03em;
++}
++
++.lp-register-intro p {
++  margin: 0;
++  color: rgba(255,255,255,0.62);
++  font-size: 16px;
++  line-height: 1.65;
++  max-width: 640px;
++}
++
++.lp-register-card {
++  background: rgba(255,255,255,0.03);
++  border: 1px solid rgba(255,255,255,0.08);
++  border-radius: 20px;
++  padding: clamp(22px, 4vw, 32px);
++}
++
++.lp-register-card--success {
++  max-width: 640px;
++  margin: 48px auto 0;
++}
++
++.lp-register-section + .lp-register-section {
++  margin-top: 28px;
++  padding-top: 28px;
++  border-top: 1px solid rgba(255,255,255,0.08);
++}
++
++.lp-register-section h2 {
++  margin: 0 0 18px;
++  font-size: 18px;
++  font-weight: 800;
++  color: #fff;
++}
++
++.lp-register-check {
++  display: flex;
++  align-items: center;
++  gap: 10px;
++  color: rgba(255,255,255,0.82);
++  font-size: 14px;
++  grid-column: 1 / -1;
++}
++
++.lp-register-check input {
++  width: 18px;
++  height: 18px;
++  accent-color: var(--proto-red);
++}
++
++.lp-register-actions {
++  margin-top: 28px;
++}
++
++.lp-register-foot {
++  margin: 16px 0 0;
++  text-align: center;
++  color: rgba(255,255,255,0.55);
++  font-size: 14px;
++}
++
++.lp-register-link {
++  background: none;
++  border: none;
++  padding: 0;
++  color: #fff;
++  font: inherit;
++  font-weight: 700;
++  cursor: pointer;
++  text-decoration: underline;
++}
++
++.lp-register-honeypot {
++  position: absolute;
++  left: -9999px;
++  width: 1px;
++  height: 1px;
++  opacity: 0;
++  pointer-events: none;
++}
++
++.lp-register-spin {
++  animation: lp-register-spin 0.8s linear infinite;
++}
++
++@keyframes lp-register-spin {
++  to { transform: rotate(360deg); }
++}
+diff --git a/src/lib/tradeApplication.js b/src/lib/tradeApplication.js
+index 80909f3..673e593 100644
+--- a/src/lib/tradeApplication.js
++++ b/src/lib/tradeApplication.js
+@@ -1,8 +1,50 @@
+-export async function submitTradeApplication({ email, username, password, contactName, businessName, phone, companyAddress, deliveryAddress, vatNumber, country, province, city, businessType, monthlySpend, website, acceptWhatsapp, customerCode }) {
++export async function submitTradeApplication({
++  email,
++  username,
++  password,
++  confirmPassword,
++  contactName,
++  businessName,
++  phone,
++  companyAddress,
++  deliveryAddress,
++  vatNumber,
++  country,
++  province,
++  city,
++  businessType,
++  monthlySpend,
++  website,
++  acceptWhatsapp,
++  customerCode,
++  instantApproval,
++  company_fax,
++}) {
+   const res = await fetch('/api/register-trade', {
+     method: 'POST',
+     headers: { 'Content-Type': 'application/json' },
+-    body: JSON.stringify({ email, username, password, contactName, businessName, phone, companyAddress, deliveryAddress, vatNumber, country, province, city, businessType, monthlySpend, website, acceptWhatsapp, customerCode }),
++    body: JSON.stringify({
++      email,
++      username,
++      password,
++      confirmPassword,
++      contactName,
++      businessName,
++      phone,
++      companyAddress,
++      deliveryAddress,
++      vatNumber,
++      country,
++      province,
++      city,
++      businessType,
++      monthlySpend,
++      website,
++      acceptWhatsapp,
++      customerCode,
++      instantApproval,
++      company_fax,
++    }),
+   });
+ 
+   const data = await res.json();
+diff --git a/src/pages/RegisterPage.jsx b/src/pages/RegisterPage.jsx
+new file mode 100644
+index 0000000..adb6e21
+--- /dev/null
++++ b/src/pages/RegisterPage.jsx
+@@ -0,0 +1,313 @@
++import { useMemo, useState } from 'react';
++import { CheckCircle2, Loader2, LogIn } from 'lucide-react';
++import '../landing.css';
++
++const BUSINESS_TYPES = [
++  'Retail store',
++  'Online shop / e-commerce',
++  'Wholesaler',
++  'Importer / distributor',
++  'Craft & hobby shop',
++  'Gift & novelty store',
++  'Pharmacy / health & beauty',
++  'Hardware & home store',
++  'Stationery & office supply',
++  "Baby & children's store",
++  'Fashion & clothing boutique',
++  'Dollar / variety store',
++  'Market trader / spaza shop',
++  'School or institution',
++  'Events, parties & décor',
++  'Other',
++];
++
++const SPEND_BANDS = [
++  'R0 – R5,000',
++  'R5,000 – R10,000',
++  'R10,000 – R25,000',
++  'R25,000 – R50,000',
++  'R50,000+',
++];
++
++const SA_PROVINCES = [
++  'Eastern Cape',
++  'Free State',
++  'Gauteng',
++  'KwaZulu-Natal',
++  'Limpopo',
++  'Mpumalanga',
++  'Northern Cape',
++  'North West',
++  'Western Cape',
++];
++
++const EMPTY_FORM = {
++  contactName: '',
++  email: '',
++  password: '',
++  confirmPassword: '',
++  phone: '',
++  businessName: '',
++  businessType: '',
++  monthlySpend: '',
++  website: '',
++  vatNumber: '',
++  country: 'South Africa',
++  province: '',
++  city: '',
++  companyAddress: '',
++  deliveryAddress: '',
++  sameDelivery: true,
++  acceptWhatsapp: true,
++  company_fax: '',
++};
++
++export default function RegisterPage({ onLogin }) {
++  const [form, setForm] = useState(EMPTY_FORM);
++  const [busy, setBusy] = useState(false);
++  const [error, setError] = useState('');
++  const [success, setSuccess] = useState(null);
++
++  const portalTitle = useMemo(() => 'Proto Trading — Wholesale Trade Portal', []);
++
++  const set = (key) => (e) => {
++    const value = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
++    setForm((prev) => ({ ...prev, [key]: value }));
++  };
++
++  const handleSubmit = async (e) => {
++    e.preventDefault();
++    setBusy(true);
++    setError('');
++    try {
++      const { submitTradeApplication } = await import('../lib/tradeApplication');
++      const result = await submitTradeApplication({
++        email: form.email.trim(),
++        password: form.password,
++        confirmPassword: form.confirmPassword,
++        contactName: form.contactName.trim(),
++        businessName: form.businessName.trim(),
++        phone: form.phone.trim(),
++        companyAddress: form.companyAddress.trim(),
++        deliveryAddress: form.sameDelivery ? form.companyAddress.trim() : form.deliveryAddress.trim(),
++        vatNumber: form.vatNumber.trim() || null,
++        country: form.country.trim(),
++        province: form.province,
++        city: form.city.trim(),
++        businessType: form.businessType,
++        monthlySpend: form.monthlySpend || null,
++        website: form.website.trim() || null,
++        acceptWhatsapp: form.acceptWhatsapp,
++        instantApproval: true,
++        company_fax: form.company_fax,
++      });
++      setSuccess({
++        email: form.email.trim(),
++        customerCode: result.customerCode,
++      });
++      document.title = portalTitle;
++    } catch (err) {
++      setError(err.message || 'Registration failed');
++    } finally {
++      setBusy(false);
++    }
++  };
++
++  if (success) {
++    return (
++      <div className="lp-register-page">
++        <header className="lp-register-topbar">
++          <a href="/" className="lp-register-brand">
++            <span className="lp-register-logo">P</span>
++            <span>
++              <strong>PROTO</strong>
++              <em>TRADING</em>
++            </span>
++          </a>
++        </header>
++        <main className="lp-register-main">
++          <div className="lp-register-card lp-register-card--success">
++            <div className="lp-quiz-success">
++              <CheckCircle2 size={52} />
++              <h3>You&apos;re approved</h3>
++              <p>
++                Your trade account is live. Sign in with
++                {' '}
++                <strong>{success.email}</strong>
++                {' '}
++                to browse wholesale stock and pricing.
++              </p>
++              {success.customerCode && (
++                <p style={{ marginTop: -8, marginBottom: 20 }}>
++                  Your customer code:
++                  {' '}
++                  <strong style={{ letterSpacing: '0.08em' }}>{success.customerCode}</strong>
++                </p>
++              )}
++              <button type="button" onClick={onLogin}>
++                <LogIn size={16} style={{ marginRight: 8, verticalAlign: -2 }} />
++                Log in now
++              </button>
++            </div>
++          </div>
++        </main>
++      </div>
++    );
++  }
++
++  return (
++    <div className="lp-register-page">
++      <header className="lp-register-topbar">
++        <a href="/" className="lp-register-brand">
++          <span className="lp-register-logo">P</span>
++          <span>
++            <strong>PROTO</strong>
++            <em>TRADING</em>
++          </span>
++        </a>
++        <button type="button" className="btn-outline" onClick={onLogin}>Log in</button>
++      </header>
++
++      <main className="lp-register-main">
++        <div className="lp-register-intro">
++          <p className="lp-register-kicker">Wholesale trade portal</p>
++          <h1>Create your trade account</h1>
++          <p>
++            Register your business for wholesale access. Approved accounts can sign in immediately
++            and start ordering from our live catalogue.
++          </p>
++        </div>
++
++        <form className="lp-register-card" onSubmit={(e) => void handleSubmit(e)}>
++          {error && <div className="lp-quiz-error">{error}</div>}
++
++          <section className="lp-register-section">
++            <h2>Account details</h2>
++            <div className="lp-quiz-fields">
++              <div className="lp-quiz-field">
++                <label>Contact name</label>
++                <input value={form.contactName} onChange={set('contactName')} required disabled={busy} placeholder="Full name" />
++              </div>
++              <div className="lp-quiz-field">
++                <label>Email</label>
++                <input type="email" value={form.email} onChange={set('email')} required disabled={busy} autoComplete="email" placeholder="you@business.co.za" />
++              </div>
++              <div className="lp-quiz-field">
++                <label>Password</label>
++                <input type="password" value={form.password} onChange={set('password')} required disabled={busy} autoComplete="new-password" minLength={8} placeholder="At least 8 characters" />
++              </div>
++              <div className="lp-quiz-field">
++                <label>Confirm password</label>
++                <input type="password" value={form.confirmPassword} onChange={set('confirmPassword')} required disabled={busy} autoComplete="new-password" minLength={8} />
++              </div>
++              <div className="lp-quiz-field">
++                <label>Mobile / WhatsApp</label>
++                <input type="tel" value={form.phone} onChange={set('phone')} required disabled={busy} inputMode="tel" placeholder="071 234 5678" />
++              </div>
++              <label className="lp-register-check">
++                <input type="checkbox" checked={form.acceptWhatsapp} onChange={set('acceptWhatsapp')} disabled={busy} />
++                <span>Send order updates on WhatsApp</span>
++              </label>
++            </div>
++          </section>
++
++          <section className="lp-register-section">
++            <h2>Business details</h2>
++            <div className="lp-quiz-fields">
++              <div className="lp-quiz-field">
++                <label>Business / trading name</label>
++                <input value={form.businessName} onChange={set('businessName')} required disabled={busy} />
++              </div>
++              <div className="lp-quiz-field">
++                <label>Business type</label>
++                <select value={form.businessType} onChange={set('businessType')} required disabled={busy}>
++                  <option value="">Select type</option>
++                  {BUSINESS_TYPES.map((type) => (
++                    <option key={type} value={type}>{type}</option>
++                  ))}
++                </select>
++              </div>
++              <div className="lp-quiz-field">
++                <label>Estimated monthly spend</label>
++                <select value={form.monthlySpend} onChange={set('monthlySpend')} disabled={busy}>
++                  <option value="">Select band</option>
++                  {SPEND_BANDS.map((band) => (
++                    <option key={band} value={band}>{band}</option>
++                  ))}
++                </select>
++              </div>
++              <div className="lp-quiz-field">
++                <label>VAT number</label>
++                <input value={form.vatNumber} onChange={set('vatNumber')} disabled={busy} />
++              </div>
++              <div className="lp-quiz-field lp-quiz-field--full">
++                <label>Website / social</label>
++                <input value={form.website} onChange={set('website')} disabled={busy} placeholder="https://" />
++              </div>
++            </div>
++          </section>
++
++          <section className="lp-register-section">
++            <h2>Location & delivery</h2>
++            <div className="lp-quiz-fields">
++              <div className="lp-quiz-field">
++                <label>Country</label>
++                <input value={form.country} onChange={set('country')} required disabled={busy} />
++              </div>
++              <div className="lp-quiz-field">
++                <label>Province</label>
++                <select value={form.province} onChange={set('province')} required disabled={busy}>
++                  <option value="">Select province</option>
++                  {SA_PROVINCES.map((p) => (
++                    <option key={p} value={p}>{p}</option>
++                  ))}
++                </select>
++              </div>
++              <div className="lp-quiz-field">
++                <label>City</label>
++                <input value={form.city} onChange={set('city')} required disabled={busy} />
++              </div>
++              <div className="lp-quiz-field lp-quiz-field--full">
++                <label>Company address</label>
++                <textarea value={form.companyAddress} onChange={set('companyAddress')} required disabled={busy} rows={3} />
++              </div>
++              <label className="lp-register-check lp-register-check--full">
++                <input type="checkbox" checked={form.sameDelivery} onChange={set('sameDelivery')} disabled={busy} />
++                <span>Delivery address is the same as company address</span>
++              </label>
++              {!form.sameDelivery && (
++                <div className="lp-quiz-field lp-quiz-field--full">
++                  <label>Delivery address</label>
++                  <textarea value={form.deliveryAddress} onChange={set('deliveryAddress')} required disabled={busy} rows={3} />
++                </div>
++              )}
++            </div>
++          </section>
++
++          <input
++            type="text"
++            name="company_fax"
++            value={form.company_fax}
++            onChange={set('company_fax')}
++            tabIndex={-1}
++            autoComplete="off"
++            className="lp-register-honeypot"
++            aria-hidden="true"
++          />
++
++          <div className="lp-register-actions">
++            <button type="submit" className="lp-quiz-next" disabled={busy} style={{ width: '100%' }}>
++              {busy ? <Loader2 size={16} className="lp-register-spin" /> : null}
++              {busy ? 'Creating your account…' : 'Register & get instant approval'}
++            </button>
++            <p className="lp-register-foot">
++              Already registered?
++              {' '}
++              <button type="button" className="lp-register-link" onClick={onLogin}>Sign in to the trade portal</button>
++            </p>
++          </div>
++        </form>
++      </main>
++    </div>
++  );
++}
+diff --git a/vercel.json b/vercel.json
+index 2ecce5d..5342712 100644
+--- a/vercel.json
++++ b/vercel.json
+@@ -3,7 +3,8 @@
+   "buildCommand": "node scripts/generate-catalog.js && vite build",
+   "outputDirectory": "dist",
+   "rewrites": [
+-    { "source": "/api/(.*)", "destination": "/api/$1" }
++    { "source": "/api/(.*)", "destination": "/api/$1" },
++    { "source": "/((?!api/|assets/).*)", "destination": "/index.html" }
+   ],
+   "headers": [
+     { "source": "/assets/(.*)", "headers": [{ "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }] },
