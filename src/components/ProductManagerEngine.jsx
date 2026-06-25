@@ -283,7 +283,7 @@ export default function ProductManagerEngine({
     categoryPath,
   }), [status, page, pageSize, debouncedSearch, categoryPath, reorderMode]);
 
-  const { data, isLoading, isFetching, isPlaceholderData } = useCatalogQuery(catalogParams, {
+  const { data, isLoading, isFetching, isPlaceholderData, isError, error } = useCatalogQuery(catalogParams, {
     enabled: status !== 'approval',
   });
   const rows = data?.rows || [];
@@ -697,8 +697,10 @@ export default function ProductManagerEngine({
                         onShowToast={onShowToast}
                       />
                     ))}
-                    {!rows.length && !isLoading && (
-                      <p className="adm-empty">No products in this view.</p>
+                    {!rows.length && !isLoading && !isFetching && (
+                      isError
+                        ? <p className="adm-empty" style={{ color: '#c40000' }}>Failed to load products: {error?.message || 'Unknown error'}. Try refreshing the page or signing out and back in.</p>
+                        : <p className="adm-empty">No products in this view.</p>
                     )}
                   </div>
                 ) : (
@@ -843,8 +845,10 @@ export default function ProductManagerEngine({
                       </div>
                     </div>
                   ))}
-                  {!rows.length && !isLoading && (
-                    <p className="adm-empty">No products in this view.</p>
+                  {!rows.length && !isLoading && !isFetching && (
+                    isError
+                      ? <p className="adm-empty" style={{ color: '#c40000' }}>Failed to load products: {error?.message || 'Unknown error'}. Try refreshing the page or signing out and back in.</p>
+                      : <p className="adm-empty">No products in this view.</p>
                   )}
                 </div>
                 )}
