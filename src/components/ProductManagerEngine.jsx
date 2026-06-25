@@ -71,6 +71,7 @@ function PmMobileProductCard({
   showStockColumn,
   onToggleSelect,
   onEditProduct,
+  onMakeLive,
   mutations,
   onRefreshStats,
   recycleSku,
@@ -146,8 +147,10 @@ function PmMobileProductCard({
         )}
         {status === 'archived' && (
           <>
-            <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => mutations.unarchive.mutate(item.sku, { onSuccess: () => onRefreshStats?.() })}>Restore</button>
-            <button type="button" className="adm-btn-red adm-btn--sm" onClick={() => recycleSku(item.sku, true)}>Recycle</button>
+            <button type="button" className="adm-btn-red adm-btn--sm" onClick={() => onMakeLive?.(item)}>
+              <ArchiveRestore size={14} /> Make live
+            </button>
+            <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => recycleSku(item.sku, true)}>To recycle</button>
           </>
         )}
         {status === 'approval' && (
@@ -408,7 +411,7 @@ export default function ProductManagerEngine({
     onRefreshStats?.();
   };
 
-  const runBulk = async (action) => {
+  const runBulk = async (action, { successMessage } = {}) => {
     const skus = [...selected];
     if (!skus.length) return;
     const errors = [];
@@ -425,8 +428,27 @@ export default function ProductManagerEngine({
     if (errors.length) {
       onShowToast?.(`${skus.length - errors.length} ok, ${errors.length} failed`, 'warning');
     } else {
-      onShowToast?.(`${skus.length} updated`, 'success');
+      onShowToast?.(successMessage || `${skus.length} updated`, 'success');
     }
+  };
+
+  const makeLive = (item) => {
+    const name = item.title || item.name || item.sku;
+    if (!window.confirm(`Move "${name}" to the live website catalogue (website_stock)?`)) return;
+    mutations.unarchive.mutate(item.sku, {
+      onSuccess: () => {
+        onRefreshStats?.();
+        onShowToast?.(`"${name}" is now live on the website`, 'success');
+      },
+      onError: (err) => onShowToast?.(err.message, 'error'),
+    });
+  };
+
+  const bulkMakeLive = () => {
+    const count = selected.size;
+    if (!count) return;
+    if (!window.confirm(`Move ${count} product(s) to the live website catalogue?`)) return;
+    void runBulk(mutations.unarchive, { successMessage: `${count} product(s) are now live` });
   };
 
   const recycleSku = (sku, fromArchive) => mutations.softDelete.mutate(
@@ -594,6 +616,11 @@ export default function ProductManagerEngine({
               </div>
             )}
             <div className="adm-toolbar pm-toolbar">
+              {status === 'archived' && (
+                <p className="adm-section-note" style={{ margin: '0 0 8px', width: '100%' }}>
+                  Hidden from customers. Click <strong>Make live</strong> to move back to the website catalogue.
+                </p>
+              )}
               <label className="adm-search">
                 <Search size={15} />
                 <input
@@ -629,8 +656,10 @@ export default function ProductManagerEngine({
                   )}
                   {status === 'archived' && (
                     <>
-                      <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => runBulk(mutations.unarchive)}>Restore</button>
-                      <button type="button" className="adm-btn-red adm-btn--sm" onClick={() => runBulk({ mutateAsync: (sku) => mutations.softDelete.mutateAsync({ sku, fromArchive: true }) })}>To recycle</button>
+                      <button type="button" className="adm-btn-red adm-btn--sm" onClick={bulkMakeLive}>
+                        <ArchiveRestore size={14} /> Make live
+                      </button>
+                      <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => runBulk({ mutateAsync: (sku) => mutations.softDelete.mutateAsync({ sku, fromArchive: true }) })}>To recycle</button>
                     </>
                   )}
                   {status === 'approval' && (
@@ -691,6 +720,7 @@ export default function ProductManagerEngine({
                         showStockColumn={showStockColumn}
                         onToggleSelect={toggleSelect}
                         onEditProduct={onEditProduct}
+                        onMakeLive={makeLive}
                         mutations={mutations}
                         onRefreshStats={onRefreshStats}
                         recycleSku={recycleSku}
@@ -807,8 +837,10 @@ export default function ProductManagerEngine({
                         )}
                         {status === 'archived' && (
                           <>
-                            <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => mutations.unarchive.mutate(item.sku, { onSuccess: () => onRefreshStats?.() })}>Restore</button>
-                            <button type="button" className="adm-btn-red adm-btn--sm" onClick={() => recycleSku(item.sku, true)}>To recycle</button>
+                            <button type="button" className="adm-btn-red adm-btn--sm" onClick={() => makeLive(item)}>
+                              <ArchiveRestore size={14} /> Make live
+                            </button>
+                            <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => recycleSku(item.sku, true)}>To recycle</button>
                           </>
                         )}
                         {status === 'approval' && (

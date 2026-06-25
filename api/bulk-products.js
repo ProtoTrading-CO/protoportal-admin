@@ -1,6 +1,7 @@
 import { requireAdminKey } from './_admin-auth.js';
 import { createClient } from '@supabase/supabase-js';
 import { labelsToDbFields, loadTaxonomy, resolveLabelsForSubcategory } from './_taxonomy-utils.js';
+import { restoreArchivedToLive } from './_ensure-product.js';
 
 function getStockClient() {
   return createClient(
@@ -38,18 +39,12 @@ async function archiveProduct(supabase, sku) {
 }
 
 async function unarchiveProduct(supabase, sku) {
-  const { data: archived } = await supabase
-    .from('archived_products')
-    .select('sku, archived_by')
-    .eq('sku', sku)
-    .maybeSingle();
-  if (!archived) return { sku, ok: false, error: 'Not in archive' };
-  if (archived.archived_by === 'new-products') {
-    return { sku, ok: false, error: 'New Items staging — use Set Live in New Items tab' };
+  try {
+    const result = await restoreArchivedToLive(supabase, sku);
+    return { sku, ok: true, alreadyLive: !!result.alreadyLive };
+  } catch (err) {
+    return { sku, ok: false, error: err.message || 'Restore failed' };
   }
-  const { error } = await supabase.rpc('unarchive_product', { p_sku: sku });
-  if (error) return { sku, ok: false, error: error.message };
-  return { sku, ok: true };
 }
 
 /**

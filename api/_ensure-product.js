@@ -64,3 +64,38 @@ export function groupCatalogueRowsByErpKey(rows, { preferLiveSkus = null } = {})
 
   return byKey;
 }
+
+/** Move archived_products row → website_stock with ERP + SOH bridge wired up. */
+export async function restoreArchivedToLive(supabase, sku) {
+  const cleanSku = String(sku || '').trim();
+  if (!cleanSku) throw new Error('sku required');
+
+  const { data: archived, error: archErr } = await supabase
+    .from('archived_products')
+    .select('*')
+    .eq('sku', cleanSku)
+    .maybeSingle();
+  if (archErr) throw archErr;
+
+  if (!archived) {
+    const { data: live } = await supabase.from('website_stock').select('sku').eq('sku', cleanSku).maybeSingle();
+    if (live) return { ok: true, sku: cleanSku, alreadyLive: true };
+    throw new Error('Product not in archive');
+  }
+
+  if (archived.archived_by === 'new-products') {
+    throw new Error('New product preview — use Approval → Set live');
+  }
+
+  await ensureProductFromCatalogueRow(supabase, archived);
+
+  const { error: unErr } = await supabase.rpc('unarchive_product', { p_sku: cleanSku });
+  if (unErr) throw unErr;
+
+  await supabase.rpc('upsert_website_product_from_stock', { p_website_sku: cleanSku }).catch(() => {});
+
+  const { data: syncResult, error: syncErr } = await supabase.rpc('sync_website_from_products');
+  if (syncErr) console.warn('sync_website_from_products:', syncErr.message);
+
+  return { ok: true, sku: cleanSku, sync: syncResult };
+}

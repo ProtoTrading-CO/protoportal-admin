@@ -1,7 +1,7 @@
 import { requireAdminKey } from './_admin-auth.js';
 import { loadTaxonomy } from './_taxonomy-utils.js';
 import { getStockClient, enrichRowsWithProductStock } from './_stock-client.js';
-import { ensureProductFromCatalogueRow } from './_ensure-product.js';
+import { ensureProductFromCatalogueRow, restoreArchivedToLive } from './_ensure-product.js';
 import { collectImageUrlsFromRow, removeStagingObjects } from './_staging-storage.js';
 
 const PAGE_SIZE = 1000;
@@ -97,14 +97,11 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true });
     }
 
-    if (action === 'unarchive') {
+    if (action === 'unarchive' || action === 'restoreToLive') {
       const { sku } = req.body;
       if (!sku) return res.status(400).json({ error: 'sku required' });
-      const { data: archived } = await supabase.from('archived_products').select('*').eq('sku', sku).maybeSingle();
-      const { error } = await supabase.rpc('unarchive_product', { p_sku: sku });
-      if (error) throw error;
-      if (archived) await ensureProductFromCatalogueRow(supabase, archived);
-      return res.status(200).json({ ok: true });
+      const result = await restoreArchivedToLive(supabase, sku);
+      return res.status(200).json(result);
     }
 
     if (action === 'recycleFromArchive') {
