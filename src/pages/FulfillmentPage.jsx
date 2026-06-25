@@ -14,9 +14,8 @@ import {
 import { generateOrderPdfBase64, createEmailOrderItems, openPdfBase64Preview } from '../lib/orderDocuments';
 import { displayOrderNumber, buildFulfillmentUrl } from '../lib/orderNumber';
 import { getOrderAccessFromUrl } from '../lib/adminKey';
-import categories from '../data/categories.json';
-
-const CATEGORY_LABELS = Object.fromEntries(categories.map((c) => [c.id, c.label]));
+import { fetchTaxonomy } from '../lib/taxonomyAdmin';
+import { LEGACY_NAV_ALIASES } from '../lib/taxonomy';
 
 /**
  * Local-state quantity input.
@@ -121,6 +120,7 @@ export default function FulfillmentPage() {
   const swapTimerRef = useRef(null);
   const userPickerRef = useRef(null);
   const [userPickerOpen, setUserPickerOpen] = useState(false);
+  const [categoryLabels, setCategoryLabels] = useState({ uncategorized: 'Other / Uncategorized' });
 
   const activeUser = useMemo(
     () => users.find((u) => u.id === activeUserId) || null,
@@ -148,13 +148,17 @@ export default function FulfillmentPage() {
       fetch(`/api/admin-orders?id=${orderId}`).then((r) => r.json()),
       fetchFulfillmentUsers(),
       fetchFulfillmentProgress(orderId),
+      fetchTaxonomy(),
     ])
-      .then(async ([orderData, userRows, progressData]) => {
+      .then(async ([orderData, userRows, progressData, taxonomyRows]) => {
         const row = orderData.rows?.[0];
         if (!row) throw new Error('Order not found');
         setOrder(row);
         setUsers(userRows);
         setProgress(progressData);
+        const labels = { uncategorized: 'Other / Uncategorized' };
+        for (const cat of taxonomyRows || []) labels[cat.id] = cat.label;
+        setCategoryLabels(labels);
 
         const rawItems = (row.original_items || row.items || []).map((it, idx) => ({
           ...it,
@@ -169,7 +173,7 @@ export default function FulfillmentPage() {
         const enriched = rawItems.map((it) => ({
           ...it,
           mainCategoryId: catMap[it.productId]?.category || 'uncategorized',
-          mainCategoryLabel: catMap[it.productId]?.categoryLabel || CATEGORY_LABELS.uncategorized || 'Other',
+          mainCategoryLabel: catMap[it.productId]?.categoryLabel || labels[catMap[it.productId]?.category] || labels.uncategorized,
         }));
 
         setItems(applyProgress(enriched, progressData.sections));
@@ -188,8 +192,14 @@ export default function FulfillmentPage() {
 
   useEffect(() => {
     if (!orderId || loading) return undefined;
+    const refreshUsers = () => {
+      void fetchFulfillmentUsers().then(setUsers).catch(() => {});
+    };
     const iv = setInterval(() => { void refreshProgress(); }, 30000);
-    const onFocus = () => { void refreshProgress(); };
+    const onFocus = () => {
+      void refreshProgress();
+      refreshUsers();
+    };
     window.addEventListener('focus', onFocus);
     return () => { clearInterval(iv); window.removeEventListener('focus', onFocus); };
   }, [orderId, loading, refreshProgress]);
@@ -208,22 +218,27 @@ export default function FulfillmentPage() {
       if (!map.has(catId)) {
         map.set(catId, {
           id: catId,
-          label: item.mainCategoryLabel || CATEGORY_LABELS[catId] || catId,
+          label: item.mainCategoryLabel || categoryLabels[catId] || catId,
           items: [],
         });
       }
       map.get(catId).items.push({ ...item, idx });
     });
     return [...map.values()].sort((a, b) => a.label.localeCompare(b.label));
-  }, [items]);
+  }, [items, categoryLabels]);
 
   const updateItem = (idx, patch) => {
     setItems((prev) => prev.map((it, i) => (i === idx ? { ...it, ...patch } : it)));
   };
 
-  const canEditCategory = (categoryId) => (
-    Boolean(activeUser?.isAdmin) || assignedCategorySet.has(categoryId)
-  );
+  const canEditCategory = (categoryId) => {
+    if (activeUser?.isAdmin) return true;
+    if (assignedCategorySet.has(categoryId)) return true;
+    for (const [legacy, current] of Object.entries(LEGACY_NAV_ALIASES)) {
+      if (current === categoryId && assignedCategorySet.has(legacy)) return true;
+    }
+    return categoryId === 'uncategorized' && assignedCategorySet.has('uncategorized');
+  };
 
   const saveCategorySection = async (categoryId, sectionItems) => {
     if (!activeUser || !orderId) return;
@@ -239,7 +254,7 @@ export default function FulfillmentPage() {
         complete: true,
       });
       setProgress(data);
-      setStatusMsg({ type: 'ok', text: `${CATEGORY_LABELS[categoryId] || 'Section'} saved` });
+      setStatusMsg({ type: 'ok', text: `${categoryLabels[categoryId] || 'Section'} saved` });
       setTimeout(() => setStatusMsg(null), 2500);
     } catch (e) {
       setStatusMsg({ type: 'err', text: e.message });

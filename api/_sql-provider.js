@@ -1,4 +1,4 @@
-import { fetchStmastRow, isStmastAccessConfigured, sqlRowToPreview } from './_sql-stmast.js';
+import { fetchStmastRow, isStmastAccessConfigured, sqlRowToPreview, toSqlPreview } from './_sql-stmast.js';
 import { fetchFromCache } from './_stmast-cache.js';
 
 // Always true — stmast_cache is available via existing Supabase credentials
@@ -14,7 +14,7 @@ export async function getProductByCode(code) {
   if (isStmastAccessConfigured()) {
     try {
       const row = await fetchStmastRow(normalized);
-      if (row) return sqlRowToPreview(row);
+      if (row) return toSqlPreview(row);
     } catch (_) {
       // bridge unavailable — fall through to cache
     }

@@ -101,7 +101,7 @@ import { displayOrderNumber, buildFulfillmentUrl } from '../lib/orderNumber';
 import { fetchPresaleInvoices, uploadPresaleInvoice } from '../lib/presaleInvoice';
 import { fetchConfirmationSent, markConfirmationSent, fetchPaymentRecords, uploadPop, setPaymentStatus } from '../lib/orderPayment';
 import { deleteOrderAdmin, fetchAllOrdersAdmin, updateOrderAdmin, advanceOrderWorkflow } from '../lib/orders';
-import { orderMatchesTab, normalizeOrderStatus } from '../lib/orderStatus';
+import { orderMatchesTab, normalizeOrderStatus, getWorkflowAdvanceOptions } from '../lib/orderStatus';
 import OrderWorkflowBadge from '../components/OrderWorkflowBadge';
 import { fetchFulfillmentUsers, loadActiveUserId } from '../lib/fulfillmentUsers';
 import { fetchSpecials, saveSpecials } from '../lib/specials';
@@ -2346,6 +2346,10 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     try {
       const updated = await updateOrderAdmin(order.id, patch);
       setOrders((prev) => prev.map((item) => item.id === order.id ? updated : item));
+      return updated;
+    } catch (err) {
+      showToast(err.message || 'Failed to update order', 'error');
+      throw err;
     } finally { setSaving(''); }
   };
 
@@ -3916,8 +3920,20 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                         </div>
                         {isExpanded && (
                           <div style={{ background: '#f8fafc', borderTop: '1px solid #f1f5f9', padding: '14px 16px' }}>
-                            <div style={{ marginBottom: 14 }}>
+                            <div style={{ marginBottom: 14, display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
                               <OrderWorkflowBadge order={order} />
+                              {getWorkflowAdvanceOptions(order.status).map(({ label, target }) => (
+                                <button
+                                  key={target}
+                                  type="button"
+                                  className="adm-btn-ghost"
+                                  style={{ fontSize: 12, padding: '4px 10px' }}
+                                  disabled={saving === `advance-${order.id}`}
+                                  onClick={() => void advanceOrderStatus(order, target)}
+                                >
+                                  {saving === `advance-${order.id}` ? 'Updating…' : label}
+                                </button>
+                              ))}
                             </div>
                             <OrderWhatsappNotify orderId={order.id} />
                             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
@@ -4934,7 +4950,11 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
 
       <FulfillmentSettingsModal
         open={fulfillmentSettingsOpen}
-        onClose={() => setFulfillmentSettingsOpen(false)}
+        taxonomyTree={taxonomyTree}
+        onClose={(saved) => {
+          setFulfillmentSettingsOpen(false);
+          if (saved) void fetchFulfillmentUsers().then(setFulfillmentUsers);
+        }}
       />
 
       {toast && (

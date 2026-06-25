@@ -55,6 +55,15 @@ export function getNextManualStatus(status) {
   return null;
 }
 
+export function getWorkflowAdvanceOptions(status) {
+  const key = normalizeOrderStatus(status);
+  if (key === 'pending') return [{ label: 'Mark handed over', target: 'handed over' }];
+  if (key === 'handed over') return [{ label: 'Start fulfilment', target: 'order in progress' }];
+  if (key === 'order in progress') return [{ label: 'Move to order confirmation', target: 'order sent' }];
+  if (key === 'order sent') return [{ label: 'Mark payment received', target: 'payment received' }];
+  return [];
+}
+
 export function isNewOrderStatus(status) {
   return workflowStageIndex(status) === 0;
 }

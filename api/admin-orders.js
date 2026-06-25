@@ -1,6 +1,6 @@
 import { requireAdminOrOrderToken } from './_admin-auth.js';
 import { createClient } from '@supabase/supabase-js';
-import { advanceOrderStatus, normalizeOrderStatus } from './_order-status.js';
+import { advanceOrderStatus, advanceOrderStatusToTarget, normalizeOrderStatus } from './_order-status.js';
 
 function getAdminClient() {
   return createClient(
@@ -63,13 +63,17 @@ export default async function handler(req, res) {
 
     if (advanceWorkflow) {
       const target = normalizeOrderStatus(advanceWorkflow);
-      if (target !== 'order sent' && target !== 'payment received') {
-        return res.status(400).json({ error: 'Manual advance only supports Order Confirmation or payment received' });
+      const allowedTargets = new Set(['handed over', 'order in progress', 'order sent', 'payment received']);
+      if (!allowedTargets.has(target)) {
+        return res.status(400).json({ error: `Unsupported workflow target: "${target}"` });
       }
       try {
-        const result = await advanceOrderStatus(supabase, id, target);
+        const result = await advanceOrderStatusToTarget(supabase, id, target);
         if (!result.ok) {
-          return res.status(409).json({ error: `Cannot advance to "${target}" from "${result.current || 'unknown'}"` });
+          return res.status(409).json({
+            error: `Cannot advance to "${target}" from "${result.current || 'unknown'}"`,
+            reason: result.reason,
+          });
         }
       } catch (err) {
         return res.status(400).json({ error: err.message });

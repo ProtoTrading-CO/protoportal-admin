@@ -15,6 +15,17 @@ import {
 import categories from '../data/categories.json';
 import { isImageFile } from '../lib/parseIntakeFilename.js';
 
+function displayTitle(...candidates) {
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.trim()) return candidate.trim();
+    if (candidate && typeof candidate === 'object') {
+      const inner = candidate.title ?? candidate.DESCR ?? candidate.descr ?? candidate.name;
+      if (typeof inner === 'string' && inner.trim()) return inner.trim();
+    }
+  }
+  return '';
+}
+
 // Maps Gemini's category labels to taxonomy IDs
 const GEMINI_CATEGORY_MAP = {
   'Arts Crafts & Stationery': 'arts-crafts-stationery',
@@ -861,7 +872,7 @@ export default function ProductLoaderPanel({
                     <tr key={row.filename} style={{ borderTop: '1px solid #f1f5f9' }}>
                       <td style={{ padding: '7px 10px', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.filename}</td>
                       <td style={{ padding: '7px 10px', fontWeight: 700 }}>{row.code || '—'}</td>
-                      <td style={{ padding: '7px 10px', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={row.title}>{row.title || '—'}</td>
+                      <td style={{ padding: '7px 10px', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={displayTitle(row.title, row.sqlRow?.title)}>{displayTitle(row.title, row.sqlRow?.title) || '—'}</td>
                       <td style={{ padding: '7px 10px' }}>{row.imageSlot}</td>
                       <td style={{ padding: '7px 10px', color: row.status === 'done' ? '#16a34a' : row.status === 'error' || row.status === 'unmatched' ? '#dc2626' : '#64748b' }}>
                         {row.status === 'processing' ? '…' : row.status}
@@ -1004,7 +1015,7 @@ export default function ProductLoaderPanel({
                   }}
                 >
                   <div>
-                    <div style={{ fontWeight: 800, fontSize: 14, color: '#111827', marginBottom: 2 }}>{row.title}</div>
+                    <div style={{ fontWeight: 800, fontSize: 14, color: '#111827', marginBottom: 2 }}>{displayTitle(row.title, row.sqlRow?.title) || row.sku}</div>
                     <div style={{ fontSize: 12, color: '#64748b', marginBottom: 10 }}>
                       <strong>{row.sku}</strong>
                       {row.price > 0 && <> · R{Number(row.price).toFixed(2)}</>}
@@ -1183,7 +1194,7 @@ export default function ProductLoaderPanel({
                 )}
               </div>
                 <div style={{ fontSize: 16, fontWeight: 700, color: '#111827', marginBottom: 6 }}>
-                  {sqlRow?.title || websiteRow?.title || '—'}
+                  {displayTitle(sqlRow?.title, websiteRow?.title) || '—'}
                 </div>
                 <div style={{ display: 'flex', gap: 16, fontSize: 13, color: '#475569', flexWrap: 'wrap' }}>
                   <span>Price: <strong>R{Number(sqlRow?.price ?? websiteRow?.price ?? 0).toFixed(2)}</strong></span>
@@ -1477,7 +1488,7 @@ export default function ProductLoaderPanel({
               {/* Summary */}
               <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '10px 14px', fontSize: 12, color: '#475569', marginBottom: 16, lineHeight: 1.9 }}>
                 <strong style={{ color: '#111827' }}>Publishing:</strong>{' '}
-                {sqlRow?.title || websiteRow?.title || code} ·{' '}
+                {displayTitle(sqlRow?.title, websiteRow?.title, code) || code} ·{' '}
                 {findNode(taxonomyTree, categoryId)?.label || categoryId}
                 {sub1Id ? ` › ${findNode(taxonomyTree, sub1Id)?.label || sub1Id}` : ''}
                 {sub2Id ? ` › ${findNode(taxonomyTree, sub2Id)?.label || sub2Id}` : ''}

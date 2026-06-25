@@ -78,3 +78,39 @@ export async function advanceOrderStatus(supabase, orderId, nextStatus, { force 
   if (error) throw error;
   return { ok: true, order: data, previous: current };
 }
+
+/** Advance through each workflow stage until the target is reached (or already past it). */
+export async function advanceOrderStatusToTarget(supabase, orderId, nextStatus, { force = false } = {}) {
+  const target = normalizeOrderStatus(nextStatus);
+  if (!WORKFLOW_STATUSES.includes(target) || target === 'pending') {
+    return { ok: false, reason: 'invalid-status' };
+  }
+
+  let lastResult = null;
+  let guard = 0;
+  while (guard < WORKFLOW_STATUSES.length) {
+    guard += 1;
+    const { data: order, error: loadErr } = await supabase
+      .from('orders')
+      .select('id, status')
+      .eq('id', orderId)
+      .maybeSingle();
+    if (loadErr) throw loadErr;
+    if (!order) return { ok: false, reason: 'not-found' };
+
+    const current = normalizeOrderStatus(order.status);
+    if (workflowStageIndex(current) >= workflowStageIndex(target)) {
+      return lastResult || { ok: true, order, previous: current, alreadyAtOrPast: true };
+    }
+
+    const nextIdx = workflowStageIndex(current) + 1;
+    const stepTarget = WORKFLOW_STATUSES[nextIdx];
+    if (!stepTarget) return { ok: false, reason: 'invalid-step', current, target };
+
+    lastResult = await advanceOrderStatus(supabase, orderId, stepTarget, { force });
+    if (!lastResult.ok) return lastResult;
+    if (stepTarget === target) return lastResult;
+  }
+
+  return lastResult || { ok: false, reason: 'max-steps' };
+}

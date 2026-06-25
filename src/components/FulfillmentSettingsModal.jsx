@@ -1,12 +1,29 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Check, Crown, Loader2, MessageCircle, Plus, Trash2, X } from 'lucide-react';
-import categories from '../data/categories.json';
 import { fetchFulfillmentUsers, saveFulfillmentUsers } from '../lib/fulfillmentUsers';
-
-const MAIN_CATEGORIES = categories.map((c) => ({ id: c.id, label: c.label }));
+import { LEGACY_NAV_ALIASES } from '../lib/taxonomy';
 
 function slugify(name) {
   return String(name || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || `user-${Date.now()}`;
+}
+
+function normalizeAssignedCategoryIds(categoryIds = []) {
+  const out = new Set();
+  for (const id of categoryIds) {
+    if (!id) continue;
+    out.add(id);
+    const mapped = LEGACY_NAV_ALIASES[id];
+    if (mapped) out.add(mapped);
+  }
+  return [...out];
+}
+
+function buildMainCategories(taxonomyTree) {
+  const mains = (taxonomyTree || []).map((c) => ({ id: c.id, label: c.label }));
+  if (!mains.some((c) => c.id === 'uncategorized')) {
+    mains.push({ id: 'uncategorized', label: 'Other / Uncategorized' });
+  }
+  return mains;
 }
 
 /** Mirror of the server-side WATI normalisation so the user sees the saved shape live. */
@@ -27,7 +44,7 @@ function emptyUser() {
   return { id: `user-${Date.now()}`, name: '', whatsapp: '', isAdmin: false, categoryIds: [] };
 }
 
-export default function FulfillmentSettingsModal({ open, onClose }) {
+export default function FulfillmentSettingsModal({ open, onClose, taxonomyTree = [] }) {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -35,16 +52,28 @@ export default function FulfillmentSettingsModal({ open, onClose }) {
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState(null);
 
+  const mainCategories = useMemo(() => buildMainCategories(taxonomyTree), [taxonomyTree]);
+
   useEffect(() => {
+    if (!open) return undefined;
+    let cancelled = false;
+    setLoading(true);
+    setError('');
     fetchFulfillmentUsers()
-      .then((rows) => setUsers(rows.map((u) => ({
-        ...u,
-        isAdmin: Boolean(u.isAdmin),
-        categoryIds: Array.isArray(u.categoryIds) ? u.categoryIds.filter(Boolean) : [],
-      }))))
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
-  }, []);
+      .then((rows) => {
+        if (cancelled) return;
+        setUsers(rows.map((u) => ({
+          ...u,
+          isAdmin: Boolean(u.isAdmin),
+          categoryIds: normalizeAssignedCategoryIds(
+            Array.isArray(u.categoryIds) ? u.categoryIds.filter(Boolean) : [],
+          ),
+        })));
+      })
+      .catch((e) => { if (!cancelled) setError(e.message); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [open]);
 
   const updateUser = (idx, patch) => {
     setUsers((prev) => prev.map((u, i) => (i === idx ? { ...u, ...patch } : u)));
@@ -184,7 +213,7 @@ export default function FulfillmentSettingsModal({ open, onClose }) {
                     Categories {user.isAdmin && <em className="adm-muted" style={{ fontWeight: 400 }}>(admins can tick all categories regardless)</em>}
                   </span>
                   <div className="adm-ff-chip-grid">
-                    {MAIN_CATEGORIES.map((cat) => {
+                    {mainCategories.map((cat) => {
                       const active = (user.categoryIds || []).includes(cat.id);
                       return (
                         <button

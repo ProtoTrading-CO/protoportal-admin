@@ -198,7 +198,7 @@ function getAllCached() {
         })
         .catch(() => loadLiveFromDB()
           .then((all) => {
-            _cache = all.filter((p) => p.category);
+            _cache = all;
             saveToLocalCache(_cache);
             return _cache;
           }))
@@ -223,8 +223,12 @@ export function invalidateAdminCache() {
   _adminCacheGen += 1;
   _adminCache = null;
   _adminLoadPromise = null;
+  _cache = null;
+  _loadPromise = null;
+  try { localStorage.removeItem(LS_KEY); } catch {}
   queryClient.invalidateQueries({ queryKey: ['catalog'] });
   queryClient.invalidateQueries({ queryKey: queryKeys.dashboardStats() });
+  queryClient.invalidateQueries({ queryKey: queryKeys.taxonomy() });
 }
 
 function applyPathFilter(products, categoryPath) {

@@ -19,8 +19,8 @@ export async function fetchFromCache(code) {
   const onhand = Number(data.onhand) || 0;
   const booked = Number(data.booked) || 0;
   return {
-    code:      data.code,
-    title:     data.descr || '',
+    code:      String(data.code || '').trim(),
+    title:     String(data.descr ?? '').trim(),
     price:     Number(data.price_a) || 0,
     onhand,
     booked,

@@ -1,7 +1,7 @@
 import { requireAdminOrOrderToken } from './_admin-auth.js';
 import { readSiteConfigJson, getPortalAdminClient } from './_site-config.js';
 import { mutateSiteConfigJson } from './_site-config-mutate.js';
-import { advanceOrderStatus } from './_order-status.js';
+import { advanceOrderStatusToTarget } from './_order-status.js';
 
 function progressFile(orderId) {
   return `fulfillment/progress/${orderId}.json`;
@@ -54,7 +54,7 @@ export default async function handler(req, res) {
       if (Boolean(complete)) {
         try {
           const supabase = getPortalAdminClient();
-          await advanceOrderStatus(supabase, orderId, 'order in progress');
+          await advanceOrderStatusToTarget(supabase, orderId, 'order in progress');
         } catch (err) {
           console.error('fulfillment-progress: status advance failed:', err.message);
         }

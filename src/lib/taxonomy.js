@@ -49,7 +49,7 @@ export function slugToLabelFromTree(slug, tree) {
 }
 
 /** Legacy nav ids whose slug no longer matches labelToSlug(label) after a rename. */
-const LEGACY_NAV_ALIASES = {
+export const LEGACY_NAV_ALIASES = {
   // Pre-restructure aliases — keep old slugs resolving to new top-level ids
   'arts-crafts-stationery': 'arts-and-crafts',
   'art-supplies-and-stationery': 'arts-and-crafts',

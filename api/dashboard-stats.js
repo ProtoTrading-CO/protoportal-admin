@@ -68,22 +68,25 @@ async function loadStats() {
 
   const [
     liveProducts,
-    archivedProducts,
-    approvalPending,
+    totalArchived,
+    dormantArchived,
     recycleBin,
+    approvalPending,
     uncategorized,
     customersRes,
     ordersRes,
   ] = await Promise.all([
     countTable(stockSb, 'website_stock'),
-    countTable(stockSb, 'archived_products', (q) =>
-      q.not('archived_by', 'in', '("new-products","recycle-bin")')),
-    countApproval(stockSb),
+    countTable(stockSb, 'archived_products'),
+    countTable(stockSb, 'archived_products', (q) => q.eq('archived_by', 'new-products')),
     countTable(stockSb, 'archived_products', (q) => q.eq('archived_by', 'recycle-bin')),
+    countApproval(stockSb),
     countTable(stockSb, 'website_stock', (q) => q.or('category.is.null,category.eq.')),
     mainSb.from('customers').select('*', { count: 'exact', head: true }),
     mainSb.from('orders').select('*', { count: 'exact', head: true }),
   ]);
+
+  const archivedProducts = Math.max(0, totalArchived - dormantArchived - recycleBin);
 
   if (customersRes.error) throw customersRes.error;
   if (ordersRes.error) throw ordersRes.error;

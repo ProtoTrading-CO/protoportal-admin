@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { requireAdminKey } from './_admin-auth.js';
 import { getProductByCode, isSqlConfigured } from './_sql-provider.js';
+import { toSqlPreview } from './_sql-stmast.js';
 
 function getStockClient() {
   return createClient(
@@ -51,7 +52,7 @@ export default async function handler(req, res) {
   }
 
   // SQL enriches price/stock when available — website_stock is always the base
-  const sqlRow = sqlResult.status === 'fulfilled' ? sqlResult.value : null;
+  const sqlRow = sqlResult.status === 'fulfilled' ? toSqlPreview(sqlResult.value) : null;
   const dataSource = sqlRow ? 'sql' : 'website_stock';
 
   const existingImages = SLOT_FIELDS.map((f) => websiteRow?.[f]).filter(Boolean);

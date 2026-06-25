@@ -13,6 +13,29 @@ import {
 
 const VALID_STATUS = new Set(['live', 'archived', 'new-items', 'approval', 'recycle']);
 const EXCLUDE_ARCHIVED = ['new-products', 'recycle-bin'];
+const PAGE_CHUNK = 1000;
+
+async function fetchAllArchivedRows(sb, { archivedBy, excludeBy, sort }) {
+  const rows = [];
+  let from = 0;
+  while (true) {
+    let q = sb.from('archived_products').select('*');
+    if (archivedBy) q = q.eq('archived_by', archivedBy);
+    if (excludeBy?.length) {
+      const quoted = excludeBy.map((v) => `"${v}"`).join(',');
+      q = q.or(`archived_by.is.null,archived_by.not.in.(${quoted})`);
+    }
+    if (sort === 'updated') q = q.order('updated_at', { ascending: false });
+    else q = q.order('title', { ascending: true });
+    q = q.range(from, from + PAGE_CHUNK - 1);
+    const { data, error } = await q;
+    if (error) throw error;
+    rows.push(...(data || []));
+    if ((data || []).length < PAGE_CHUNK) break;
+    from += PAGE_CHUNK;
+  }
+  return rows;
+}
 
 function parseCategoryPath(raw) {
   if (!raw) return [];
@@ -56,7 +79,8 @@ async function queryArchivedPaginated(sb, { search, categoryPath, tree, page, pa
   }
   q = applyCategoryFiltersToQuery(q, resolveCategoryFilters(tree, categoryPath));
   if (excludeBy?.length) {
-    for (const by of excludeBy) q = q.neq('archived_by', by);
+    const quoted = excludeBy.map((v) => `"${v}"`).join(',');
+    q = q.or(`archived_by.is.null,archived_by.not.in.(${quoted})`);
   }
   if (sort === 'updated') q = q.order('updated_at', { ascending: false });
   else q = q.order('title', { ascending: true });
@@ -79,20 +103,15 @@ async function fetchLiveSkus(sb) {
 }
 
 async function loadApprovalRows(sb) {
-  const { data: staged, error } = await sb
-    .from('archived_products')
-    .select('*')
-    .eq('archived_by', 'new-products')
-    .order('updated_at', { ascending: false });
-  if (error) throw error;
-  const skus = (staged || []).map((r) => r.sku).filter(Boolean);
+  const staged = await fetchAllArchivedRows(sb, { archivedBy: 'new-products', sort: 'updated' });
+  const skus = staged.map((r) => r.sku).filter(Boolean);
   if (!skus.length) return [];
   const { data: liveRows } = await sb.from('website_stock').select('*').in('sku', skus);
   const liveBySku = new Map((liveRows || []).map((r) => [r.sku, r]));
   const barcodes = (staged || []).map((r) => r.barcode || r.sku).filter(Boolean);
   const stockChecks = await batchValidateStockReady(sb, barcodes);
   const rows = [];
-  for (const row of staged || []) {
+  for (const row of staged) {
     const live = liveBySku.get(row.sku);
     if (!live) continue;
     const { appliedSlots } = mergeStagedImagesOntoLive(row, live);
@@ -142,17 +161,15 @@ export default async function handler(req, res) {
       });
     } else if (status === 'new-items') {
       const liveSkus = await fetchLiveSkus(sb);
-      const raw = await queryArchivedPaginated(sb, {
-        search, categoryPath, tree, page: 1, pageSize: 10000, sort, archivedBy: 'new-products',
-      });
-      let rows = raw.rows.filter((r) => !liveSkus.has(r.sku));
-      rows = filterByCategoryPath(rows, categoryPath);
+      const allRows = await fetchAllArchivedRows(sb, { archivedBy: 'new-products', sort });
+      let rows = allRows.filter((r) => !liveSkus.has(r.sku));
+      rows = filterByCategoryPath(rows, categoryPath, tree);
       rows = applySearchFilter(rows, search);
       const pageSlice = paginateRows(rows, page, pageSize);
       result = { ...pageSlice, archived: true };
     } else if (status === 'approval') {
       let rows = await loadApprovalRows(sb);
-      rows = filterByCategoryPath(rows, categoryPath);
+      rows = filterByCategoryPath(rows, categoryPath, tree);
       rows = applySearchFilter(rows, search);
       const pageSlice = paginateRows(rows, page, pageSize);
       result = { ...pageSlice, archived: true };

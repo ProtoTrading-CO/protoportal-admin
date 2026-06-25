@@ -39,12 +39,29 @@ function normalizeRow(row) {
   if (!row) return null;
   return {
     CODE: row.CODE ?? row.code,
-    DESCR: row.DESCR ?? row.descr,
-    PRICE_A: row.PRICE_A ?? row.price_a,
+    DESCR: row.DESCR ?? row.descr ?? row.title ?? row.description,
+    PRICE_A: row.PRICE_A ?? row.price_a ?? row.price,
     ONHAND: row.ONHAND ?? row.onhand,
     BOOKED: row.BOOKED ?? row.booked,
     DEPT: row.DEPT ?? row.dept,
   };
+}
+
+/** Normalize bridge/cache/raw rows into a consistent preview shape for the UI. */
+export function toSqlPreview(row) {
+  if (!row) return null;
+  if (row.title != null && row.code != null && row.DESCR == null && row.descr == null) {
+    return {
+      code: String(row.code || row.CODE || '').trim(),
+      title: String(row.title ?? '').trim(),
+      price: Number(row.price ?? row.PRICE_A ?? row.price_a) || 0,
+      onhand: Number(row.onhand ?? row.ONHAND) || 0,
+      booked: Number(row.booked ?? row.BOOKED) || 0,
+      available: Number(row.available ?? ((Number(row.onhand ?? row.ONHAND) || 0) - (Number(row.booked ?? row.BOOKED) || 0))),
+      dept: String(row.dept ?? row.DEPT ?? '').trim(),
+    };
+  }
+  return sqlRowToPreview(normalizeRow(row));
 }
 
 async function fetchViaBridge(sku) {

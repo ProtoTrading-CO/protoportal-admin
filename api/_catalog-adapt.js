@@ -1,8 +1,11 @@
-import { labelToSlug } from './_taxonomy-utils.js';
+import { labelToSlug, resolveCategoryIds } from './_taxonomy-utils.js';
 
 const SUB_FIELDS = ['subcategory_one', 'subcategory_two', 'subcategory_three', 'subcategory_four'];
 
-export function rowCategoryPath(row) {
+/** Stable taxonomy node ids for a DB row (falls back to slug-of-label when orphaned). */
+export function rowCategoryPath(row, tree = null) {
+  const { categoryPath } = resolveCategoryIds(row, tree);
+  if (categoryPath.length) return categoryPath;
   const parts = [row.category, ...SUB_FIELDS.map((f) => row[f])].filter(Boolean);
   return parts.map(labelToSlug);
 }
@@ -37,14 +40,14 @@ export function applyCategoryFiltersToQuery(q, filters) {
   return q;
 }
 
-/** Filter rows whose category path starts with the given slug prefix. */
-export function filterByCategoryPath(rows, categoryPath) {
+/** Filter rows whose category path starts with the given taxonomy id prefix. */
+export function filterByCategoryPath(rows, categoryPath, tree = null) {
   if (!Array.isArray(categoryPath) || !categoryPath.length) return rows;
   if (categoryPath[0] === '__uncategorized__') {
     return rows.filter((r) => !String(r.category || '').trim());
   }
   return rows.filter((r) => {
-    const cp = rowCategoryPath(r);
+    const cp = rowCategoryPath(r, tree);
     const depth = Math.min(cp.length, categoryPath.length);
     return depth > 0 && categoryPath.slice(0, depth).every((seg, i) => cp[i] === seg);
   });
@@ -67,8 +70,7 @@ export function applySearchFilter(rows, search) {
 export function adaptCatalogRow(row, tree, { archived = false } = {}) {
   const images = [row.image_url_one, row.image_url_two, row.image_url_three, row.image_url_four].filter(Boolean);
   const subLabels = SUB_FIELDS.map((f) => row[f]).filter(Boolean);
-  const categoryPath = rowCategoryPath(row);
-  const categoryId = categoryPath[0] || '';
+  const { categoryId, categoryPath } = resolveCategoryIds(row, tree);
   const soh = row.available_stock ?? row.stock_qty;
   const stockNum = soh !== null && soh !== undefined && soh !== '' ? Number(soh) : null;
   return {

@@ -94,7 +94,7 @@ export default async function handler(req, res) {
       fetchAllRows(supabase, 'website_stock'),
       loadTaxonomy().catch(() => []),
     ]);
-    const products = rows.map((r) => adapt(r, tree)).filter((p) => p.category);
+    const products = rows.map((r) => adapt(r, tree));
 
     res.setHeader('Cache-Control', 's-maxage=60, stale-while-revalidate=3600');
     res.setHeader('Content-Type', 'application/json');
