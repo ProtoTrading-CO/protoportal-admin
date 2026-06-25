@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { findProductBySku, fetchProductLookupMap } from './_sku-match.js';
 
 /**
  * Stock Supabase client for serverless API routes.
@@ -19,10 +20,14 @@ export function getStockClient() {
   });
 }
 
+function stockKeyForRow(row, linkByWebsiteSku) {
+  return linkByWebsiteSku.get(row.sku) || row.barcode || row.sku || '';
+}
+
 /** Resolve ERP product SKU per website row (website_products, else barcode). */
 export async function resolveProductSkusForRows(supabase, rows) {
   const websiteSkus = [...new Set(rows.map((r) => r.sku).filter(Boolean))];
-  const productSkuByWebsiteSku = new Map();
+  const linkByWebsiteSku = new Map();
   if (websiteSkus.length) {
     for (let i = 0; i < websiteSkus.length; i += 500) {
       const chunk = websiteSkus.slice(i, i + 500);
@@ -36,34 +41,56 @@ export async function resolveProductSkusForRows(supabase, rows) {
       }
       for (const l of data || []) {
         const sku = l.product_sku || l.barcode || null;
-        if (sku) productSkuByWebsiteSku.set(l.website_sku, sku);
+        if (sku) linkByWebsiteSku.set(l.website_sku, sku);
       }
     }
   }
-  return rows.map((r) => productSkuByWebsiteSku.get(r.sku) || r.barcode || null);
+
+  const rawKeys = rows.map((r) => stockKeyForRow(r, linkByWebsiteSku));
+  const lookupMap = await fetchProductLookupMap(supabase, rawKeys, 'sku');
+  return rows.map((r, i) => {
+    const product = findProductBySku(lookupMap, rawKeys[i]);
+    return product?.sku || rawKeys[i] || null;
+  });
 }
 
-/** Attach live SOH + price from public.products via website_products (fallback: barcode). */
+/** Attach live SOH + price from public.products (fuzzy SKU match + website_products). */
 export async function enrichRowsWithProductStock(supabase, rows, { includePrice = false } = {}) {
-  const resolved = await resolveProductSkusForRows(supabase, rows);
-  const productSkus = [...new Set(resolved)].filter(Boolean);
-  if (!productSkus.length) return rows;
-  const stockBySku = new Map();
-  const cols = includePrice ? 'sku, stock_qty, available_stock, sell_price' : 'sku, stock_qty, available_stock';
-  for (let i = 0; i < productSkus.length; i += 500) {
-    const chunk = productSkus.slice(i, i + 500);
-    const { data, error } = await supabase.from('products').select(cols).in('sku', chunk);
-    if (error) throw error;
-    for (const p of data || []) stockBySku.set(p.sku, p);
+  if (!rows.length) return rows;
+
+  const websiteSkus = [...new Set(rows.map((r) => r.sku).filter(Boolean))];
+  const linkByWebsiteSku = new Map();
+  if (websiteSkus.length) {
+    for (let i = 0; i < websiteSkus.length; i += 500) {
+      const chunk = websiteSkus.slice(i, i + 500);
+      const { data, error } = await supabase
+        .from('website_products')
+        .select('website_sku, product_sku, barcode')
+        .in('website_sku', chunk);
+      if (error) {
+        if (/website_products/i.test(String(error.message || ''))) break;
+        throw error;
+      }
+      for (const l of data || []) {
+        const sku = l.product_sku || l.barcode || null;
+        if (sku) linkByWebsiteSku.set(l.website_sku, sku);
+      }
+    }
   }
+
+  const rawKeys = rows.map((r) => stockKeyForRow(r, linkByWebsiteSku));
+  const cols = includePrice ? 'sku, stock_qty, available_stock, sell_price' : 'sku, stock_qty, available_stock';
+  const lookupMap = await fetchProductLookupMap(supabase, rawKeys, cols);
+
   return rows.map((r, i) => {
-    const p = stockBySku.get(resolved[i]);
-    if (!p) return r;
+    const product = findProductBySku(lookupMap, rawKeys[i]);
+    if (!product) return r;
     return {
       ...r,
-      stock_qty: p.stock_qty,
-      available_stock: p.available_stock,
-      ...(includePrice ? { sell_price: p.sell_price } : {}),
+      stock_qty: product.stock_qty,
+      available_stock: product.available_stock,
+      ...(includePrice ? { sell_price: product.sell_price } : {}),
+      ...(includePrice && product.sell_price != null && !Number(r.price) ? { price: product.sell_price } : {}),
     };
   });
 }

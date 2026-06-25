@@ -72,7 +72,9 @@ export function adaptCatalogRow(row, tree, { archived = false } = {}) {
   const subLabels = SUB_FIELDS.map((f) => row[f]).filter(Boolean);
   const { categoryId, categoryPath } = resolveCategoryIds(row, tree);
   const soh = row.available_stock ?? row.stock_qty;
-  const stockNum = soh !== null && soh !== undefined && soh !== '' ? Number(soh) : null;
+  const stockNum = soh !== null && soh !== undefined && soh !== ''
+    ? Number(soh)
+    : 0;
   return {
     id: row.sku,
     sku: row.sku,

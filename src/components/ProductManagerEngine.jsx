@@ -50,8 +50,8 @@ const STOCK_STATUSES = new Set(['live', 'archived']);
 
 function formatStockUnits(qty, keepLive = false) {
   if (keepLive && (qty === null || qty === undefined || qty <= 0)) return 'Available';
-  if (qty === null || qty === undefined) return '—';
-  return `${qty} units`;
+  const n = qty === null || qty === undefined ? 0 : Number(qty);
+  return `${Number.isFinite(n) ? n : 0} units`;
 }
 
 function CatalogSkeleton() {

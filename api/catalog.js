@@ -175,7 +175,8 @@ export default async function handler(req, res) {
       result = { ...pageSlice, archived: true };
     }
 
-    const needsStock = status === 'new-items' || status === 'approval' || status === 'archived';
+    const needsStock = status === 'live' || status === 'archived' || status === 'recycle'
+      || status === 'new-items' || status === 'approval';
     let enriched = result.rows;
     if (needsStock && enriched.length) {
       enriched = await enrichRowsWithProductStock(sb, enriched, { includePrice: status === 'new-items' });

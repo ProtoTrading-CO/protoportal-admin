@@ -1,6 +1,5 @@
-/** Stage a processed image in New Products without removing the live catalogue row. */
-
 import { stagingExpiresAt, collectImageUrlsFromRow, removeStagingObjects, isExpiredStaging, resolveLiveImageUrl, storagePathFromPublicUrl, buildLiveObjectPath, publicUrlForPath, repairSkuLiveStagingUrls } from './_staging-storage.js';
+import { findProductBySku, fetchProductLookupMap } from './_sku-match.js';
 
 const LIVE_SELECT = `
   id, sku, barcode, title, original_description,
@@ -179,12 +178,8 @@ export async function validateStockReady(sb, barcode) {
   const key = String(barcode || '').trim();
   if (!key) return { ok: false, error: 'Missing barcode/SKU for stock lookup' };
 
-  const { data: product, error } = await sb
-    .from('products')
-    .select('sku, sell_price, available_stock, stock_qty')
-    .eq('sku', key)
-    .maybeSingle();
-  if (error) throw new Error(error.message);
+  const lookupMap = await fetchProductLookupMap(sb, [key], 'sku, sell_price, available_stock, stock_qty');
+  const product = findProductBySku(lookupMap, key);
   if (!product) return { ok: false, error: `No stock record for "${key}" — add price and SOH in the stock system first` };
 
   const price = readStock(product.sell_price);
@@ -210,17 +205,10 @@ export async function batchValidateStockReady(sb, barcodes) {
 
   if (!keys.length) return result;
 
-  const { data: products, error } = await sb
-    .from('products')
-    .select('sku, sell_price, available_stock, stock_qty')
-    .in('sku', keys);
-
-  if (error) throw new Error(error.message);
-
-  const byKey = new Map((products || []).map((p) => [p.sku, p]));
+  const lookupMap = await fetchProductLookupMap(sb, keys, 'sku, sell_price, available_stock, stock_qty');
 
   for (const key of keys) {
-    const product = byKey.get(key);
+    const product = findProductBySku(lookupMap, key);
     if (!product) {
       result.set(key, { ok: false, error: `No stock record for "${key}" — add price and SOH in the stock system first` });
       continue;
