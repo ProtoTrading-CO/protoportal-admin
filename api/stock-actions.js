@@ -22,7 +22,7 @@ async function fetchAllRows(supabase, table, { filter = null, orderBy = null } =
   return rows;
 }
 
-/** Attach live SOH from public.products (join: products.sku = row.barcode). */
+/** Attach live SOH from public.products via website_product_links (fallback: barcode). */
 async function enrichRowsWithProductStockLocal(supabase, rows) {
   return enrichRowsWithProductStock(supabase, rows);
 }

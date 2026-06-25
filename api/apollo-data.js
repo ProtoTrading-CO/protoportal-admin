@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { resolveProductSkusForRows } from './_stock-client.js';
 
 const PAGE = 1000;
 const CACHE_MS = 90_000;
@@ -52,10 +53,11 @@ async function fetchAllPages(client, table, select, orderBy = 'title') {
 }
 
 async function enrichStockLevels(stock, rows) {
-  const barcodes = [...new Set(rows.map((r) => r.barcode).filter(Boolean))];
-  const stockByBarcode = new Map();
-  for (let i = 0; i < barcodes.length; i += 500) {
-    const chunk = barcodes.slice(i, i + 500);
+  const resolved = await resolveProductSkusForRows(stock, rows);
+  const productSkus = [...new Set(resolved)].filter(Boolean);
+  const stockBySku = new Map();
+  for (let i = 0; i < productSkus.length; i += 500) {
+    const chunk = productSkus.slice(i, i + 500);
     const { data, error } = await stock
       .from('products')
       .select('sku, stock_qty, available_stock')
@@ -64,14 +66,14 @@ async function enrichStockLevels(stock, rows) {
       console.error('apollo stock enrich chunk:', error.message);
       continue;
     }
-    for (const p of data || []) stockByBarcode.set(p.sku, p);
+    for (const p of data || []) stockBySku.set(p.sku, p);
   }
-  return rows.map((row) => {
+  return rows.map((row, i) => {
     const localAvailable = readStock(row.available_stock);
     const localRaw = readStock(row.stock_qty);
     let soh = localAvailable !== null ? localAvailable : localRaw;
-    if (soh === null && row.barcode) {
-      const p = stockByBarcode.get(row.barcode);
+    if (soh === null && resolved[i]) {
+      const p = stockBySku.get(resolved[i]);
       const available = readStock(p?.available_stock);
       const raw = readStock(p?.stock_qty);
       soh = available !== null ? available : raw;

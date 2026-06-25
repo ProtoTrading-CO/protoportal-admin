@@ -174,7 +174,7 @@ function readStock(value) {
   return Number.isFinite(n) ? n : null;
 }
 
-/** Require price + SOH from source-of-truth products table (join: products.sku = barcode). */
+/** Require price + SOH from source-of-truth products table (via barcode / product SKU). */
 export async function validateStockReady(sb, barcode) {
   const key = String(barcode || '').trim();
   if (!key) return { ok: false, error: 'Missing barcode/SKU for stock lookup' };
