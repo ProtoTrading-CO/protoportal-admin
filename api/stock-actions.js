@@ -1,6 +1,7 @@
 import { requireAdminKey } from './_admin-auth.js';
 import { loadTaxonomy } from './_taxonomy-utils.js';
 import { getStockClient, enrichRowsWithProductStock } from './_stock-client.js';
+import { ensureProductFromCatalogueRow } from './_ensure-product.js';
 import { collectImageUrlsFromRow, removeStagingObjects } from './_staging-storage.js';
 
 const PAGE_SIZE = 1000;
@@ -84,6 +85,7 @@ export default async function handler(req, res) {
       const clean = Object.fromEntries(Object.entries(row).filter(([k]) => ALLOWED.has(k)));
       const { error } = await supabase.from('website_stock').insert(clean);
       if (error) throw error;
+      await ensureProductFromCatalogueRow(supabase, clean);
       return res.status(200).json({ ok: true });
     }
 
@@ -98,8 +100,10 @@ export default async function handler(req, res) {
     if (action === 'unarchive') {
       const { sku } = req.body;
       if (!sku) return res.status(400).json({ error: 'sku required' });
+      const { data: archived } = await supabase.from('archived_products').select('*').eq('sku', sku).maybeSingle();
       const { error } = await supabase.rpc('unarchive_product', { p_sku: sku });
       if (error) throw error;
+      if (archived) await ensureProductFromCatalogueRow(supabase, archived);
       return res.status(200).json({ ok: true });
     }
 
