@@ -136,12 +136,15 @@ const REMAP_RULES = [
   { oldCat: 'Packaging', oldSub1: 'Retail Display & Tagging', newCat: 'Packaging & Storage', newSub1: 'Tags' },
   { oldCat: 'Packaging', newCat: 'Packaging & Storage' },
 
-  // ── Textiles ─────────────────────────────────────────────────────────────
+  // ── Textiles (ribbon integration) ─────────────────────────────────────────
   { oldCat: 'Textiles', oldSub1: 'Blankets & Throws', newCat: 'Homeware', newSub1: 'Bedroom', newSub2: 'Blankets' },
   { oldCat: 'Textiles', oldSub1: 'Ribbon & Trim', oldSub2: 'Organza Ribbon', newCat: 'Textiles', newSub1: 'Organza' },
   { oldCat: 'Textiles', oldSub1: 'Ribbon & Trim', oldSub2: 'Petersham Ribbon', newCat: 'Textiles', newSub1: 'Petersham' },
   { oldCat: 'Textiles', oldSub1: 'Ribbon & Trim', oldSub2: 'Satin Ribbon', newCat: 'Textiles', newSub1: 'Satin' },
-  { oldCat: 'Textiles', oldSub1: 'Ribbon & Trim', newCat: 'Textiles' },
+  { oldCat: 'Textiles', oldSub1: 'Ribbon & Trim', oldSub2: 'Florist Ribbon', newCat: 'Textiles', newSub1: 'Acrylic & Blends', newSub2: 'Florist Ribbon' },
+  { oldCat: 'Textiles', oldSub1: 'Ribbon & Trim', oldSub2: 'Pull Ribbon', newCat: 'Textiles', newSub1: 'Acrylic & Blends', newSub2: 'Pull Ribbon' },
+  { oldCat: 'Textiles', oldSub1: 'Ribbon & Trim', oldSub2: 'Jute Ribbon', newCat: 'Textiles', newSub1: 'Natural', newSub2: 'Jute Ribbon' },
+  { oldCat: 'Textiles', oldSub1: 'Ribbon & Trim', newCat: 'Textiles', newSub1: 'Ribbon & Trim' },
   { oldCat: 'Textiles', oldSub1: 'Sewing & Haberdashery', newCat: 'Fashion & Accessories', newSub1: 'Iron-on Patch' },
   { oldCat: 'Textiles', oldSub1: 'Wool & Yarn', newCat: 'Textiles', newSub1: 'Acrylic & Blends' },
   { oldCat: 'Textiles', newCat: 'Textiles' },
