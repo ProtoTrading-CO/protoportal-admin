@@ -528,10 +528,17 @@ export default function ProductLoaderPanel({
     }
   };
 
+  const resolveLookupCode = (codeOverride) => {
+    if (typeof codeOverride === 'string' || typeof codeOverride === 'number') {
+      return String(codeOverride).trim();
+    }
+    return String(code || '').trim();
+  };
+
   const handleLookup = async (codeOverride) => {
-    const c = String(codeOverride ?? code).trim();
-    if (!c) return;
-    if (codeOverride) setCode(c);
+    const c = resolveLookupCode(codeOverride);
+    if (!c || c === '[object Object]') return;
+    if (typeof codeOverride === 'string' || typeof codeOverride === 'number') setCode(c);
     setLookingUp(true);
     setLookupError('');
     setLookupData(null);
@@ -1167,7 +1174,7 @@ export default function ProductLoaderPanel({
         <button
           type="button"
           className="adm-btn-red"
-          onClick={handleLookup}
+          onClick={() => void handleLookup()}
           disabled={lookingUp || !code.trim()}
         >
           {lookingUp ? <Loader2 size={15} className="spin" /> : <RefreshCw size={15} />}
