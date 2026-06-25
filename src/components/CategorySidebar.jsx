@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { ChevronDown, ChevronLeft, ChevronRight, FolderTree, MoreHorizontal, Pencil, Plus, Search, Trash2 } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ChevronDown, ChevronLeft, ChevronRight, FolderTree, GripVertical, MoreHorizontal, Pencil, Plus, Search, Trash2 } from 'lucide-react';
 
 function buildPathFromRoot(tree, targetId, path = []) {
   for (const node of tree) {
@@ -60,6 +60,17 @@ function collectIds(nodes, ids = []) {
     if (node.children?.length) collectIds(node.children, ids);
   }
   return ids;
+}
+
+/** Reorder children of a specific parent node (deep in the tree). */
+function reorderChildrenInTree(tree, parentId, newChildren) {
+  return tree.map((node) => {
+    if (node.id === parentId) return { ...node, children: newChildren };
+    if (node.children?.length) {
+      return { ...node, children: reorderChildrenInTree(node.children, parentId, newChildren) };
+    }
+    return node;
+  });
 }
 
 function RowActions({ node, nodeType, onEditNode, onDeleteNode, onAddChild }) {
@@ -132,15 +143,21 @@ function CategoryRow({
   onAddChild,
   onDrillIn,
   stackMode = false,
+  showDragHandle = false,
 }) {
   const isSelected = selectedPath.length > 0 && selectedPath[selectedPath.length - 1] === node.id;
   const isOnPath = selectedPath.includes(node.id);
 
   return (
     <div
-      className={`cat-sidebar-item-row${isSelected ? ' cat-sidebar-item-row--active' : ''}${isOnPath && !isSelected ? ' cat-sidebar-item-row--path' : ''}${stackMode ? ' cat-sidebar-item-row--stack' : ''}`}
+      className={`cat-sidebar-item-row${isSelected ? ' cat-sidebar-item-row--active' : ''}${isOnPath && !isSelected ? ' cat-sidebar-item-row--path' : ''}${stackMode ? ' cat-sidebar-item-row--stack' : ''}${showDragHandle ? ' cat-sidebar-item-row--draggable' : ''}`}
       style={{ '--cat-depth': depth }}
     >
+      {showDragHandle && (
+        <span className="cat-sidebar-drag-handle" aria-hidden="true">
+          <GripVertical size={14} />
+        </span>
+      )}
       {!stackMode && (hasChildren ? (
         <button
           type="button"
@@ -182,6 +199,66 @@ function CategoryRow({
   );
 }
 
+/** Renders a draggable flat list of sibling nodes. */
+function DraggableSiblingList({ nodes, parentId, onReorderSiblings, renderItem }) {
+  const [draggingId, setDraggingId] = useState(null);
+  const [overId, setOverId] = useState(null);
+  const dragNodeRef = useRef(null);
+
+  const handleDragStart = (e, id) => {
+    e.stopPropagation();
+    dragNodeRef.current = id;
+    setDraggingId(id);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleDragOver = (e, id) => {
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'move';
+    if (id !== dragNodeRef.current) setOverId(id);
+  };
+
+  const handleDrop = (e, targetId) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const sourceId = dragNodeRef.current;
+    if (!sourceId || sourceId === targetId) {
+      setDraggingId(null); setOverId(null); dragNodeRef.current = null;
+      return;
+    }
+    const fromIdx = nodes.findIndex((n) => n.id === sourceId);
+    const toIdx = nodes.findIndex((n) => n.id === targetId);
+    if (fromIdx === -1 || toIdx === -1) {
+      setDraggingId(null); setOverId(null); dragNodeRef.current = null;
+      return;
+    }
+    const next = [...nodes];
+    const [moved] = next.splice(fromIdx, 1);
+    next.splice(toIdx, 0, moved);
+    onReorderSiblings(parentId, next);
+    setDraggingId(null); setOverId(null); dragNodeRef.current = null;
+  };
+
+  const handleDragEnd = () => {
+    setDraggingId(null); setOverId(null); dragNodeRef.current = null;
+  };
+
+  return nodes.map((node) => (
+    <div
+      key={node.id}
+      draggable
+      onDragStart={(e) => handleDragStart(e, node.id)}
+      onDragOver={(e) => handleDragOver(e, node.id)}
+      onDrop={(e) => handleDrop(e, node.id)}
+      onDragEnd={handleDragEnd}
+      className={`cat-sidebar-drag-item${draggingId === node.id ? ' cat-sidebar-drag-item--dragging' : ''}${overId === node.id ? ' cat-sidebar-drag-item--over' : ''}`}
+    >
+      {renderItem(node, true)}
+    </div>
+  ));
+}
+
 function TreeBranch({
   node,
   depth,
@@ -194,6 +271,8 @@ function TreeBranch({
   onDeleteNode,
   onAddChild,
   forceOpen,
+  onReorderSiblings,
+  showDragHandle = false,
 }) {
   const hasChildren = node.children?.length > 0;
   const pathHere = [...ancestors, node.id];
@@ -214,23 +293,52 @@ function TreeBranch({
         onEditNode={onEditNode}
         onDeleteNode={onDeleteNode}
         onAddChild={onAddChild}
+        showDragHandle={showDragHandle}
       />
-      {hasChildren && open && node.children.map((child) => (
-        <TreeBranch
-          key={child.id}
-          node={child}
-          depth={depth + 1}
-          selectedPath={selectedPath}
-          onSelectPath={onSelectPath}
-          isOpen={isOpen}
-          onToggle={onToggle}
-          ancestors={pathHere}
-          onEditNode={onEditNode}
-          onDeleteNode={onDeleteNode}
-          onAddChild={onAddChild}
-          forceOpen={forceOpen}
-        />
-      ))}
+      {hasChildren && open && (
+        onReorderSiblings ? (
+          <DraggableSiblingList
+            nodes={node.children}
+            parentId={node.id}
+            onReorderSiblings={onReorderSiblings}
+            renderItem={(child, showHandle) => (
+              <TreeBranch
+                key={child.id}
+                node={child}
+                depth={depth + 1}
+                selectedPath={selectedPath}
+                onSelectPath={onSelectPath}
+                isOpen={isOpen}
+                onToggle={onToggle}
+                ancestors={pathHere}
+                onEditNode={onEditNode}
+                onDeleteNode={onDeleteNode}
+                onAddChild={onAddChild}
+                forceOpen={forceOpen}
+                onReorderSiblings={onReorderSiblings}
+                showDragHandle={showHandle}
+              />
+            )}
+          />
+        ) : (
+          node.children.map((child) => (
+            <TreeBranch
+              key={child.id}
+              node={child}
+              depth={depth + 1}
+              selectedPath={selectedPath}
+              onSelectPath={onSelectPath}
+              isOpen={isOpen}
+              onToggle={onToggle}
+              ancestors={pathHere}
+              onEditNode={onEditNode}
+              onDeleteNode={onDeleteNode}
+              onAddChild={onAddChild}
+              forceOpen={forceOpen}
+            />
+          ))
+        )
+      )}
     </div>
   );
 }
@@ -383,6 +491,7 @@ export default function CategorySidebar({
   className = '',
   isActive = true,
   onStackNavChange,
+  onReorder,
 }) {
   const [expanded, setExpanded] = useState(() => new Set());
   const [collapsed, setCollapsed] = useState(() => new Set());
@@ -478,6 +587,17 @@ export default function CategorySidebar({
     onSelectPath(path);
   };
 
+  // Called from DraggableSiblingList at any level. parentId=null means root.
+  const handleReorderSiblings = (parentId, newSiblings) => {
+    if (!onReorder) return;
+    const newTree = parentId == null
+      ? newSiblings
+      : reorderChildrenInTree(tree, parentId, newSiblings);
+    onReorder(newTree);
+  };
+
+  const canDrag = !!onReorder && !filterQuery;
+
   return (
     <div className={`cat-sidebar-wrap${stackMode ? ' cat-sidebar-wrap--stack' : ''}${className ? ` ${className}` : ''}`}>
       {showSearch && (
@@ -528,6 +648,56 @@ export default function CategorySidebar({
             displayTree={displayTree}
             browsePath={browsePath}
             setBrowsePath={setBrowsePath}
+          />
+        ) : canDrag ? (
+          <DraggableSiblingList
+            nodes={displayTree}
+            parentId={null}
+            onReorderSiblings={handleReorderSiblings}
+            renderItem={(node, showHandle) => (
+              <div className="cat-sidebar-root">
+                <CategoryRow
+                  node={node}
+                  depth={0}
+                  selectedPath={selectedPath}
+                  pathHere={[node.id]}
+                  hasChildren={!!node.children?.length}
+                  open={isOpen(node.id)}
+                  onToggle={() => toggle(node.id)}
+                  onSelect={() => handleSelectRoot(node.id)}
+                  nodeType="category"
+                  onEditNode={onEditNode}
+                  onDeleteNode={onDeleteNode}
+                  onAddChild={onAddChild}
+                  showDragHandle={showHandle}
+                />
+                {node.children?.length && isOpen(node.id) && (
+                  <DraggableSiblingList
+                    nodes={node.children}
+                    parentId={node.id}
+                    onReorderSiblings={handleReorderSiblings}
+                    renderItem={(child, showChildHandle) => (
+                      <TreeBranch
+                        key={child.id}
+                        node={child}
+                        depth={1}
+                        selectedPath={selectedPath}
+                        onSelectPath={onSelectPath}
+                        isOpen={isOpen}
+                        onToggle={toggle}
+                        ancestors={[node.id]}
+                        onEditNode={onEditNode}
+                        onDeleteNode={onDeleteNode}
+                        onAddChild={onAddChild}
+                        forceOpen={false}
+                        onReorderSiblings={handleReorderSiblings}
+                        showDragHandle={showChildHandle}
+                      />
+                    )}
+                  />
+                )}
+              </div>
+            )}
           />
         ) : (
           displayTree.map((node) => (

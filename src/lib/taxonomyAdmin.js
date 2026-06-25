@@ -111,4 +111,15 @@ export function flattenSubcategories(nodes, depth = 1, prefix = '') {
   return out;
 }
 
+export async function replaceFullTaxonomy(categories) {
+  const res = await fetch('/api/taxonomy', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'replace', categories }),
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || 'Replace failed');
+  return json;
+}
+
 export { labelToSlug, bundledCategories };

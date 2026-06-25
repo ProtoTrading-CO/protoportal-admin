@@ -91,6 +91,7 @@ import {
   fetchTaxonomy,
   flattenSubcategories,
   renameTaxonomyNode,
+  replaceFullTaxonomy,
   subcategoryOptionsFromTree,
 } from '../lib/taxonomyAdmin';
 import { approveCustomer, deleteCustomer, fetchCustomersPage, fetchProtoActiveCustomersPage, seedProtoActiveCustomers, updateProtoActiveCustomer, updateCustomerAdmin } from '../lib/customers';
@@ -872,6 +873,20 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     setTaxonomyTree(tree);
     setLiveTaxonomyTree(tree);
     return tree;
+  };
+
+  const handleCategoryReorder = async (newTree) => {
+    setTaxonomyTree(newTree);
+    setLiveTaxonomyTree(newTree);
+    try {
+      await replaceFullTaxonomy(newTree);
+    } catch (err) {
+      showToast(err.message || 'Failed to save category order', 'error');
+      // Revert on failure
+      const reverted = await fetchTaxonomy();
+      setTaxonomyTree(reverted);
+      setLiveTaxonomyTree(reverted);
+    }
   };
 
   const loadOrders = async () => {
@@ -2575,6 +2590,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                     onSelectPath={setProductCategoryPath}
                     showUncategorized
                     uncategorizedCount={uncategorizedCount}
+                    onReorder={handleCategoryReorder}
                   />
                   <div className="adm-panel-main">
                 <div className="adm-toolbar" style={{ gridTemplateColumns: '1fr auto auto' }}>
