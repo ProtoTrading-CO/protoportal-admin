@@ -224,6 +224,7 @@ export default function ProductManagerEngine({
   initialStatus = 'live',
 }) {
   const [status, setStatus] = useState(initialStatus);
+  const [archiveStockView, setArchiveStockView] = useState('zero');
   const [reorderMode, setReorderMode] = useState(false);
 
   useEffect(() => {
@@ -280,7 +281,7 @@ export default function ProductManagerEngine({
     setPage(1);
     setSelected(new Set());
     selectedRowsRef.current = new Map();
-  }, [status, debouncedSearch, categoryPath.join('/')]);
+  }, [status, debouncedSearch, categoryPath.join('/'), archiveStockView]);
 
   const handlePageChange = useCallback((nextPage) => {
     setPage(nextPage);
@@ -293,7 +294,8 @@ export default function ProductManagerEngine({
     pageSize: reorderMode && status === 'live' ? 500 : pageSize,
     search: debouncedSearch,
     categoryPath,
-  }), [status, page, pageSize, debouncedSearch, categoryPath, reorderMode]);
+    stockFilter: status === 'archived' ? archiveStockView : undefined,
+  }), [status, page, pageSize, debouncedSearch, categoryPath, reorderMode, archiveStockView]);
 
   const { data, isLoading, isFetching, isPlaceholderData } = useCatalogQuery(catalogParams, {
     enabled: status !== 'approval',
@@ -641,9 +643,34 @@ export default function ProductManagerEngine({
             )}
             <div className="adm-toolbar pm-toolbar">
               {status === 'archived' && (
-                <p className="adm-section-note" style={{ margin: '0 0 8px', width: '100%' }}>
-                  Hidden from customers. Click <strong>Make live</strong> to move back to the website catalogue.
-                </p>
+                <>
+                  <p className="adm-section-note" style={{ margin: '0 0 8px', width: '100%' }}>
+                    {archiveStockView === 'zero'
+                      ? 'Products with 0 or negative stock (hidden from customers). Click Make live to restore to the website catalogue.'
+                      : 'All archived products. Click Make live to restore to the website catalogue.'}
+                  </p>
+                  <div className="pm-archive-stock-toggle" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', width: '100%', marginBottom: 8 }}>
+                    <button
+                      type="button"
+                      className={`adm-btn-ghost adm-btn--sm${archiveStockView === 'zero' ? ' adm-tab--active' : ''}`}
+                      onClick={() => setArchiveStockView('zero')}
+                    >
+                      0 / negative stock
+                    </button>
+                    <button
+                      type="button"
+                      className={`adm-btn-ghost adm-btn--sm${archiveStockView === 'all' ? ' adm-tab--active' : ''}`}
+                      onClick={() => setArchiveStockView('all')}
+                    >
+                      Show all
+                    </button>
+                    {!isLoading && (
+                      <span className="adm-pill" style={{ marginLeft: 'auto', fontSize: 12 }}>
+                        {total} product{total === 1 ? '' : 's'}
+                      </span>
+                    )}
+                  </div>
+                </>
               )}
               <label className="adm-search">
                 <Search size={15} />
@@ -753,7 +780,11 @@ export default function ProductManagerEngine({
                       />
                     ))}
                     {!rows.length && !isLoading && (
-                      <p className="adm-empty">No products in this view.</p>
+                      <p className="adm-empty">
+                        {status === 'archived' && archiveStockView === 'zero'
+                          ? 'No archived products with 0 or negative stock.'
+                          : 'No products in this view.'}
+                      </p>
                     )}
                   </div>
                 ) : (
@@ -901,7 +932,11 @@ export default function ProductManagerEngine({
                     </div>
                   ))}
                   {!rows.length && !isLoading && (
-                    <p className="adm-empty">No products in this view.</p>
+                    <p className="adm-empty">
+                      {status === 'archived' && archiveStockView === 'zero'
+                        ? 'No archived products with 0 or negative stock.'
+                        : 'No products in this view.'}
+                    </p>
                   )}
                 </div>
                 )}

@@ -10,8 +10,9 @@ export function buildCatalogParams({
   search = '',
   categoryPath = [],
   sort = 'title',
+  stockFilter,
 } = {}) {
-  return { status, page, pageSize, search, categoryPath, sort };
+  return { status, page, pageSize, search, categoryPath, sort, stockFilter };
 }
 
 async function fetchCatalog(params) {
@@ -23,6 +24,7 @@ async function fetchCatalog(params) {
   });
   if (params.search) qs.set('search', params.search);
   if (params.categoryPath?.length) qs.set('categoryPath', JSON.stringify(params.categoryPath));
+  if (params.stockFilter) qs.set('stockFilter', params.stockFilter);
   const res = await fetch(`/api/catalog?${qs}`);
   const json = await res.json();
   if (!res.ok) throw new Error(json.error || 'Catalog fetch failed');

@@ -9,6 +9,7 @@ import {
   paginateRows,
   resolveCategoryFilters,
   applyCategoryFiltersToQuery,
+  isZeroOrNegativeStock,
 } from './_catalog-adapt.js';
 
 const VALID_STATUS = new Set(['live', 'archived', 'new-items', 'approval', 'recycle']);
@@ -156,9 +157,20 @@ export default async function handler(req, res) {
         search, categoryPath, tree, page, pageSize, sort, archivedBy: 'recycle-bin',
       });
     } else if (status === 'archived') {
-      result = await queryArchivedPaginated(sb, {
-        search, categoryPath, tree, page, pageSize, sort, excludeBy: EXCLUDE_ARCHIVED,
-      });
+      const stockFilter = String(req.query.stockFilter || 'zero').trim();
+      if (stockFilter === 'zero') {
+        const allRows = await fetchAllArchivedRows(sb, { excludeBy: EXCLUDE_ARCHIVED, sort });
+        let rows = filterByCategoryPath(allRows, categoryPath, tree);
+        rows = applySearchFilter(rows, search);
+        rows = await enrichRowsWithProductStock(sb, rows);
+        rows = rows.filter(isZeroOrNegativeStock);
+        const pageSlice = paginateRows(rows, page, pageSize);
+        result = { ...pageSlice, archived: true };
+      } else {
+        result = await queryArchivedPaginated(sb, {
+          search, categoryPath, tree, page, pageSize, sort, excludeBy: EXCLUDE_ARCHIVED,
+        });
+      }
     } else if (status === 'new-items') {
       const liveSkus = await fetchLiveSkus(sb);
       const allRows = await fetchAllArchivedRows(sb, { archivedBy: 'new-products', sort });
