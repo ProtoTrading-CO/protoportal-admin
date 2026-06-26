@@ -188,25 +188,31 @@ export async function logImageGenCost(sb, entry) {
 
 async function logImageGenCostDb(sb, row) {
   if (!sb) return;
+  const baseRow = {
+    id: row.id,
+    sku: row.sku,
+    slot: row.slot,
+    operation: row.operation,
+    model: row.model,
+    image_style: row.image_style,
+    tokens_in: row.tokens_in,
+    tokens_out: row.tokens_out,
+    cost_usd: row.cost_usd,
+    cost_zar: row.cost_zar,
+    processing_ms: row.processing_ms,
+    operator: row.operator,
+    batch_id: row.batch_id,
+    status: row.status,
+    error: row.error,
+  };
   try {
-    const { error } = await sb.from('image_gen_cost_logs').insert({
-      id: row.id,
-      sku: row.sku,
-      slot: row.slot,
-      operation: row.operation,
-      model: row.model,
-      image_style: row.image_style,
-      tokens_in: row.tokens_in,
-      tokens_out: row.tokens_out,
-      cost_usd: row.cost_usd,
-      cost_zar: row.cost_zar,
+    let { error } = await sb.from('image_gen_cost_logs').insert({
+      ...baseRow,
       cost_source: row.cost_source,
-      processing_ms: row.processing_ms,
-      operator: row.operator,
-      batch_id: row.batch_id,
-      status: row.status,
-      error: row.error,
     });
+    if (error && /cost_source/i.test(error.message || '')) {
+      ({ error } = await sb.from('image_gen_cost_logs').insert(baseRow));
+    }
     if (error && !isMissingTableError(error)) {
       console.warn('logImageGenCostDb:', error.message);
     }
@@ -267,6 +273,7 @@ export async function acquireTransformSemaphore(sb, { batchId, operator, ttlSec 
     }
     return { acquired: true, reentry: !!result?.reentry };
   } catch (err) {
+    if (err?.code === 'IMAGE_GEN_BUDGET_EXCEEDED') throw err;
     if (/queue full/i.test(err.message)) throw err;
     throw new Error(`Could not enter image gen queue — ${err.message || 'try again'}`);
   }

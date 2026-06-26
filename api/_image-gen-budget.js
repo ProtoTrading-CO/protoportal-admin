@@ -92,18 +92,27 @@ function periodKey(period, d = new Date()) {
 async function sumCostsFromDb(sb, sinceIso) {
   if (!sb) return null;
   try {
-    const { data, error } = await sb
-      .from('image_gen_cost_logs')
-      .select('cost_usd, status')
-      .gte('created_at', sinceIso);
-    if (error) {
-      if (isMissingTableError(error)) return null;
-      throw error;
-    }
     let usd = 0;
-    for (const row of data || []) {
-      if (row.status === 'error') continue;
-      usd += Number(row.cost_usd) || 0;
+    let from = 0;
+    const pageSize = 1000;
+    while (true) {
+      const { data, error } = await sb
+        .from('image_gen_cost_logs')
+        .select('cost_usd, status')
+        .gte('created_at', sinceIso)
+        .order('created_at', { ascending: true })
+        .range(from, from + pageSize - 1);
+      if (error) {
+        if (isMissingTableError(error)) return null;
+        throw error;
+      }
+      const rows = data || [];
+      for (const row of rows) {
+        if (row.status === 'error') continue;
+        usd += Number(row.cost_usd) || 0;
+      }
+      if (rows.length < pageSize) break;
+      from += pageSize;
     }
     return usd;
   } catch (err) {
@@ -241,21 +250,32 @@ async function readAlertState() {
   return readSiteConfigJson(ALERTS_FILE, { sent: {} });
 }
 
-async function markAlertSent(period, periodKeyVal, level) {
-  const state = await readAlertState();
+async function claimBudgetAlert(period, periodKeyVal, level) {
   const key = `${period}:${periodKeyVal}:${level}`;
-  state.sent = state.sent || {};
-  state.sent[key] = new Date().toISOString();
-  await writeSiteConfigJson(ALERTS_FILE, state);
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const state = await readAlertState();
+    if (state.sent?.[key]) return false;
+    const version = state.updatedAt || null;
+    const next = {
+      ...state,
+      sent: { ...(state.sent || {}), [key]: new Date().toISOString() },
+    };
+    const current = await readAlertState();
+    if ((current.updatedAt || null) !== version && attempt < 7) {
+      await new Promise((r) => { setTimeout(r, 30 + attempt * 40); });
+      continue;
+    }
+    try {
+      await writeSiteConfigJson(ALERTS_FILE, next);
+      return true;
+    } catch {
+      await new Promise((r) => { setTimeout(r, 30 + attempt * 40); });
+    }
+  }
+  return false;
 }
 
-async function wasAlertSent(period, periodKeyVal, level) {
-  const state = await readAlertState();
-  const key = `${period}:${periodKeyVal}:${level}`;
-  return Boolean(state.sent?.[key]);
-}
-
-async function sendBudgetEmail({ to, subject, html }) {
+async function claimBudgetAlert(period, periodKeyVal, level) {
   const apiKey = process.env.BREVO_API_KEY;
   if (!apiKey || !to) {
     console.warn('image-gen budget alert: BREVO_API_KEY or alert email missing');
@@ -292,7 +312,7 @@ async function maybeAlertPeriod(sb, { period, periodKeyVal, spent, limitUsd, con
   const pct = (spent / limitUsd) * 100;
   const level = levelForPct(pct);
   if (level === 'ok') return null;
-  if (await wasAlertSent(period, periodKeyVal, level)) return null;
+  if (!(await claimBudgetAlert(period, periodKeyVal, level))) return null;
 
   const label = period === 'daily' ? 'Daily' : 'Monthly';
   const subject = level === 'exceeded'
@@ -310,7 +330,15 @@ async function maybeAlertPeriod(sb, { period, periodKeyVal, spent, limitUsd, con
   `;
 
   const sent = await sendBudgetEmail({ to: config.alertEmail, subject, html });
-  if (sent) await markAlertSent(period, periodKeyVal, level);
+  if (!sent) {
+    // Allow retry if email failed — remove claim so next log/cron can try again.
+    const state = await readAlertState();
+    const key = `${period}:${periodKeyVal}:${level}`;
+    if (state.sent?.[key]) {
+      delete state.sent[key];
+      await writeSiteConfigJson(ALERTS_FILE, state);
+    }
+  }
   return { period, level, pct, sent };
 }
 

@@ -81,14 +81,18 @@ export default async function handler(req, res) {
       .eq('sku', cleanSku)
       .maybeSingle();
 
-    if (lookupError) return res.status(400).json({ error: lookupError.message });
+    if (lookupError) {
+      return res.status(400).json({ error: lookupError.message });
+    }
     if (!row) {
       return res.status(404).json({ error: `Live product "${cleanSku}" not found` });
     }
 
     const srcSlot = sourceSlot ? Math.min(4, Math.max(1, Number(sourceSlot))) : firstSourceSlot(row);
     const sourceUrl = readSlotUrl(row, srcSlot);
-    if (!sourceUrl) return res.status(400).json({ error: 'Product has no source image to reprocess' });
+    if (!sourceUrl) {
+      return res.status(400).json({ error: 'Product has no source image to reprocess' });
+    }
 
     const t0 = Date.now();
     let imageUrl;
@@ -192,7 +196,7 @@ export default async function handler(req, res) {
     if (err.code === 'IMAGE_GEN_BUDGET_EXCEEDED') {
       return res.status(402).json({ error: err.message, budget: err.budgetStatus });
     }
-    const status = /in use by/i.test(err.message) ? 409 : 500;
+    const status = /in use by|queue full/i.test(err.message) ? 409 : 500;
     return res.status(status).json({ error: err.message || 'Reprocess failed' });
   } finally {
     if (lockHeld) await releaseImageGenLock(sb, cleanSku, slot);
