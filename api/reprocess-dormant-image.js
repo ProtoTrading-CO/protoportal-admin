@@ -8,6 +8,7 @@ import {
   resolveImageGenCost,
 } from './_image-gen-cost.js';
 import { assertImageGenBudgetAllowsSpend } from './_image-gen-budget.js';
+import { removeStorageObjects } from './_staging-storage.js';
 
 const SLOT_FIELDS = {
   1: 'image_url_one',
@@ -63,6 +64,16 @@ export default async function handler(req, res) {
       targetSlot: slot,
     });
 
+    const { error: updateErr } = await sb
+      .from('archived_products')
+      .update({ [field]: result.url, updated_at: new Date().toISOString() })
+      .eq('sku', cleanSku)
+      .eq('archived_by', 'new-products');
+    if (updateErr) {
+      await removeStorageObjects(sb, [result.url]);
+      throw new Error(updateErr.message);
+    }
+
     const { costUsd, costSource } = resolveImageGenCost({
       model: result.model,
       tokensIn: result.tokensIn,
@@ -87,13 +98,6 @@ export default async function handler(req, res) {
       batchId,
       status: 'ok',
     });
-
-    const { error: updateErr } = await sb
-      .from('archived_products')
-      .update({ [field]: result.url, updated_at: new Date().toISOString() })
-      .eq('sku', cleanSku)
-      .eq('archived_by', 'new-products');
-    if (updateErr) throw new Error(updateErr.message);
 
     return res.status(200).json({
       ok: true,

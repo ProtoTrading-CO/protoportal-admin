@@ -83,9 +83,14 @@ export default async function handler(req, res) {
         'image_url_one', 'image_url_two', 'image_url_three', 'image_url_four',
       ]);
       const clean = Object.fromEntries(Object.entries(row).filter(([k]) => ALLOWED.has(k)));
+      const ensured = await ensureProductFromCatalogueRow(supabase, clean);
       const { error } = await supabase.from('website_stock').insert(clean);
-      if (error) throw error;
-      await ensureProductFromCatalogueRow(supabase, clean);
+      if (error) {
+        if (ensured.created) {
+          await supabase.from('products').delete().eq('sku', ensured.sku);
+        }
+        throw error;
+      }
       return res.status(200).json({ ok: true });
     }
 

@@ -460,6 +460,13 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   const singleImageRef = useRef(null);
   const folderImageRef = useRef(null);
   const reprocessAbortRef = useRef(null);
+  const listLoadSeqRef = useRef({});
+  const beginListLoad = (key) => {
+    const seq = (listLoadSeqRef.current[key] || 0) + 1;
+    listLoadSeqRef.current[key] = seq;
+    return seq;
+  };
+  const isStaleListLoad = (key, seq) => listLoadSeqRef.current[key] !== seq;
   const [customerApproveBusy, setCustomerApproveBusy] = useState(false);
   const customerExcelRef = useRef(null);
 
@@ -689,17 +696,23 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   };
 
   const loadDormant = async () => {
+    const seq = beginListLoad('dormant');
     setLoadingProgress(0);
     setLoadingError('');
     try {
       const rows = await fetchDormantProducts({ searchQuery: dormantSearch });
+      if (isStaleListLoad('dormant', seq)) return;
       setDormantRows(rows);
     } catch (err) {
+      if (isStaleListLoad('dormant', seq)) return;
       setLoadingError(err.message || 'Failed to load dormant products');
-    } finally { setLoadingProgress(null); }
+    } finally {
+      if (!isStaleListLoad('dormant', seq)) setLoadingProgress(null);
+    }
   };
 
   const loadProducts = async () => {
+    const seq = beginListLoad('products');
     setLoadingProgress(0);
     setLoadingError('');
     try {
@@ -708,16 +721,23 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
         pageSize: productPageSize,
         searchQuery: productSearchDebounced,
         categoryPathFilter: productCategoryPath,
-        onProgress: setLoadingProgress,
+        onProgress: (pct) => {
+          if (!isStaleListLoad('products', seq)) setLoadingProgress(pct);
+        },
       });
+      if (isStaleListLoad('products', seq)) return;
       setProductRows(data.rows);
       setProductTotal(data.total);
     } catch (err) {
+      if (isStaleListLoad('products', seq)) return;
       setLoadingError(err.message || 'Failed to load products');
-    } finally { setLoadingProgress(null); }
+    } finally {
+      if (!isStaleListLoad('products', seq)) setLoadingProgress(null);
+    }
   };
 
   const loadArchive = async () => {
+    const seq = beginListLoad('archive');
     setLoadingProgress(0);
     setLoadingError('');
     try {
@@ -727,26 +747,45 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
         searchQuery: archiveSearch,
         archived: true,
         categoryPathFilter: archiveCategoryPath,
-        onProgress: setLoadingProgress,
+        onProgress: (pct) => {
+          if (!isStaleListLoad('archive', seq)) setLoadingProgress(pct);
+        },
       });
+      if (isStaleListLoad('archive', seq)) return;
       setArchiveRows(data.rows);
       setArchiveTotal(data.total);
     } catch (err) {
+      if (isStaleListLoad('archive', seq)) return;
       setLoadingError(err.message || 'Failed to load archive');
-    } finally { setLoadingProgress(null); }
+    } finally {
+      if (!isStaleListLoad('archive', seq)) setLoadingProgress(null);
+    }
   };
 
   const loadRecycle = async () => {
+    const seq = beginListLoad('recycle');
     setLoadingProgress(0);
     setLoadingError('');
     try {
-      const data = await fetchAdminProductsPage({ page: recyclePage, pageSize: ADMIN_PAGE_SIZE, searchQuery: recycleSearch, recycled: true, onProgress: setLoadingProgress });
+      const data = await fetchAdminProductsPage({
+        page: recyclePage,
+        pageSize: ADMIN_PAGE_SIZE,
+        searchQuery: recycleSearch,
+        recycled: true,
+        onProgress: (pct) => {
+          if (!isStaleListLoad('recycle', seq)) setLoadingProgress(pct);
+        },
+      });
+      if (isStaleListLoad('recycle', seq)) return;
       setRecycleRows(data.rows);
       setRecycleTotal(data.total);
       setRecycleCatalogTotal(data.total);
     } catch (err) {
+      if (isStaleListLoad('recycle', seq)) return;
       setLoadingError(err.message || 'Failed to load recycle bin');
-    } finally { setLoadingProgress(null); }
+    } finally {
+      if (!isStaleListLoad('recycle', seq)) setLoadingProgress(null);
+    }
   };
 
   const refreshDashboardStats = () => {
@@ -761,19 +800,24 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   };
 
   const loadCustomers = async () => {
+    const seq = beginListLoad('customers');
     setLoading(true);
     try {
       const data = customerTab === 'proto-active'
         ? await fetchProtoActiveCustomersPage({ page: customerPage, pageSize: ADMIN_PAGE_SIZE, searchQuery: customerSearch })
         : await fetchCustomersPage({ page: customerPage, pageSize: ADMIN_PAGE_SIZE, tab: customerTab, searchQuery: customerSearch });
+      if (isStaleListLoad('customers', seq)) return;
       setCustomerRows(data.rows);
       setCustomerTotal(data.total);
       if (data.migrationRequired && data.message) showToast(data.message, 'warning');
     } catch (err) {
+      if (isStaleListLoad('customers', seq)) return;
       showToast(err.message || 'Failed to load customers', 'error');
       setCustomerRows([]);
       setCustomerTotal(0);
-    } finally { setLoading(false); }
+    } finally {
+      if (!isStaleListLoad('customers', seq)) setLoading(false);
+    }
   };
 
   const importProtoActiveList = async () => {
@@ -1634,6 +1678,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   });
 
   const loadCrmCustomers = async (page = crmMeta.page || 1) => {
+    const seq = beginListLoad('crm');
     setCrmLoading(true);
     setCrmError('');
     try {
@@ -1643,6 +1688,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
       const res = await fetch(`/api/whatsapp-contacts?${params}`);
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Failed to load WhatsApp contacts');
+      if (isStaleListLoad('crm', seq)) return;
       setCrmAllCustomers(json.contacts || []);
       setCrmMeta({
         total: json.total || 0,
@@ -1652,10 +1698,12 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
         summary: json.summary || null,
       });
     } catch (e) {
+      if (isStaleListLoad('crm', seq)) return;
       console.error(e);
       setCrmError(e.message || 'Failed to load WhatsApp contacts');
+    } finally {
+      if (!isStaleListLoad('crm', seq)) setCrmLoading(false);
     }
-    finally { setCrmLoading(false); }
   };
 
   const loadCrmTemplates = async () => {

@@ -198,6 +198,25 @@ export async function collectLiveReferencedStagingPaths(supabase) {
   return paths;
 }
 
+/** Remove storage objects for any product-images public URL (staging or gen-*). */
+export async function removeStorageObjects(supabase, urls = []) {
+  const paths = [...new Set(
+    urls
+      .map(storagePathFromPublicUrl)
+      .filter(Boolean),
+  )];
+  if (!paths.length || !supabase) return { removed: 0 };
+
+  try {
+    const { error } = await supabase.storage.from(BUCKET).remove(paths);
+    if (error) console.warn('removeStorageObjects:', error.message);
+    return { removed: error ? 0 : paths.length };
+  } catch (err) {
+    console.warn('removeStorageObjects:', err?.message || err);
+    return { removed: 0 };
+  }
+}
+
 /** Remove staging/* objects unless still referenced on website_stock. */
 export async function removeStagingObjects(supabase, urls = [], { skipLiveReferenced = true } = {}) {
   let paths = [...new Set(

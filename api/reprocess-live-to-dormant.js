@@ -12,6 +12,7 @@ import {
   resolveImageGenCost,
 } from './_image-gen-cost.js';
 import { assertImageGenBudgetAllowsSpend } from './_image-gen-budget.js';
+import { removeStorageObjects } from './_staging-storage.js';
 
 const LIVE_SELECT = `
   id, sku, barcode, title, original_description,
@@ -148,6 +149,20 @@ export default async function handler(req, res) {
       costUsd: costUsdFromApi,
       isImageOutput: true,
     });
+
+    let stillLive;
+    try {
+      ({ stillLive } = await stageDormantSlotPreview(sb, row, {
+        slot,
+        imageUrl,
+        stagedBy: operator,
+        stagedBatchId: batchId,
+      }));
+    } catch (stageErr) {
+      await removeStorageObjects(sb, [imageUrl]);
+      throw stageErr;
+    }
+
     const costMeta = await logImageGenCost(sb, {
       sku: cleanSku,
       slot,
@@ -162,13 +177,6 @@ export default async function handler(req, res) {
       operator,
       batchId,
       status: 'ok',
-    });
-
-    const { stillLive } = await stageDormantSlotPreview(sb, row, {
-      slot,
-      imageUrl,
-      stagedBy: operator,
-      stagedBatchId: batchId,
     });
 
     return res.status(200).json({
