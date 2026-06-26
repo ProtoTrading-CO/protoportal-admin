@@ -2561,7 +2561,7 @@ body.adm-is-reorder-dragging .adm-reorder-card--dragging {
 
 .adm-reorder-grid {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 8px;
 }
 
@@ -5030,6 +5030,8 @@ html, body { background: #f5f5f5; color: #111827; }
 }
 .apollo-head-title { margin: 0; font-size: 20px; font-weight: 800; color: #111; letter-spacing: -0.02em; }
 .apollo-head-sub { margin: 2px 0 0; font-size: 12px; color: #64748b; font-weight: 500; }
+.apollo-index-time { color: #94a3b8; font-weight: 600; }
+.apollo-index-error { margin: 4px 0 0; font-size: 11px; color: #b91c1c; font-weight: 600; }
 
 .apollo-export-btn {
   display: inline-flex; align-items: center; gap: 6px;

@@ -135,7 +135,7 @@ function moveBlockGrid(prev, moveSet, direction, cols) {
 }
 
 function readGridColumnCount(gridEl) {
-  if (!gridEl) return 5;
+  if (!gridEl) return 3;
   const tracks = window.getComputedStyle(gridEl).gridTemplateColumns.trim().split(/\s+/).filter(Boolean);
   return Math.max(1, tracks.length);
 }
