@@ -1,6 +1,7 @@
 import { requireAdminOrOrderToken } from './_admin-auth.js';
 import { createClient } from '@supabase/supabase-js';
 import { getPortalAdminClient, SITE_CONFIG_BUCKET, writeSiteConfigJson } from './_site-config.js';
+import { CUSTOMER_SEND_FORBIDDEN, isVictorSender } from './_fulfillment-auth.js';
 
 async function markConfirmationSent(orderId) {
   const meta = { orderId, sentAt: new Date().toISOString() };
@@ -211,9 +212,15 @@ export default async function handler(req, res) {
     pdfBase64,
     pdfFilename,
     confirmationStoragePath,
+    senderUserId,
+    senderName,
   } = req.body || {};
 
   if (!to) return res.status(400).json({ error: 'Recipient email (to) is required.' });
+
+  if (!isVictorSender({ userId: senderUserId, name: senderName })) {
+    return res.status(403).json({ error: CUSTOMER_SEND_FORBIDDEN });
+  }
 
   if (!process.env.BREVO_API_KEY) {
     return res.status(500).json({ error: 'Brevo API key not configured (BREVO_API_KEY).' });

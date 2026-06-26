@@ -1,6 +1,11 @@
 import { requireAdminOrOrderToken } from './_admin-auth.js';
 import { createClient } from '@supabase/supabase-js';
 import { advanceOrderStatus, advanceOrderStatusToTarget, normalizeOrderStatus } from './_order-status.js';
+import {
+  CUSTOMER_SEND_FORBIDDEN,
+  isVictorSender,
+  PAYMENT_RECEIVED_FORBIDDEN,
+} from './_fulfillment-auth.js';
 
 function getAdminClient() {
   return createClient(
@@ -66,6 +71,12 @@ export default async function handler(req, res) {
       const allowedTargets = new Set(['handed over', 'order in progress', 'order sent', 'payment received']);
       if (!allowedTargets.has(target)) {
         return res.status(400).json({ error: `Unsupported workflow target: "${target}"` });
+      }
+      if ((target === 'order sent' || target === 'payment received')
+        && !isVictorSender({ userId: senderUserId, name: senderName })) {
+        return res.status(403).json({
+          error: target === 'payment received' ? PAYMENT_RECEIVED_FORBIDDEN : CUSTOMER_SEND_FORBIDDEN,
+        });
       }
       try {
         const result = await advanceOrderStatusToTarget(supabase, id, target);

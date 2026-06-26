@@ -4755,6 +4755,17 @@ html, body { background: #f5f5f5; color: #111827; }
 }
 .adm-oc-send-btn:hover:not(:disabled) { background: #1e293b; }
 .adm-oc-send-btn:disabled { opacity: 0.65; cursor: not-allowed; }
+.adm-oc-victor-gate {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1.5px dashed #cbd5e1;
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 700;
+}
 
 .adm-oc-label--paid { color: #15803d; }
 .adm-pay-toggle {

@@ -101,6 +101,7 @@ import { deleteOrderAdmin, fetchAllOrdersAdmin, updateOrderAdmin, advanceOrderWo
 import { orderMatchesTab, normalizeOrderStatus, getWorkflowAdvanceOptions } from '../lib/orderStatus';
 import OrderWorkflowBadge from '../components/OrderWorkflowBadge';
 import { fetchFulfillmentUsers, loadActiveUserId } from '../lib/fulfillmentUsers';
+import { isVictorSender, CUSTOMER_SEND_FORBIDDEN, PAYMENT_RECEIVED_FORBIDDEN } from '../lib/fulfillmentAuth';
 import { fetchSpecials, saveSpecials } from '../lib/specials';
 import { fetchBanner, saveBanner, uploadBannerImage } from '../lib/banner';
 import { BANNER_LABEL, BANNER_ASPECT_CSS } from '../lib/bannerSpec';
@@ -905,6 +906,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     () => fulfillmentUsers.find((u) => u.id === activeFulfillmentUserId) || null,
     [fulfillmentUsers, activeFulfillmentUserId],
   );
+  const victorCanSend = isVictorSender(activeFulfillmentUser);
 
   const orderListGridCols = orderTab === 'sent' || orderTab === 'paid'
     ? '1.4fr 1.2fr 1fr 2fr 120px 56px'
@@ -940,15 +942,19 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
           />
         </label>
         {invoice && <span className="adm-oc-uploaded">✓ {invoice.filename || 'Invoice uploaded'}</span>}
-        <button
-          type="button"
-          className="adm-oc-send-btn"
-          disabled={sending}
-          onClick={() => void sendOrderConfirmation(order)}
-        >
-          {sending ? <Loader2 size={13} className="spin" /> : <Send size={13} />}
-          {sending ? 'Sending…' : 'Send'}
-        </button>
+        {victorCanSend ? (
+          <button
+            type="button"
+            className="adm-oc-send-btn"
+            disabled={sending}
+            onClick={() => void sendOrderConfirmation(order)}
+          >
+            {sending ? <Loader2 size={13} className="spin" /> : <Send size={13} />}
+            {sending ? 'Sending…' : 'Send'}
+          </button>
+        ) : (
+          <span className="adm-oc-victor-gate" title={CUSTOMER_SEND_FORBIDDEN}>Victor only</span>
+        )}
       </div>
     );
   };
@@ -1006,15 +1012,19 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
         </label>
         {pop?.filename && <span className="adm-oc-uploaded">✓ {pop.filename}</span>}
         {isPaid && (
-          <button
-            type="button"
-            className="adm-presale-pay-btn"
-            disabled={saving === `advance-${order.id}`}
-            onClick={() => void advanceOrderStatus(order, 'payment received')}
-          >
-            <Check size={14} strokeWidth={2.5} />
-            {saving === `advance-${order.id}` ? 'Updating…' : 'Confirm payment'}
-          </button>
+          victorCanSend ? (
+            <button
+              type="button"
+              className="adm-presale-pay-btn"
+              disabled={saving === `advance-${order.id}`}
+              onClick={() => void advanceOrderStatus(order, 'payment received')}
+            >
+              <Check size={14} strokeWidth={2.5} />
+              {saving === `advance-${order.id}` ? 'Updating…' : 'Confirm payment'}
+            </button>
+          ) : (
+            <span className="adm-oc-victor-gate" title={PAYMENT_RECEIVED_FORBIDDEN}>Victor only</span>
+          )
         )}
       </div>
     );
@@ -1059,6 +1069,10 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     const email = order.customers?.email;
     if (!email) {
       alert('This customer has no email address on file.');
+      return;
+    }
+    if (!victorCanSend) {
+      showToast(CUSTOMER_SEND_FORBIDDEN, 'error');
       return;
     }
     const invoiceAttached = Boolean(presaleInvoices[order.id]);
@@ -1108,6 +1122,8 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
           assignedTo: activeFulfillmentUser?.name || '',
           total,
           hasPrices,
+          senderUserId: activeFulfillmentUser?.id || '',
+          senderName: activeFulfillmentUser?.name || '',
           confirmationStoragePath: urlData.path,
           pdfFilename: `proto-order-confirmation-${displayOrderNumber(order)}.pdf`,
         }),
@@ -2350,6 +2366,13 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   };
 
   const advanceOrderStatus = async (order, targetStatus) => {
+    if ((targetStatus === 'payment received' || targetStatus === 'order sent') && !victorCanSend) {
+      showToast(
+        targetStatus === 'payment received' ? PAYMENT_RECEIVED_FORBIDDEN : CUSTOMER_SEND_FORBIDDEN,
+        'error',
+      );
+      return;
+    }
     setSaving(`advance-${order.id}`);
     try {
       const updated = await advanceOrderWorkflow(order.id, targetStatus, {

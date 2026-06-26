@@ -13,6 +13,7 @@ import {
 } from '../lib/fulfillmentUsers';
 import { generateOrderPdfBase64, createEmailOrderItems, openPdfBase64Preview } from '../lib/orderDocuments';
 import { displayOrderNumber, buildFulfillmentUrl } from '../lib/orderNumber';
+import { isVictorSender, CUSTOMER_SEND_FORBIDDEN } from '../lib/fulfillmentAuth';
 import { getOrderAccessFromUrl } from '../lib/adminKey';
 import { fetchTaxonomy } from '../lib/taxonomyAdmin';
 import { LEGACY_NAV_ALIASES } from '../lib/taxonomy';
@@ -126,6 +127,7 @@ export default function FulfillmentPage() {
     () => users.find((u) => u.id === activeUserId) || null,
     [users, activeUserId],
   );
+  const victorCanSave = isVictorSender(activeUser);
 
   const assignedCategorySet = useMemo(
     () => new Set(activeUser?.categoryIds || []),
@@ -242,6 +244,10 @@ export default function FulfillmentPage() {
 
   const saveCategorySection = async (categoryId, sectionItems) => {
     if (!activeUser || !orderId) return;
+    if (!victorCanSave) {
+      setStatusMsg({ type: 'err', text: CUSTOMER_SEND_FORBIDDEN });
+      return;
+    }
     setSectionSaving(categoryId);
     setStatusMsg(null);
     try {
@@ -309,6 +315,10 @@ export default function FulfillmentPage() {
   const combinedNotes = [autoNotes, userNotes].filter(Boolean).join('\n\n');
 
   const doSave = async () => {
+    if (!victorCanSave) {
+      setStatusMsg({ type: 'err', text: CUSTOMER_SEND_FORBIDDEN });
+      return;
+    }
     setSaving(true);
     setStatusMsg(null);
     try {
@@ -484,7 +494,7 @@ export default function FulfillmentPage() {
           const isComplete = Boolean(section?.complete);
           const savedByOther = section && section.userId !== activeUserId;
           const editable = canEditCategory(group.id) && !savedByOther;
-          const canSave = canEditCategory(group.id) && activeUser;
+          const canSave = canEditCategory(group.id) && activeUser && victorCanSave;
 
           return (
             <section key={group.id} className={`ff-section${isComplete ? ' ff-section--complete' : ''}${!editable ? ' ff-section--locked' : ''}`}>
@@ -545,10 +555,16 @@ export default function FulfillmentPage() {
           {previewing ? <Loader2 size={16} className="star-spinning" /> : <FileText size={16} />}
           <span>{previewing ? 'PDF…' : 'Preview PDF'}</span>
         </button>
-        <button type="button" onClick={() => void doSave()} disabled={saving || previewing} className="ff-btn-send">
-          {saving ? <Loader2 size={16} className="star-spinning" /> : <Check size={16} />}
-          <span>{saving ? 'Saving…' : 'Save order'}</span>
-        </button>
+        {victorCanSave ? (
+          <button type="button" onClick={() => void doSave()} disabled={saving || previewing} className="ff-btn-send">
+            {saving ? <Loader2 size={16} className="star-spinning" /> : <Check size={16} />}
+            <span>{saving ? 'Saving…' : 'Save order'}</span>
+          </button>
+        ) : (
+          <div className="ff-btn-victor-gate" role="note">
+            Only <strong>Victor</strong> can save and send orders
+          </div>
+        )}
       </div>
     </div>
   );
