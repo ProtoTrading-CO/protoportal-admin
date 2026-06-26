@@ -306,6 +306,7 @@ export default function ProductManagerEngine({
   });
   const rows = data?.rows || [];
   const total = data?.total || 0;
+  const archiveOosLive = status === 'archived' && archiveStockView === 'zero';
   const tree = taxonomyTree.length ? taxonomyTree : (data?.tree || []);
 
   const categoryKey = categoryPath.length
@@ -724,8 +725,8 @@ export default function ProductManagerEngine({
                 <>
                   <p className="adm-section-note" style={{ margin: '0 0 8px', width: '100%' }}>
                     {archiveStockView === 'zero'
-                      ? 'Products with 0 or negative stock (hidden from customers). Click Make live to restore to the website catalogue.'
-                      : 'All archived products. Click Make live to restore to the website catalogue.'}
+                      ? 'Live products with 0 or negative ERP stock. Select all, then Archive all to hide them from the trade website.'
+                      : 'Products in the archive table. Click Make live to restore to the website catalogue.'}
                   </p>
                   <div className="pm-archive-stock-toggle" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', width: '100%', marginBottom: 8 }}>
                     <button
@@ -835,7 +836,20 @@ export default function ProductManagerEngine({
                       <button type="button" className="adm-btn-red adm-btn--sm" onClick={() => runBulk({ mutateAsync: (sku) => mutations.softDelete.mutateAsync({ sku, fromArchive: false }) })}>To recycle</button>
                     </>
                   )}
-                  {status === 'archived' && (
+                  {status === 'archived' && archiveOosLive && (
+                    <>
+                      <button
+                        type="button"
+                        className="adm-btn-ghost adm-btn--sm"
+                        disabled={bulkActionPending}
+                        onClick={() => void bulkArchiveSelected()}
+                      >
+                        {bulkActionPending ? 'Archiving…' : 'Archive all'}
+                      </button>
+                      <button type="button" className="adm-btn-red adm-btn--sm" onClick={() => runBulk({ mutateAsync: (sku) => mutations.softDelete.mutateAsync({ sku, fromArchive: false }) })}>To recycle</button>
+                    </>
+                  )}
+                  {status === 'archived' && !archiveOosLive && (
                     <>
                       <button
                         type="button"
@@ -902,7 +916,7 @@ export default function ProductManagerEngine({
                       <PmMobileProductCard
                         key={item.id}
                         item={item}
-                        status={status}
+                        status={archiveOosLive ? 'live' : status}
                         selected={selected}
                         showStockColumn={showStockColumn}
                         onToggleSelect={toggleSelect}
@@ -917,7 +931,7 @@ export default function ProductManagerEngine({
                     {!rows.length && !isLoading && (
                       <p className="adm-empty">
                         {status === 'archived' && archiveStockView === 'zero'
-                          ? 'No archived products with 0 or negative stock.'
+                          ? 'No live products with 0 or negative stock.'
                           : 'No products in this view.'}
                       </p>
                     )}
@@ -1034,7 +1048,13 @@ export default function ProductManagerEngine({
                             <button type="button" className="adm-btn-red adm-btn--sm" onClick={() => recycleSku(item.sku, false)}>To recycle</button>
                           </>
                         )}
-                        {status === 'archived' && (
+                        {status === 'archived' && archiveOosLive && (
+                          <>
+                            <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => mutations.archive.mutate(item.sku, { onSuccess: () => onRefreshStats?.() })}>Archive</button>
+                            <button type="button" className="adm-btn-red adm-btn--sm" onClick={() => recycleSku(item.sku, false)}>To recycle</button>
+                          </>
+                        )}
+                        {status === 'archived' && !archiveOosLive && (
                           <>
                             <button type="button" className="adm-btn-red adm-btn--sm" onClick={() => makeLive(item)}>
                               <ArchiveRestore size={14} /> Make live

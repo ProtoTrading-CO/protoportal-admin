@@ -16,6 +16,28 @@ const VALID_STATUS = new Set(['live', 'archived', 'new-items', 'approval', 'recy
 const EXCLUDE_ARCHIVED = ['new-products', 'recycle-bin'];
 const PAGE_CHUNK = 1000;
 
+async function fetchAllLiveRows(sb, { search, categoryPath, tree, sort }) {
+  const rows = [];
+  let from = 0;
+  while (true) {
+    let q = sb.from('website_stock').select('*');
+    const term = safeSearchTerm(search);
+    if (term) {
+      q = q.or(`title.ilike.%${term}%,sku.ilike.%${term}%,barcode.ilike.%${term}%`);
+    }
+    q = applyCategoryFiltersToQuery(q, resolveCategoryFilters(tree, categoryPath));
+    if (sort === 'updated') q = q.order('updated_at', { ascending: false });
+    else q = q.order('title', { ascending: true });
+    q = q.range(from, from + PAGE_CHUNK - 1);
+    const { data, error } = await q;
+    if (error) throw error;
+    rows.push(...(data || []));
+    if ((data || []).length < PAGE_CHUNK) break;
+    from += PAGE_CHUNK;
+  }
+  return rows;
+}
+
 async function fetchAllArchivedRows(sb, { archivedBy, excludeBy, sort }) {
   const rows = [];
   let from = 0;
@@ -150,6 +172,7 @@ export default async function handler(req, res) {
     const tree = await loadTaxonomy().catch(() => []);
 
     let result;
+    let stockAlreadyEnriched = false;
     if (status === 'live') {
       result = await queryLivePaginated(sb, { search, categoryPath, tree, page, pageSize, sort });
     } else if (status === 'recycle') {
@@ -159,13 +182,13 @@ export default async function handler(req, res) {
     } else if (status === 'archived') {
       const stockFilter = String(req.query.stockFilter || 'zero').trim();
       if (stockFilter === 'zero') {
-        const allRows = await fetchAllArchivedRows(sb, { excludeBy: EXCLUDE_ARCHIVED, sort });
-        let rows = filterByCategoryPath(allRows, categoryPath, tree);
-        rows = applySearchFilter(rows, search);
+        // Live website_stock rows with ERP SOH <= 0 (archived_products is often empty)
+        let rows = await fetchAllLiveRows(sb, { search, categoryPath, tree, sort });
         rows = await enrichRowsWithProductStock(sb, rows);
         rows = rows.filter(isZeroOrNegativeStock);
         const pageSlice = paginateRows(rows, page, pageSize);
-        result = { ...pageSlice, archived: true };
+        result = { ...pageSlice, archived: false, archiveView: 'oos-live' };
+        stockAlreadyEnriched = true;
       } else {
         result = await queryArchivedPaginated(sb, {
           search, categoryPath, tree, page, pageSize, sort, excludeBy: EXCLUDE_ARCHIVED,
@@ -190,7 +213,7 @@ export default async function handler(req, res) {
     const needsStock = status === 'live' || status === 'archived' || status === 'recycle'
       || status === 'new-items' || status === 'approval';
     let enriched = result.rows;
-    if (needsStock && enriched.length) {
+    if (needsStock && enriched.length && !stockAlreadyEnriched) {
       enriched = await enrichRowsWithProductStock(sb, enriched, { includePrice: status === 'new-items' });
     }
 
@@ -204,6 +227,7 @@ export default async function handler(req, res) {
       pageSize: result.pageSize,
       hasMore: result.hasMore,
       status,
+      archiveView: result.archiveView || (status === 'archived' ? 'archived' : null),
     });
   } catch (err) {
     console.error('catalog:', err?.message || err);
