@@ -3,6 +3,7 @@ import { loadTaxonomy } from './_taxonomy-utils.js';
 import { getStockClient, enrichRowsWithProductStock } from './_stock-client.js';
 import { ensureProductFromCatalogueRow, restoreArchivedToLive } from './_ensure-product.js';
 import { collectImageUrlsFromRow, removeStagingObjects } from './_staging-storage.js';
+import { reorderStagedImageSlots } from './_stage-dormant.js';
 
 const PAGE_SIZE = 1000;
 
@@ -134,6 +135,18 @@ export default async function handler(req, res) {
         .eq('archived_by', 'new-products');
       if (error) throw error;
       return res.status(200).json({ ok: true });
+    }
+
+    if (action === 'reorderStagedImages') {
+      const { sku, fromSlot, toSlot } = req.body || {};
+      if (!sku) return res.status(400).json({ error: 'sku required' });
+      const from = Number(fromSlot);
+      const to = Number(toSlot);
+      if (!from || !to || from < 1 || from > 4 || to < 1 || to > 4) {
+        return res.status(400).json({ error: 'fromSlot and toSlot must be 1–4' });
+      }
+      const result = await reorderStagedImageSlots(supabase, sku, from, to);
+      return res.status(200).json({ ok: true, ...result });
     }
 
     return res.status(400).json({ error: `Unknown action: ${action}` });

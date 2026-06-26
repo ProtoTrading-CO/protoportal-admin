@@ -561,6 +561,18 @@ export async function archiveProduct(sku, shouldArchive = true) {
   invalidateAdminCache();
 }
 
+/** Swap two staged Approval preview slots (1–4) before go-live. */
+export async function reorderStagedApprovalImages(sku, fromSlot, toSlot) {
+  const res = await fetch('/api/stock-actions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'reorderStagedImages', sku, fromSlot, toSlot }),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json.error || 'Failed to reorder staged images');
+  return json;
+}
+
 /** Go live from New Products — applies staged image if product is still on site, else unarchives. */
 export async function applyDormantLive(sku) {
   const res = await fetch('/api/apply-dormant-live', {
