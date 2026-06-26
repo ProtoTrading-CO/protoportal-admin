@@ -118,7 +118,9 @@ function adapt(row, { archived = false, tree = null } = {}) {
     description: row.original_description || '',
     originalDescription: row.original_description || '',
     packDescription: row.pack_description || '',
+    unitsOfIssue: String(row.units_of_issue || '').trim(),
     price: Number(row.price) || 0,
+    sellPrice: row.sell_price != null ? Number(row.sell_price) : null,
     images,
     image: images[0] || '',
     secondaryImage: images[1] || '',
@@ -148,6 +150,7 @@ function adapt(row, { archived = false, tree = null } = {}) {
     archivedBy: row.archived_by || null,
     stillLive: !!row.still_live,
     createdAt: row.created_at,
+    updatedAt: row.updated_at,
     yearlySales: 0,
     supplier: '',
   };

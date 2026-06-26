@@ -1,4 +1,5 @@
 import { resolvePathLabels } from '../components/CategorySidebar';
+import { fetchAdminProductsPage, setLiveTaxonomyTree } from './products';
 
 const STATUS_LABELS = {
   live: 'Live',
@@ -7,35 +8,73 @@ const STATUS_LABELS = {
   recycle: 'Recycle bin',
 };
 
-function productToCatalogRow(p, tree) {
+const MAX_PATH_LEVELS = 5;
+
+function firstImageUrl(url) {
+  return String(url || '').split(',')[0].trim();
+}
+
+function productToCatalogRow(p, tree, status) {
   const pathIds = Array.isArray(p.categoryPath) ? p.categoryPath : [];
   const pathLabels = resolvePathLabels(tree, pathIds);
-  const fallbackLabels = [p.categoryLabel, ...(p.subcategoryLabels || [])].filter(Boolean);
 
-  const labels = pathLabels.length ? pathLabels : fallbackLabels;
-  const fullPath = labels.join(' > ');
+  const dbCategory = p.categoryLabel || '';
+  const dbSub1 = p.subcategoryLabels?.[0] || '';
+  const dbSub2 = p.subcategoryLabels?.[1] || '';
+  const dbSub3 = p.subcategoryLabels?.[2] || '';
+  const dbSub4 = p.subcategoryLabels?.[3] || '';
+  const dbPath = [dbCategory, dbSub1, dbSub2, dbSub3, dbSub4].filter(Boolean).join(' > ');
 
-  return {
+  const taxLabels = pathLabels.length
+    ? pathLabels
+    : [dbCategory, dbSub1, dbSub2, dbSub3, dbSub4].filter(Boolean);
+
+  const row = {
+    Status: STATUS_LABELS[status] || status,
     'Website SKU': p.sku || p.websiteSku || '',
     Barcode: p.barcode || p.code || '',
     'Product name': p.name || p.title || '',
-    'Main category': labels[0] || '',
-    'Subcategory 1': labels[1] || '',
-    'Subcategory 2': labels[2] || '',
-    'Subcategory 3': labels[3] || '',
-    'Subcategory 4': labels[4] || '',
-    'Category path': fullPath,
+    // Database-assigned categories (source of truth in website_stock)
+    'Category (DB)': dbCategory,
+    'Subcategory one (DB)': dbSub1,
+    'Subcategory two (DB)': dbSub2,
+    'Subcategory three (DB)': dbSub3,
+    'Subcategory four (DB)': dbSub4,
+    'Category path (DB)': dbPath,
+    // Taxonomy-resolved path
+    'Main category ID': pathIds[0] || p.category || '',
+    'Main category (taxonomy)': taxLabels[0] || '',
+    'Subcategory 1 (taxonomy)': taxLabels[1] || '',
+    'Subcategory 2 (taxonomy)': taxLabels[2] || '',
+    'Subcategory 3 (taxonomy)': taxLabels[3] || '',
+    'Subcategory 4 (taxonomy)': taxLabels[4] || '',
+    'Category path (taxonomy)': taxLabels.join(' > '),
     'Category path IDs': pathIds.join(' / '),
     'Price (ex VAT)': p.price ?? '',
-    'Stock (units)': p.stockQty ?? '',
+    'Sell price': p.sellPrice ?? '',
+    'Stock on hand': p.stockOnHand ?? p.stockQty ?? '',
+    'Available stock': p.availableStock ?? '',
     'Units of issue': p.unitsOfIssue || '',
+    'Pack description': p.packDescription || '',
     Description: p.description || p.originalDescription || '',
+    'Image URL 1': firstImageUrl(p.image || p.images?.[0]),
+    'Image URL 2': firstImageUrl(p.secondaryImage || p.images?.[1]),
+    'Image URL 3': firstImageUrl(p.imageThree || p.images?.[2]),
+    'Image URL 4': firstImageUrl(p.imageFour || p.images?.[3]),
+    'New arrival': p.isNew ? 'Yes' : 'No',
+    'In stock': p.inStock === false ? 'No' : 'Yes',
+    'Archived by': p.archivedBy || '',
+    'Created at': p.createdAt || '',
+    'Updated at': p.updatedAt || '',
   };
+
+  return row;
 }
 
 function sortCatalogRows(rows) {
   return [...rows].sort((a, b) => {
-    const c = (a['Category path'] || '').localeCompare(b['Category path'] || '');
+    const c = (a['Category path (DB)'] || a['Category path (taxonomy)'] || '')
+      .localeCompare(b['Category path (DB)'] || b['Category path (taxonomy)'] || '');
     if (c) return c;
     return (a['Product name'] || '').localeCompare(b['Product name'] || '');
   });
@@ -64,33 +103,79 @@ async function fetchAllCatalogProducts(status) {
   return rows;
 }
 
-/** Export catalogue rows with full category + subcategory columns (Product Manager). */
+async function fetchProductsForStatus(status) {
+  if (status === 'approval') {
+    return fetchAllCatalogProducts('approval');
+  }
+  if (status === 'archived') {
+    const { rows } = await fetchAdminProductsPage({
+      page: 1,
+      pageSize: 999999,
+      archived: true,
+      categoryFilter: 'all',
+    });
+    return rows;
+  }
+  if (status === 'recycle') {
+    const { rows } = await fetchAdminProductsPage({
+      page: 1,
+      pageSize: 999999,
+      recycled: true,
+      categoryFilter: 'all',
+    });
+    return rows;
+  }
+  const { rows } = await fetchAdminProductsPage({
+    page: 1,
+    pageSize: 999999,
+    categoryFilter: 'all',
+  });
+  return rows;
+}
+
+function walkCategoryTree(nodes, ancestors = [], rows = []) {
+  for (const node of nodes || []) {
+    const path = [...ancestors, node];
+    const labels = path.map((n) => n.label);
+    const ids = path.map((n) => n.id);
+    const row = {
+      'Full path': labels.join(' > '),
+      Depth: path.length,
+      'Is leaf': node.children?.length ? 'No' : 'Yes',
+    };
+    for (let i = 0; i < MAX_PATH_LEVELS; i += 1) {
+      row[`Level ${i + 1}`] = labels[i] || '';
+      row[`Level ${i + 1} ID`] = ids[i] || '';
+    }
+    rows.push(row);
+    if (node.children?.length) walkCategoryTree(node.children, path, rows);
+  }
+  return rows;
+}
+
+function buildCategoryTreeSheet(tree) {
+  return walkCategoryTree(tree);
+}
+
+/** Export catalogue with full DB + taxonomy categories and all product fields. */
 export async function exportProductsCatalogXlsx({ status = 'live', taxonomyTree = [] } = {}) {
   const XLSX = await import('xlsx');
   const tree = Array.isArray(taxonomyTree) ? taxonomyTree : [];
-  const products = await fetchAllCatalogProducts(status);
-  const sheetRows = sortCatalogRows(products.map((p) => productToCatalogRow(p, tree)));
+  setLiveTaxonomyTree(tree);
+
+  const products = await fetchProductsForStatus(status);
+  const sheetRows = sortCatalogRows(products.map((p) => productToCatalogRow(p, tree, status)));
 
   const wb = XLSX.utils.book_new();
   const mainSheet = STATUS_LABELS[status] || 'Products';
   const ws = XLSX.utils.json_to_sheet(sheetRows);
-  ws['!cols'] = [
-    { wch: 16 },
-    { wch: 14 },
-    { wch: 42 },
-    { wch: 22 },
-    { wch: 22 },
-    { wch: 22 },
-    { wch: 22 },
-    { wch: 22 },
-    { wch: 52 },
-    { wch: 36 },
-    { wch: 12 },
-    { wch: 10 },
-    { wch: 14 },
-    { wch: 48 },
-  ];
   XLSX.utils.book_append_sheet(wb, ws, mainSheet.slice(0, 31));
+
+  const treeRows = buildCategoryTreeSheet(tree);
+  if (treeRows.length) {
+    const treeWs = XLSX.utils.json_to_sheet(treeRows);
+    XLSX.utils.book_append_sheet(wb, treeWs, 'Category tree');
+  }
 
   const stamp = new Date().toISOString().slice(0, 10);
   const statusSlug = String(status).replace(/[^a-z0-9]+/gi, '-').toLowerCase();
@@ -98,7 +183,35 @@ export async function exportProductsCatalogXlsx({ status = 'live', taxonomyTree 
   return sheetRows.length;
 }
 
-/** @deprecated Use exportProductsCatalogXlsx — kept for callers expecting live-only export. */
+/** Export live + archived + recycle in one workbook (all products, all data). */
+export async function exportAllProductsCatalogXlsx({ taxonomyTree = [] } = {}) {
+  const XLSX = await import('xlsx');
+  const tree = Array.isArray(taxonomyTree) ? taxonomyTree : [];
+  setLiveTaxonomyTree(tree);
+
+  const statuses = ['live', 'archived', 'recycle'];
+  const allRows = [];
+
+  for (const status of statuses) {
+    const products = await fetchProductsForStatus(status);
+    allRows.push(...products.map((p) => productToCatalogRow(p, tree, status)));
+  }
+
+  const sheetRows = sortCatalogRows(allRows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(sheetRows), 'All products');
+
+  const treeRows = buildCategoryTreeSheet(tree);
+  if (treeRows.length) {
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(treeRows), 'Category tree');
+  }
+
+  const stamp = new Date().toISOString().slice(0, 10);
+  XLSX.writeFile(wb, `proto-products-all-${stamp}.xlsx`);
+  return sheetRows.length;
+}
+
+/** @deprecated Use exportProductsCatalogXlsx */
 export async function exportLiveProductsXlsx(taxonomyTree = []) {
   return exportProductsCatalogXlsx({ status: 'live', taxonomyTree });
 }

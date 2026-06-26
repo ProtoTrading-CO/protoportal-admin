@@ -30,7 +30,7 @@ import { queryClient } from '../lib/queryClient';
 import { queryKeys } from '../lib/queryKeys';
 import { getActiveImageBatch, subscribeImageBatch } from '../lib/imageBatchTracker';
 import { sortOrderCategoryKey, lookupSortOrder, applySkuOrder, sortOrderLookupKeys } from '../lib/taxonomy';
-import { exportProductsCatalogXlsx } from '../lib/exportLiveProducts';
+import { exportProductsCatalogXlsx, exportAllProductsCatalogXlsx } from '../lib/exportLiveProducts';
 
 const STATUS_META = {
   live: { label: 'Live', icon: PackagePlus },
@@ -465,11 +465,13 @@ export default function ProductManagerEngine({
     { onSuccess: () => onRefreshStats?.() },
   );
 
-  const handleExportCatalog = async () => {
+  const handleExportCatalog = async (allStatuses = false) => {
     setExportingXlsx(true);
     try {
-      const count = await exportProductsCatalogXlsx({ status, taxonomyTree });
-      onShowToast?.(`Exported ${count} product${count === 1 ? '' : 's'} with categories`, 'success');
+      const count = allStatuses
+        ? await exportAllProductsCatalogXlsx({ taxonomyTree })
+        : await exportProductsCatalogXlsx({ status, taxonomyTree });
+      onShowToast?.(`Exported ${count} product${count === 1 ? '' : 's'} with full categories`, 'success');
     } catch (err) {
       onShowToast?.(err.message || 'Export failed', 'error');
     } finally {
@@ -515,16 +517,28 @@ export default function ProductManagerEngine({
         </div>
         <div className="pm-engine-head-actions">
           {status !== 'approval' && !reorderMode && (
-            <button
-              type="button"
-              className="adm-btn-ghost adm-btn--sm"
-              disabled={exportingXlsx}
-              onClick={() => void handleExportCatalog()}
-              title="Download Excel with category and subcategory per product"
-            >
-              {exportingXlsx ? <Loader2 size={14} className="spin" /> : <FileSpreadsheet size={14} />}
-              {exportingXlsx ? 'Exporting…' : 'Export Excel'}
-            </button>
+            <>
+              <button
+                type="button"
+                className="adm-btn-ghost adm-btn--sm"
+                disabled={exportingXlsx}
+                onClick={() => void handleExportCatalog(false)}
+                title="Export current tab with all category levels and product fields"
+              >
+                {exportingXlsx ? <Loader2 size={14} className="spin" /> : <FileSpreadsheet size={14} />}
+                {exportingXlsx ? 'Exporting…' : 'Export Excel'}
+              </button>
+              <button
+                type="button"
+                className="adm-btn-ghost adm-btn--sm"
+                disabled={exportingXlsx}
+                onClick={() => void handleExportCatalog(true)}
+                title="Export live + archived + recycle in one file, plus category tree sheet"
+              >
+                {exportingXlsx ? <Loader2 size={14} className="spin" /> : <FileSpreadsheet size={14} />}
+                Export all
+              </button>
+            </>
           )}
           {isFetching && !isLoading && <Loader2 size={16} className="spin" aria-label="Refreshing" />}
           <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => queryClient.invalidateQueries({ queryKey: ['catalog'] })}>
