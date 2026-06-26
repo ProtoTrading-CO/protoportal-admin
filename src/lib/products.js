@@ -145,7 +145,6 @@ function adapt(row, { archived = false, tree = null } = {}) {
     leadTime: '',
     tradeNote: '',
     inStock: stock.stockOnHand !== null ? stock.stockOnHand > 0 : true,
-    keepLiveWhenOos: !!row.keep_live_when_oos,
     archivedBy: row.archived_by || null,
     stillLive: !!row.still_live,
     createdAt: row.created_at,
@@ -580,13 +579,6 @@ export async function applyDormantLive(sku) {
 /** Toggle curated New Arrivals placement on the trade site homepage. */
 export async function setNewArrival(sku, isNewArrival) {
   await stockAction({ action: 'setNewArrival', sku, isNewArrival: !!isNewArrival });
-  invalidateProductCache();
-  invalidateAdminCache();
-}
-
-/** Keep a product on the live site even when source stock is zero (opts out of auto-oos archive). */
-export async function setKeepLiveWhenOos(sku, keepLive) {
-  await stockAction({ action: 'setKeepLive', sku, keepLive: !!keepLive });
   invalidateProductCache();
   invalidateAdminCache();
 }

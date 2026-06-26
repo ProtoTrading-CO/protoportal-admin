@@ -17,8 +17,6 @@ import {
   Eye,
   FileDown,
   Home,
-  Pin,
-  PinOff,
   Plus,
   Globe,
   Grip,
@@ -75,7 +73,6 @@ import {
   recycleProduct,
   restoreRecycledProduct,
   saveSortOrder,
-  setKeepLiveWhenOos,
   setNewArrival,
   setLiveTaxonomyTree,
   updateProduct,
@@ -390,8 +387,7 @@ function csvDownload(rows, filename) {
   URL.revokeObjectURL(url);
 }
 
-function formatStockUnits(qty, keepLive = false) {
-  if (keepLive && (qty === null || qty === undefined || qty <= 0)) return 'Available';
+function formatStockUnits(qty) {
   const n = qty === null || qty === undefined ? 0 : Number(qty);
   return `${Number.isFinite(n) ? n : 0} units`;
 }
@@ -1595,20 +1591,6 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     } finally { setSaving(''); }
   };
 
-  const toggleKeepLiveWhenOos = async (product) => {
-    const next = !product.keepLiveWhenOos;
-    setSaving(`keep-${product.id}`);
-    try {
-      await setKeepLiveWhenOos(product.id, next);
-      await refreshDashboardStats();
-      if (activeSection === 'products') await loadProducts();
-      else if (activeSection === 'archive') await loadArchive();
-      showToast(next ? 'Product will stay on site when out of stock' : 'Product will auto-archive when out of stock');
-    } catch (err) {
-      showToast(err.message || 'Could not update keep-live setting', 'error');
-    } finally { setSaving(''); }
-  };
-
   const toggleNewArrival = async (product) => {
     const next = !product.isNew;
     setSaving(`new-${product.id}`);
@@ -2742,7 +2724,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                           </div>
                         </div>
                         <div>
-                          <span style={{ fontWeight: 700, color: !product.keepLiveWhenOos && product.stockQty < 0 ? '#b91c1c' : undefined }}>{formatStockUnits(product.stockQty, product.keepLiveWhenOos)}</span>
+                          <span style={{ fontWeight: 700, color: product.stockQty < 0 ? '#b91c1c' : undefined }}>{formatStockUnits(product.stockQty)}</span>
                           {product.supplier && <div className="adm-muted" style={{ fontSize: 11 }}>{product.supplier}</div>}
                         </div>
                         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
@@ -2761,15 +2743,6 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                             style={{ color: product.isNew ? '#0f766e' : undefined }}
                           >
                             <Sparkles size={14} />
-                          </button>
-                          <button
-                            onClick={() => void toggleKeepLiveWhenOos(product)}
-                            className="adm-icon-btn"
-                            title={product.keepLiveWhenOos ? 'Auto-archive when out of stock (click to enable)' : 'Keep on site when out of stock (click to pin)'}
-                            disabled={saving === `keep-${product.id}`}
-                            style={{ color: product.keepLiveWhenOos ? '#8B1A1A' : undefined }}
-                          >
-                            {product.keepLiveWhenOos ? <Pin size={14} /> : <PinOff size={14} />}
                           </button>
                           <button onClick={() => openEditProduct(product)} className="adm-icon-btn" title="Edit product details"><Pencil size={14} /></button>
                           <button onClick={() => void toggleArchive(product)} className="adm-icon-btn">{product.isArchived ? <ArchiveRestore size={14} /> : <Archive size={14} />}</button>
@@ -3111,19 +3084,10 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                           </div>
                         </div>
                         <div>
-                          <span style={{ fontWeight: 900, fontSize: 15, color: !product.keepLiveWhenOos && product.stockQty < 0 ? '#b91c1c' : '#8B1A1A' }}>{formatStockUnits(product.stockQty, product.keepLiveWhenOos)}</span>
+                          <span style={{ fontWeight: 900, fontSize: 15, color: product.stockQty < 0 ? '#b91c1c' : '#8B1A1A' }}>{formatStockUnits(product.stockQty)}</span>
                           {product.supplier && <div className="adm-muted" style={{ fontSize: 11 }}>{product.supplier}</div>}
                         </div>
                         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-                          <button
-                            onClick={() => void toggleKeepLiveWhenOos(product)}
-                            className="adm-icon-btn"
-                            title={product.keepLiveWhenOos ? 'Pinned — restore to site' : 'Keep on site when out of stock'}
-                            disabled={saving === `keep-${product.id}`}
-                            style={{ color: product.keepLiveWhenOos ? '#8B1A1A' : undefined }}
-                          >
-                            {product.keepLiveWhenOos ? <Pin size={14} /> : <PinOff size={14} />}
-                          </button>
                           <button onClick={() => openEditProduct(product)} className="adm-icon-btn" title="Edit product"><Pencil size={14} /></button>
                           <button onClick={() => void toggleArchive(product)} className="adm-icon-btn" title="Restore from archive"><ArchiveRestore size={14} /></button>
                         </div>
@@ -3202,7 +3166,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                         </div>
                       </div>
                       <div>
-                        <span style={{ fontWeight: 700, color: !product.keepLiveWhenOos && product.stockQty < 0 ? '#b91c1c' : undefined }}>{formatStockUnits(product.stockQty, product.keepLiveWhenOos)}</span>
+                        <span style={{ fontWeight: 700, color: product.stockQty < 0 ? '#b91c1c' : undefined }}>{formatStockUnits(product.stockQty)}</span>
                       </div>
                       <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                         <button onClick={() => void restoreFromRecycle(product)} className="adm-icon-btn" title="Restore to live catalogue" disabled={saving === product.id}>

@@ -115,45 +115,6 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true });
     }
 
-    if (action === 'setKeepLive') {
-      const { sku, keepLive } = req.body;
-      if (!sku) return res.status(400).json({ error: 'sku required' });
-
-      const { data: live } = await supabase.from('website_stock').select('sku, barcode').eq('sku', sku).maybeSingle();
-      let barcode = live?.barcode;
-      if (!live) {
-        const { data: arch } = await supabase.from('archived_products').select('sku, barcode').eq('sku', sku).maybeSingle();
-        if (!arch) return res.status(404).json({ error: 'Product not found' });
-        barcode = arch.barcode;
-        const { error: archErr } = await supabase
-          .from('archived_products')
-          .update({ keep_live_when_oos: !!keepLive })
-          .eq('sku', sku);
-        if (archErr) throw archErr;
-        if (keepLive) {
-          const { error: unErr } = await supabase.rpc('unarchive_product', { p_sku: sku });
-          if (unErr) throw unErr;
-          const { error: flagErr } = await supabase
-            .from('website_stock')
-            .update({ keep_live_when_oos: true })
-            .eq('sku', sku);
-          if (flagErr) throw flagErr;
-        }
-      } else {
-        const { error: liveErr } = await supabase
-          .from('website_stock')
-          .update({ keep_live_when_oos: !!keepLive })
-          .eq('sku', sku);
-        if (liveErr) throw liveErr;
-      }
-
-      if (!keepLive && barcode) {
-        const { error: visErr } = await supabase.rpc('apply_catalog_visibility_for_barcode', { p_barcode: barcode });
-        if (visErr) throw visErr;
-      }
-      return res.status(200).json({ ok: true });
-    }
-
     if (action === 'deleteStagedPreview') {
       const { sku } = req.body;
       if (!sku) return res.status(400).json({ error: 'sku required' });

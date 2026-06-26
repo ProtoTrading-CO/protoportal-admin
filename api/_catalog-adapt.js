@@ -104,7 +104,6 @@ export function adaptCatalogRow(row, tree, { archived = false } = {}) {
     isArchived: archived,
     archivedBy: row.archived_by || null,
     stillLive: !!row.still_live,
-    keepLiveWhenOos: !!row.keep_live_when_oos,
     updatedAt: row.updated_at,
     createdAt: row.created_at,
     liveImages: archived && row._live ? [

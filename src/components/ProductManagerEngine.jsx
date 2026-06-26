@@ -48,8 +48,7 @@ const ROW_COLUMNS = {
 
 const STOCK_STATUSES = new Set(['live', 'archived']);
 
-function formatStockUnits(qty, keepLive = false) {
-  if (keepLive && (qty === null || qty === undefined || qty <= 0)) return 'Available';
+function formatStockUnits(qty) {
   const n = qty === null || qty === undefined ? 0 : Number(qty);
   return `${Number.isFinite(n) ? n : 0} units`;
 }
@@ -110,7 +109,7 @@ function PmMobileProductCard({
           )}
           {showStockColumn && (
             <div className="pm-mobile-card-stock">
-              {formatStockUnits(item.stockQty, item.keepLiveWhenOos)}
+              {formatStockUnits(item.stockQty)}
             </div>
           )}
         </div>
@@ -796,12 +795,12 @@ export default function ProductManagerEngine({
                           <span style={{
                             fontWeight: status === 'archived' ? 900 : 700,
                             fontSize: status === 'archived' ? 15 : undefined,
-                            color: !item.keepLiveWhenOos && item.stockQty < 0
+                            color: item.stockQty < 0
                               ? '#b91c1c'
                               : (status === 'archived' ? '#8B1A1A' : undefined),
                           }}
                           >
-                            {formatStockUnits(item.stockQty, item.keepLiveWhenOos)}
+                            {formatStockUnits(item.stockQty)}
                           </span>
                         </div>
                       )}
