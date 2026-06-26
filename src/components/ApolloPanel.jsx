@@ -360,6 +360,8 @@ export default function ApolloPanel({ isActive = true, taxonomyTree, onShowToast
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [indexStatus, setIndexStatus] = useState(null);
+  const [indexError, setIndexError] = useState('');
+  const [rebuildingIndex, setRebuildingIndex] = useState(false);
   const [wizardOpen, setWizardOpen] = useState(false);
   const [wizardBackground, setWizardBackground] = useState(false);
   const [wizardPrefill, setWizardPrefill] = useState(null);
@@ -416,12 +418,32 @@ export default function ApolloPanel({ isActive = true, taxonomyTree, onShowToast
     return () => clearInterval(timer);
   }, [isActive]);
 
+  const loadIndexStatus = useCallback(async (refresh = false) => {
+    setIndexError('');
+    try {
+      const res = await fetch(`/api/apollo${refresh ? '?refresh=1' : ''}`);
+      const json = await res.json();
+      if (!res.ok) throw new Error(formatErrorMessage(json?.error, 'Index build failed'));
+      if (json.ok) setIndexStatus(json);
+    } catch (err) {
+      setIndexError(formatErrorMessage(err, 'Could not load Apollo index'));
+      onShowToast?.(formatErrorMessage(err, 'Apollo index failed'), 'error');
+    }
+  }, [onShowToast]);
+
   useEffect(() => {
-    void fetch('/api/apollo')
-      .then((r) => r.json())
-      .then((json) => { if (json.ok) setIndexStatus(json); })
-      .catch(() => {});
-  }, []);
+    void loadIndexStatus(false);
+  }, [loadIndexStatus]);
+
+  const rebuildIndex = useCallback(async () => {
+    setRebuildingIndex(true);
+    try {
+      await loadIndexStatus(true);
+      onShowToast?.('Apollo index rebuilt', 'success');
+    } finally {
+      setRebuildingIndex(false);
+    }
+  }, [loadIndexStatus, onShowToast]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
@@ -557,10 +579,26 @@ export default function ApolloPanel({ isActive = true, taxonomyTree, onShowToast
                 <h2 className="apollo-head-title">Apollo</h2>
                 <p className="apollo-head-sub">
                   Live keyword index · {indexStatus ? `${indexStatus.counts?.products?.toLocaleString() ?? '—'} products, ${indexStatus.counts?.customers ?? '—'} customers` : 'building…'}
+                  {indexStatus?.indexedAt && (
+                    <span className="apollo-index-time">
+                      {' · '}Indexed {new Date(indexStatus.indexedAt).toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  )}
                 </p>
+                {indexError && <p className="apollo-index-error">{indexError}</p>}
               </div>
             </div>
             <div className="apollo-head-actions">
+              <button
+                type="button"
+                className="apollo-action-btn apollo-action-btn--ghost"
+                onClick={() => void rebuildIndex()}
+                disabled={busy || rebuildingIndex}
+                title="Rebuild live product/customer index"
+              >
+                {rebuildingIndex ? <Loader2 size={13} className="spin" /> : <Sparkles size={13} />}
+                {rebuildingIndex ? 'Rebuilding…' : 'Rebuild index'}
+              </button>
               {wizardOpen && wizardBackground && (
                 <button type="button" className="apollo-action-btn apollo-action-btn--ghost" onClick={() => setWizardBackground(false)}>
                   Image batch

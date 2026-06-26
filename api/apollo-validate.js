@@ -41,6 +41,11 @@ export function validateIntent(query, parsed) {
     if (!hasTerms && !hasSkus) return false;
   }
 
+  if (intent === 'product_search' && /find code|lookup code|sku\s+\d/i.test(q)) {
+    const code = q.match(/\d{6,}/)?.[0];
+    if (code && !String(terms || '').includes(code)) return false;
+  }
+
   return true;
 }
 
