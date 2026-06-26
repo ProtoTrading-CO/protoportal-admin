@@ -130,3 +130,20 @@ export function paginateRows(rows, page, pageSize) {
     hasMore: total > from + pageSize,
   };
 }
+
+/** SOH from enriched row: available_stock first, then stock_qty. Null if unknown. */
+export function readStockOnHand(row) {
+  const read = (val) => {
+    if (val === null || val === undefined || val === '') return null;
+    const n = Number(val);
+    return Number.isFinite(n) ? n : null;
+  };
+  const available = read(row?.available_stock);
+  const raw = read(row?.stock_qty);
+  return available !== null ? available : raw;
+}
+
+export function isZeroOrNegativeStock(row) {
+  const soh = readStockOnHand(row);
+  return soh === null ? false : soh <= 0;
+}

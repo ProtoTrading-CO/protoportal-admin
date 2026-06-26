@@ -23,7 +23,7 @@ import CategorySidebar, { resolvePathLabels } from './CategorySidebar';
 import ReorderGrid from './ReorderGrid';
 import ApprovalPanel from './ApprovalPanel';
 import BulkProductEditModal from './BulkProductEditModal';
-import { useCatalogQuery, buildCatalogParams, CATALOG_STATUSES } from '../hooks/useCatalog';
+import { useCatalogQuery, buildCatalogParams, fetchAllCatalogRows, CATALOG_STATUSES } from '../hooks/useCatalog';
 import { useCatalogMutations } from '../hooks/useCatalogMutations';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { queryClient } from '../lib/queryClient';
@@ -224,6 +224,7 @@ export default function ProductManagerEngine({
   initialStatus = 'live',
 }) {
   const [status, setStatus] = useState(initialStatus);
+  const [archiveStockView, setArchiveStockView] = useState('zero');
   const [reorderMode, setReorderMode] = useState(false);
 
   useEffect(() => {
@@ -241,6 +242,9 @@ export default function ProductManagerEngine({
   const [reorderSaving, setReorderSaving] = useState(false);
   const [exportingXlsx, setExportingXlsx] = useState(false);
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
+  const [selectAllView, setSelectAllView] = useState(false);
+  const [selectingAll, setSelectingAll] = useState(false);
+  const [bulkActionPending, setBulkActionPending] = useState(false);
   const [categoryDrawerOpen, setCategoryDrawerOpen] = useState(false);
   const [categoryStackNav, setCategoryStackNav] = useState(null);
   const selectedRowsRef = useRef(new Map());
@@ -280,7 +284,8 @@ export default function ProductManagerEngine({
     setPage(1);
     setSelected(new Set());
     selectedRowsRef.current = new Map();
-  }, [status, debouncedSearch, categoryPath.join('/')]);
+    setSelectAllView(false);
+  }, [status, debouncedSearch, categoryPath.join('/'), archiveStockView]);
 
   const handlePageChange = useCallback((nextPage) => {
     setPage(nextPage);
@@ -293,7 +298,8 @@ export default function ProductManagerEngine({
     pageSize: reorderMode && status === 'live' ? 500 : pageSize,
     search: debouncedSearch,
     categoryPath,
-  }), [status, page, pageSize, debouncedSearch, categoryPath, reorderMode]);
+    stockFilter: status === 'archived' ? archiveStockView : undefined,
+  }), [status, page, pageSize, debouncedSearch, categoryPath, reorderMode, archiveStockView]);
 
   const { data, isLoading, isFetching, isPlaceholderData } = useCatalogQuery(catalogParams, {
     enabled: status !== 'approval',
@@ -380,6 +386,7 @@ export default function ProductManagerEngine({
   };
 
   const toggleSelect = (id, item) => {
+    setSelectAllView(false);
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(id)) {
@@ -391,6 +398,68 @@ export default function ProductManagerEngine({
       }
       return next;
     });
+  };
+
+  const allPageSelected = rows.length > 0 && rows.every((r) => selected.has(r.id));
+
+  const clearSelection = () => {
+    setSelected(new Set());
+    selectedRowsRef.current = new Map();
+    setSelectAllView(false);
+  };
+
+  const toggleSelectAllPage = () => {
+    if (allPageSelected) {
+      clearSelection();
+      return;
+    }
+    setSelectAllView(false);
+    setSelected((prev) => {
+      const next = new Set(prev);
+      for (const item of rows) {
+        next.add(item.id);
+        selectedRowsRef.current.set(item.id, item);
+      }
+      return next;
+    });
+  };
+
+  const selectAllInView = async () => {
+    setSelectingAll(true);
+    try {
+      const allRows = await fetchAllCatalogRows({
+        status,
+        search: debouncedSearch,
+        categoryPath,
+        stockFilter: status === 'archived' ? archiveStockView : undefined,
+      });
+      selectedRowsRef.current = new Map(allRows.map((r) => [r.id, r]));
+      setSelected(new Set(allRows.map((r) => r.id)));
+      setSelectAllView(true);
+      onShowToast?.(`Selected ${allRows.length} product(s)`, 'success');
+    } catch (err) {
+      onShowToast?.(err.message || 'Failed to select all', 'error');
+    } finally {
+      setSelectingAll(false);
+    }
+  };
+
+  const bulkArchiveSelected = async () => {
+    const skus = [...selected];
+    if (!skus.length) return;
+    if (!window.confirm(`Archive ${skus.length} product(s)? They will be hidden from the trade website.`)) return;
+    setBulkActionPending(true);
+    try {
+      await mutations.bulkArchive.mutateAsync(skus);
+      clearSelection();
+      queryClient.invalidateQueries({ queryKey: ['catalog'] });
+      onRefreshStats?.();
+      onShowToast?.(`Archived ${skus.length} product(s)`, 'success');
+    } catch (err) {
+      onShowToast?.(err.message || 'Bulk archive failed', 'error');
+    } finally {
+      setBulkActionPending(false);
+    }
   };
 
   const handleImageFix = () => {
@@ -453,11 +522,22 @@ export default function ProductManagerEngine({
     });
   };
 
-  const bulkMakeLive = () => {
-    const count = selected.size;
-    if (!count) return;
-    if (!window.confirm(`Move ${count} product(s) to the live website catalogue?`)) return;
-    void runBulk(mutations.unarchive, { successMessage: `${count} product(s) are now live` });
+  const bulkMakeLive = async () => {
+    const skus = [...selected];
+    if (!skus.length) return;
+    if (!window.confirm(`Move ${skus.length} product(s) to the live website catalogue?`)) return;
+    setBulkActionPending(true);
+    try {
+      await mutations.bulkUnarchive.mutateAsync(skus);
+      clearSelection();
+      queryClient.invalidateQueries({ queryKey: ['catalog'] });
+      onRefreshStats?.();
+      onShowToast?.(`${skus.length} product(s) are now live`, 'success');
+    } catch (err) {
+      onShowToast?.(err.message || 'Bulk restore failed', 'error');
+    } finally {
+      setBulkActionPending(false);
+    }
   };
 
   const recycleSku = (sku, fromArchive) => mutations.softDelete.mutate(
@@ -641,9 +721,34 @@ export default function ProductManagerEngine({
             )}
             <div className="adm-toolbar pm-toolbar">
               {status === 'archived' && (
-                <p className="adm-section-note" style={{ margin: '0 0 8px', width: '100%' }}>
-                  Hidden from customers. Click <strong>Make live</strong> to move back to the website catalogue.
-                </p>
+                <>
+                  <p className="adm-section-note" style={{ margin: '0 0 8px', width: '100%' }}>
+                    {archiveStockView === 'zero'
+                      ? 'Products with 0 or negative stock (hidden from customers). Click Make live to restore to the website catalogue.'
+                      : 'All archived products. Click Make live to restore to the website catalogue.'}
+                  </p>
+                  <div className="pm-archive-stock-toggle" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', width: '100%', marginBottom: 8 }}>
+                    <button
+                      type="button"
+                      className={`adm-btn-ghost adm-btn--sm${archiveStockView === 'zero' ? ' adm-tab--active' : ''}`}
+                      onClick={() => setArchiveStockView('zero')}
+                    >
+                      0 / negative stock
+                    </button>
+                    <button
+                      type="button"
+                      className={`adm-btn-ghost adm-btn--sm${archiveStockView === 'all' ? ' adm-tab--active' : ''}`}
+                      onClick={() => setArchiveStockView('all')}
+                    >
+                      Show all
+                    </button>
+                    {!isLoading && (
+                      <span className="adm-pill" style={{ marginLeft: 'auto', fontSize: 12 }}>
+                        {total} product{total === 1 ? '' : 's'}
+                      </span>
+                    )}
+                  </div>
+                </>
               )}
               <label className="adm-search">
                 <Search size={15} />
@@ -655,6 +760,51 @@ export default function ProductManagerEngine({
                   onChange={(e) => setSearchInput(e.target.value)}
                 />
               </label>
+              {rows.length > 0 && status !== 'approval' && !reorderMode && (
+                <div className="pm-select-toolbar" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', width: '100%' }}>
+                  <button
+                    type="button"
+                    className="adm-btn-ghost adm-btn--sm"
+                    onClick={toggleSelectAllPage}
+                  >
+                    {allPageSelected ? `Deselect page (${rows.length})` : `Select page (${rows.length})`}
+                  </button>
+                  {total > rows.length && (
+                    <button
+                      type="button"
+                      className="adm-btn-ghost adm-btn--sm"
+                      disabled={selectingAll}
+                      onClick={() => void selectAllInView()}
+                    >
+                      {selectingAll ? <><Loader2 size={14} className="spin" /> Loading…</> : `Select all (${total})`}
+                    </button>
+                  )}
+                  {selected.size > 0 && (
+                    <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={clearSelection}>
+                      Clear
+                    </button>
+                  )}
+                </div>
+              )}
+              {allPageSelected && total > rows.length && !selectAllView && (
+                <div className="pm-select-all-banner adm-bulk-bar" style={{ width: '100%', marginBottom: 0 }}>
+                  <span>All {rows.length} on this page selected.</span>
+                  <button
+                    type="button"
+                    className="adm-bulk-bar__link"
+                    disabled={selectingAll}
+                    onClick={() => void selectAllInView()}
+                  >
+                    {selectingAll ? 'Loading…' : `Select all ${total} in this view`}
+                  </button>
+                </div>
+              )}
+              {selectAllView && selected.size > 0 && (
+                <div className="pm-select-all-banner adm-bulk-bar" style={{ width: '100%', marginBottom: 0 }}>
+                  <span>All {selected.size} products in this view are selected.</span>
+                  <button type="button" className="adm-bulk-bar__link" onClick={clearSelection}>Clear selection</button>
+                </div>
+              )}
               {selected.size > 0 && (
                 <div className="pm-bulk-bar">
                   <span>{selected.size} selected</span>
@@ -674,14 +824,26 @@ export default function ProductManagerEngine({
                   )}
                   {status === 'live' && (
                     <>
-                      <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => runBulk(mutations.archive)}>Archive</button>
+                      <button
+                        type="button"
+                        className="adm-btn-ghost adm-btn--sm"
+                        disabled={bulkActionPending}
+                        onClick={() => void bulkArchiveSelected()}
+                      >
+                        {bulkActionPending ? 'Archiving…' : 'Archive all'}
+                      </button>
                       <button type="button" className="adm-btn-red adm-btn--sm" onClick={() => runBulk({ mutateAsync: (sku) => mutations.softDelete.mutateAsync({ sku, fromArchive: false }) })}>To recycle</button>
                     </>
                   )}
                   {status === 'archived' && (
                     <>
-                      <button type="button" className="adm-btn-red adm-btn--sm" onClick={bulkMakeLive}>
-                        <ArchiveRestore size={14} /> Make live
+                      <button
+                        type="button"
+                        className="adm-btn-red adm-btn--sm"
+                        disabled={bulkActionPending}
+                        onClick={() => void bulkMakeLive()}
+                      >
+                        {bulkActionPending ? 'Restoring…' : <><ArchiveRestore size={14} /> Make live all</>}
                       </button>
                       <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => runBulk({ mutateAsync: (sku) => mutations.softDelete.mutateAsync({ sku, fromArchive: true }) })}>To recycle</button>
                     </>
@@ -753,7 +915,11 @@ export default function ProductManagerEngine({
                       />
                     ))}
                     {!rows.length && !isLoading && (
-                      <p className="adm-empty">No products in this view.</p>
+                      <p className="adm-empty">
+                        {status === 'archived' && archiveStockView === 'zero'
+                          ? 'No archived products with 0 or negative stock.'
+                          : 'No products in this view.'}
+                      </p>
                     )}
                   </div>
                 ) : (
@@ -762,7 +928,15 @@ export default function ProductManagerEngine({
                     className="adm-list-head pm-list-head"
                     style={{ gridTemplateColumns: ROW_COLUMNS[status] || ROW_COLUMNS.live }}
                   >
-                    <span />
+                    <span>
+                      <input
+                        type="checkbox"
+                        checked={allPageSelected}
+                        onChange={toggleSelectAllPage}
+                        style={{ accentColor: '#8B1A1A', cursor: 'pointer' }}
+                        aria-label="Select all products on this page"
+                      />
+                    </span>
                     <span />
                     <span>Product</span>
                     {showStockColumn && <span>Stock</span>}
@@ -901,7 +1075,11 @@ export default function ProductManagerEngine({
                     </div>
                   ))}
                   {!rows.length && !isLoading && (
-                    <p className="adm-empty">No products in this view.</p>
+                    <p className="adm-empty">
+                      {status === 'archived' && archiveStockView === 'zero'
+                        ? 'No archived products with 0 or negative stock.'
+                        : 'No products in this view.'}
+                    </p>
                   )}
                 </div>
                 )}
