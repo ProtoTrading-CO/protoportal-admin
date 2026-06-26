@@ -2575,7 +2575,7 @@ body.adm-is-reorder-dragging .adm-reorder-card--dragging {
 ══════════════════════════════════════════ */
 @media (max-width: 1024px) {
   .adm-layout { grid-template-columns: 200px 1fr; }
-  .adm-reorder-grid { grid-template-columns: repeat(4, 1fr); }
+  .adm-reorder-grid { grid-template-columns: repeat(3, 1fr); }
 }
 
 /* ══════════════════════════════════════════

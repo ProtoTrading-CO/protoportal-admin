@@ -53,10 +53,12 @@ export default async function handler(req, res) {
 
     const { data: meta } = await sb
       .from('crm_contacts')
-      .select('synced_at, last_campaign_name')
+      .select('synced_at')
       .order('synced_at', { ascending: false })
       .limit(1)
       .maybeSingle();
+
+    const campaignMeta = await readSiteConfigJson(CAMPAIGN_META_FILE, null);
 
     res.setHeader('Cache-Control', 's-maxage=30, stale-while-revalidate=120');
     return res.status(200).json({
@@ -65,7 +67,8 @@ export default async function handler(req, res) {
       page,
       pageSize,
       lastSyncedAt: meta?.synced_at || null,
-      lastCampaignName: meta?.last_campaign_name || null,
+      lastCampaignName: campaignMeta?.name || null,
+      campaign: campaignMeta,
     });
   } catch (err) {
     console.error('crm-contacts:', err?.message || err);

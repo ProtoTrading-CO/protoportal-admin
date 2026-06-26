@@ -175,19 +175,19 @@ function buildEmailHtml({
       Handled by: <strong style="color:#374151">${escapeHtml(assignedTo)}</strong>
     </div>` : ''}
 
-    <div style="margin-top:24px;padding:14px 16px;background:#fff5f5;border:1px solid #fecaca;border-radius:8px;font-size:13px;color:#7f1d1d;line-height:1.5">
-      <strong>Attachments</strong><br>
-      • Order confirmation (PDF)${hasPresaleInvoice ? '<br>• Presale invoice' : ''}
+    <div style="margin-top:20px;padding:14px 16px;background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;font-size:13px;color:#9a3412;line-height:1.55">
+      <strong style="display:block;margin-bottom:4px;color:#7c2d12">Attachments</strong>
+      Order confirmation (PDF)${hasPresaleInvoice ? ' · Presale invoice' : ''}
     </div>
 
-    <p style="margin:32px 0 0;font-size:14px;color:#374151;line-height:1.6">
-      Thank you for choosing Proto Trading. If you have any questions, please reply to this email.
+    <p style="margin:28px 0 0;font-size:14px;color:#475569;line-height:1.65">
+      Thank you for choosing Proto Trading. Reply to this email if you have any questions.
     </p>
   </div>
 
-  <div style="padding:20px 32px;background:#111111;text-align:center">
-    <div style="font-size:12px;color:#ffffff;font-weight:600">Proto Trading · South Africa</div>
-    <div style="font-size:11px;color:#999999;margin-top:4px">online@proto.co.za</div>
+  <div style="padding:22px 32px;background:#0f172a;text-align:center">
+    <div style="font-size:13px;color:#ffffff;font-weight:700">Proto Trading · South Africa</div>
+    <div style="font-size:12px;color:#94a3b8;margin-top:6px">online@proto.co.za</div>
   </div>
 </div>
 </body>
