@@ -188,6 +188,52 @@ export default function CostTrackingPanel({ onShowToast }) {
         </article>
       </div>
 
+      {summary?.byCostSource?.length > 0 && (
+        <section className="cost-breakdown">
+          <h3>By cost source</h3>
+          <div className="cost-breakdown-table-wrap">
+            <table className="adm-table cost-table">
+              <thead>
+                <tr><th>Source</th><th>Calls</th><th>USD</th><th>ZAR</th></tr>
+              </thead>
+              <tbody>
+                {summary.byCostSource.map((row) => (
+                  <tr key={row.costSource}>
+                    <td>{row.costSource === 'openrouter' ? 'OpenRouter actual' : 'Estimated'}</td>
+                    <td>{row.count}</td>
+                    <td>{formatUsd(row.usd)}</td>
+                    <td>{formatZar(row.zar)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
+      {summary?.byOperation?.length > 0 && (
+        <section className="cost-breakdown">
+          <h3>By operation</h3>
+          <div className="cost-breakdown-table-wrap">
+            <table className="adm-table cost-table">
+              <thead>
+                <tr><th>Operation</th><th>Calls</th><th>USD</th><th>ZAR</th></tr>
+              </thead>
+              <tbody>
+                {summary.byOperation.map((row) => (
+                  <tr key={row.operation}>
+                    <td>{row.operation}</td>
+                    <td>{row.count}</td>
+                    <td>{formatUsd(row.usd)}</td>
+                    <td>{formatZar(row.zar)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
       {summary?.byOperator?.length > 0 && (
         <section className="cost-breakdown">
           <h3>By operator</h3>
@@ -227,6 +273,7 @@ export default function CostTrackingPanel({ onShowToast }) {
                   <th>SKU</th>
                   <th>Op</th>
                   <th>Model</th>
+                  <th>Source</th>
                   <th>USD</th>
                   <th>ZAR</th>
                   <th>Status</th>
@@ -240,6 +287,7 @@ export default function CostTrackingPanel({ onShowToast }) {
                     <td>{row.sku ? `${row.sku}${row.slot ? ` · s${row.slot}` : ''}` : '—'}</td>
                     <td>{row.operation || '—'}</td>
                     <td className="cost-model-cell">{row.model || '—'}</td>
+                    <td>{row.cost_source === 'openrouter' ? 'API' : 'Est.'}</td>
                     <td>{formatUsd(row.cost_usd)}</td>
                     <td>{formatZar(row.cost_zar)}</td>
                     <td>{row.status === 'error' ? row.error || 'error' : 'ok'}</td>

@@ -4,12 +4,12 @@ import { readSlotUrl, stageDormantSlotPreview } from './_stage-dormant.js';
 import {
   acquireImageGenLock,
   acquireTransformSemaphore,
-  estimateImageGenCost,
   extractImageGenMeta,
   fetchUsdToZarRate,
   getStockClient,
   logImageGenCost,
   releaseImageGenLock,
+  resolveImageGenCost,
 } from './_image-gen-cost.js';
 
 const LIVE_SELECT = `
@@ -85,6 +85,7 @@ export default async function handler(req, res) {
     let model;
     let tokensIn;
     let tokensOut;
+    let costUsdFromApi = null;
 
     try {
       const result = await fixImageFromUrl(sourceUrl, {
@@ -101,8 +102,9 @@ export default async function handler(req, res) {
       model = result.model;
       tokensIn = result.tokensIn;
       tokensOut = result.tokensOut;
+      costUsdFromApi = result.costUsd;
     } catch (genErr) {
-      const costUsd = estimateImageGenCost({ model: DEFAULT_IMAGE_MODEL, isImageOutput: true });
+      const { costUsd, costSource } = resolveImageGenCost({ model: DEFAULT_IMAGE_MODEL, isImageOutput: true });
       const usdToZar = await fetchUsdToZarRate();
       await logImageGenCost(sb, {
         sku: cleanSku,
@@ -113,6 +115,7 @@ export default async function handler(req, res) {
         tokensIn: 0,
         tokensOut: 0,
         costUsd,
+        costSource,
         costZar: costUsd * usdToZar,
         usdToZar,
         processingMs: Date.now() - t0,
@@ -124,7 +127,13 @@ export default async function handler(req, res) {
       throw genErr;
     }
 
-    const costUsd = estimateImageGenCost({ model, tokensIn, tokensOut, isImageOutput: true });
+    const { costUsd, costSource } = resolveImageGenCost({
+      model,
+      tokensIn,
+      tokensOut,
+      costUsd: costUsdFromApi,
+      isImageOutput: true,
+    });
     const costMeta = await logImageGenCost(sb, {
       sku: cleanSku,
       slot,
@@ -134,6 +143,7 @@ export default async function handler(req, res) {
       tokensIn,
       tokensOut,
       costUsd,
+      costSource,
       processingMs: Date.now() - t0,
       operator,
       batchId,

@@ -1,5 +1,12 @@
 import { requireAdminKey } from './_admin-auth.js';
-import { fixImageFromBase64 } from './_image-pipeline.js';
+import { fixImageFromBase64, DEFAULT_IMAGE_MODEL } from './_image-pipeline.js';
+import {
+  extractImageGenMeta,
+  fetchUsdToZarRate,
+  getStockClient,
+  logImageGenCost,
+  resolveImageGenCost,
+} from './_image-gen-cost.js';
 
 export const config = { api: { bodyParser: { sizeLimit: '15mb' } } };
 
@@ -18,12 +25,40 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Please upload a JPG, PNG, or WEBP image.' });
   }
 
+  const { operator, batchId } = extractImageGenMeta(req);
+  const sku = String(filename || '').replace(/\.[^.]+$/, '').trim() || null;
+  const t0 = Date.now();
+
   try {
-    const t0 = Date.now();
     const result = await fixImageFromBase64(base64, contentType, filename, {
       userInstructions: prompt,
       imageStyle: imageStyle || 'standard',
     });
+
+    const { costUsd, costSource } = resolveImageGenCost({
+      model: result.model,
+      tokensIn: result.tokensIn,
+      tokensOut: result.tokensOut,
+      costUsd: result.costUsd,
+      isImageOutput: true,
+    });
+    const usdToZar = await fetchUsdToZarRate();
+    const costMeta = await logImageGenCost(getStockClient(), {
+      sku,
+      operation: 'transform',
+      imageStyle: result.imageStyle,
+      model: result.model,
+      tokensIn: result.tokensIn,
+      tokensOut: result.tokensOut,
+      costUsd,
+      costSource,
+      usdToZar,
+      processingMs: Date.now() - t0,
+      operator,
+      batchId,
+      status: 'ok',
+    });
+
     return res.status(200).json({
       url: result.url,
       base64: result.base64,
@@ -31,9 +66,29 @@ export default async function handler(req, res) {
       tokensIn: result.tokensIn,
       tokensOut: result.tokensOut,
       imageStyle: result.imageStyle,
+      costUsd: costMeta.costUsd,
+      costZar: costMeta.costZar,
       processingMs: Date.now() - t0,
     });
   } catch (error) {
+    const { costUsd, costSource } = resolveImageGenCost({ model: DEFAULT_IMAGE_MODEL, isImageOutput: true });
+    const usdToZar = await fetchUsdToZarRate();
+    await logImageGenCost(getStockClient(), {
+      sku,
+      operation: 'transform',
+      imageStyle: imageStyle || 'standard',
+      model: null,
+      tokensIn: 0,
+      tokensOut: 0,
+      costUsd,
+      costSource,
+      usdToZar,
+      processingMs: Date.now() - t0,
+      operator,
+      batchId,
+      status: 'error',
+      error: error.message,
+    });
     console.error('transform-product-image:', error?.message || error);
     return res.status(500).json({ error: error.message || 'Gemini image generation failed' });
   }

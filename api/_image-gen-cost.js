@@ -19,10 +19,10 @@ const SEMAPHORE_FILE = 'image-gen/semaphore.json';
 const MAX_LOGS = 500;
 const MAX_CONCURRENT_TRANSFORMS = 3;
 
-/** Approximate OpenRouter pricing — image models often bill per call + tokens. */
+/** Approximate OpenRouter pricing — fallback when usage.cost is missing from API. */
 const MODEL_PRICING = {
-  'google/gemini-3-pro-image-preview': { inPerM: 0.10, outPerM: 0.40, imagePerCall: 0.06 },
-  'google/gemini-2.5-flash-image': { inPerM: 0.075, outPerM: 0.30, imagePerCall: 0.025 },
+  'google/gemini-3-pro-image-preview': { inPerM: 0.10, outPerM: 0.40, imagePerCall: 0.55 },
+  'google/gemini-2.5-flash-image': { inPerM: 0.075, outPerM: 0.30, imagePerCall: 0.04 },
   'google/gemini-2.5-flash': { inPerM: 0.075, outPerM: 0.30, imagePerCall: 0 },
   'google/gemini-flash-1.5': { inPerM: 0.075, outPerM: 0.30, imagePerCall: 0 },
 };
@@ -99,6 +99,7 @@ function normalizeLog(row) {
     tokens_out: Number(row.tokens_out ?? row.tokensOut ?? 0),
     cost_usd: Number(row.cost_usd ?? row.costUsd ?? 0),
     cost_zar: Number(row.cost_zar ?? row.costZar ?? 0),
+    cost_source: row.cost_source || row.costSource || 'estimated',
     processing_ms: row.processing_ms ?? row.processingMs ?? null,
     operator: row.operator || null,
     batch_id: row.batch_id || row.batchId || null,
@@ -126,10 +127,27 @@ export async function fetchUsdToZarRate() {
 
 export function estimateImageGenCost({ model = '', tokensIn = 0, tokensOut = 0, isImageOutput = false } = {}) {
   const key = String(model || '').trim();
-  const pricing = MODEL_PRICING[key] || { inPerM: 0.10, outPerM: 0.40, imagePerCall: isImageOutput ? 0.04 : 0 };
+  const pricing = MODEL_PRICING[key] || { inPerM: 0.10, outPerM: 0.40, imagePerCall: isImageOutput ? 0.45 : 0 };
   const tokenCost = ((tokensIn / 1e6) * pricing.inPerM) + ((tokensOut / 1e6) * pricing.outPerM);
   const imageCost = isImageOutput ? (pricing.imagePerCall || 0) : 0;
   return parseFloat((tokenCost + imageCost).toFixed(6));
+}
+
+/** Prefer OpenRouter-reported cost; fall back to local estimate. */
+export function resolveImageGenCost({
+  model = '',
+  tokensIn = 0,
+  tokensOut = 0,
+  costUsd = null,
+  isImageOutput = false,
+} = {}) {
+  if (costUsd != null && Number.isFinite(Number(costUsd))) {
+    return { costUsd: Number(costUsd), costSource: 'openrouter' };
+  }
+  return {
+    costUsd: estimateImageGenCost({ model, tokensIn, tokensOut, isImageOutput }),
+    costSource: 'estimated',
+  };
 }
 
 export function extractImageGenMeta(req) {
@@ -363,6 +381,7 @@ export function summarizeCosts(logs = []) {
   const byDay = new Map();
   const byOperator = new Map();
   const byOperation = new Map();
+  const byCostSource = new Map();
 
   for (const row of logs.map(normalizeLog)) {
     const usd = Number(row.cost_usd) || 0;
@@ -394,6 +413,13 @@ export function summarizeCosts(logs = []) {
     k.zar += zar;
     k.count += 1;
     byOperation.set(kind, k);
+
+    const src = row.cost_source || 'estimated';
+    const s = byCostSource.get(src) || { usd: 0, zar: 0, count: 0 };
+    s.usd += usd;
+    s.zar += zar;
+    s.count += 1;
+    byCostSource.set(src, s);
   }
 
   return {
@@ -401,5 +427,6 @@ export function summarizeCosts(logs = []) {
     byDay: [...byDay.entries()].sort((a, b) => b[0].localeCompare(a[0])).map(([day, v]) => ({ day, ...v })),
     byOperator: [...byOperator.entries()].sort((a, b) => b[1].usd - a[1].usd).map(([operator, v]) => ({ operator, ...v })),
     byOperation: [...byOperation.entries()].sort((a, b) => b[1].usd - a[1].usd).map(([operation, v]) => ({ operation, ...v })),
+    byCostSource: [...byCostSource.entries()].sort((a, b) => b[1].usd - a[1].usd).map(([costSource, v]) => ({ costSource, ...v })),
   };
 }

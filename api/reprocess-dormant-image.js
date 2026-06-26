@@ -1,6 +1,12 @@
 import { requireAdminKey } from './_admin-auth.js';
 import { createClient } from '@supabase/supabase-js';
-import { fixImageFromUrl, IMAGE_STYLES } from './_image-pipeline.js';
+import { fixImageFromUrl, IMAGE_STYLES, DEFAULT_IMAGE_MODEL } from './_image-pipeline.js';
+import {
+  extractImageGenMeta,
+  fetchUsdToZarRate,
+  logImageGenCost,
+  resolveImageGenCost,
+} from './_image-gen-cost.js';
 
 const SLOT_FIELDS = {
   1: 'image_url_one',
@@ -29,7 +35,9 @@ export default async function handler(req, res) {
   if (!cleanSku) return res.status(400).json({ error: 'sku is required' });
 
   const style = Object.values(IMAGE_STYLES).includes(imageStyle) ? imageStyle : IMAGE_STYLES.standard;
+  const { operator, batchId } = extractImageGenMeta(req);
   const sb = getClient();
+  const t0 = Date.now();
 
   const { data: row, error: lookupError } = await sb
     .from('archived_products')
@@ -45,16 +53,42 @@ export default async function handler(req, res) {
   if (!sourceUrl) return res.status(400).json({ error: `No image in slot ${slot} for "${cleanSku}"` });
 
   try {
-    const { url: imageUrl, model, tokensIn, tokensOut } = await fixImageFromUrl(sourceUrl, {
+    const result = await fixImageFromUrl(sourceUrl, {
       sku: cleanSku,
       imageStyle: style,
       userInstructions: userPrompt,
       productTitle: row.title,
+      targetSlot: slot,
+    });
+
+    const { costUsd, costSource } = resolveImageGenCost({
+      model: result.model,
+      tokensIn: result.tokensIn,
+      tokensOut: result.tokensOut,
+      costUsd: result.costUsd,
+      isImageOutput: true,
+    });
+    const usdToZar = await fetchUsdToZarRate();
+    const costMeta = await logImageGenCost(sb, {
+      sku: cleanSku,
+      slot,
+      operation: 'transform',
+      imageStyle: style,
+      model: result.model,
+      tokensIn: result.tokensIn,
+      tokensOut: result.tokensOut,
+      costUsd,
+      costSource,
+      usdToZar,
+      processingMs: Date.now() - t0,
+      operator,
+      batchId,
+      status: 'ok',
     });
 
     const { error: updateErr } = await sb
       .from('archived_products')
-      .update({ [field]: imageUrl, updated_at: new Date().toISOString() })
+      .update({ [field]: result.url, updated_at: new Date().toISOString() })
       .eq('sku', cleanSku)
       .eq('archived_by', 'new-products');
     if (updateErr) throw new Error(updateErr.message);
@@ -63,14 +97,36 @@ export default async function handler(req, res) {
       ok: true,
       sku: cleanSku,
       slot,
-      imageUrl,
+      imageUrl: result.url,
       sourceUrl,
       imageStyle: style,
-      model,
-      tokensIn,
-      tokensOut,
+      model: result.model,
+      tokensIn: result.tokensIn,
+      tokensOut: result.tokensOut,
+      costUsd: costMeta.costUsd,
+      costZar: costMeta.costZar,
+      processingMs: Date.now() - t0,
     });
   } catch (err) {
+    const { costUsd, costSource } = resolveImageGenCost({ model: DEFAULT_IMAGE_MODEL, isImageOutput: true });
+    const usdToZar = await fetchUsdToZarRate();
+    await logImageGenCost(sb, {
+      sku: cleanSku,
+      slot,
+      operation: 'transform',
+      imageStyle: style,
+      model: null,
+      tokensIn: 0,
+      tokensOut: 0,
+      costUsd,
+      costSource,
+      usdToZar,
+      processingMs: Date.now() - t0,
+      operator,
+      batchId,
+      status: 'error',
+      error: err.message,
+    });
     console.error('reprocess-dormant-image:', err?.message || err);
     return res.status(500).json({ error: err.message || 'Image generation failed' });
   }

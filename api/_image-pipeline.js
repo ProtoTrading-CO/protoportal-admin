@@ -276,6 +276,7 @@ export async function transformWithOpenRouter(base64, contentType, {
     body: JSON.stringify({
       model,
       modalities: ['image', 'text'],
+      usage: { include: true },
       messages: [{
         role: 'user',
         content,
@@ -296,11 +297,15 @@ export async function transformWithOpenRouter(base64, contentType, {
 
   const generated = extractGeneratedImage(payload);
   const usage = payload.usage || {};
+  const costUsd = usage.cost != null && Number.isFinite(Number(usage.cost))
+    ? Number(usage.cost)
+    : null;
   return {
     ...generated,
     model,
     tokensIn: usage.prompt_tokens || 0,
     tokensOut: usage.completion_tokens || 0,
+    costUsd,
   };
 }
 
@@ -374,6 +379,7 @@ export async function fixImageFromUrl(imageUrl, {
     model: transformed.model,
     tokensIn: transformed.tokensIn,
     tokensOut: transformed.tokensOut,
+    costUsd: transformed.costUsd,
     imageStyle: style,
   };
 }
@@ -402,6 +408,7 @@ export async function fixImageFromBase64(base64, contentType, filename = 'produc
     model: transformed.model,
     tokensIn: transformed.tokensIn,
     tokensOut: transformed.tokensOut,
+    costUsd: transformed.costUsd,
     imageStyle: style,
   };
 }
