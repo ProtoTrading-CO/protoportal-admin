@@ -83,7 +83,35 @@ function colIndex(headers, patterns) {
   return -1;
 }
 
+/** Product Manager export: Row Type (CATEGORY|PRODUCT) + Category Path + SKU */
+function parseRowTypeExport(sheetName, raw) {
+  const mappings = [];
+  const errors = [];
+  const headers = (raw[0] || []).map((h) => norm(h));
+  const rowTypeCol = colIndex(headers, [/^row type$/i]);
+  const pathCol = colIndex(headers, [/^category path$/i, /^target path$/i, /^full path$/i]);
+  const skuCol = colIndex(headers, [/^sku$/i, /^website sku$/i]);
+  if (rowTypeCol < 0 || pathCol < 0 || skuCol < 0) return null;
+
+  for (let r = 1; r < raw.length; r++) {
+    const row = raw[r];
+    if (!row?.some((c) => norm(c))) continue;
+    if (norm(row[rowTypeCol]).toUpperCase() !== 'PRODUCT') continue;
+
+    const sku = norm(row[skuCol]);
+    const targetPath = norm(row[pathCol]);
+    if (!sku || sku.includes('[OBJECT') || !targetPath) continue;
+
+    mappings.push({ sku, targetPath, source: `${sheetName}:row${r + 1}` });
+  }
+
+  return { mappings, errors, rowCount: mappings.length };
+}
+
 function extractMappingsFromSheet(sheetName, raw) {
+  const rowTypeParsed = parseRowTypeExport(sheetName, raw);
+  if (rowTypeParsed?.rowCount) return rowTypeParsed;
+
   const mappings = [];
   const errors = [];
 
