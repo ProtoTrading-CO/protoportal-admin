@@ -3,7 +3,7 @@
  * Falls back silently when tables are missing or PostgREST schema cache is stale.
  */
 
-import { MAX_CONCURRENT_TRANSFORMS } from './_image-gen-cost.js';
+import { MAX_CONCURRENT_TRANSFORMS } from './_image-gen-constants.js';
 
 const DEFAULT_LOCK_TTL_SEC = 180;
 const DEFAULT_SEM_TTL_SEC = 300;
