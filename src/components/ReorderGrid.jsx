@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Grip, Loader2, Pencil, Trash2 } from 'lucide-react';
+import { LEGACY_NAV_ALIASES } from '../lib/taxonomy';
 import { subcategoryOptionsFromTree } from '../lib/taxonomyAdmin';
 
 function deepestGroupKey(product, mainCategoryId, selectedPath = []) {
