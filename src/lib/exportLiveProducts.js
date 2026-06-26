@@ -1,109 +1,104 @@
-import { fetchAdminProductsPage } from './products';
+import { resolvePathLabels } from '../components/CategorySidebar';
 
-function collectImageUrls(p) {
-  const seen = new Set();
-  const urls = [];
-  const add = (url) => {
-    const u = String(url || '').trim();
-    if (!u || seen.has(u)) return;
-    seen.add(u);
-    urls.push(u);
-  };
-  add(p.image);
-  (p.images || []).forEach(add);
-  add(p.secondaryImage);
-  add(p.imageThree);
-  add(p.imageFour);
-  return urls;
-}
+const STATUS_LABELS = {
+  live: 'Live',
+  archived: 'Archived',
+  approval: 'Approval',
+  recycle: 'Recycle bin',
+};
 
-function toSheetRow(p, subLabel = '') {
-  const images = collectImageUrls(p);
+function productToCatalogRow(p, tree) {
+  const pathIds = Array.isArray(p.categoryPath) ? p.categoryPath : [];
+  const pathLabels = resolvePathLabels(tree, pathIds);
+  const fallbackLabels = [p.categoryLabel, ...(p.subcategoryLabels || [])].filter(Boolean);
+
+  const labels = pathLabels.length ? pathLabels : fallbackLabels;
+  const fullPath = labels.join(' > ');
+
   return {
+    'Website SKU': p.sku || p.websiteSku || '',
     Barcode: p.barcode || p.code || '',
-    SKU: p.websiteSku || p.sku || '',
-    Name: p.name || p.title || '',
-    Subcategory: subLabel,
-    Price: p.price ?? '',
-    'Image URLs': images.join(', '),
+    'Product name': p.name || p.title || '',
+    'Main category': labels[0] || '',
+    'Subcategory 1': labels[1] || '',
+    'Subcategory 2': labels[2] || '',
+    'Subcategory 3': labels[3] || '',
+    'Subcategory 4': labels[4] || '',
+    'Category path': fullPath,
+    'Category path IDs': pathIds.join(' / '),
+    'Price (ex VAT)': p.price ?? '',
+    'Stock (units)': p.stockQty ?? '',
+    'Units of issue': p.unitsOfIssue || '',
+    Description: p.description || p.originalDescription || '',
   };
 }
 
-function subcategoryLabel(p, cat) {
-  const subId = p.categoryPath?.[1];
-  if (!subId) return '';
-  const sub = (cat?.children || []).find((s) => s.id === subId);
-  return sub?.label || subId;
-}
-
-function uniqueSheetName(label, used) {
-  const base = String(label || 'Sheet').slice(0, 31);
-  if (!used.has(base)) {
-    used.add(base);
-    return base;
-  }
-  for (let i = 2; i < 100; i += 1) {
-    const suffix = ` (${i})`;
-    const name = `${String(label || 'Sheet').slice(0, 31 - suffix.length)}${suffix}`;
-    if (!used.has(name)) {
-      used.add(name);
-      return name;
-    }
-  }
-  const fallback = `Sheet ${used.size + 1}`.slice(0, 31);
-  used.add(fallback);
-  return fallback;
-}
-
-function sortRows(rows) {
+function sortCatalogRows(rows) {
   return [...rows].sort((a, b) => {
-    const s = (a.Subcategory || '').localeCompare(b.Subcategory || '');
-    if (s) return s;
-    return (a.Name || '').localeCompare(b.Name || '');
+    const c = (a['Category path'] || '').localeCompare(b['Category path'] || '');
+    if (c) return c;
+    return (a['Product name'] || '').localeCompare(b['Product name'] || '');
   });
 }
 
-/** Export live products — one sheet per main category, lean columns + image URLs. */
-export async function exportLiveProductsXlsx(taxonomyTree = []) {
+async function fetchAllCatalogProducts(status) {
+  const pageSize = 200;
+  const rows = [];
+  let page = 1;
+
+  while (true) {
+    const qs = new URLSearchParams({
+      status,
+      page: String(page),
+      pageSize: String(pageSize),
+      sort: 'title',
+    });
+    const res = await fetch(`/api/catalog?${qs}`, { credentials: 'same-origin' });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error || 'Failed to load products');
+    rows.push(...(json.rows || []));
+    if (!json.hasMore) break;
+    page += 1;
+  }
+
+  return rows;
+}
+
+/** Export catalogue rows with full category + subcategory columns (Product Manager). */
+export async function exportProductsCatalogXlsx({ status = 'live', taxonomyTree = [] } = {}) {
   const XLSX = await import('xlsx');
-  const { rows: all } = await fetchAdminProductsPage({
-    page: 1,
-    pageSize: 999999,
-    searchQuery: '',
-    categoryFilter: 'all',
-  });
+  const tree = Array.isArray(taxonomyTree) ? taxonomyTree : [];
+  const products = await fetchAllCatalogProducts(status);
+  const sheetRows = sortCatalogRows(products.map((p) => productToCatalogRow(p, tree)));
 
-  const categories = Array.isArray(taxonomyTree) ? taxonomyTree : [];
-  const catById = new Map(categories.map((c) => [c.id, c]));
   const wb = XLSX.utils.book_new();
-  const usedSheetNames = new Set();
-
-  categories.forEach((cat) => {
-    const catProducts = all.filter((p) => p.category === cat.id || p.categoryPath?.[0] === cat.id);
-    if (!catProducts.length) return;
-
-    const rows = sortRows(
-      catProducts.map((p) => toSheetRow(p, subcategoryLabel(p, cat))),
-    );
-    const ws = XLSX.utils.json_to_sheet(rows);
-    XLSX.utils.book_append_sheet(wb, ws, uniqueSheetName(cat.label || cat.id, usedSheetNames));
-  });
-
-  const uncategorised = all.filter((p) => {
-    const catId = p.category || p.categoryPath?.[0];
-    return !catId || !categories.some((c) => c.id === catId);
-  });
-  if (uncategorised.length) {
-    const rows = sortRows(uncategorised.map((p) => toSheetRow(p)));
-    const ws = XLSX.utils.json_to_sheet(rows);
-    XLSX.utils.book_append_sheet(wb, ws, uniqueSheetName('Uncategorised', usedSheetNames));
-  }
-
-  if (!wb.SheetNames.length) {
-    const ws = XLSX.utils.json_to_sheet(sortRows(all.map((p) => toSheetRow(p))));
-    XLSX.utils.book_append_sheet(wb, ws, 'Live products');
-  }
+  const mainSheet = STATUS_LABELS[status] || 'Products';
+  const ws = XLSX.utils.json_to_sheet(sheetRows);
+  ws['!cols'] = [
+    { wch: 16 },
+    { wch: 14 },
+    { wch: 42 },
+    { wch: 22 },
+    { wch: 22 },
+    { wch: 22 },
+    { wch: 22 },
+    { wch: 22 },
+    { wch: 52 },
+    { wch: 36 },
+    { wch: 12 },
+    { wch: 10 },
+    { wch: 14 },
+    { wch: 48 },
+  ];
+  XLSX.utils.book_append_sheet(wb, ws, mainSheet.slice(0, 31));
 
   const stamp = new Date().toISOString().slice(0, 10);
-  XLSX.writeFile(wb, `proto-live-products-${stamp}.xlsx`);
+  const statusSlug = String(status).replace(/[^a-z0-9]+/gi, '-').toLowerCase();
+  XLSX.writeFile(wb, `proto-products-${statusSlug}-${stamp}.xlsx`);
+  return sheetRows.length;
+}
+
+/** @deprecated Use exportProductsCatalogXlsx — kept for callers expecting live-only export. */
+export async function exportLiveProductsXlsx(taxonomyTree = []) {
+  return exportProductsCatalogXlsx({ status: 'live', taxonomyTree });
 }

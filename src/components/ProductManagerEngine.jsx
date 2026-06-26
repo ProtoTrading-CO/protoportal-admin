@@ -30,7 +30,7 @@ import { queryClient } from '../lib/queryClient';
 import { queryKeys } from '../lib/queryKeys';
 import { getActiveImageBatch, subscribeImageBatch } from '../lib/imageBatchTracker';
 import { sortOrderCategoryKey, lookupSortOrder, applySkuOrder, sortOrderLookupKeys } from '../lib/taxonomy';
-import { exportLiveProductsXlsx } from '../lib/exportLiveProducts';
+import { exportProductsCatalogXlsx } from '../lib/exportLiveProducts';
 
 const STATUS_META = {
   live: { label: 'Live', icon: PackagePlus },
@@ -239,7 +239,7 @@ export default function ProductManagerEngine({
   const [sortOrderMeta, setSortOrderMeta] = useState({ updatedAt: null });
   const [reorderDirty, setReorderDirty] = useState(false);
   const [reorderSaving, setReorderSaving] = useState(false);
-  const [exportingLive, setExportingLive] = useState(false);
+  const [exportingXlsx, setExportingXlsx] = useState(false);
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
   const [categoryDrawerOpen, setCategoryDrawerOpen] = useState(false);
   const [categoryStackNav, setCategoryStackNav] = useState(null);
@@ -465,15 +465,15 @@ export default function ProductManagerEngine({
     { onSuccess: () => onRefreshStats?.() },
   );
 
-  const handleExportLive = async () => {
-    setExportingLive(true);
+  const handleExportCatalog = async () => {
+    setExportingXlsx(true);
     try {
-      await exportLiveProductsXlsx(taxonomyTree);
-      onShowToast?.('Live products exported to Excel', 'success');
+      const count = await exportProductsCatalogXlsx({ status, taxonomyTree });
+      onShowToast?.(`Exported ${count} product${count === 1 ? '' : 's'} with categories`, 'success');
     } catch (err) {
       onShowToast?.(err.message || 'Export failed', 'error');
     } finally {
-      setExportingLive(false);
+      setExportingXlsx(false);
     }
   };
 
@@ -514,15 +514,16 @@ export default function ProductManagerEngine({
           <p className="adm-section-note">In-stock products are live on the site. Use ✨ to add products to New Arrivals on the trade homepage.</p>
         </div>
         <div className="pm-engine-head-actions">
-          {status === 'live' && !reorderMode && (
+          {status !== 'approval' && !reorderMode && (
             <button
               type="button"
               className="adm-btn-ghost adm-btn--sm"
-              disabled={exportingLive}
-              onClick={() => void handleExportLive()}
+              disabled={exportingXlsx}
+              onClick={() => void handleExportCatalog()}
+              title="Download Excel with category and subcategory per product"
             >
-              {exportingLive ? <Loader2 size={14} className="spin" /> : <FileSpreadsheet size={14} />}
-              {exportingLive ? 'Exporting…' : 'Export Excel'}
+              {exportingXlsx ? <Loader2 size={14} className="spin" /> : <FileSpreadsheet size={14} />}
+              {exportingXlsx ? 'Exporting…' : 'Export Excel'}
             </button>
           )}
           {isFetching && !isLoading && <Loader2 size={16} className="spin" aria-label="Refreshing" />}
