@@ -42,10 +42,11 @@ export default async function handler(req, res) {
 
   try {
     if (action === 'listLive') {
-      const [rows, tree] = await Promise.all([
+      const [rawRows, tree] = await Promise.all([
         fetchAllRows(supabase, 'website_stock', { orderBy: 'title' }),
         loadTaxonomy().catch(() => []),
       ]);
+      const rows = await enrichRowsWithProductStockLocal(supabase, rawRows);
       return res.status(200).json({ rows, tree });
     }
 

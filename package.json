@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "resize-images": "node scripts/resize-product-images.mjs"
+    "resize-images": "node scripts/resize-product-images.mjs",
+    "export-category-trees": "node scripts/export-category-trees-pdf.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1073.0",
