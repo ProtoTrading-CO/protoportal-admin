@@ -18,7 +18,7 @@ Never merge admin back into the main repo. Never reference or restore the old em
 
 ## Auth
 
-**No login/authentication yet.** `Root.jsx` uses a temporary hardcoded admin customer. Do not assume Supabase auth, sessions, or role checks exist.
+**Supabase JWT login** with a 3-email allowlist (`src/lib/auth.js`, `api/_admin-auth.js`). `Root.jsx` gates the dashboard behind `AdminLoginPage`. Fulfillment uses scoped order tokens; crons use `CRON_SECRET`.
 
 ## Before any change
 

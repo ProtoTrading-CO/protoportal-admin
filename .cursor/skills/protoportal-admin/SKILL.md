@@ -16,7 +16,7 @@ The old embedded admin inside protoportal-main is **deprecated**. Never restore,
 
 ## Auth status
 
-**No real authentication yet.** `src/Root.jsx` passes a hardcoded `temporaryCustomer` with `role: 'admin'`. Logout reloads the page. Do not add auth assumptions without explicit user request.
+**Supabase email/password login** with allowlist (`src/lib/auth.js`). `Root.jsx` → `AdminGate` → `AdminLoginPage` or lazy `AdminPage`. Fulfillment at `/fulfillment` accepts order token links. API: `requireAdminKey`, `requireAdminOrOrderToken`, `requireCronOrAdminKey` in `api/_admin-auth.js`.
 
 ## Workflow before changes
 
@@ -40,7 +40,7 @@ npm run build
 ## Entry
 
 - `src/main.jsx` → `src/Root.jsx`
-- `Root.jsx`: `/fulfillment` → `FulfillmentPage`; else → `AdminPage` with temporary customer
+- `Root.jsx`: `/fulfillment` → `FulfillmentPage`; else → `AdminGate` (login or `AdminPage`)
 - "Portal" button links to protoportal-main.vercel.app
 
 ## Admin sections (`AdminPage.jsx`)
