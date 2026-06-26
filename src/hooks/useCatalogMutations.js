@@ -3,6 +3,8 @@ import { queryKeys } from '../lib/queryKeys';
 import {
   applyDormantLive,
   archiveProduct,
+  bulkArchiveProducts,
+  bulkUnarchiveProducts,
   deleteProduct,
   recycleProduct,
   restoreRecycledProduct,
@@ -84,9 +86,21 @@ export function useCatalogMutations() {
     onSettled: () => invalidateCatalogAndStats(queryClient, ['live', 'archived']),
   });
 
+  const bulkArchive = useMutation({
+    mutationFn: (skus) => bulkArchiveProducts(skus),
+    onSettled: () => invalidateCatalogAndStats(queryClient, ['live', 'archived']),
+  });
+
+  const bulkUnarchive = useMutation({
+    mutationFn: (skus) => bulkUnarchiveProducts(skus),
+    onSettled: () => invalidateCatalogAndStats(queryClient, ['live', 'archived']),
+  });
+
   return {
     archive,
     unarchive,
+    bulkArchive,
+    bulkUnarchive,
     setLive,
     softDelete,
     restoreRecycle,

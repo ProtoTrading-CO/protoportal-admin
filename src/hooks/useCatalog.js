@@ -31,6 +31,20 @@ async function fetchCatalog(params) {
   return json;
 }
 
+/** Fetch every row matching catalog filters (paged server reads). */
+export async function fetchAllCatalogRows(params) {
+  const pageSize = 200;
+  let page = 1;
+  const all = [];
+  while (true) {
+    const json = await fetchCatalog({ ...params, page, pageSize });
+    all.push(...(json.rows || []));
+    if (!json.hasMore) break;
+    page += 1;
+  }
+  return all;
+}
+
 export function useCatalogQuery(params, { enabled = true } = {}) {
   return useQuery({
     queryKey: queryKeys.catalog(params),
