@@ -1,12 +1,13 @@
 import { requireAdminKey } from './_admin-auth.js';
-import { createClient } from '@supabase/supabase-js';
 import { fixImageFromUrl, IMAGE_STYLES, DEFAULT_IMAGE_MODEL } from './_image-pipeline.js';
 import {
   extractImageGenMeta,
   fetchUsdToZarRate,
   logImageGenCost,
+  getStockClient,
   resolveImageGenCost,
 } from './_image-gen-cost.js';
+import { assertImageGenBudgetAllowsSpend } from './_image-gen-budget.js';
 
 const SLOT_FIELDS = {
   1: 'image_url_one',
@@ -14,14 +15,6 @@ const SLOT_FIELDS = {
   3: 'image_url_three',
   4: 'image_url_four',
 };
-
-function getClient() {
-  return createClient(
-    process.env.VITE_STOCK_SUPABASE_URL,
-    process.env.VITE_STOCK_SUPABASE_KEY,
-    { auth: { autoRefreshToken: false, persistSession: false } },
-  );
-}
 
 export default async function handler(req, res) {
   if (!(await requireAdminKey(req, res))) return;
@@ -36,8 +29,17 @@ export default async function handler(req, res) {
 
   const style = Object.values(IMAGE_STYLES).includes(imageStyle) ? imageStyle : IMAGE_STYLES.standard;
   const { operator, batchId } = extractImageGenMeta(req);
-  const sb = getClient();
+  const sb = getStockClient();
   const t0 = Date.now();
+
+  try {
+    await assertImageGenBudgetAllowsSpend(sb);
+  } catch (err) {
+    if (err.code === 'IMAGE_GEN_BUDGET_EXCEEDED') {
+      return res.status(402).json({ error: err.message, budget: err.budgetStatus });
+    }
+    throw err;
+  }
 
   const { data: row, error: lookupError } = await sb
     .from('archived_products')

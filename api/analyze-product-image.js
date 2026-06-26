@@ -1,10 +1,10 @@
 import { requireAdminKey } from './_admin-auth.js';
 import {
-  estimateImageGenCost,
   extractImageGenMeta,
   fetchUsdToZarRate,
   getStockClient,
   logImageGenCost,
+  resolveImageGenCost,
 } from './_image-gen-cost.js';
 // Gemini Flash vision analysis — metadata only, no storage.
 // Frontend calls upload-product-image separately for the actual image URL.
@@ -77,6 +77,7 @@ export default async function handler(req, res) {
     },
     body: JSON.stringify({
       model: MODEL,
+      usage: { include: true },
       messages: [{
         role: 'user',
         content: [
@@ -106,7 +107,13 @@ export default async function handler(req, res) {
   const usage = json.usage || {};
   const tokensIn = usage.prompt_tokens || IMAGE_TOKEN_ESTIMATE;
   const tokensOut = usage.completion_tokens || 80;
-  const costUsd = estimateImageGenCost({ model: MODEL, tokensIn, tokensOut });
+  const { costUsd, costSource } = resolveImageGenCost({
+    model: MODEL,
+    tokensIn,
+    tokensOut,
+    costUsd: usage.cost != null ? Number(usage.cost) : null,
+    isImageOutput: false,
+  });
   const usdToZar = await fetchUsdToZarRate();
   const costZar = parseFloat((costUsd * usdToZar).toFixed(4));
   const { operator, batchId } = extractImageGenMeta(req);
@@ -119,6 +126,7 @@ export default async function handler(req, res) {
     tokensIn,
     tokensOut,
     costUsd,
+    costSource,
     costZar,
     usdToZar,
     processingMs: Date.now() - t0,

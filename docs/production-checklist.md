@@ -19,7 +19,7 @@ See `scripts/env.example` for the full list. Required for production:
 - `CRON_SECRET` (Vercel cron auth)
 - `ORDER_NOTIFY_SECRET` (fulfillment order links)
 
-Optional: `ADMIN_DASH_KEY`, `IMAGE_GEN_CONCURRENCY`, R2 vars, OpenRouter model overrides.
+Optional: `ADMIN_DASH_KEY`, `IMAGE_GEN_CONCURRENCY`, R2 vars, OpenRouter model overrides. Image gen budgets are configured in Admin → Cost Tracking (no extra env vars).
 
 ## Auth
 
@@ -34,6 +34,7 @@ Optional: `ADMIN_DASH_KEY`, `IMAGE_GEN_CONCURRENCY`, R2 vars, OpenRouter model o
 | `/api/run-scheduled-broadcasts` | hourly | WhatsApp broadcasts |
 | `/api/brevo-sync` | every 15 min | CRM contact cache |
 | `/api/purge-expired-staging` | 03:00 daily | Staged image cleanup |
+| `/api/image-gen-budget-check` | 08:00 daily | Budget alert emails (deduped) |
 
 All use `requireCronOrAdminKey` — failures return JSON `{ error }` without crashing the platform.
 
@@ -42,6 +43,7 @@ All use `requireCronOrAdminKey` — failures return JSON `{ error }` without cra
 Run on **stock Supabase** (`yiqsvwajozafvalwcero`):
 
 - `migrations/032_disable_auto_oos.sql` — disable auto-OOS archive
+- `migrations/033_image_gen_cost_source.sql` — cost_source column on image_gen_cost_logs
 - Then: `node scripts/restore-auto-oos-to-live.mjs` — bulk restore legacy `auto-oos` rows
 
 ## PII

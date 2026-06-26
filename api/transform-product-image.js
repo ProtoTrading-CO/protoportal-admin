@@ -7,6 +7,7 @@ import {
   logImageGenCost,
   resolveImageGenCost,
 } from './_image-gen-cost.js';
+import { assertImageGenBudgetAllowsSpend } from './_image-gen-budget.js';
 
 export const config = { api: { bodyParser: { sizeLimit: '15mb' } } };
 
@@ -28,6 +29,16 @@ export default async function handler(req, res) {
   const { operator, batchId } = extractImageGenMeta(req);
   const sku = String(filename || '').replace(/\.[^.]+$/, '').trim() || null;
   const t0 = Date.now();
+  const sb = getStockClient();
+
+  try {
+    await assertImageGenBudgetAllowsSpend(sb);
+  } catch (err) {
+    if (err.code === 'IMAGE_GEN_BUDGET_EXCEEDED') {
+      return res.status(402).json({ error: err.message, budget: err.budgetStatus });
+    }
+    throw err;
+  }
 
   try {
     const result = await fixImageFromBase64(base64, contentType, filename, {
@@ -43,7 +54,7 @@ export default async function handler(req, res) {
       isImageOutput: true,
     });
     const usdToZar = await fetchUsdToZarRate();
-    const costMeta = await logImageGenCost(getStockClient(), {
+    const costMeta = await logImageGenCost(sb, {
       sku,
       operation: 'transform',
       imageStyle: result.imageStyle,
@@ -73,7 +84,7 @@ export default async function handler(req, res) {
   } catch (error) {
     const { costUsd, costSource } = resolveImageGenCost({ model: DEFAULT_IMAGE_MODEL, isImageOutput: true });
     const usdToZar = await fetchUsdToZarRate();
-    await logImageGenCost(getStockClient(), {
+    await logImageGenCost(sb, {
       sku,
       operation: 'transform',
       imageStyle: imageStyle || 'standard',

@@ -5,7 +5,9 @@ import {
   registerImageGenBatch,
   summarizeCosts,
   updateImageGenBatch,
+  getStockClient,
 } from './_image-gen-cost.js';
+import { getImageGenBudgetStatus, saveImageGenBudgetConfig } from './_image-gen-budget.js';
 
 export default async function handler(req, res) {
   if (!(await requireAdminKey(req, res))) return;
@@ -15,17 +17,20 @@ export default async function handler(req, res) {
     try {
       const days = Math.min(90, Math.max(1, Number(req.query?.days) || 30));
       const limit = Math.min(500, Math.max(50, Number(req.query?.limit) || 200));
-      const [logs, active] = await Promise.all([
-        listImageGenCosts(null, { days, limit }),
-        listActiveImageGenState(null),
+      const sb = getStockClient();
+      const [logs, active, budget] = await Promise.all([
+        listImageGenCosts(sb, { days, limit }),
+        listActiveImageGenState(sb),
+        getImageGenBudgetStatus(sb),
       ]);
       return res.status(200).json({
         logs,
         summary: summarizeCosts(logs),
         active,
+        budget,
         usdToZar: logs[0]?.cost_zar && logs[0]?.cost_usd
           ? Number(logs[0].cost_zar) / Number(logs[0].cost_usd)
-          : null,
+          : budget?.spend?.usdToZar ?? null,
       });
     } catch (err) {
       const msg = err?.message || 'Failed to load image gen costs';
@@ -35,6 +40,7 @@ export default async function handler(req, res) {
           logs: [],
           summary: summarizeCosts([]),
           active: { locks: [], batches: [] },
+          budget: null,
         });
       }
       return res.status(500).json({ error: msg });
@@ -44,23 +50,37 @@ export default async function handler(req, res) {
   if (req.method === 'POST') {
     const { action } = req.body || {};
     const operator = String(req.body?.operator || req.headers['x-image-gen-operator'] || 'Unknown').slice(0, 64);
+    const sb = getStockClient();
 
     if (action === 'registerBatch') {
       const { batchId, total, style, productCount } = req.body || {};
       if (!batchId) return res.status(400).json({ error: 'batchId is required' });
-      await registerImageGenBatch(null, { batchId, operator, total, style, productCount });
+      await registerImageGenBatch(sb, { batchId, operator, total, style, productCount });
       return res.status(200).json({ ok: true });
     }
 
     if (action === 'updateBatch') {
       const { batchId, done, failed, status } = req.body || {};
       if (!batchId) return res.status(400).json({ error: 'batchId is required' });
-      await updateImageGenBatch(null, batchId, {
+      await updateImageGenBatch(sb, batchId, {
         ...(done != null ? { done: Number(done) } : {}),
         ...(failed != null ? { failed: Number(failed) } : {}),
         ...(status ? { status } : {}),
       });
       return res.status(200).json({ ok: true });
+    }
+
+    if (action === 'saveBudget') {
+      const { dailyUsd, monthlyUsd, alertEmail, blockAtLimit, alertsEnabled } = req.body || {};
+      const config = await saveImageGenBudgetConfig({
+        ...(dailyUsd != null ? { dailyUsd } : {}),
+        ...(monthlyUsd != null ? { monthlyUsd } : {}),
+        ...(alertEmail != null ? { alertEmail } : {}),
+        ...(blockAtLimit != null ? { blockAtLimit: Boolean(blockAtLimit) } : {}),
+        ...(alertsEnabled != null ? { alertsEnabled: Boolean(alertsEnabled) } : {}),
+      });
+      const budget = await getImageGenBudgetStatus(sb);
+      return res.status(200).json({ ok: true, config, budget });
     }
 
     return res.status(400).json({ error: `Unknown action: ${action}` });

@@ -24,6 +24,7 @@ import { compressImage, applyDormantLive } from '../lib/products';
 import { mapWithConcurrency } from '../lib/concurrency';
 import {
   countRecipeJobs,
+  estimateBatchCostUsd,
   expandProductSlots,
   recipeSummary,
   runReprocessBatch,
@@ -162,9 +163,24 @@ export default function ApolloImageWizard({
 
   const activeSlots = useMemo(() => enabledSlots(slotPlans), [slotPlans]);
   const totalJobs = countRecipeJobs(selectedIds.size, slotPlans);
+  const batchCostEstimate = useMemo(
+    () => estimateBatchCostUsd(selectedIds.size, slotPlans),
+    [selectedIds.size, slotPlans],
+  );
+  const [budgetStatus, setBudgetStatus] = useState(null);
   const summaryLines = useMemo(() => recipeSummary(slotPlans), [slotPlans]);
 
   const selectedIdsKey = [...selectedIds].sort().join(',');
+
+  useEffect(() => {
+    if (step !== 1) return undefined;
+    let cancelled = false;
+    void fetch('/api/image-gen-costs?days=1&limit=5')
+      .then((r) => r.json())
+      .then((json) => { if (!cancelled) setBudgetStatus(json.budget || null); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [step]);
 
   useEffect(() => {
     setSameCodeSelected(new Set((sameCodeProducts || []).map((p) => p.sku)));
@@ -1030,9 +1046,22 @@ export default function ApolloImageWizard({
               Build recipe <ArrowRight size={14} />
             </button>
           ) : (
-            <button type="button" className="adm-btn-red" disabled={!canNext() || busy} onClick={() => void startGen()}>
-              <Sparkles size={14} /> Generate {totalJobs} image{totalJobs === 1 ? '' : 's'}
-            </button>
+            <div className="apollo-wizard-generate-wrap">
+              {budgetStatus?.blocked && (
+                <p className="apollo-budget-blocked" role="alert">
+                  Image gen budget exceeded — raise limits in Cost Tracking or wait for the period to reset.
+                </p>
+              )}
+              {budgetStatus?.configured && !budgetStatus.blocked && batchCostEstimate.totalUsd > 0 && (
+                <p className="apollo-budget-estimate adm-muted">
+                  Est. batch cost ~${batchCostEstimate.totalUsd.toFixed(2)} USD
+                  {budgetStatus.daily?.limitUsd ? ` · today ${((budgetStatus.daily.spentUsd || 0) + batchCostEstimate.totalUsd).toFixed(2)} / ${budgetStatus.daily.limitUsd} daily` : ''}
+                </p>
+              )}
+              <button type="button" className="adm-btn-red" disabled={!canNext() || busy || budgetStatus?.blocked} onClick={() => void startGen()}>
+                <Sparkles size={14} /> Generate {totalJobs} image{totalJobs === 1 ? '' : 's'}
+              </button>
+            </div>
           )}
         </div>
       )}

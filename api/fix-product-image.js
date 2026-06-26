@@ -1,6 +1,14 @@
 import { requireAdminKey } from './_admin-auth.js';
 import { createClient } from '@supabase/supabase-js';
-import { fixImageFromUrl } from './_image-pipeline.js';
+import { fixImageFromUrl, DEFAULT_IMAGE_MODEL } from './_image-pipeline.js';
+import {
+  extractImageGenMeta,
+  fetchUsdToZarRate,
+  getStockClient,
+  logImageGenCost,
+  resolveImageGenCost,
+} from './_image-gen-cost.js';
+import { assertImageGenBudgetAllowsSpend } from './_image-gen-budget.js';
 
 function getStockAdminClient() {
   return createClient(
@@ -19,6 +27,17 @@ export default async function handler(req, res) {
   if (!sku) return res.status(400).json({ error: 'sku is required' });
 
   const supabase = getStockAdminClient();
+  const sb = getStockClient();
+
+  try {
+    await assertImageGenBudgetAllowsSpend(sb);
+  } catch (err) {
+    if (err.code === 'IMAGE_GEN_BUDGET_EXCEEDED') {
+      return res.status(402).json({ error: err.message, budget: err.budgetStatus });
+    }
+    throw err;
+  }
+
   const { data: row, error: lookupError } = await supabase
     .from('website_stock')
     .select('sku, title, image_url_one')
@@ -31,13 +50,39 @@ export default async function handler(req, res) {
   const imageUrl = String(row.image_url_one || '').split(',')[0].trim();
   if (!imageUrl) return res.status(400).json({ error: 'Product has no image to fix' });
 
+  const { operator, batchId } = extractImageGenMeta(req);
+  const t0 = Date.now();
+
   try {
-    const t0 = Date.now();
-    const { url: newUrl, model, tokensIn, tokensOut } = await fixImageFromUrl(imageUrl, { sku: row.sku });
+    const result = await fixImageFromUrl(imageUrl, { sku: row.sku });
+
+    const { costUsd, costSource } = resolveImageGenCost({
+      model: result.model,
+      tokensIn: result.tokensIn,
+      tokensOut: result.tokensOut,
+      costUsd: result.costUsd,
+      isImageOutput: true,
+    });
+    const usdToZar = await fetchUsdToZarRate();
+    const costMeta = await logImageGenCost(sb, {
+      sku: row.sku,
+      slot: 1,
+      operation: 'fix',
+      model: result.model,
+      tokensIn: result.tokensIn,
+      tokensOut: result.tokensOut,
+      costUsd,
+      costSource,
+      usdToZar,
+      processingMs: Date.now() - t0,
+      operator,
+      batchId,
+      status: 'ok',
+    });
 
     const { error: updateError } = await supabase
       .from('website_stock')
-      .update({ image_url_one: newUrl, updated_at: new Date().toISOString() })
+      .update({ image_url_one: result.url, updated_at: new Date().toISOString() })
       .eq('sku', row.sku);
     if (updateError) return res.status(400).json({ error: updateError.message });
 
@@ -45,13 +90,33 @@ export default async function handler(req, res) {
       ok: true,
       sku: row.sku,
       title: row.title,
-      imageUrl: newUrl,
-      model,
-      tokensIn,
-      tokensOut,
+      imageUrl: result.url,
+      model: result.model,
+      tokensIn: result.tokensIn,
+      tokensOut: result.tokensOut,
+      costUsd: costMeta.costUsd,
+      costZar: costMeta.costZar,
       processingMs: Date.now() - t0,
     });
   } catch (err) {
+    const { costUsd, costSource } = resolveImageGenCost({ model: DEFAULT_IMAGE_MODEL, isImageOutput: true });
+    const usdToZar = await fetchUsdToZarRate();
+    await logImageGenCost(sb, {
+      sku: row.sku,
+      slot: 1,
+      operation: 'fix',
+      model: null,
+      tokensIn: 0,
+      tokensOut: 0,
+      costUsd,
+      costSource,
+      usdToZar,
+      processingMs: Date.now() - t0,
+      operator,
+      batchId,
+      status: 'error',
+      error: err.message,
+    });
     console.error('fix-product-image:', err?.message || err);
     return res.status(500).json({ error: err.message || 'Image fix failed' });
   }

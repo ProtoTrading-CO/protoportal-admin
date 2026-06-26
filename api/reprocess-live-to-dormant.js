@@ -11,6 +11,7 @@ import {
   releaseImageGenLock,
   resolveImageGenCost,
 } from './_image-gen-cost.js';
+import { assertImageGenBudgetAllowsSpend } from './_image-gen-budget.js';
 
 const LIVE_SELECT = `
   id, sku, barcode, title, original_description,
@@ -56,6 +57,15 @@ export default async function handler(req, res) {
 
   const sb = getClient();
   let lockHeld = false;
+
+  try {
+    await assertImageGenBudgetAllowsSpend(sb);
+  } catch (err) {
+    if (err.code === 'IMAGE_GEN_BUDGET_EXCEEDED') {
+      return res.status(402).json({ error: err.message, budget: err.budgetStatus });
+    }
+    throw err;
+  }
 
   try {
     if (batchId) {
@@ -179,6 +189,9 @@ export default async function handler(req, res) {
     });
   } catch (err) {
     console.error('reprocess-live-to-dormant:', err?.message || err);
+    if (err.code === 'IMAGE_GEN_BUDGET_EXCEEDED') {
+      return res.status(402).json({ error: err.message, budget: err.budgetStatus });
+    }
     const status = /in use by/i.test(err.message) ? 409 : 500;
     return res.status(status).json({ error: err.message || 'Reprocess failed' });
   } finally {
