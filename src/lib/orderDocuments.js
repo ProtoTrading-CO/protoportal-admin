@@ -331,9 +331,15 @@ export async function generateOrderPdfBase64({
       doc.setTextColor(220, 38, 38);
       doc.text('OUT OF STOCK', COL.name.x, textY + nameLines.length * ROW_LINE + 2);
     } else if (item.swapped) {
+      doc.setFont('helvetica', 'bold');
       doc.setFontSize(7);
       doc.setTextColor(37, 99, 235);
       doc.text('SUBSTITUTED', COL.name.x, textY + nameLines.length * ROW_LINE + 2);
+    } else if (orderedQty !== confirmedQty) {
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(7);
+      doc.setTextColor(146, 64, 14);
+      doc.text('QTY CHANGED', COL.name.x, textY + nameLines.length * ROW_LINE + 2);
     }
 
     doc.setFont('helvetica', 'normal');

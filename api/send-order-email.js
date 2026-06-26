@@ -123,35 +123,36 @@ function buildEmailHtml({
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Order ${escapeHtml(orderNumber)} — Proto Trading</title>
 </head>
-<body style="margin:0;padding:0;background:#f8fafc;font-family:Arial,Helvetica,sans-serif">
-<div style="max-width:600px;margin:32px auto;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 2px 16px rgba(0,0,0,0.08)">
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:Arial,Helvetica,sans-serif">
+<div style="max-width:640px;margin:24px auto;background:#ffffff;border-radius:14px;overflow:hidden;box-shadow:0 4px 24px rgba(15,23,42,0.08)">
 
-  <div style="background:#ffffff;padding:0;border-bottom:4px solid #c40000">
-    <div style="padding:28px 32px 24px">
-      <div style="color:#c40000;font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;margin-bottom:6px">Proto Trading</div>
-      <h1 style="color:#111111;margin:0;font-size:24px;font-weight:800">Order Confirmation</h1>
-      <div style="color:#666666;font-size:13px;margin-top:8px">${escapeHtml(orderNumber)}${dateStr ? ` &nbsp;·&nbsp; ${dateStr}` : ''}</div>
+  <div style="background:#111111;padding:0">
+    <div style="height:4px;background:#c40000"></div>
+    <div style="padding:28px 32px 22px">
+      <div style="color:#c40000;font-size:11px;font-weight:800;letter-spacing:0.1em;text-transform:uppercase;margin-bottom:8px">Proto Trading</div>
+      <h1 style="color:#ffffff;margin:0;font-size:26px;font-weight:800;line-height:1.2">Order Confirmation</h1>
+      <div style="color:#cbd5e1;font-size:13px;margin-top:10px;font-weight:600">${escapeHtml(orderNumber)}${dateStr ? ` · ${dateStr}` : ''}</div>
     </div>
   </div>
 
   <div style="padding:28px 32px;background:#ffffff">
-    <p style="color:#111111;font-size:15px;margin:0 0 20px">Hi <strong>${escapeHtml(customerName, 'there')}</strong>,</p>
-    <p style="color:#333333;font-size:14px;margin:0 0 24px;line-height:1.6">
-      Thank you for your order. Your confirmed order summary is below, and we have attached your
-      <strong>order confirmation PDF</strong>${hasPresaleInvoice ? ' together with your <strong>presale invoice</strong>' : ''}.
-      ${items.some((i) => i.removed) ? '<br><span style="color:#dc2626;font-weight:700">Items marked OUT OF STOCK are not included in your confirmed order.</span>' : ''}
-      ${items.some((i) => !i.removed && i.originalQty != null && i.qty !== i.originalQty) ? '<br><span style="color:#92400e;font-weight:700">Items marked QTY CHANGED have been adjusted from your original order.</span>' : ''}
+    <p style="color:#0f172a;font-size:15px;margin:0 0 8px">Hi <strong>${escapeHtml(customerName, 'there')}</strong>,</p>
+    <p style="color:#334155;font-size:14px;margin:0 0 24px;line-height:1.65">
+      Thank you for your order. Your confirmed summary is below and your
+      <strong>order confirmation PDF</strong> is attached${hasPresaleInvoice ? ', together with your <strong>presale invoice</strong>' : ''}.
+      ${items.some((i) => i.removed) ? '<br><span style="display:inline-block;margin-top:10px;color:#dc2626;font-weight:700;font-size:13px">Items marked OUT OF STOCK are not included in your confirmed order.</span>' : ''}
+      ${items.some((i) => !i.removed && i.originalQty != null && i.qty !== i.originalQty) ? '<br><span style="display:inline-block;margin-top:8px;color:#92400e;font-weight:700;font-size:13px">Items marked QTY CHANGED have been adjusted from your original order.</span>' : ''}
     </p>
 
-    <table style="width:100%;border-collapse:collapse;font-family:Arial,sans-serif">
+    <table style="width:100%;border-collapse:collapse;font-family:Arial,sans-serif;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden">
       <thead>
-        <tr style="background:#ffffff;border-bottom:1px solid #eeeeee">
-          <th style="padding:10px 12px;text-align:left;font-size:11px;font-weight:700;color:#ffffff;text-transform:uppercase;letter-spacing:0.05em;width:60px;background:#111111">Img</th>
-          <th style="padding:10px 12px;text-align:left;font-size:11px;font-weight:700;color:#ffffff;text-transform:uppercase;letter-spacing:0.05em;background:#111111">Code</th>
-          <th style="padding:10px 12px;text-align:left;font-size:11px;font-weight:700;color:#ffffff;text-transform:uppercase;letter-spacing:0.05em;background:#111111">Product</th>
-          <th style="padding:10px 12px;text-align:center;font-size:11px;font-weight:700;color:#ffffff;text-transform:uppercase;letter-spacing:0.05em;background:#111111">Ordered</th>
-          <th style="padding:10px 12px;text-align:center;font-size:11px;font-weight:700;color:#ffffff;text-transform:uppercase;letter-spacing:0.05em;background:#c40000">Confirmed</th>
-          ${showPrices ? '<th style="padding:10px 12px;text-align:right;font-size:11px;font-weight:700;color:#ffffff;text-transform:uppercase;letter-spacing:0.05em;background:#111111">Total</th>' : ''}
+        <tr>
+          <th style="padding:11px 12px;text-align:left;font-size:10px;font-weight:800;color:#ffffff;text-transform:uppercase;letter-spacing:0.06em;width:60px;background:#111111;border-bottom:2px solid #c40000">Img</th>
+          <th style="padding:11px 12px;text-align:left;font-size:10px;font-weight:800;color:#ffffff;text-transform:uppercase;letter-spacing:0.06em;background:#111111;border-bottom:2px solid #c40000">Code</th>
+          <th style="padding:11px 12px;text-align:left;font-size:10px;font-weight:800;color:#ffffff;text-transform:uppercase;letter-spacing:0.06em;background:#111111;border-bottom:2px solid #c40000">Product</th>
+          <th style="padding:11px 12px;text-align:center;font-size:10px;font-weight:800;color:#ffffff;text-transform:uppercase;letter-spacing:0.06em;background:#111111;border-bottom:2px solid #c40000">Ordered</th>
+          <th style="padding:11px 12px;text-align:center;font-size:10px;font-weight:800;color:#ffffff;text-transform:uppercase;letter-spacing:0.06em;background:#c40000;border-bottom:2px solid #c40000">Confirmed</th>
+          ${showPrices ? '<th style="padding:11px 12px;text-align:right;font-size:10px;font-weight:800;color:#ffffff;text-transform:uppercase;letter-spacing:0.06em;background:#111111;border-bottom:2px solid #c40000">Total</th>' : ''}
         </tr>
       </thead>
       <tbody>${itemRows}</tbody>
