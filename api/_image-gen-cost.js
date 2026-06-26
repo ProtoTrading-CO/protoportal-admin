@@ -9,7 +9,9 @@ import {
   registerImageGenBatchDb,
   updateImageGenBatchDb,
   listActiveImageGenStateDb,
+  isMissingTableError,
 } from './_image-gen-db-locks.js';
+import { maybeSendImageGenBudgetAlerts } from './_image-gen-budget.js';
 
 const USD_TO_ZAR_FALLBACK = 18.0;
 const COSTS_FILE = 'image-gen/cost-logs.json';
@@ -157,7 +159,7 @@ export function extractImageGenMeta(req) {
   };
 }
 
-export async function logImageGenCost(_sb, entry) {
+export async function logImageGenCost(sb, entry) {
   const usdToZar = entry.usdToZar ?? await fetchUsdToZarRate();
   const costUsd = Number(entry.costUsd ?? entry.cost_usd ?? 0);
   const costZar = Number(entry.costZar ?? entry.cost_zar ?? (costUsd * usdToZar).toFixed(4));
@@ -175,7 +177,42 @@ export async function logImageGenCost(_sb, entry) {
     console.warn('logImageGenCost:', err?.message || err);
   }
 
+  await logImageGenCostDb(sb, row);
+
+  maybeSendImageGenBudgetAlerts(sb).catch((err) => {
+    console.warn('budget alerts:', err?.message || err);
+  });
+
   return { costUsd, costZar, usdToZar };
+}
+
+async function logImageGenCostDb(sb, row) {
+  if (!sb) return;
+  try {
+    const { error } = await sb.from('image_gen_cost_logs').insert({
+      id: row.id,
+      sku: row.sku,
+      slot: row.slot,
+      operation: row.operation,
+      model: row.model,
+      image_style: row.image_style,
+      tokens_in: row.tokens_in,
+      tokens_out: row.tokens_out,
+      cost_usd: row.cost_usd,
+      cost_zar: row.cost_zar,
+      cost_source: row.cost_source,
+      processing_ms: row.processing_ms,
+      operator: row.operator,
+      batch_id: row.batch_id,
+      status: row.status,
+      error: row.error,
+    });
+    if (error && !isMissingTableError(error)) {
+      console.warn('logImageGenCostDb:', error.message);
+    }
+  } catch (err) {
+    if (!isMissingTableError(err)) console.warn('logImageGenCostDb:', err?.message || err);
+  }
 }
 
 function purgeExpiredLocks(locks = []) {
@@ -196,8 +233,11 @@ export async function purgeExpiredLocksStore() {
   }
 }
 
-export async function acquireTransformSemaphore(_sb, { batchId, operator, ttlSec = 300 } = {}) {
-  const db = await acquireTransformSemaphoreDb(_sb, { batchId, operator, ttlSec });
+export async function acquireTransformSemaphore(sb, { batchId, operator, ttlSec = 300 } = {}) {
+  const { assertImageGenBudgetAllowsSpend } = await import('./_image-gen-budget.js');
+  await assertImageGenBudgetAllowsSpend(sb);
+
+  const db = await acquireTransformSemaphoreDb(sb, { batchId, operator, ttlSec });
   if (db) return db;
 
   const expiresAt = new Date(Date.now() + ttlSec * 1000).toISOString();
@@ -357,13 +397,53 @@ export async function updateImageGenBatch(_sb, batchId, patch = {}) {
   } catch { /* ignore */ }
 }
 
-export async function listImageGenCosts(_sb, { days = 30, limit = 200 } = {}) {
+export async function listImageGenCosts(sb, { days = 30, limit = 200 } = {}) {
   const since = Date.now() - days * 24 * 60 * 60 * 1000;
+  const sinceIso = new Date(since).toISOString();
+  const cap = Math.min(limit, 500);
+
+  if (sb) {
+    try {
+      const { data, error } = await sb
+        .from('image_gen_cost_logs')
+        .select('*')
+        .gte('created_at', sinceIso)
+        .order('created_at', { ascending: false })
+        .limit(cap);
+      if (!error && data) {
+        return data.map((r) => normalizeLog({
+          id: r.id,
+          created_at: r.created_at,
+          sku: r.sku,
+          slot: r.slot,
+          operation: r.operation,
+          model: r.model,
+          image_style: r.image_style,
+          tokens_in: r.tokens_in,
+          tokens_out: r.tokens_out,
+          cost_usd: r.cost_usd,
+          cost_zar: r.cost_zar,
+          cost_source: r.cost_source,
+          processing_ms: r.processing_ms,
+          operator: r.operator,
+          batch_id: r.batch_id,
+          status: r.status,
+          error: r.error,
+        }));
+      }
+      if (error && !isMissingTableError(error)) {
+        console.warn('listImageGenCosts db:', error.message);
+      }
+    } catch (err) {
+      if (!isMissingTableError(err)) console.warn('listImageGenCosts db:', err?.message || err);
+    }
+  }
+
   const store = await readStore(COSTS_FILE, { logs: [] });
   return (store.logs || [])
     .map(normalizeLog)
     .filter((row) => new Date(row.created_at).getTime() >= since)
-    .slice(0, Math.min(limit, 500));
+    .slice(0, cap);
 }
 
 export async function listActiveImageGenState(_sb) {

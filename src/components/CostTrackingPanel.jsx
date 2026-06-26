@@ -31,6 +31,28 @@ function formatWhen(value) {
   return d.toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 }
 
+function budgetBarClass(level) {
+  if (level === 'exceeded') return 'cost-budget-bar__fill--exceeded';
+  if (level === 'warning') return 'cost-budget-bar__fill--warning';
+  return '';
+}
+
+function BudgetMeter({ label, period }) {
+  if (!period?.limitUsd) return null;
+  const pct = Math.min(100, period.pct ?? 0);
+  return (
+    <article className={`cost-budget-meter cost-budget-meter--${period.level}`}>
+      <div className="cost-budget-meter-head">
+        <strong>{label}</strong>
+        <span>{formatUsd(period.spentUsd)} / {formatUsd(period.limitUsd)} ({pct}%)</span>
+      </div>
+      <div className="cost-budget-bar" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
+        <div className={`cost-budget-bar__fill ${budgetBarClass(period.level)}`} style={{ width: `${pct}%` }} />
+      </div>
+    </article>
+  );
+}
+
 async function parseJsonResponse(res) {
   const text = await res.text();
   if (!text.trim()) {
@@ -84,6 +106,7 @@ export default function CostTrackingPanel({ onShowToast }) {
 
   const summary = data?.summary;
   const logs = data?.logs || [];
+  const budget = data?.budget;
   const active = data?.active || { locks: [], batches: [] };
   // Only batches that are genuinely still running: items left to process AND
   // started recently. Completed, fully-failed and stale batches drop off.
@@ -145,6 +168,35 @@ export default function CostTrackingPanel({ onShowToast }) {
 
       {error && (
         <div className="cost-tracking-warn">{error}</div>
+      )}
+
+      {budget?.configured && (
+        <section className={`cost-budget-section cost-budget-section--${budget.level}`}>
+          <h3>Budget limits</h3>
+          {budget.blocked && (
+            <p className="cost-budget-blocked" role="alert">
+              <strong>Image generation blocked</strong> — daily or monthly limit reached. New Apollo batches and transforms are paused until the period resets or limits are raised in Vercel.
+            </p>
+          )}
+          {!budget.blocked && budget.level === 'warning' && (
+            <p className="cost-budget-warn" role="alert">
+              Approaching budget limit ({budget.warnPct}%+) — alerts go to <code>{budget.alertEmail}</code>.
+            </p>
+          )}
+          <div className="cost-budget-meters">
+            <BudgetMeter label="Today (UTC)" period={budget.daily} />
+            <BudgetMeter label="This month (UTC)" period={budget.monthly} />
+          </div>
+          <p className="adm-muted cost-budget-note">
+            Email at {budget.warnPct}% and 100%. Set <code>IMAGE_GEN_BUDGET_DAILY_USD</code>, <code>IMAGE_GEN_BUDGET_MONTHLY_USD</code>, and <code>IMAGE_GEN_ALERT_EMAIL</code> in Vercel.
+          </p>
+        </section>
+      )}
+
+      {!budget?.configured && !loading && (
+        <p className="adm-muted cost-budget-unconfigured">
+          No budget limits configured — set <code>IMAGE_GEN_BUDGET_DAILY_USD</code> and/or <code>IMAGE_GEN_BUDGET_MONTHLY_USD</code> in Vercel to enable alerts.
+        </p>
       )}
 
       {(liveBatches.length > 0 || active.locks?.length > 0) && (

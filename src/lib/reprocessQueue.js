@@ -39,7 +39,12 @@ export async function reprocessOneToDormant(sku, {
       await sleep(3000 + attempt * 2500 + Math.random() * 1500);
       continue;
     }
-    if (!res.ok) throw new Error(json.error || `Reprocess failed (${res.status})`);
+    if (!res.ok) {
+      if (res.status === 402) {
+        throw new Error(json.error || 'Image generation budget exceeded — see Cost Tracking');
+      }
+      throw new Error(json.error || `Reprocess failed (${res.status})`);
+    }
     return json;
   }
   throw lastErr || new Error('Reprocess failed after retries');
@@ -182,4 +187,23 @@ export function recipeSummary(slotPlans) {
       const prompt = String(p?.prompt || '').trim();
       return prompt ? `Image ${s} · ${style} · “${prompt.slice(0, 40)}${prompt.length > 40 ? '…' : ''}”` : `Image ${s} · ${style}`;
     });
+}
+
+/** Rough OpenRouter $ estimate — matches api/_image-gen-budget.js */
+export function estimateBatchCostUsd(productCount, slotPlans) {
+  const PRO = 0.55;
+  const FLASH = 0.04;
+  let perProductUsd = 0;
+  for (const slot of [1, 2, 3, 4]) {
+    const plan = slotPlans?.[slot];
+    if (!plan?.enabled) continue;
+    const style = plan.style || 'shadow';
+    const usePro = slot === 1 || style === 'generative' || style === 'measurements';
+    perProductUsd += usePro ? PRO : FLASH;
+  }
+  const count = Math.max(0, Number(productCount) || 0);
+  return {
+    perProductUsd: parseFloat(perProductUsd.toFixed(4)),
+    totalUsd: parseFloat((perProductUsd * count).toFixed(2)),
+  };
 }
