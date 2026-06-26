@@ -35,14 +35,14 @@ function tokenize(text) {
     .filter((w) => w.length > 1);
 }
 
-async function fetchAllPages(client, table, select, orderBy = 'title') {
+async function fetchAllPages(client, table, select, orderBy = 'title', { ascending = true } = {}) {
   const rows = [];
   let from = 0;
   while (true) {
     const { data, error } = await client
       .from(table)
       .select(select)
-      .order(orderBy, { ascending: true })
+      .order(orderBy, { ascending })
       .range(from, from + PAGE - 1);
     if (error) throw error;
     rows.push(...(data || []));
@@ -50,6 +50,24 @@ async function fetchAllPages(client, table, select, orderBy = 'title') {
     from += PAGE;
   }
   return rows;
+}
+
+async function fetchOrderCountsByCustomer(supabase) {
+  const orderCounts = {};
+  let from = 0;
+  while (true) {
+    const { data, error } = await supabase
+      .from('orders')
+      .select('customer_id')
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+    for (const row of data || []) {
+      if (row.customer_id) orderCounts[row.customer_id] = (orderCounts[row.customer_id] || 0) + 1;
+    }
+    if ((data || []).length < PAGE) break;
+    from += PAGE;
+  }
+  return orderCounts;
 }
 
 async function enrichStockLevels(stock, rows) {
@@ -137,21 +155,20 @@ async function loadProducts(stock) {
 }
 
 async function loadCustomers(supabase) {
-  const { data, error, count } = await supabase
+  const { count, error: countErr } = await supabase
     .from('customers')
-    .select('id, name, email, phone, business_name, business_type, city, province, tier, is_approved, created_at', { count: 'exact' })
-    .order('created_at', { ascending: false })
-    .limit(500);
-  if (error) throw error;
+    .select('id', { count: 'exact', head: true });
+  if (countErr) throw countErr;
 
-  const ids = (data || []).map((c) => c.id).filter(Boolean);
-  const orderCounts = {};
-  if (ids.length) {
-    const { data: orderRows } = await supabase.from('orders').select('customer_id').in('customer_id', ids);
-    for (const row of orderRows || []) {
-      if (row.customer_id) orderCounts[row.customer_id] = (orderCounts[row.customer_id] || 0) + 1;
-    }
-  }
+  const data = await fetchAllPages(
+    supabase,
+    'customers',
+    'id, name, email, phone, business_name, business_type, city, province, tier, is_approved, created_at',
+    'created_at',
+    { ascending: false },
+  );
+
+  const orderCounts = await fetchOrderCountsByCustomer(supabase);
 
   const list = (data || []).map((c) => ({
     id: c.id,
@@ -170,7 +187,7 @@ async function loadCustomers(supabase) {
   }));
 
   return {
-    total: count || list.length,
+    total: count ?? list.length,
     pending: list.filter((c) => !c.approved).length,
     approved: list.filter((c) => c.approved).length,
     list,
@@ -187,14 +204,14 @@ async function loadOrders(supabase) {
   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
   const start = thirtyDaysAgo.toISOString();
 
-  const { data, error } = await supabase
-    .from('orders')
-    .select('id, status, total_ex_vat, created_at, original_items, final_items, items, customers(name, email, business_name)')
-    .order('created_at', { ascending: false })
-    .limit(300);
-  if (error) throw error;
+  const all = await fetchAllPages(
+    supabase,
+    'orders',
+    'id, status, total_ex_vat, created_at, original_items, final_items, items, customers(name, email, business_name)',
+    'created_at',
+    { ascending: false },
+  );
 
-  const all = data || [];
   const recent30 = all.filter((o) => o.created_at >= start);
   const statusCounts = {};
   for (const o of recent30) {

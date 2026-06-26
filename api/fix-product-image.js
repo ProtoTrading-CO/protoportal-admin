@@ -8,6 +8,7 @@ import {
   resolveImageGenCost,
 } from './_image-gen-cost.js';
 import { assertImageGenBudgetAllowsSpend } from './_image-gen-budget.js';
+import { removeStorageObjects } from './_staging-storage.js';
 
 export default async function handler(req, res) {
   if (!(await requireAdminKey(req, res))) return;
@@ -46,6 +47,15 @@ export default async function handler(req, res) {
   try {
     const result = await fixImageFromUrl(imageUrl, { sku: row.sku });
 
+    const { error: updateError } = await sb
+      .from('website_stock')
+      .update({ image_url_one: result.url, updated_at: new Date().toISOString() })
+      .eq('sku', row.sku);
+    if (updateError) {
+      await removeStorageObjects(sb, [result.url]);
+      return res.status(400).json({ error: updateError.message });
+    }
+
     const { costUsd, costSource } = resolveImageGenCost({
       model: result.model,
       tokensIn: result.tokensIn,
@@ -69,12 +79,6 @@ export default async function handler(req, res) {
       batchId,
       status: 'ok',
     });
-
-    const { error: updateError } = await sb
-      .from('website_stock')
-      .update({ image_url_one: result.url, updated_at: new Date().toISOString() })
-      .eq('sku', row.sku);
-    if (updateError) return res.status(400).json({ error: updateError.message });
 
     return res.status(200).json({
       ok: true,

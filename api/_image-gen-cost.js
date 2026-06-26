@@ -18,7 +18,7 @@ const COSTS_FILE = 'image-gen/cost-logs.json';
 const LOCKS_FILE = 'image-gen/locks.json';
 const BATCHES_FILE = 'image-gen/batches.json';
 const SEMAPHORE_FILE = 'image-gen/semaphore.json';
-const MAX_LOGS = 500;
+const MAX_LOGS = 2000;
 export const MAX_CONCURRENT_TRANSFORMS = Math.max(1, Math.min(10, Number(process.env.IMAGE_GEN_CONCURRENCY) || 3));
 
 /** Approximate OpenRouter pricing — fallback when usage.cost is missing from API. */
@@ -163,15 +163,16 @@ export async function logImageGenCost(sb, entry) {
     cost_zar: costZar,
   });
 
-  try {
-    const store = await readStore(COSTS_FILE, { logs: [] });
-    const logs = [row, ...(store.logs || [])].slice(0, MAX_LOGS);
-    await writeStore(COSTS_FILE, { logs });
-  } catch (err) {
-    console.warn('logImageGenCost:', err?.message || err);
+  const dbOk = await logImageGenCostDb(sb, row);
+  if (!dbOk) {
+    try {
+      const store = await readStore(COSTS_FILE, { logs: [] });
+      const logs = [row, ...(store.logs || [])].slice(0, MAX_LOGS);
+      await writeStore(COSTS_FILE, { logs });
+    } catch (err) {
+      console.warn('logImageGenCost:', err?.message || err);
+    }
   }
-
-  await logImageGenCostDb(sb, row);
 
   maybeSendImageGenBudgetAlerts(sb).catch((err) => {
     console.warn('budget alerts:', err?.message || err);
@@ -181,7 +182,7 @@ export async function logImageGenCost(sb, entry) {
 }
 
 async function logImageGenCostDb(sb, row) {
-  if (!sb) return;
+  if (!sb) return false;
   const baseRow = {
     id: row.id,
     sku: row.sku,
@@ -207,11 +208,14 @@ async function logImageGenCostDb(sb, row) {
     if (error && /cost_source/i.test(error.message || '')) {
       ({ error } = await sb.from('image_gen_cost_logs').insert(baseRow));
     }
-    if (error && !isMissingTableError(error)) {
-      console.warn('logImageGenCostDb:', error.message);
+    if (error) {
+      if (!isMissingTableError(error)) console.warn('logImageGenCostDb:', error.message);
+      return false;
     }
+    return true;
   } catch (err) {
     if (!isMissingTableError(err)) console.warn('logImageGenCostDb:', err?.message || err);
+    return false;
   }
 }
 
