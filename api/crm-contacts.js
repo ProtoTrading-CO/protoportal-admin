@@ -1,5 +1,8 @@
 import { requireAdminKey, requireCronOrAdminKey } from './_admin-auth.js';
 import { createClient } from '@supabase/supabase-js';
+import { readSiteConfigJson } from './_site-config.js';
+
+const CAMPAIGN_META_FILE = 'crm/brevo-campaign-summary.json';
 
 function getMainClient() {
   return createClient(
