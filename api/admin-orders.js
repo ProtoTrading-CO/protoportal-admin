@@ -1,6 +1,6 @@
 import { requireAdminOrOrderToken } from './_admin-auth.js';
 import { createClient } from '@supabase/supabase-js';
-import { advanceOrderStatus, advanceOrderStatusToTarget, normalizeOrderStatus } from './_order-status.js';
+import { advanceOrderStatusToTarget, normalizeOrderStatus } from './_order-status.js';
 import {
   CUSTOMER_SEND_FORBIDDEN,
   isVictorSender,
@@ -11,18 +11,35 @@ function getAdminClient() {
   return createClient(
     process.env.VITE_SUPABASE_URL,
     process.env.SUPABASE_SERVICE_ROLE_KEY,
-    { auth: { autoRefreshToken: false, persistSession: false } }
+    { auth: { autoRefreshToken: false, persistSession: false } },
   );
 }
 
+function assertOrderScope(auth, orderId, res) {
+  if (auth.type === 'admin') return true;
+  if (String(orderId) === String(auth.orderId)) return true;
+  res.status(403).json({ error: 'Not authorized for this order' });
+  return false;
+}
+
 export default async function handler(req, res) {
-  if (!(await requireAdminOrOrderToken(req, res))) return;
+  const auth = await requireAdminOrOrderToken(req, res);
+  if (!auth) return;
   const supabase = getAdminClient();
 
-  // GET — list orders (service role bypasses RLS)
   if (req.method === 'GET') {
     const { limit = '150', customerId = '', id = '' } = req.query;
     const lim = Math.min(500, Math.max(1, parseInt(limit, 10) || 150));
+
+    if (auth.type === 'order') {
+      const { data, error } = await supabase
+        .from('orders')
+        .select('*, customers(name, contact_name, email, phone, business_name, business_type, city, province, country, company_address, delivery_address, vat_number, customer_code, tier)')
+        .eq('id', auth.orderId)
+        .maybeSingle();
+      if (error) return res.status(400).json({ error: error.message });
+      return res.status(200).json({ rows: data ? [data] : [] });
+    }
 
     let ordersQuery = supabase
       .from('orders')
@@ -34,15 +51,14 @@ export default async function handler(req, res) {
     if (customerId) ordersQuery = ordersQuery.eq('customer_id', customerId);
 
     const { data, error } = await ordersQuery;
-
     if (error) return res.status(400).json({ error: error.message });
     return res.status(200).json({ rows: data || [] });
   }
 
-  // PATCH — update an order
   if (req.method === 'PATCH') {
     const { id, notes, advanceWorkflow, senderUserId, senderName, ...raw } = req.body || {};
     if (!id) return res.status(400).json({ error: 'id required' });
+    if (!assertOrderScope(auth, id, res)) return;
 
     const patch = { ...raw };
     if (notes !== undefined) patch.order_change_notes = notes;
@@ -101,8 +117,10 @@ export default async function handler(req, res) {
     return res.status(200).json({ row: data });
   }
 
-  // DELETE — remove an order
   if (req.method === 'DELETE') {
+    if (auth.type !== 'admin') {
+      return res.status(403).json({ error: 'Admin access required' });
+    }
     const { id } = req.body || {};
     if (!id) return res.status(400).json({ error: 'id required' });
     const { error } = await supabase.from('orders').delete().eq('id', id);

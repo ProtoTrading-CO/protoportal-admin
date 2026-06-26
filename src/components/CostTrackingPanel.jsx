@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DollarSign, Loader2, RefreshCw, Users, Zap } from 'lucide-react';
 import { getImageGenOperator, setImageGenOperator } from '../lib/imageGenSession';
 
@@ -86,12 +86,17 @@ export default function CostTrackingPanel({ onShowToast }) {
     alertsEnabled: true,
   });
 
+  const loadSeqRef = useRef(0);
+
   const load = useCallback(async () => {
+    const seq = loadSeqRef.current + 1;
+    loadSeqRef.current = seq;
     setLoading(true);
     setError('');
     try {
       const res = await fetch(`/api/image-gen-costs?days=${days}&limit=250`);
       const json = await parseJsonResponse(res);
+      if (loadSeqRef.current !== seq) return;
       if (!res.ok && res.status !== 503) {
         throw new Error(typeof json.error === 'string' ? json.error : 'Failed to load costs');
       }
@@ -108,11 +113,12 @@ export default function CostTrackingPanel({ onShowToast }) {
         });
       }
     } catch (err) {
+      if (loadSeqRef.current !== seq) return;
       const message = err?.message || 'Failed to load cost data';
       setError(message);
       onShowToast?.(message, 'error');
     } finally {
-      setLoading(false);
+      if (loadSeqRef.current === seq) setLoading(false);
     }
   }, [days, onShowToast]);
 

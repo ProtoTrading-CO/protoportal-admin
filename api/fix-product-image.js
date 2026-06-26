@@ -1,5 +1,4 @@
 import { requireAdminKey } from './_admin-auth.js';
-import { createClient } from '@supabase/supabase-js';
 import { fixImageFromUrl, DEFAULT_IMAGE_MODEL } from './_image-pipeline.js';
 import {
   extractImageGenMeta,
@@ -10,14 +9,6 @@ import {
 } from './_image-gen-cost.js';
 import { assertImageGenBudgetAllowsSpend } from './_image-gen-budget.js';
 
-function getStockAdminClient() {
-  return createClient(
-    process.env.VITE_STOCK_SUPABASE_URL,
-    process.env.VITE_STOCK_SUPABASE_KEY,
-    { auth: { autoRefreshToken: false, persistSession: false } },
-  );
-}
-
 export default async function handler(req, res) {
   if (!(await requireAdminKey(req, res))) return;
   res.setHeader('Cache-Control', 'no-store');
@@ -26,7 +17,6 @@ export default async function handler(req, res) {
   const { sku } = req.body || {};
   if (!sku) return res.status(400).json({ error: 'sku is required' });
 
-  const supabase = getStockAdminClient();
   const sb = getStockClient();
 
   try {
@@ -38,7 +28,7 @@ export default async function handler(req, res) {
     throw err;
   }
 
-  const { data: row, error: lookupError } = await supabase
+  const { data: row, error: lookupError } = await sb
     .from('website_stock')
     .select('sku, title, image_url_one')
     .eq('sku', String(sku).trim())
@@ -80,7 +70,7 @@ export default async function handler(req, res) {
       status: 'ok',
     });
 
-    const { error: updateError } = await supabase
+    const { error: updateError } = await sb
       .from('website_stock')
       .update({ image_url_one: result.url, updated_at: new Date().toISOString() })
       .eq('sku', row.sku);

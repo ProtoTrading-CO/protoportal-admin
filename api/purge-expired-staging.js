@@ -1,37 +1,37 @@
-import { createClient } from '@supabase/supabase-js';
+import { requireCronOrAdminKey } from './_admin-auth.js';
+import { getStockClient } from './_stock-client.js';
 import { collectImageUrlsFromRow, removeStagingObjects, collectLiveReferencedStagingPaths, storagePathFromPublicUrl } from './_staging-storage.js';
-
-function getClient() {
-  return createClient(
-    process.env.VITE_STOCK_SUPABASE_URL,
-    process.env.VITE_STOCK_SUPABASE_KEY,
-    { auth: { autoRefreshToken: false, persistSession: false } },
-  );
-}
 
 /** Daily cron — remove expired Approval previews and staging/* storage objects. */
 export default async function handler(req, res) {
-  const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret && req.headers.authorization !== `Bearer ${cronSecret}`) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
+  if (!(await requireCronOrAdminKey(req, res))) return;
 
   res.setHeader('Cache-Control', 'no-store');
   if (req.method !== 'GET' && req.method !== 'POST') return res.status(405).end();
 
-  const sb = getClient();
+  const sb = getStockClient();
   const now = new Date().toISOString();
+  const expired = [];
+  let from = 0;
+  const pageSize = 1000;
 
-  const { data: expired, error } = await sb
-    .from('archived_products')
-    .select('*')
-    .eq('archived_by', 'new-products')
-    .not('staged_expires_at', 'is', null)
-    .lte('staged_expires_at', now);
+  while (true) {
+    const { data, error } = await sb
+      .from('archived_products')
+      .select('*')
+      .eq('archived_by', 'new-products')
+      .not('staged_expires_at', 'is', null)
+      .lte('staged_expires_at', now)
+      .order('sku', { ascending: true })
+      .range(from, from + pageSize - 1);
 
-  if (error) {
-    console.error('purge-expired-staging:', error.message);
-    return res.status(500).json({ error: error.message });
+    if (error) {
+      console.error('purge-expired-staging:', error.message);
+      return res.status(500).json({ error: error.message });
+    }
+    expired.push(...(data || []));
+    if ((data || []).length < pageSize) break;
+    from += pageSize;
   }
 
   let removedFiles = 0;
@@ -40,7 +40,7 @@ export default async function handler(req, res) {
 
   const liveStagingRefs = await collectLiveReferencedStagingPaths(sb);
 
-  for (const row of expired || []) {
+  for (const row of expired) {
     const urls = collectImageUrlsFromRow(row);
     const safeUrls = urls.filter((url) => {
       const path = storagePathFromPublicUrl(url);

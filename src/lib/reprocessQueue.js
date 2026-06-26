@@ -5,8 +5,17 @@ import { imageGenHeaders } from './imageGenSession.js';
 /** Match server semaphore — avoid flooding API with 409 lock retries. */
 const BATCH_CONCURRENCY = 3;
 
-async function sleep(ms) {
-  return new Promise((resolve) => { setTimeout(resolve, ms); });
+async function sleep(ms, signal) {
+  if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(resolve, ms);
+    if (signal) {
+      signal.addEventListener('abort', () => {
+        clearTimeout(timer);
+        reject(new DOMException('Aborted', 'AbortError'));
+      }, { once: true });
+    }
+  });
 }
 
 export async function reprocessOneToDormant(sku, {
@@ -17,12 +26,17 @@ export async function reprocessOneToDormant(sku, {
   referenceImageUrl,
   batchId,
   retries = 5,
+  signal,
 } = {}) {
   let lastErr;
   for (let attempt = 0; attempt < retries; attempt += 1) {
+    if (signal?.aborted) {
+      throw new DOMException('Aborted', 'AbortError');
+    }
     const res = await fetch('/api/reprocess-live-to-dormant', {
       method: 'POST',
       headers: await imageGenHeaders(batchId),
+      signal,
       body: JSON.stringify({
         sku,
         prompt: prompt || undefined,
@@ -36,7 +50,8 @@ export async function reprocessOneToDormant(sku, {
     const json = await res.json().catch(() => ({}));
     if (res.status === 409 && attempt < retries - 1) {
       lastErr = new Error(json.error || 'SKU slot locked — waiting for other user…');
-      await sleep(3000 + attempt * 2500 + Math.random() * 1500);
+      const waitMs = 3000 + attempt * 2500 + Math.random() * 1500;
+      await sleep(waitMs, signal);
       continue;
     }
     if (!res.ok) {
@@ -139,6 +154,7 @@ export async function runReprocessBatch(products, {
         sourceSlot: item.sourceSlot || 1,
         referenceImageUrl: item.referenceUrl || undefined,
         batchId,
+        signal,
       });
       results.done += 1;
       results.items[i] = { sku: item.sku, slot: item.slot, ok: true, imageUrl: json.imageUrl };
@@ -150,6 +166,7 @@ export async function runReprocessBatch(products, {
         slot: item.slot,
       });
     } catch (err) {
+      if (signal?.aborted || err?.name === 'AbortError') return;
       results.failed += 1;
       results.items[i] = { sku: item.sku, slot: item.slot, ok: false, error: err.message };
       onItemUpdate?.(i, {

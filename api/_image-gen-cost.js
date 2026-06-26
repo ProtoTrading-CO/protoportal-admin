@@ -1,6 +1,6 @@
-import { createClient } from '@supabase/supabase-js';
 import { randomUUID } from 'crypto';
 import { readSiteConfigJson, writeSiteConfigJson } from './_site-config.js';
+import { getStockClient } from './_stock-client.js';
 import {
   acquireImageGenLockDb,
   releaseImageGenLockDb,
@@ -32,13 +32,7 @@ const MODEL_PRICING = {
 let cachedFxRate = null;
 let cachedFxAt = 0;
 
-export function getStockClient() {
-  return createClient(
-    process.env.VITE_STOCK_SUPABASE_URL,
-    process.env.VITE_STOCK_SUPABASE_KEY,
-    { auth: { autoRefreshToken: false, persistSession: false } },
-  );
-}
+export { getStockClient };
 
 async function readStore(file, fallback) {
   try {

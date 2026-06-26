@@ -196,14 +196,15 @@ export default function ApolloImageWizard({
   }, [queue, busy]);
 
   const ensureAllLiveRows = async () => {
-    if (allLiveRowsRef.current) return allLiveRowsRef.current;
+    if (allLiveRowsRef.current?.length) return allLiveRowsRef.current;
     const res = await fetch('/api/stock-actions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'listLive' }),
     });
-    const json = await res.json();
-    allLiveRowsRef.current = res.ok ? (json.rows || []) : [];
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(json.error || `Failed to load catalogue (${res.status})`);
+    allLiveRowsRef.current = json.rows || [];
     return allLiveRowsRef.current;
   };
 
@@ -466,9 +467,7 @@ export default function ApolloImageWizard({
     if (stopRef) stopRef.current = () => ac.abort();
 
     try {
-      const products = selectedProducts.length
-        ? selectedProducts
-        : await loadProducts();
+      const products = await loadProducts();
       if (!products.length) {
         onShowToast?.('Could not load selected products', 'error');
         setStep(1);
@@ -540,7 +539,7 @@ export default function ApolloImageWizard({
         );
         onRefreshCatalog?.();
       }
-      if (!backgroundRef.current) {
+      if (!backgroundRef.current && !aborted) {
         setBatchDone(true);
         setStep(3);
         void findAndSetSameCodeProducts(generatedProductsRef.current);

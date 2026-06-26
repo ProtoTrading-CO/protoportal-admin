@@ -6,6 +6,7 @@ import {
   logImageGenCost,
   resolveImageGenCost,
 } from './_image-gen-cost.js';
+import { assertImageGenBudgetAllowsSpend } from './_image-gen-budget.js';
 // Gemini Flash vision analysis — metadata only, no storage.
 // Frontend calls upload-product-image separately for the actual image URL.
 
@@ -64,6 +65,16 @@ export default async function handler(req, res) {
 
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) return res.status(500).json({ error: 'OPENROUTER_API_KEY not configured' });
+
+  const sb = getStockClient();
+  try {
+    await assertImageGenBudgetAllowsSpend(sb);
+  } catch (err) {
+    if (err.code === 'IMAGE_GEN_BUDGET_EXCEEDED') {
+      return res.status(402).json({ error: err.message, budget: err.budgetStatus });
+    }
+    throw err;
+  }
 
   const t0 = Date.now();
 

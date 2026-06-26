@@ -121,16 +121,20 @@ export async function requireAdminKey(req, res) {
   }
 }
 
-/** Admin JWT or scoped fulfillment order token. */
-export async function requireAdminOrOrderToken(req, res) {
-  if (hasAdminKey(req)) return true;
+export async function resolveRequestAuth(req) {
+  if (hasAdminKey(req)) return { type: 'admin' };
   const admin = await verifyAdminUser(req);
-  if (admin) return true;
-
+  if (admin) return { type: 'admin', user: admin };
   const orderId = extractOrderId(req);
   const token = extractOrderToken(req);
-  if (orderId && verifyOrderToken(orderId, token)) return true;
+  if (orderId && verifyOrderToken(orderId, token)) return { type: 'order', orderId };
+  return null;
+}
 
+/** Admin JWT or scoped fulfillment order token. */
+export async function requireAdminOrOrderToken(req, res) {
+  const auth = await resolveRequestAuth(req);
+  if (auth) return auth;
   return sendUnauthorized(res);
 }
 

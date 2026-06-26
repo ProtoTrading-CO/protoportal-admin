@@ -275,7 +275,7 @@ async function claimBudgetAlert(period, periodKeyVal, level) {
   return false;
 }
 
-async function claimBudgetAlert(period, periodKeyVal, level) {
+async function sendBudgetEmail({ to, subject, html }) {
   const apiKey = process.env.BREVO_API_KEY;
   if (!apiKey || !to) {
     console.warn('image-gen budget alert: BREVO_API_KEY or alert email missing');

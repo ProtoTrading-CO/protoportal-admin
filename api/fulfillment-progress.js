@@ -12,11 +12,15 @@ function emptyProgress(orderId) {
 }
 
 export default async function handler(req, res) {
-  if (!(await requireAdminOrOrderToken(req, res))) return;
+  const auth = await requireAdminOrOrderToken(req, res);
+  if (!auth) return;
   res.setHeader('Cache-Control', 'no-store');
   const { orderId } = req.method === 'GET' ? req.query : (req.body || {});
 
   if (!orderId) return res.status(400).json({ error: 'orderId required' });
+  if (auth.type === 'order' && String(orderId) !== String(auth.orderId)) {
+    return res.status(403).json({ error: 'Not authorized for this order' });
+  }
 
   if (req.method === 'GET') {
     try {
