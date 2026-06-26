@@ -517,7 +517,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   const [reorderDirty, setReorderDirty] = useState(false);
   const [reorderSaving, setReorderSaving] = useState(false);
   const [reorderSortMeta, setReorderSortMeta] = useState({ updatedAt: null });
-  const reorderAllCacheRef = useRef(null);
+  const reorderCacheByMainRef = useRef({});
   const [taxonomyTree, setTaxonomyTree] = useState(categories);
   const [toast, setToast] = useState(null);
   const [moveModalOpen, setMoveModalOpen] = useState(false);
@@ -837,7 +837,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
 
   const reorderCategoryKey = sortOrderCategoryKey(reorderNavPath, taxonomyTree);
 
-  const mergeReorderIntoAllCache = useCallback((all, visible, categoryPath) => {
+  const mergeReorderIntoCategoryCache = useCallback((all, visible, categoryPath) => {
     if (!categoryPath?.length) return visible;
     const visibleIds = new Set(visible.map((p) => p.id));
     const merged = [];
@@ -865,24 +865,29 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
 
   const applyReorderView = useCallback(async (allRows) => {
     const store = await fetchSortOrderStore();
-    const filtered = applyPathFilter(allRows, reorderCategoryPath);
+    const filtered = applyPathFilter(allRows, reorderNavPath);
     const ordered = applySortOrdersToProducts(filtered, reorderNavPath, taxonomyTree, store);
     if (reorderNavPath.length) {
       setReorderSortMeta(sortMetaForPath(store, reorderNavPath, taxonomyTree));
     }
     setReorderProducts(ordered);
     return ordered;
-  }, [reorderCategoryPath, reorderNavPath, taxonomyTree]);
+  }, [reorderNavPath, taxonomyTree]);
 
-  const loadReorderProducts = async ({ forceCatalog = false } = {}) => {
-    const firstLoad = !reorderAllCacheRef.current;
+  const loadReorderProducts = async ({ forceCatalog = false, mainId = reorderMainId } = {}) => {
+    if (!mainId) {
+      setReorderProducts([]);
+      return;
+    }
+    const cached = reorderCacheByMainRef.current[mainId];
+    const firstLoad = !cached;
     if (firstLoad || forceCatalog) setLoading(true);
     setLoadingError('');
     try {
-      if (!reorderAllCacheRef.current || forceCatalog) {
-        reorderAllCacheRef.current = await fetchReorderProducts({ mainCategory: 'all' });
+      if (!cached || forceCatalog) {
+        reorderCacheByMainRef.current[mainId] = await fetchReorderProducts({ mainCategory: mainId });
       }
-      await applyReorderView(reorderAllCacheRef.current);
+      await applyReorderView(reorderCacheByMainRef.current[mainId]);
       setReorderDirty(false);
     } catch (err) {
       setLoadingError(err.message || 'Failed to load products');
@@ -919,11 +924,12 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
       });
       setReorderSortMeta({ updatedAt: json.updatedAt });
       setReorderDirty(false);
-      if (reorderAllCacheRef.current) {
-        reorderAllCacheRef.current = mergeReorderIntoAllCache(
-          reorderAllCacheRef.current,
+      if (reorderMainId && reorderCacheByMainRef.current[reorderMainId]) {
+        const cachePath = reorderCategoryPath.length ? reorderCategoryPath : [reorderMainId];
+        reorderCacheByMainRef.current[reorderMainId] = mergeReorderIntoCategoryCache(
+          reorderCacheByMainRef.current[reorderMainId],
           orderedProducts,
-          reorderCategoryPath,
+          cachePath,
         );
       }
     } catch (err) {
@@ -938,7 +944,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     } finally {
       setReorderSaving(false);
     }
-  }, [reorderSearch, reorderCategoryPath, reorderNavPath, taxonomyTree, productsForSortSave, mergeReorderIntoAllCache]);
+  }, [reorderSearch, reorderCategoryPath, reorderNavPath, reorderMainId, taxonomyTree, productsForSortSave, mergeReorderIntoCategoryCache]);
 
   const showToast = (message, type = 'success') => {
     setToast({ message, type });
@@ -1248,14 +1254,16 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   useEffect(() => { if (activeSection === 'pricing') void loadCategoryWorkingSet(pricingCategory, 'pricing'); }, [activeSection, pricingCategory]);
   useEffect(() => { void reloadTaxonomy(); }, []);
   useEffect(() => {
-    if (activeSection !== 'reorder') return;
-    void loadReorderProducts();
-  }, [activeSection]);
+    if (activeSection !== 'reorder' || !reorderMainId) return;
+    void loadReorderProducts({ mainId: reorderMainId });
+  }, [activeSection, reorderMainId]);
 
   useEffect(() => {
-    if (activeSection !== 'reorder' || !reorderAllCacheRef.current) return;
-    void applyReorderView(reorderAllCacheRef.current);
-  }, [activeSection, reorderCategoryPath.join('/'), reorderCategoryKey, taxonomyTree, applyReorderView]);
+    if (activeSection !== 'reorder' || !reorderMainId) return;
+    const cached = reorderCacheByMainRef.current[reorderMainId];
+    if (!cached) return;
+    void applyReorderView(cached);
+  }, [activeSection, reorderCategoryPath.join('/'), reorderCategoryKey, reorderMainId, taxonomyTree, applyReorderView]);
   useEffect(() => { if (activeSection === 'orders' && orders.length === 0) void loadOrders(); }, [activeSection]);
   useEffect(() => {
     if (activeSection !== 'orders') return undefined;
@@ -1459,12 +1467,17 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     setEditorImageDragOver('');
   };
 
-  const swapEditorImages = () => {
-    setProductForm((current) => ({
-      ...current,
-      image: current.secondaryImage || '',
-      secondaryImage: current.image || '',
-    }));
+  const swapEditorImageSlots = (index) => {
+    setProductForm((current) => {
+      const keys = PRODUCT_IMAGE_SLOTS.map((s) => s.key);
+      const next = { ...current };
+      const a = keys[index];
+      const b = keys[index + 1];
+      if (!a || !b) return current;
+      next[a] = current[b] || '';
+      next[b] = current[a] || '';
+      return next;
+    });
   };
 
   const clearEditorImage = (slotKey) => {
@@ -1918,19 +1931,19 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   const visibleReorderProducts = useMemo(() => {
     const q = reorderSearch.trim();
     if (q) return fuzzyFilter(reorderProducts, q);
-    return applyPathFilter(reorderProducts, reorderCategoryPath);
-  }, [reorderProducts, reorderCategoryPath, reorderSearch]);
+    return applyPathFilter(reorderProducts, reorderNavPath);
+  }, [reorderProducts, reorderNavPath, reorderSearch]);
 
   const handleReorderProductsChange = useCallback((nextOrFn) => {
     setReorderProducts((prev) => {
       if (typeof nextOrFn === 'function') return nextOrFn(prev);
-      const pathFiltered = applyPathFilter(prev, reorderCategoryPath);
+      const pathFiltered = applyPathFilter(prev, reorderNavPath);
       const q = reorderSearch.trim();
       const currentVisible = q ? fuzzyFilter(pathFiltered, q) : pathFiltered;
       return mergeVisibleReorder(prev, currentVisible, nextOrFn);
     });
     setReorderDirty(true);
-  }, [reorderCategoryPath, reorderSearch]);
+  }, [reorderNavPath, reorderSearch]);
 
   const saveReorderOrder = async () => {
     if (reorderSearchActive) {
@@ -3287,10 +3300,10 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                       onClick={() => {
                         setSelectedIds(new Set());
                         setReorderDirty(false);
-                        reorderAllCacheRef.current = null;
+                        reorderCacheByMainRef.current = {};
                         invalidateSortOrderStore();
                         invalidateAdminCache();
-                        void loadReorderProducts({ forceCatalog: true });
+                        void loadReorderProducts({ forceCatalog: true, mainId: reorderMainId });
                       }}
                       className="adm-btn-ghost"
                       type="button"
@@ -3398,11 +3411,12 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                     selectedIds={selectedIds}
                     onToggleSelect={toggleSelectReorder}
                     mainCategoryId={reorderMainId}
-                    selectedPath={reorderCategoryPath}
+                    selectedPath={reorderNavPath}
                     taxonomyTree={taxonomyTree}
                     loading={loading}
                     dragDisabled={reorderSearchActive}
                     savingOrder={reorderSaving}
+                    emptyHint={reorderMainId ? undefined : 'Select a category in the sidebar to load products.'}
                     onEditProduct={openContentEdit}
                     onEditSubcategory={setEditTaxonomyModal}
                     onDeleteSubcategory={(sub) => void openDeleteSubcategory(sub)}
@@ -4777,21 +4791,23 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                   Best size: 800×800 px square, white background, product centred — matches your resize script and catalog cards.
                 </p>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-                  {PRODUCT_IMAGE_SLOTS.map((slot) => {
+                  {PRODUCT_IMAGE_SLOTS.map((slot, slotIndex) => {
                     const value = productForm[slot.key];
                     const isDragOver = editorImageDragOver === slot.key;
+                    const nextKey = PRODUCT_IMAGE_SLOTS[slotIndex + 1]?.key;
                     return (
                       <div key={slot.key} style={{ display: 'grid', gap: 8 }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
                           <span style={{ fontSize: 12, fontWeight: 700, color: '#334155' }}>{slot.label}</span>
-                          {slot.key === 'secondary' && productForm.secondaryImage && productForm.image && (
+                          {nextKey && (
                             <button
                               type="button"
-                              onClick={swapEditorImages}
+                              onClick={() => swapEditorImageSlots(slotIndex)}
                               className="adm-btn-ghost"
                               style={{ padding: '6px 10px', fontSize: 12 }}
+                              disabled={!productForm[slot.key] && !productForm[nextKey]}
                             >
-                              Swap 1 ↔ 2
+                              Swap {slotIndex + 1} ↔ {slotIndex + 2}
                             </button>
                           )}
                         </div>
