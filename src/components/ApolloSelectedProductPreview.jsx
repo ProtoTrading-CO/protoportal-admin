@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
 import { ChevronLeft, ChevronRight, Image, Loader2, Pencil, X } from 'lucide-react';
+import ProductImageSlotReorder from './ProductImageSlotReorder';
+import { productImagesFromRecord } from '../lib/productImages';
 
 function ProductImageLightbox({ product, index, onClose, onChangeIndex }) {
-  const images = product?.images?.length
-    ? product.images
-    : [product?.image].filter(Boolean);
+  const images = productImagesFromRecord(product).filter(Boolean);
   const current = images[index];
 
   useEffect(() => {
@@ -56,6 +56,8 @@ export default function ApolloSelectedProductPreview({
   activeSlots = [],
   onEditSelection,
   onDeselectProduct,
+  onReorderImages,
+  imageReorderSavingSku = '',
   compact = false,
 }) {
   const [lightbox, setLightbox] = useState(null);
@@ -82,6 +84,9 @@ export default function ApolloSelectedProductPreview({
             {activeSlots.length > 0 && (
               <> · regenerating slot{activeSlots.length === 1 ? '' : 's'} {activeSlots.join(', ')}</>
             )}
+            {onReorderImages && !compact && (
+              <> · swap image order with arrows below each product</>
+            )}
             {onDeselectProduct && (
               <> · tap × to remove from batch</>
             )}
@@ -97,9 +102,8 @@ export default function ApolloSelectedProductPreview({
       <div className="apollo-scope-preview-grid">
         {products.map((p) => {
           const sku = p.sku || p.id;
-          const images = p.images?.length
-            ? p.images
-            : [p.image, p.imageTwo, p.imageThree, p.imageFour].filter(Boolean);
+          const images = productImagesFromRecord(p);
+          const saving = imageReorderSavingSku === sku;
           return (
             <article
               key={sku}
@@ -119,32 +123,44 @@ export default function ApolloSelectedProductPreview({
                   <X size={14} strokeWidth={2.5} />
                 </button>
               )}
-              <button
-                type="button"
-                className="apollo-scope-preview-card-body"
-                onClick={() => setLightbox({ product: p, index: 0 })}
-              >
-                <div className="apollo-scope-preview-thumbs">
-                  {[1, 2, 3, 4].map((slot) => {
-                    const url = images[slot - 1];
-                    const willRegen = slotSet.has(slot);
-                    return (
-                      <div
-                        key={slot}
-                        className={`apollo-scope-preview-thumb${willRegen ? ' apollo-scope-preview-thumb--target' : ''}`}
-                        title={willRegen ? `Image ${slot} — will regenerate` : `Image ${slot}`}
-                      >
-                        {url ? <img src={url} alt="" /> : <Image size={11} color="#cbd5e1" />}
-                        <span className="apollo-scope-preview-slot">{slot}</span>
-                      </div>
-                    );
-                  })}
-                </div>
+              <div className="apollo-scope-preview-card-body">
+                {onReorderImages && !compact ? (
+                  <ProductImageSlotReorder
+                    images={images}
+                    onSwap={(nextImages) => onReorderImages(p, nextImages)}
+                    disabled={!!imageReorderSavingSku}
+                    saving={saving}
+                    compact
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    className="apollo-scope-preview-thumb-row"
+                    onClick={() => setLightbox({ product: p, index: 0 })}
+                  >
+                    <div className="apollo-scope-preview-thumbs">
+                      {[1, 2, 3, 4].map((slot) => {
+                        const url = images[slot - 1];
+                        const willRegen = slotSet.has(slot);
+                        return (
+                          <div
+                            key={slot}
+                            className={`apollo-scope-preview-thumb${willRegen ? ' apollo-scope-preview-thumb--target' : ''}`}
+                            title={willRegen ? `Image ${slot} — will regenerate` : `Image ${slot}`}
+                          >
+                            {url ? <img src={url} alt="" /> : <Image size={11} color="#cbd5e1" />}
+                            <span className="apollo-scope-preview-slot">{slot}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </button>
+                )}
                 <div className="apollo-scope-preview-meta">
                   <strong>{p.title || p.name || sku}</strong>
                   <span>{sku}</span>
                 </div>
-              </button>
+              </div>
             </article>
           );
         })}

@@ -1,7 +1,12 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { Grip, Loader2, Pencil, Trash2 } from 'lucide-react';
 import { LEGACY_NAV_ALIASES } from '../lib/taxonomy';
 import { subcategoryOptionsFromTree } from '../lib/taxonomyAdmin';
+
+const GROUP_HEADER_HEIGHT = 36;
+const CARD_ROW_HEIGHT = 168;
+const GRID_GAP = 8;
 
 function deepestGroupKey(product, mainCategoryId, selectedPath = []) {
   const path = product.categoryPath || [];
@@ -100,7 +105,6 @@ function reorderInsert(prev, moveSet, targetId, { toTop = false } = {}) {
   return sameOrder(prev, next) ? prev : next;
 }
 
-/** Move selection in a multi-column grid: ←/→ one column, ↑/↓ one row. */
 function moveBlockGrid(prev, moveSet, direction, cols) {
   const columnCount = Math.max(1, cols || 1);
   const start = prev.findIndex((p) => moveSet.has(p.id));
@@ -140,10 +144,11 @@ function moveBlockGrid(prev, moveSet, direction, cols) {
   return sameOrder(prev, without) ? prev : without;
 }
 
-function readGridColumnCount(gridEl) {
-  if (!gridEl) return 3;
-  const tracks = window.getComputedStyle(gridEl).gridTemplateColumns.trim().split(/\s+/).filter(Boolean);
-  return Math.max(1, tracks.length);
+function readGridColumnCount(containerEl) {
+  if (!containerEl) return 3;
+  const width = containerEl.clientWidth;
+  if (width < 640) return 2;
+  return 3;
 }
 
 function reorderWithinGroup(groups, sourceGroupId, moveSet, targetId, { toTop = false } = {}) {
@@ -165,6 +170,27 @@ function reorderWithinGroup(groups, sourceGroupId, moveSet, targetId, { toTop = 
     g.id === sourceGroupId ? { ...g, products: nextGroupProducts } : g
   ));
   return { nextGroups, groupId: sourceGroupId, flat: nextGroups.flatMap((g) => g.products) };
+}
+
+function buildVirtualRows(groups, columnCount) {
+  const rows = [];
+  for (const group of groups) {
+    rows.push({ type: 'header', group });
+    const cols = Math.max(1, columnCount);
+    for (let i = 0; i < group.products.length; i += cols) {
+      rows.push({
+        type: 'products',
+        group,
+        products: group.products.slice(i, i + cols),
+      });
+    }
+  }
+  return rows;
+}
+
+function estimateRowHeight(row) {
+  if (row.type === 'header') return GROUP_HEADER_HEIGHT;
+  return CARD_ROW_HEIGHT + GRID_GAP;
 }
 
 const ReorderCard = memo(function ReorderCard({
@@ -244,6 +270,7 @@ export default function ReorderGrid({
   onDeleteSubcategory,
   onOrderCommitted,
   savingOrder = false,
+  emptyHint,
 }) {
   const scrollRef = useRef(null);
   const gridRef = useRef(null);
@@ -262,11 +289,34 @@ export default function ReorderGrid({
   const [dragId, setDragId] = useState(null);
   const [overId, setOverId] = useState(null);
   const [draggingSet, setDraggingSet] = useState(() => new Set());
+  const [columnCount, setColumnCount] = useState(3);
 
   const groups = useMemo(
     () => buildGroups(products, mainCategoryId, taxonomyTree, selectedPath),
     [products, mainCategoryId, taxonomyTree, selectedPath],
   );
+
+  const virtualRows = useMemo(
+    () => buildVirtualRows(groups, columnCount),
+    [groups, columnCount],
+  );
+
+  const rowVirtualizer = useVirtualizer({
+    count: virtualRows.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: (index) => estimateRowHeight(virtualRows[index]),
+    overscan: 4,
+  });
+
+  useEffect(() => {
+    const el = gridRef.current;
+    if (!el) return undefined;
+    const update = () => setColumnCount(readGridColumnCount(el));
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   const getMoveSet = useCallback((id) => (
     selectedIds.has(id) ? new Set(selectedIds) : new Set([id])
@@ -445,7 +495,7 @@ export default function ReorderGrid({
       else if (e.key === 'ArrowDown') direction = 'down';
       else if (e.key === 'ArrowLeft') direction = 'left';
 
-      const cols = readGridColumnCount(gridRef.current);
+      const cols = columnCount;
       let changed = false;
       let changedGroupId = null;
       const nextGroups = groups.map((group) => {
@@ -467,7 +517,7 @@ export default function ReorderGrid({
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [dragDisabled, savingOrder, selectedIds, groups, onProductsChange, onOrderCommitted]);
+  }, [dragDisabled, savingOrder, selectedIds, groups, columnCount, onProductsChange, onOrderCommitted]);
 
   return (
     <div className="adm-reorder-content" ref={scrollRef} tabIndex={0}>
@@ -482,7 +532,9 @@ export default function ReorderGrid({
         </div>
       )}
       {!loading && products.length === 0 && (
-        <div className="adm-empty">No products match these filters.</div>
+        <div className="adm-empty">
+          {emptyHint || 'No products match these filters.'}
+        </div>
       )}
 
       <div
@@ -492,50 +544,87 @@ export default function ReorderGrid({
         ↑ Drop here to move to top
       </div>
 
-      <div className="adm-reorder-grid" ref={gridRef}>
-        {groups.map((group) => (
-          <div key={`grp-${group.id}`} className="adm-reorder-group">
-            <div className="adm-reorder-group-header">
-              <span>{group.label}</span>
-              {group.id !== '__other__' && (
-                <div className="adm-reorder-group-actions">
-                  <button
-                    type="button"
-                    className="adm-reorder-cat-edit"
-                    title="Edit subcategory name"
-                    onClick={() => onEditSubcategory?.({ id: group.id, label: group.label, type: 'subcategory' })}
-                  >
-                    <Pencil size={11} />
-                  </button>
-                  {onDeleteSubcategory && (
-                    <button
-                      type="button"
-                      className="adm-reorder-cat-edit adm-reorder-cat-edit--danger"
-                      title="Delete subcategory"
-                      onClick={() => onDeleteSubcategory({ id: group.id, label: group.label, type: 'subcategory' })}
-                    >
-                      <Trash2 size={11} />
-                    </button>
-                  )}
+      <div className="adm-reorder-virtual-wrap" ref={gridRef}>
+        <div
+          className="adm-reorder-virtual"
+          style={{ height: `${rowVirtualizer.getTotalSize()}px` }}
+        >
+          {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+            const row = virtualRows[virtualRow.index];
+            if (!row) return null;
+
+            if (row.type === 'header') {
+              const group = row.group;
+              return (
+                <div
+                  key={`hdr-${group.id}`}
+                  className="adm-reorder-virtual-row adm-reorder-virtual-row--header"
+                  style={{
+                    transform: `translateY(${virtualRow.start}px)`,
+                    height: `${virtualRow.size}px`,
+                  }}
+                >
+                  <div className="adm-reorder-group-header">
+                    <span>{group.label}</span>
+                    {group.id !== '__other__' && (
+                      <div className="adm-reorder-group-actions">
+                        <button
+                          type="button"
+                          className="adm-reorder-cat-edit"
+                          title="Edit subcategory name"
+                          onClick={() => onEditSubcategory?.({ id: group.id, label: group.label, type: 'subcategory' })}
+                        >
+                          <Pencil size={11} />
+                        </button>
+                        {onDeleteSubcategory && (
+                          <button
+                            type="button"
+                            className="adm-reorder-cat-edit adm-reorder-cat-edit--danger"
+                            title="Delete subcategory"
+                            onClick={() => onDeleteSubcategory({ id: group.id, label: group.label, type: 'subcategory' })}
+                          >
+                            <Trash2 size={11} />
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
-              )}
-            </div>
-            {group.products.map((product) => (
-              <ReorderCard
-                key={product.id}
-                product={product}
-                isDragging={draggingSet.has(product.id)}
-                isOver={overId === product.id && !draggingSet.has(product.id)}
-                isSelected={selectedIds.has(product.id)}
-                dragDisabled={dragDisabled}
-                onToggleSelect={onToggleSelect}
-                onEditProduct={onEditProduct}
-                onStartDrag={startDrag}
-                scrollRef={scrollRef}
-              />
-            ))}
-          </div>
-        ))}
+              );
+            }
+
+            return (
+              <div
+                key={`row-${row.group.id}-${virtualRow.index}`}
+                className="adm-reorder-virtual-row adm-reorder-virtual-row--cards"
+                style={{
+                  transform: `translateY(${virtualRow.start}px)`,
+                  height: `${virtualRow.size}px`,
+                }}
+              >
+                <div
+                  className="adm-reorder-row-grid"
+                  style={{ gridTemplateColumns: `repeat(${columnCount}, minmax(0, 1fr))` }}
+                >
+                  {row.products.map((product) => (
+                    <ReorderCard
+                      key={product.id}
+                      product={product}
+                      isDragging={draggingSet.has(product.id)}
+                      isOver={overId === product.id && !draggingSet.has(product.id)}
+                      isSelected={selectedIds.has(product.id)}
+                      dragDisabled={dragDisabled}
+                      onToggleSelect={onToggleSelect}
+                      onEditProduct={onEditProduct}
+                      onStartDrag={startDrag}
+                      scrollRef={scrollRef}
+                    />
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );

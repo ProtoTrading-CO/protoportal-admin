@@ -20,8 +20,13 @@ import ApolloProductPicker from './ApolloProductPicker';
 import ApolloCompactProductList from './ApolloCompactProductList';
 import ApolloSelectedProductPreview from './ApolloSelectedProductPreview';
 import ReprocessLiveFeed from './ReprocessLiveFeed';
-import { compressImage, applyDormantLive } from '../lib/products';
+import { compressImage, applyDormantLive, updateProduct } from '../lib/products';
 import { mapWithConcurrency } from '../lib/concurrency';
+import {
+  applyImagePayloadToProduct,
+  imagesToPayload,
+  productImagesFromRecord,
+} from '../lib/productImages';
 import {
   countRecipeJobs,
   estimateBatchCostUsd,
@@ -153,6 +158,7 @@ export default function ApolloImageWizard({
   const [sameCodeSuggestion, setSameCodeSuggestion] = useState([]);
   const [selectedProducts, setSelectedProducts] = useState([]);
   const [selectedProductsLoading, setSelectedProductsLoading] = useState(false);
+  const [imageReorderSavingSku, setImageReorderSavingSku] = useState('');
 
   const abortRef = useRef(null);
   const batchIdRef = useRef(null);
@@ -286,6 +292,25 @@ export default function ApolloImageWizard({
     });
   }, [onShowToast]);
 
+  const handleReorderImages = useCallback(async (product, nextImages) => {
+    const sku = product.sku || product.id;
+    if (!sku || imageReorderSavingSku) return;
+    const payload = imagesToPayload(nextImages);
+    setImageReorderSavingSku(sku);
+    try {
+      await updateProduct(sku, payload);
+      setSelectedProducts((prev) => prev.map((p) => (
+        (p.sku || p.id) === sku ? applyImagePayloadToProduct(p, payload) : p
+      )));
+      onRefreshCatalog?.();
+      onShowToast?.(`Image order saved for ${sku}`, 'success');
+    } catch (err) {
+      onShowToast?.(err.message || 'Failed to save image order', 'error');
+    } finally {
+      setImageReorderSavingSku('');
+    }
+  }, [imageReorderSavingSku, onRefreshCatalog, onShowToast]);
+
   const patchSlot = (slot, patch) => {
     setSlotPlans((prev) => ({
       ...prev,
@@ -369,20 +394,22 @@ export default function ApolloImageWizard({
       title: row.title,
       barcode: row.barcode || '',
       image: row.image_url_one,
+      secondaryImage: row.image_url_two,
+      imageThree: row.image_url_three,
+      imageFour: row.image_url_four,
       images: [row.image_url_one, row.image_url_two, row.image_url_three, row.image_url_four].filter(Boolean),
     });
     const mapPrefillRow = (p) => {
-      const images = p.images?.length
-        ? p.images
-        : [p.image, p.secondaryImage, p.imageThree, p.imageFour].filter(Boolean);
+      const images = productImagesFromRecord(p);
+      const payload = imagesToPayload(images);
       return {
         id: p.id || p.sku,
         sku: p.sku || p.id,
         name: p.title || p.name || p.sku,
         title: p.title || p.name || p.sku,
         barcode: p.barcode || '',
-        image: images[0] || p.image,
-        images,
+        ...payload,
+        images: images.filter(Boolean),
       };
     };
 
@@ -755,6 +782,8 @@ export default function ApolloImageWizard({
           activeSlots={activeSlots}
           onEditSelection={step === 1 && !busy ? () => setStep(0) : undefined}
           onDeselectProduct={step === 1 && !busy ? handleDeselectProduct : undefined}
+          onReorderImages={step === 1 && !busy ? handleReorderImages : undefined}
+          imageReorderSavingSku={imageReorderSavingSku}
           compact={step === 2}
         />
       )}
