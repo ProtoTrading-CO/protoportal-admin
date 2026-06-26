@@ -142,6 +142,40 @@ export { readSlotUrl, slotField };
 
 const IMAGE_FIELDS = ['image_url_one', 'image_url_two', 'image_url_three', 'image_url_four'];
 
+/** Swap two staged preview slots (1–4) on archived_products before Approval go-live. */
+export async function reorderStagedImageSlots(sb, sku, fromSlot, toSlot) {
+  const cleanSku = String(sku || '').trim();
+  const a = Math.min(4, Math.max(1, Number(fromSlot) || 1));
+  const b = Math.min(4, Math.max(1, Number(toSlot) || 1));
+  if (!cleanSku || a === b) return null;
+
+  const { data: row, error } = await sb
+    .from('archived_products')
+    .select('*')
+    .eq('sku', cleanSku)
+    .eq('archived_by', 'new-products')
+    .maybeSingle();
+  if (error) throw error;
+  if (!row) throw new Error(`No staged preview for "${cleanSku}"`);
+
+  const urls = IMAGE_FIELDS.map((_, i) => readSlotUrl(row, i + 1));
+  [urls[a - 1], urls[b - 1]] = [urls[b - 1], urls[a - 1]];
+
+  const patch = { updated_at: new Date().toISOString() };
+  IMAGE_FIELDS.forEach((field, i) => {
+    patch[field] = urls[i] || null;
+  });
+
+  const { error: upErr } = await sb
+    .from('archived_products')
+    .update(patch)
+    .eq('sku', cleanSku)
+    .eq('archived_by', 'new-products');
+  if (upErr) throw upErr;
+
+  return { images: urls };
+}
+
 /** Merge staged image slots onto a live row — only changed / newly generated URLs apply. */
 export function mergeStagedImagesOntoLive(staged, live) {
   const merged = {};

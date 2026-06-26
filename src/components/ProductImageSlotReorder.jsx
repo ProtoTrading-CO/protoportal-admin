@@ -16,7 +16,7 @@ export default function ProductImageSlotReorder({
   const handleSwap = (index) => {
     if (disabled || saving) return;
     const next = swapAdjacentImageSlots(slots, index);
-    onSwap?.(next);
+    onSwap?.(next, index);
   };
 
   return (

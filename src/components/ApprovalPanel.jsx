@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertCircle, Check, CheckCircle, ChevronLeft, ChevronRight, ImageOff, Loader2, Trash2, X, ZoomIn } from 'lucide-react';
 import { dismissImageBatch, subscribeImageBatch } from '../lib/imageBatchTracker';
-import { applyDormantLive } from '../lib/products';
+import { applyDormantLive, reorderStagedApprovalImages } from '../lib/products';
 import { mapWithConcurrency } from '../lib/concurrency';
 
 function buildGallery(item) {
@@ -49,6 +49,49 @@ function ApprovalImage({ url, fallbackUrl, alt = '' }) {
         if (idx < candidates.current.length - 1) setIdx((i) => i + 1);
       }}
     />
+  );
+}
+
+function StagedImageReorderStrip({ item, saving, onSwap, onOpenLightbox }) {
+  const images = [0, 1, 2, 3].map((i) => item.stagedImages?.[i] || '');
+  const fallbacks = item.stagedImageFallbacks || [];
+  const hasAny = images.some(Boolean) || fallbacks.some(Boolean);
+  if (!hasAny) return null;
+
+  return (
+    <div className="approval-img-strip approval-img-strip--staged">
+      <div className="approval-img-strip-head">
+        <span className="approval-img-strip-label">Staged</span>
+        <span className="approval-img-strip-hint">Swap order (1–4) before Set live</span>
+      </div>
+      <ImageStrip
+        urls={images}
+        fallbacks={fallbacks}
+        label="Staged"
+        type="staged"
+        item={item}
+        onOpenLightbox={onOpenLightbox}
+      />
+      <div className="approval-staged-swap-row">
+        {[0, 1, 2].map((i) => (
+          <button
+            key={i}
+            type="button"
+            className="approval-staged-swap-btn"
+            disabled={saving || (!images[i] && !images[i + 1])}
+            title={`Swap image ${i + 1} ↔ ${i + 2}`}
+            onClick={() => onSwap(item, i)}
+          >
+            {i + 1} ↔ {i + 2}
+          </button>
+        ))}
+        {saving && (
+          <span className="approval-staged-swap-saving">
+            <Loader2 size={12} className="spin" /> Saving…
+          </span>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -253,7 +296,7 @@ export default function ApprovalPanel({ onShowToast, onRefreshStats, embedded = 
   const [lightbox, setLightbox] = useState(null);
   const [imageBatch, setImageBatch] = useState(null);
   const [lastUpdated, setLastUpdated] = useState(null);
-  const [setLiveNotice, setSetLiveNotice] = useState(null);
+  const [reorderSavingSku, setReorderSavingSku] = useState('');
   const busyRef = useRef(false);
   const itemsSigRef = useRef('');
 
@@ -384,6 +427,27 @@ export default function ApprovalPanel({ onShowToast, onRefreshStats, embedded = 
     setBusySkus(new Set());
   };
 
+  const handleStagedReorder = async (item, index) => {
+    const sku = item.sku;
+    if (!sku || reorderSavingSku) return;
+    setReorderSavingSku(sku);
+    try {
+      await reorderStagedApprovalImages(sku, index + 1, index + 2);
+      setItems((prev) => prev.map((row) => {
+        if (row.sku !== sku) return row;
+        const stagedImages = [0, 1, 2, 3].map((i) => row.stagedImages?.[i] || '');
+        [stagedImages[index], stagedImages[index + 1]] = [stagedImages[index + 1], stagedImages[index]];
+        return { ...row, stagedImages };
+      }));
+      itemsSigRef.current = '';
+      onShowToast?.(`Image ${index + 1} ↔ ${index + 2} swapped for ${sku}`, 'success');
+    } catch (err) {
+      onShowToast?.(err.message || 'Failed to reorder staged images', 'error');
+    } finally {
+      setReorderSavingSku('');
+    }
+  };
+
   const discard = async (sku) => {
     if (!window.confirm(`Discard staged preview for ${sku}? Live images unchanged.`)) return;
     setBusy(true);
@@ -499,7 +563,12 @@ export default function ApprovalPanel({ onShowToast, onRefreshStats, embedded = 
                 </p>
               )}
               <ImageStrip urls={item.liveImages} fallbacks={[]} label="Live" type="live" item={item} onOpenLightbox={openLightbox} />
-              <ImageStrip urls={item.stagedImages} fallbacks={item.stagedImageFallbacks || []} label="Staged" type="staged" item={item} onOpenLightbox={openLightbox} />
+              <StagedImageReorderStrip
+                item={item}
+                saving={reorderSavingSku === item.sku}
+                onSwap={handleStagedReorder}
+                onOpenLightbox={openLightbox}
+              />
               <button
                 type="button"
                 className="approval-view-all"
