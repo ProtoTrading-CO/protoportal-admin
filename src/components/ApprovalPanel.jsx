@@ -297,6 +297,7 @@ export default function ApprovalPanel({ onShowToast, onRefreshStats, embedded = 
   const [imageBatch, setImageBatch] = useState(null);
   const [lastUpdated, setLastUpdated] = useState(null);
   const [reorderSavingSku, setReorderSavingSku] = useState('');
+  const [setLiveNotice, setSetLiveNotice] = useState(null);
   const busyRef = useRef(false);
   const itemsSigRef = useRef('');
 
