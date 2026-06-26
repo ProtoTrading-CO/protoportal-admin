@@ -157,15 +157,25 @@ function PmMobileProductCard({
             <button
               type="button"
               className="adm-btn-red adm-btn--sm"
-              disabled={item.stockReady === false}
+              disabled={item.stockReady === false || mutations.setLive.isPending}
               onClick={() => mutations.setLive.mutate(item.sku, {
                 onSuccess: () => onRefreshStats?.(),
                 onError: (err) => onShowToast?.(err.message, 'error'),
               })}
             >
+              {mutations.setLive.isPending ? <Loader2 size={14} className="spin" /> : null}
               Set live
             </button>
-            <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => mutations.discardPreview.mutate(item.sku)}>Discard</button>
+            <button
+              type="button"
+              className="adm-btn-ghost adm-btn--sm"
+              disabled={mutations.discardPreview.isPending}
+              onClick={() => mutations.discardPreview.mutate(item.sku, {
+                onError: (err) => onShowToast?.(err.message, 'error'),
+              })}
+            >
+              Discard
+            </button>
           </>
         )}
         {status === 'recycle' && (

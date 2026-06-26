@@ -102,6 +102,7 @@ import { orderMatchesTab, normalizeOrderStatus, getWorkflowAdvanceOptions } from
 import OrderWorkflowBadge from '../components/OrderWorkflowBadge';
 import { fetchFulfillmentUsers, loadActiveUserId } from '../lib/fulfillmentUsers';
 import { isVictorSender, CUSTOMER_SEND_FORBIDDEN, PAYMENT_RECEIVED_FORBIDDEN } from '../lib/fulfillmentAuth';
+import { errorFromJson } from '../lib/apiError';
 import { fetchSpecials, saveSpecials } from '../lib/specials';
 import { fetchBanner, saveBanner, uploadBannerImage } from '../lib/banner';
 import { BANNER_LABEL, BANNER_ASPECT_CSS } from '../lib/bannerSpec';
@@ -1037,7 +1038,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
       setPresaleInvoices((prev) => ({ ...prev, [order.id]: meta }));
       showToast(`Presale invoice uploaded for ${order.order_number || order.id.slice(0, 8)}`);
     } catch (err) {
-      alert(err.message || 'Upload failed');
+      showToast(err.message || 'Upload failed', 'error');
     } finally {
       setPresaleUploading('');
     }
@@ -1050,25 +1051,28 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
       setPaymentRecords((prev) => ({ ...prev, [order.id]: meta }));
       showToast(`Proof of payment uploaded for ${order.order_number || order.id.slice(0, 8)}`);
     } catch (err) {
-      alert(err.message || 'Upload failed');
+      showToast(err.message || 'Upload failed', 'error');
     } finally {
       setPopUploading('');
     }
   };
 
   const handlePaymentStatus = async (order, paid) => {
+    setSaving(`pay-${order.id}`);
     try {
       const meta = await setPaymentStatus(order.id, paid);
       setPaymentRecords((prev) => ({ ...prev, [order.id]: { ...prev[order.id], ...meta } }));
     } catch (err) {
-      alert(err.message || 'Failed to update payment status');
+      showToast(err.message || 'Failed to update payment status', 'error');
+    } finally {
+      setSaving('');
     }
   };
 
   const sendOrderConfirmation = async (order) => {
     const email = order.customers?.email;
     if (!email) {
-      alert('This customer has no email address on file.');
+      showToast('This customer has no email address on file.', 'error');
       return;
     }
     if (!victorCanSend) {
@@ -1144,7 +1148,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
       setOrderTab('paid');
       showToast(`Confirmation sent to ${email}${emailData.presaleIncluded ? ' with presale invoice' : ''} — moved to Payment`);
     } catch (err) {
-      alert(err.message || 'Could not send order confirmation');
+      showToast(err.message || 'Could not send order confirmation', 'error');
     } finally {
       setSaving('');
     }
@@ -2381,7 +2385,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
       });
       setOrders((prev) => prev.map((item) => item.id === order.id ? updated : item));
     } catch (err) {
-      alert(err.message || 'Could not update order status');
+      showToast(err.message || 'Could not update order status', 'error');
     } finally { setSaving(''); }
   };
 

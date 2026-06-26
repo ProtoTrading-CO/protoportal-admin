@@ -47,6 +47,9 @@ export function useCatalogMutations() {
 
   const setLive = useMutation({
     mutationFn: (sku) => applyDormantLive(sku),
+    onError: (err) => {
+      console.error('setLive:', err.message);
+    },
   });
 
   const softDelete = useMutation({
