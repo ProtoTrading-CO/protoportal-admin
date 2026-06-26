@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto';
 import { readSiteConfigJson, writeSiteConfigJson } from './_site-config.js';
 import { getStockClient } from './_stock-client.js';
+import { MAX_CONCURRENT_TRANSFORMS } from './_image-gen-constants.js';
 import {
   acquireImageGenLockDb,
   releaseImageGenLockDb,
@@ -19,7 +20,6 @@ const LOCKS_FILE = 'image-gen/locks.json';
 const BATCHES_FILE = 'image-gen/batches.json';
 const SEMAPHORE_FILE = 'image-gen/semaphore.json';
 const MAX_LOGS = 500;
-export const MAX_CONCURRENT_TRANSFORMS = Math.max(1, Math.min(10, Number(process.env.IMAGE_GEN_CONCURRENCY) || 3));
 
 /** Approximate OpenRouter pricing — fallback when usage.cost is missing from API. */
 const MODEL_PRICING = {
@@ -33,6 +33,7 @@ let cachedFxRate = null;
 let cachedFxAt = 0;
 
 export { getStockClient };
+export { MAX_CONCURRENT_TRANSFORMS } from './_image-gen-constants.js';
 
 async function readStore(file, fallback) {
   try {
