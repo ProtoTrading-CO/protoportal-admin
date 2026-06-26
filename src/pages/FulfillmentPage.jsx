@@ -466,7 +466,7 @@ export default function FulfillmentPage() {
         <div className="ff-user-card">
           <div className="ff-user-label">Working as</div>
           <div ref={userPickerRef} className="ff-user-picker">
-            <button type="button" className="ff-user-btn" onClick={() => setUserPickerOpen((o) => !o)}>
+            <button type="button" className="ff-user-btn" onClick={() => setUserPickerOpen((o) => !o)} aria-expanded={userPickerOpen}>
               <User size={16} />
               <span>{activeUser?.name || 'Select user'}</span>
               <span className="ff-user-chevron" aria-hidden>▾</span>
@@ -482,12 +482,19 @@ export default function FulfillmentPage() {
                     onClick={() => { setActiveUserId(u.id); saveActiveUserId(u.id); setUserPickerOpen(false); }}
                   >
                     {u.name}
+                    {isVictorSender(u) && <span className="ff-user-badge">Can send</span>}
                   </button>
                 ))}
               </div>
             )}
           </div>
         </div>
+
+        {!victorCanSave && (
+          <div className="ff-victor-notice" role="note">
+            View and edit quantities freely. Only <strong>Victor</strong> can save sections and send the order.
+          </div>
+        )}
 
         {categoryGroups.map((group) => {
           const section = progress.sections?.[group.id];
