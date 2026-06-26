@@ -1,6 +1,26 @@
 import { jsPDF } from 'jspdf';
 import { displayOrderNumber, buildFulfillmentUrl } from './orderNumber';
 
+/** Customer-facing order confirmation PDF/email — staff preview may still show prices. */
+export const SHOW_CUSTOMER_PRICES = false;
+
+export function stripPricesFromOrderItems(items = []) {
+  return items.map(({ unitPrice, price, ...rest }) => rest);
+}
+
+export function resolveCustomerOrderPricing(items = []) {
+  if (!SHOW_CUSTOMER_PRICES) {
+    return { hasPrices: false, total: null, items: stripPricesFromOrderItems(items) };
+  }
+  const hasPrices = items.some((item) => item.unitPrice != null || item.price != null);
+  const total = hasPrices
+    ? items
+      .filter((item) => !item.removed)
+      .reduce((sum, item) => sum + (Number(item.unitPrice ?? item.price ?? 0) * (item.qty || 0)), 0)
+    : null;
+  return { hasPrices, total, items };
+}
+
 export function buildOrderNoteSections({ assignedTo = '', autoNotes = '', userNotes = '' } = {}) {
   const autoLines = String(autoNotes || '').split('\n').map((line) => line.trim()).filter(Boolean);
   const userLines = String(userNotes || '').split('\n').map((line) => line.trim()).filter(Boolean);
@@ -257,8 +277,8 @@ export async function generateOrderPdfBase64({
   for (const item of items) {
     const orderedQty = item.originalQty != null ? item.originalQty : item.qty;
     const confirmedQty = item.removed ? 0 : (item.qty ?? item.finalQty ?? 0);
-    const price = item.unitPrice || item.price || 0;
-    const lineTotal = hasPrices && !item.removed && price ? confirmedQty * price : null;
+    const price = Number(item.unitPrice ?? item.price ?? 0);
+    const lineTotal = hasPrices && !item.removed ? confirmedQty * price : null;
     const codeText = String(item.code || '—');
     const nameText = String(item.name || '—');
 
@@ -395,7 +415,10 @@ export async function generateOrderPdfBase64({
   ensureSpace(30);
   doc.setFontSize(9);
   doc.setTextColor(148, 163, 184);
-  doc.text('Proto Trading · South Africa · All prices incl. VAT', margin, pageHeight - margin);
+  const footer = hasPrices
+    ? 'Proto Trading · South Africa · All prices incl. VAT'
+    : 'Proto Trading · South Africa';
+  doc.text(footer, margin, pageHeight - margin);
 
   return doc.output('datauristring').split(',')[1];
 }

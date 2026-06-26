@@ -93,7 +93,7 @@ import {
 } from '../lib/taxonomyAdmin';
 import { approveCustomer, deleteCustomer, fetchCustomersPage, fetchProtoActiveCustomersPage, seedProtoActiveCustomers, updateProtoActiveCustomer, updateCustomerAdmin } from '../lib/customers';
 import { supabase } from '../lib/supabase';
-import { buildOrderNoteSections, createEmailOrderItems, generateOrderPdfBase64, buildEmailItemsFromOrder, base64ToBlob } from '../lib/orderDocuments';
+import { buildOrderNoteSections, createEmailOrderItems, generateOrderPdfBase64, buildEmailItemsFromOrder, base64ToBlob, resolveCustomerOrderPricing } from '../lib/orderDocuments';
 import { displayOrderNumber, buildFulfillmentUrl } from '../lib/orderNumber';
 import { fetchPresaleInvoices, uploadPresaleInvoice } from '../lib/presaleInvoice';
 import { fetchConfirmationSent, markConfirmationSent, fetchPaymentRecords, uploadPop, setPaymentStatus } from '../lib/orderPayment';
@@ -1070,13 +1070,10 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     setSaving(`send-${order.id}`);
     try {
       const emailItems = buildEmailItemsFromOrder(order);
-      const hasPrices = emailItems.some((item) => item.unitPrice || item.price);
-      const total = hasPrices
-        ? emailItems.filter((item) => !item.removed).reduce((sum, item) => sum + ((item.unitPrice || item.price || 0) * (item.qty || 0)), 0)
-        : null;
+      const { hasPrices, total, items: customerItems } = resolveCustomerOrderPricing(emailItems);
       const pdfBase64 = await generateOrderPdfBase64({
         order,
-        items: emailItems,
+        items: customerItems,
         userNotes: order.order_change_notes || '',
         assignedTo: activeFulfillmentUser?.name || '',
         total,
@@ -1106,10 +1103,11 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
           customerName: order.customers?.name,
           orderNumber: displayOrderNumber(order),
           orderDate: order.created_at,
-          items: emailItems,
+          items: customerItems,
           userNotes: order.order_change_notes || '',
           assignedTo: activeFulfillmentUser?.name || '',
           total,
+          hasPrices,
           confirmationStoragePath: urlData.path,
           pdfFilename: `proto-order-confirmation-${displayOrderNumber(order)}.pdf`,
         }),

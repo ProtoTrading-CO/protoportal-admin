@@ -70,13 +70,14 @@ function buildEmailHtml({
   userNotes,
   assignedTo,
   total,
+  hasPrices = false,
   hasPresaleInvoice,
 }) {
   const dateStr = orderDate
     ? new Date(orderDate).toLocaleDateString('en-ZA', { day: 'numeric', month: 'long', year: 'numeric' })
     : '';
 
-  const hasPrice = items.some((item) => item.unitPrice && !item.removed);
+  const showPrices = hasPrices && items.some((item) => !item.removed);
   const allNotes = [autoNotes, userNotes].filter(Boolean).join('\n\n');
 
   const itemRows = items.map((item) => {
@@ -91,11 +92,12 @@ function buildEmailHtml({
           <td style="padding:10px 12px;font-size:13px;color:#94a3b8;text-decoration:line-through">${escapeHtml(item.name, '—')}</td>
           <td style="padding:10px 12px;text-align:center;font-size:13px;color:#94a3b8;text-decoration:line-through">${item.originalQty ?? item.qty}</td>
           <td style="padding:10px 12px;text-align:center"><span style="font-size:11px;font-weight:700;color:#dc2626;background:#fee2e2;padding:3px 8px;border-radius:4px">OUT OF STOCK</span></td>
-          ${hasPrice ? '<td style="padding:10px 12px;text-align:right;color:#94a3b8">—</td>' : ''}
+          ${showPrices ? '<td style="padding:10px 12px;text-align:right;color:#94a3b8">—</td>' : ''}
         </tr>`;
     }
     const qtyChanged = item.originalQty != null && item.qty !== item.originalQty;
-    const lineTotal = item.unitPrice ? (item.qty * item.unitPrice).toFixed(2) : null;
+    const unitPrice = Number(item.unitPrice ?? item.price ?? 0);
+    const lineTotal = showPrices ? (item.qty * unitPrice).toFixed(2) : null;
     return `
       <tr style="background:${qtyChanged ? '#fffbeb' : 'transparent'};border-bottom:1px solid #f1f5f9;">
         <td style="padding:8px 12px">
@@ -148,13 +150,13 @@ function buildEmailHtml({
           <th style="padding:10px 12px;text-align:left;font-size:11px;font-weight:700;color:#ffffff;text-transform:uppercase;letter-spacing:0.05em;background:#111111">Product</th>
           <th style="padding:10px 12px;text-align:center;font-size:11px;font-weight:700;color:#ffffff;text-transform:uppercase;letter-spacing:0.05em;background:#111111">Ordered</th>
           <th style="padding:10px 12px;text-align:center;font-size:11px;font-weight:700;color:#ffffff;text-transform:uppercase;letter-spacing:0.05em;background:#c40000">Confirmed</th>
-          ${hasPrice ? '<th style="padding:10px 12px;text-align:right;font-size:11px;font-weight:700;color:#ffffff;text-transform:uppercase;letter-spacing:0.05em;background:#111111">Total</th>' : ''}
+          ${showPrices ? '<th style="padding:10px 12px;text-align:right;font-size:11px;font-weight:700;color:#ffffff;text-transform:uppercase;letter-spacing:0.05em;background:#111111">Total</th>' : ''}
         </tr>
       </thead>
       <tbody>${itemRows}</tbody>
     </table>
 
-    ${total != null ? `
+    ${showPrices && total != null ? `
     <div style="margin-top:16px;padding:14px 12px;background:#fafafa;border-radius:8px;border:1px solid #e5e5e5;border-left:4px solid #c40000;display:flex;justify-content:space-between;align-items:center">
       <span style="font-size:14px;font-weight:700;color:#111111">Total (incl. VAT)</span>
       <span style="font-size:20px;font-weight:900;color:#c40000">R ${Number(total).toFixed(2)}</span>
@@ -205,6 +207,7 @@ export default async function handler(req, res) {
     userNotes,
     assignedTo,
     total,
+    hasPrices = false,
     pdfBase64,
     pdfFilename,
     confirmationStoragePath,
@@ -241,6 +244,7 @@ export default async function handler(req, res) {
     userNotes,
     assignedTo,
     total,
+    hasPrices,
     hasPresaleInvoice: Boolean(presaleAttachment),
   });
 
