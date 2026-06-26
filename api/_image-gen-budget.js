@@ -1,14 +1,25 @@
 /**
- * Image gen spend budgets — daily/monthly limits, email alerts, optional hard block.
+ * Image gen spend budgets — stored in site-config (no Vercel env required).
+ * Defaults apply on first deploy; edit limits in Admin → Cost Tracking.
  */
 
 import { readSiteConfigJson, writeSiteConfigJson } from './_site-config.js';
 import { isMissingTableError } from './_image-gen-db-locks.js';
 
+const CONFIG_FILE = 'image-gen/budget-config.json';
 const ALERTS_FILE = 'image-gen/budget-alerts.json';
 const WARN_PCT = 80;
 const BLOCK_PCT = 100;
 const USD_TO_ZAR_FALLBACK = 18.0;
+
+export const DEFAULT_BUDGET_CONFIG = {
+  dailyUsd: 50,
+  monthlyUsd: 200,
+  alertEmail: 'danieljoffeinfo@gmail.com',
+  blockAtLimit: true,
+  alertsEnabled: true,
+};
+
 let cachedFxRate = null;
 let cachedFxAt = 0;
 
@@ -28,26 +39,39 @@ async function fetchUsdToZarRate() {
     return cachedFxRate || USD_TO_ZAR_FALLBACK;
   }
 }
-const WARN_PCT = 80;
-const BLOCK_PCT = 100;
 
-function parsePositiveUsd(raw) {
+function parsePositiveUsd(raw, fallback) {
+  if (raw === null || raw === undefined || raw === '') return fallback;
   const n = Number(raw);
-  return Number.isFinite(n) && n > 0 ? n : null;
+  return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
-export function getImageGenBudgetConfig() {
-  const dailyUsd = parsePositiveUsd(process.env.IMAGE_GEN_BUDGET_DAILY_USD);
-  const monthlyUsd = parsePositiveUsd(process.env.IMAGE_GEN_BUDGET_MONTHLY_USD);
-  const alertEmail = String(process.env.IMAGE_GEN_ALERT_EMAIL || 'danieljoffeinfo@gmail.com').trim();
-  const blockAtLimit = String(process.env.IMAGE_GEN_BUDGET_BLOCK || 'true').toLowerCase() !== 'false';
+function normalizeBudgetConfig(raw = {}) {
+  const email = String(raw.alertEmail || DEFAULT_BUDGET_CONFIG.alertEmail).trim().toLowerCase();
   return {
-    dailyUsd,
-    monthlyUsd,
-    alertEmail,
-    blockAtLimit,
-    configured: Boolean(dailyUsd || monthlyUsd),
+    dailyUsd: parsePositiveUsd(raw.dailyUsd, DEFAULT_BUDGET_CONFIG.dailyUsd),
+    monthlyUsd: parsePositiveUsd(raw.monthlyUsd, DEFAULT_BUDGET_CONFIG.monthlyUsd),
+    alertEmail: email.includes('@') ? email : DEFAULT_BUDGET_CONFIG.alertEmail,
+    blockAtLimit: raw.blockAtLimit !== false,
+    alertsEnabled: raw.alertsEnabled !== false,
+    updatedAt: raw.updatedAt || null,
   };
+}
+
+export async function getImageGenBudgetConfig() {
+  const stored = await readSiteConfigJson(CONFIG_FILE, null);
+  return normalizeBudgetConfig(stored || DEFAULT_BUDGET_CONFIG);
+}
+
+export async function saveImageGenBudgetConfig(patch = {}) {
+  const current = await getImageGenBudgetConfig();
+  const next = normalizeBudgetConfig({
+    ...current,
+    ...patch,
+    updatedAt: new Date().toISOString(),
+  });
+  await writeSiteConfigJson(CONFIG_FILE, next);
+  return next;
 }
 
 function utcDayStart(d = new Date()) {
@@ -156,7 +180,7 @@ function buildPeriodStatus(spent, limitUsd, period) {
 }
 
 export async function getImageGenBudgetStatus(sb) {
-  const config = getImageGenBudgetConfig();
+  const config = await getImageGenBudgetConfig();
   const spend = await getImageGenSpendTotals(sb);
   const daily = buildPeriodStatus(spend.dayUsd, config.dailyUsd, 'daily');
   const monthly = buildPeriodStatus(spend.monthUsd, config.monthlyUsd, 'monthly');
@@ -168,15 +192,17 @@ export async function getImageGenBudgetStatus(sb) {
       : 'ok';
 
   return {
-    configured: config.configured,
+    configured: true,
+    config,
     blockAtLimit: config.blockAtLimit,
     alertEmail: config.alertEmail,
+    alertsEnabled: config.alertsEnabled,
     warnPct: WARN_PCT,
     spend,
     daily,
     monthly,
     level: worstLevel,
-    blocked: config.blockAtLimit && worstLevel === 'exceeded' && config.configured,
+    blocked: config.blockAtLimit && worstLevel === 'exceeded',
   };
 }
 
@@ -262,7 +288,7 @@ function formatUsd(n) {
 }
 
 async function maybeAlertPeriod(sb, { period, periodKeyVal, spent, limitUsd, config }) {
-  if (!limitUsd) return null;
+  if (!limitUsd || !config.alertsEnabled) return null;
   const pct = (spent / limitUsd) * 100;
   const level = levelForPct(pct);
   if (level === 'ok') return null;
@@ -278,7 +304,7 @@ async function maybeAlertPeriod(sb, { period, periodKeyVal, spent, limitUsd, con
     <p>Spent: <strong>${formatUsd(spent)}</strong> of <strong>${formatUsd(limitUsd)}</strong> (${pct.toFixed(1)}%)</p>
     <p>Period: ${periodKeyVal} (UTC)</p>
     ${level === 'exceeded' && config.blockAtLimit
-    ? '<p style="color:#991b1b"><strong>New image generation is blocked</strong> until the next period or you raise <code>IMAGE_GEN_BUDGET_DAILY_USD</code> / <code>IMAGE_GEN_BUDGET_MONTHLY_USD</code> in Vercel.</p>'
+    ? '<p style="color:#991b1b"><strong>New image generation is blocked</strong> until the next period or you raise the limits in Admin → Cost Tracking.</p>'
     : '<p>Consider pausing large Apollo batches until the period resets.</p>'}
     <p><a href="https://protoportal-admin.vercel.app">Open Cost Tracking in admin</a></p>
   `;
@@ -290,8 +316,8 @@ async function maybeAlertPeriod(sb, { period, periodKeyVal, spent, limitUsd, con
 
 /** Fire deduped email alerts when thresholds crossed. */
 export async function maybeSendImageGenBudgetAlerts(sb) {
-  const config = getImageGenBudgetConfig();
-  if (!config.configured || !config.alertEmail) return { alerts: [] };
+  const config = await getImageGenBudgetConfig();
+  if (!config.alertsEnabled || !config.alertEmail) return { alerts: [] };
 
   const spend = await getImageGenSpendTotals(sb);
   const alerts = [];
@@ -336,7 +362,7 @@ export async function assertImageGenBudgetAllowsSpend(sb) {
 
   const err = new Error(
     `Image generation budget exceeded (${parts.join('; ')}). `
-    + 'Raise limits in Vercel or wait for the next period. See Cost Tracking in admin.',
+    + 'Raise limits in Cost Tracking or wait for the next period.',
   );
   err.code = 'IMAGE_GEN_BUDGET_EXCEEDED';
   err.budgetStatus = status;

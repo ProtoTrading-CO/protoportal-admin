@@ -74,9 +74,17 @@ async function parseJsonResponse(res) {
 export default function CostTrackingPanel({ onShowToast }) {
   const [operator, setOperator] = useState(() => getImageGenOperator());
   const [loading, setLoading] = useState(true);
+  const [savingBudget, setSavingBudget] = useState(false);
   const [error, setError] = useState('');
   const [days, setDays] = useState(30);
   const [data, setData] = useState(null);
+  const [budgetForm, setBudgetForm] = useState({
+    dailyUsd: '50',
+    monthlyUsd: '200',
+    alertEmail: 'danieljoffeinfo@gmail.com',
+    blockAtLimit: true,
+    alertsEnabled: true,
+  });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -89,6 +97,16 @@ export default function CostTrackingPanel({ onShowToast }) {
       }
       setData(json);
       setError(typeof json.error === 'string' && res.status === 503 ? json.error : '');
+      const cfg = json.budget?.config;
+      if (cfg) {
+        setBudgetForm({
+          dailyUsd: String(cfg.dailyUsd ?? 50),
+          monthlyUsd: String(cfg.monthlyUsd ?? 200),
+          alertEmail: cfg.alertEmail || 'danieljoffeinfo@gmail.com',
+          blockAtLimit: cfg.blockAtLimit !== false,
+          alertsEnabled: cfg.alertsEnabled !== false,
+        });
+      }
     } catch (err) {
       const message = err?.message || 'Failed to load cost data';
       setError(message);
@@ -127,6 +145,32 @@ export default function CostTrackingPanel({ onShowToast }) {
     const next = setImageGenOperator(operator);
     setOperator(next);
     onShowToast?.(`Your label is now "${next}" — shown when you run Apollo batches`, 'success');
+  };
+
+  const saveBudget = async () => {
+    setSavingBudget(true);
+    try {
+      const res = await fetch('/api/image-gen-costs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'saveBudget',
+          dailyUsd: Number(budgetForm.dailyUsd),
+          monthlyUsd: Number(budgetForm.monthlyUsd),
+          alertEmail: budgetForm.alertEmail.trim(),
+          blockAtLimit: budgetForm.blockAtLimit,
+          alertsEnabled: budgetForm.alertsEnabled,
+        }),
+      });
+      const json = await parseJsonResponse(res);
+      if (!res.ok) throw new Error(json.error || 'Failed to save budget');
+      setData((prev) => (prev ? { ...prev, budget: json.budget } : prev));
+      onShowToast?.('Budget limits saved', 'success');
+    } catch (err) {
+      onShowToast?.(err.message || 'Failed to save budget', 'error');
+    } finally {
+      setSavingBudget(false);
+    }
   };
 
   return (
@@ -170,12 +214,12 @@ export default function CostTrackingPanel({ onShowToast }) {
         <div className="cost-tracking-warn">{error}</div>
       )}
 
-      {budget?.configured && (
+      {budget && (
         <section className={`cost-budget-section cost-budget-section--${budget.level}`}>
           <h3>Budget limits</h3>
           {budget.blocked && (
             <p className="cost-budget-blocked" role="alert">
-              <strong>Image generation blocked</strong> — daily or monthly limit reached. New Apollo batches and transforms are paused until the period resets or limits are raised in Vercel.
+              <strong>Image generation blocked</strong> — daily or monthly limit reached. Raise limits below or wait for the period to reset.
             </p>
           )}
           {!budget.blocked && budget.level === 'warning' && (
@@ -187,16 +231,60 @@ export default function CostTrackingPanel({ onShowToast }) {
             <BudgetMeter label="Today (UTC)" period={budget.daily} />
             <BudgetMeter label="This month (UTC)" period={budget.monthly} />
           </div>
-          <p className="adm-muted cost-budget-note">
-            Email at {budget.warnPct}% and 100%. Set <code>IMAGE_GEN_BUDGET_DAILY_USD</code>, <code>IMAGE_GEN_BUDGET_MONTHLY_USD</code>, and <code>IMAGE_GEN_ALERT_EMAIL</code> in Vercel.
-          </p>
+          <div className="cost-budget-settings">
+            <label>
+              Daily limit (USD)
+              <input
+                type="number"
+                min="1"
+                step="1"
+                className="adm-field-input"
+                value={budgetForm.dailyUsd}
+                onChange={(e) => setBudgetForm((f) => ({ ...f, dailyUsd: e.target.value }))}
+              />
+            </label>
+            <label>
+              Monthly limit (USD)
+              <input
+                type="number"
+                min="1"
+                step="5"
+                className="adm-field-input"
+                value={budgetForm.monthlyUsd}
+                onChange={(e) => setBudgetForm((f) => ({ ...f, monthlyUsd: e.target.value }))}
+              />
+            </label>
+            <label>
+              Alert email
+              <input
+                type="email"
+                className="adm-field-input"
+                value={budgetForm.alertEmail}
+                onChange={(e) => setBudgetForm((f) => ({ ...f, alertEmail: e.target.value }))}
+              />
+            </label>
+            <label className="cost-budget-check">
+              <input
+                type="checkbox"
+                checked={budgetForm.alertsEnabled}
+                onChange={(e) => setBudgetForm((f) => ({ ...f, alertsEnabled: e.target.checked }))}
+              />
+              Email at {budget.warnPct}% and 100%
+            </label>
+            <label className="cost-budget-check">
+              <input
+                type="checkbox"
+                checked={budgetForm.blockAtLimit}
+                onChange={(e) => setBudgetForm((f) => ({ ...f, blockAtLimit: e.target.checked }))}
+              />
+              Block new image gen at 100%
+            </label>
+            <button type="button" className="adm-btn-dark adm-btn--sm" onClick={() => void saveBudget()} disabled={savingBudget}>
+              {savingBudget ? <Loader2 size={14} className="spin" /> : null}
+              Save limits
+            </button>
+          </div>
         </section>
-      )}
-
-      {!budget?.configured && !loading && (
-        <p className="adm-muted cost-budget-unconfigured">
-          No budget limits configured — set <code>IMAGE_GEN_BUDGET_DAILY_USD</code> and/or <code>IMAGE_GEN_BUDGET_MONTHLY_USD</code> in Vercel to enable alerts.
-        </p>
       )}
 
       {(liveBatches.length > 0 || active.locks?.length > 0) && (

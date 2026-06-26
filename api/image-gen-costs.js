@@ -7,7 +7,7 @@ import {
   updateImageGenBatch,
   getStockClient,
 } from './_image-gen-cost.js';
-import { getImageGenBudgetStatus } from './_image-gen-budget.js';
+import { getImageGenBudgetStatus, saveImageGenBudgetConfig } from './_image-gen-budget.js';
 
 export default async function handler(req, res) {
   if (!(await requireAdminKey(req, res))) return;
@@ -68,6 +68,19 @@ export default async function handler(req, res) {
         ...(status ? { status } : {}),
       });
       return res.status(200).json({ ok: true });
+    }
+
+    if (action === 'saveBudget') {
+      const { dailyUsd, monthlyUsd, alertEmail, blockAtLimit, alertsEnabled } = req.body || {};
+      const config = await saveImageGenBudgetConfig({
+        ...(dailyUsd != null ? { dailyUsd } : {}),
+        ...(monthlyUsd != null ? { monthlyUsd } : {}),
+        ...(alertEmail != null ? { alertEmail } : {}),
+        ...(blockAtLimit != null ? { blockAtLimit: Boolean(blockAtLimit) } : {}),
+        ...(alertsEnabled != null ? { alertsEnabled: Boolean(alertsEnabled) } : {}),
+      });
+      const budget = await getImageGenBudgetStatus(sb);
+      return res.status(200).json({ ok: true, config, budget });
     }
 
     return res.status(400).json({ error: `Unknown action: ${action}` });

@@ -1049,7 +1049,7 @@ export default function ApolloImageWizard({
             <div className="apollo-wizard-generate-wrap">
               {budgetStatus?.blocked && (
                 <p className="apollo-budget-blocked" role="alert">
-                  Image gen budget exceeded — raise limits in Vercel or wait for the period to reset.
+                  Image gen budget exceeded — raise limits in Cost Tracking or wait for the period to reset.
                 </p>
               )}
               {budgetStatus?.configured && !budgetStatus.blocked && batchCostEstimate.totalUsd > 0 && (

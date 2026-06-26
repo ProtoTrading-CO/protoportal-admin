@@ -19,7 +19,7 @@ See `scripts/env.example` for the full list. Required for production:
 - `CRON_SECRET` (Vercel cron auth)
 - `ORDER_NOTIFY_SECRET` (fulfillment order links)
 
-Optional: `ADMIN_DASH_KEY`, `IMAGE_GEN_CONCURRENCY`, `IMAGE_GEN_BUDGET_DAILY_USD`, `IMAGE_GEN_BUDGET_MONTHLY_USD`, `IMAGE_GEN_ALERT_EMAIL`, R2 vars, OpenRouter model overrides.
+Optional: `ADMIN_DASH_KEY`, `IMAGE_GEN_CONCURRENCY`, R2 vars, OpenRouter model overrides. Image gen budgets are configured in Admin → Cost Tracking (no extra env vars).
 
 ## Auth
 
