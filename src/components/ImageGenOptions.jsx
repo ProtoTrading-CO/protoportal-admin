@@ -21,7 +21,7 @@ export const IMAGE_GEN_PRESETS = [
   },
 ];
 
-export const IMAGE_MODEL_LABEL = 'Gemini 3 Pro Image (OpenRouter)';
+export const IMAGE_MODEL_LABEL = 'Pro for hero / generative · Flash for routine slots';
 
 export default function ImageGenOptions({
   style,

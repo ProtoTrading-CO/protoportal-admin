@@ -41,11 +41,24 @@ Remove the background and place the product on a pure white (#FFFFFF) background
 Center the product with even padding. Preserve the exact product, colours, and shape.
 No text, watermarks, or extra props. Clean catalogue-style square product shot.`;
 
-export function resolveImageModel(imageStyle = 'standard') {
-  if (imageStyle === IMAGE_STYLES.generative || imageStyle === IMAGE_STYLES.shadow || imageStyle === IMAGE_STYLES.measurements) {
+export function resolveImageModel(imageStyle = 'standard', targetSlot = 1) {
+  const style = imageStyle || IMAGE_STYLES.standard;
+  const slot = Math.min(4, Math.max(1, Number(targetSlot) || 1));
+  if (style === IMAGE_STYLES.generative || style === IMAGE_STYLES.measurements) {
     return DEFAULT_IMAGE_MODEL;
   }
+  if (slot === 1) {
+    return DEFAULT_IMAGE_MODEL;
+  }
+  if (style === IMAGE_STYLES.standard || style === IMAGE_STYLES.shadow) {
+    return FAST_IMAGE_MODEL;
+  }
   return DEFAULT_IMAGE_MODEL;
+}
+
+export function describeImageModel(imageStyle = 'standard', targetSlot = 1) {
+  const model = resolveImageModel(imageStyle, targetSlot);
+  return model.includes('flash') ? 'Gemini Flash Image' : 'Gemini 3 Pro Image';
 }
 
 export function inferImageStyle(userInstructions = '', userQuery = '') {
@@ -354,7 +367,7 @@ export async function fixImageFromUrl(imageUrl, {
     targetSlot,
     hasReferenceImage: !!refBase64,
   });
-  const model = resolveImageModel(style);
+  const model = resolveImageModel(style, targetSlot);
 
   const { base64, contentType } = await fetchImageBuffer(imageUrl);
   const transformed = await transformWithOpenRouter(base64, contentType, {
@@ -392,7 +405,7 @@ export async function fixImageFromBase64(base64, contentType, filename = 'produc
 } = {}) {
   const style = imageStyle || IMAGE_STYLES.standard;
   const finalPrompt = buildImagePrompt({ style, userInstructions, productTitle });
-  const model = resolveImageModel(style);
+  const model = resolveImageModel(style, 1);
 
   const transformed = await transformWithOpenRouter(base64, contentType, {
     prompt: finalPrompt,

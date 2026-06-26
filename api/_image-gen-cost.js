@@ -17,7 +17,7 @@ const LOCKS_FILE = 'image-gen/locks.json';
 const BATCHES_FILE = 'image-gen/batches.json';
 const SEMAPHORE_FILE = 'image-gen/semaphore.json';
 const MAX_LOGS = 500;
-const MAX_CONCURRENT_TRANSFORMS = 3;
+export const MAX_CONCURRENT_TRANSFORMS = Math.max(1, Math.min(10, Number(process.env.IMAGE_GEN_CONCURRENCY) || 3));
 
 /** Approximate OpenRouter pricing — fallback when usage.cost is missing from API. */
 const MODEL_PRICING = {
