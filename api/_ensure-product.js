@@ -92,7 +92,8 @@ export async function restoreArchivedToLive(supabase, sku) {
   const { error: unErr } = await supabase.rpc('unarchive_product', { p_sku: cleanSku });
   if (unErr) throw unErr;
 
-  await supabase.rpc('upsert_website_product_from_stock', { p_website_sku: cleanSku }).catch(() => {});
+  const { error: upsertErr } = await supabase.rpc('upsert_website_product_from_stock', { p_website_sku: cleanSku });
+  if (upsertErr) console.warn('upsert_website_product_from_stock:', upsertErr.message);
 
   const { data: syncResult, error: syncErr } = await supabase.rpc('sync_website_from_products');
   if (syncErr) console.warn('sync_website_from_products:', syncErr.message);
