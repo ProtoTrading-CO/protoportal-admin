@@ -125,7 +125,14 @@ import { queryKeys } from '../lib/queryKeys';
 import ApolloPanel from '../components/ApolloPanel';
 import CostTrackingPanel from '../components/CostTrackingPanel';
 import ProductLoaderPanel from '../components/ProductLoaderPanel';
-import { applySkuOrder, lookupSortOrder, sortOrderCategoryKey, sortOrderLookupKeys } from '../lib/taxonomy';
+import { sortOrderCategoryKey, sortOrderLookupKeys, LEGACY_NAV_ALIASES } from '../lib/taxonomy';
+import {
+  applySortOrdersToProducts,
+  fetchSortOrderStore,
+  invalidateSortOrderStore,
+  persistSortOrder,
+  sortMetaForPath,
+} from '../lib/sortOrderStore';
 import categories from '../data/categories.json';
 
 /** Merge a reordered visible slice back into the full product list (arrow-key reorder). */
@@ -510,6 +517,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   const [reorderDirty, setReorderDirty] = useState(false);
   const [reorderSaving, setReorderSaving] = useState(false);
   const [reorderSortMeta, setReorderSortMeta] = useState({ updatedAt: null });
+  const reorderAllCacheRef = useRef(null);
   const [taxonomyTree, setTaxonomyTree] = useState(categories);
   const [toast, setToast] = useState(null);
   const [moveModalOpen, setMoveModalOpen] = useState(false);
@@ -829,40 +837,108 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
 
   const reorderCategoryKey = sortOrderCategoryKey(reorderNavPath, taxonomyTree);
 
-  const applyServerSortOrder = async (rows, navPath) => {
-    if (!navPath?.length) return rows;
-    try {
-      const res = await fetch(`/api/category-sort-order?_=${Date.now()}`);
-      const store = await res.json();
-      if (!res.ok) return rows;
-      const skuOrder = lookupSortOrder(store.orders || {}, navPath, taxonomyTree);
-      const keys = sortOrderLookupKeys(navPath, taxonomyTree);
-      const matchedKey = keys.find((k) => store.orders?.[k]?.skuOrder?.length);
-      setReorderSortMeta({ updatedAt: store.orders?.[matchedKey || reorderCategoryKey]?.updatedAt || null });
-      return skuOrder?.length ? applySkuOrder(rows, skuOrder) : rows;
-    } catch {
-      return rows;
+  const mergeReorderIntoAllCache = useCallback((all, visible, categoryPath) => {
+    if (!categoryPath?.length) return visible;
+    const visibleIds = new Set(visible.map((p) => p.id));
+    const merged = [];
+    let vi = 0;
+    for (const p of all) {
+      if (visibleIds.has(p.id)) {
+        if (vi < visible.length) merged.push(visible[vi++]);
+      } else {
+        merged.push(p);
+      }
     }
-  };
+    while (vi < visible.length) merged.push(visible[vi++]);
+    return merged;
+  }, []);
 
-  const loadReorderProducts = async () => {
-    setLoading(true);
+  const productsForSortSave = useCallback((orderedProducts, groupId) => {
+    if (groupId && !reorderCategoryPath.length) {
+      return orderedProducts.filter((p) => {
+        const main = p.categoryPath?.[0] || p.category || '';
+        return main === groupId || LEGACY_NAV_ALIASES[main] === groupId;
+      });
+    }
+    return applyPathFilter(orderedProducts, reorderCategoryPath);
+  }, [reorderCategoryPath]);
+
+  const applyReorderView = useCallback(async (allRows) => {
+    const store = await fetchSortOrderStore();
+    const filtered = applyPathFilter(allRows, reorderCategoryPath);
+    const ordered = applySortOrdersToProducts(filtered, reorderNavPath, taxonomyTree, store);
+    if (reorderNavPath.length) {
+      setReorderSortMeta(sortMetaForPath(store, reorderNavPath, taxonomyTree));
+    }
+    setReorderProducts(ordered);
+    return ordered;
+  }, [reorderCategoryPath, reorderNavPath, taxonomyTree]);
+
+  const loadReorderProducts = async ({ forceCatalog = false } = {}) => {
+    const firstLoad = !reorderAllCacheRef.current;
+    if (firstLoad || forceCatalog) setLoading(true);
     setLoadingError('');
     try {
-      const fetchCategory = reorderCategoryPath.length
-        ? reorderCategoryPath[0]
-        : 'all';
-      const rows = await fetchReorderProducts({
-        mainCategory: fetchCategory,
-        subcategoryId: null,
-      });
-      const ordered = await applyServerSortOrder(rows, reorderNavPath);
-      setReorderProducts(ordered);
+      if (!reorderAllCacheRef.current || forceCatalog) {
+        reorderAllCacheRef.current = await fetchReorderProducts({ mainCategory: 'all' });
+      }
+      await applyReorderView(reorderAllCacheRef.current);
       setReorderDirty(false);
     } catch (err) {
       setLoadingError(err.message || 'Failed to load products');
-    } finally { setLoading(false); }
+    } finally {
+      setLoading(false);
+    }
   };
+
+  const commitReorderOrder = useCallback(async (orderedProducts, { groupId } = {}) => {
+    if (reorderSearch.trim().length > 0) return;
+
+    const navPath = groupId && !reorderCategoryPath.length
+      ? [groupId]
+      : reorderNavPath;
+
+    if (!navPath.length) {
+      showToast('Select a category in the sidebar to save order', 'error');
+      return;
+    }
+
+    const categoryKey = sortOrderCategoryKey(navPath, taxonomyTree);
+    if (!categoryKey) return;
+
+    const slice = productsForSortSave(orderedProducts, groupId);
+    const skuOrder = slice.map((p) => p.id);
+    if (!skuOrder.length) return;
+
+    setReorderSaving(true);
+    try {
+      const json = await persistSortOrder({
+        categoryKey,
+        skuOrder,
+        legacyKeys: sortOrderLookupKeys(navPath, taxonomyTree).filter((k) => k !== categoryKey),
+      });
+      setReorderSortMeta({ updatedAt: json.updatedAt });
+      setReorderDirty(false);
+      if (reorderAllCacheRef.current) {
+        reorderAllCacheRef.current = mergeReorderIntoAllCache(
+          reorderAllCacheRef.current,
+          orderedProducts,
+          reorderCategoryPath,
+        );
+      }
+    } catch (err) {
+      if (err.status === 409) {
+        showToast(err.message || 'Someone else changed this order — refreshing', 'error');
+        invalidateSortOrderStore();
+        await loadReorderProducts({ forceCatalog: true });
+        return;
+      }
+      showToast(err.message || 'Failed to save order', 'error');
+      setReorderDirty(true);
+    } finally {
+      setReorderSaving(false);
+    }
+  }, [reorderSearch, reorderCategoryPath, reorderNavPath, taxonomyTree, productsForSortSave, mergeReorderIntoAllCache]);
 
   const showToast = (message, type = 'success') => {
     setToast({ message, type });
@@ -1171,9 +1247,15 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   useEffect(() => { if (activeSection === 'customers') void loadCustomers(); }, [activeSection, customerPage, customerTab, customerSearch]);
   useEffect(() => { if (activeSection === 'pricing') void loadCategoryWorkingSet(pricingCategory, 'pricing'); }, [activeSection, pricingCategory]);
   useEffect(() => { void reloadTaxonomy(); }, []);
-  // reorderCategoryKey is derived from taxonomyTree — adding it as a dep ensures
-  // the grid reloads when the live taxonomy resolves to a different sort key.
-  useEffect(() => { if (activeSection === 'reorder') void loadReorderProducts(); }, [activeSection, reorderMainId, reorderCategoryPath.join('/'), reorderCategoryKey]);
+  useEffect(() => {
+    if (activeSection !== 'reorder') return;
+    void loadReorderProducts();
+  }, [activeSection]);
+
+  useEffect(() => {
+    if (activeSection !== 'reorder' || !reorderAllCacheRef.current) return;
+    void applyReorderView(reorderAllCacheRef.current);
+  }, [activeSection, reorderCategoryPath.join('/'), reorderCategoryKey, taxonomyTree, applyReorderView]);
   useEffect(() => { if (activeSection === 'orders' && orders.length === 0) void loadOrders(); }, [activeSection]);
   useEffect(() => {
     if (activeSection !== 'orders') return undefined;
@@ -1855,38 +1937,8 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
       showToast('Clear search before saving sort order', 'error');
       return;
     }
-    if (!reorderCategoryKey) {
-      showToast('Select a category before saving sort order', 'error');
-      return;
-    }
-    const visible = applyPathFilter(reorderProducts, reorderCategoryPath);
-    const skuOrder = visible.map((p) => p.id);
-    if (!skuOrder.length) return;
-
-    setReorderSaving(true);
-    try {
-      const res = await fetch('/api/category-sort-order', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          categoryKey: reorderCategoryKey,
-          skuOrder,
-          legacyKeys: sortOrderLookupKeys(reorderNavPath, taxonomyTree).filter((k) => k !== reorderCategoryKey),
-        }),
-      });
-      const json = await res.json();
-      if (res.status === 409) {
-        showToast(json.error || 'Someone else changed this order — refresh and try again', 'error');
-        await loadReorderProducts();
-        return;
-      }
-      if (!res.ok) throw new Error(json.error || 'Save failed');
-      setReorderSortMeta({ updatedAt: json.updatedAt });
-      setReorderDirty(false);
-      showToast('Sort order saved — live site updates within ~30s', 'success');
-    } catch (err) {
-      showToast(err.message || 'Save failed', 'error');
-    } finally { setReorderSaving(false); }
+    await commitReorderOrder(reorderProducts);
+    showToast('Sort order saved to live site', 'success');
   };
 
   const toggleSelectAllReorder = () => {
@@ -3220,7 +3272,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                 <div className="adm-section-head adm-section-head--reorder">
                   <div>
                     <h2 className="adm-section-title">Reorder Grid</h2>
-                    <p className="adm-section-note">Drag by the grip handle or use arrow keys within a subcategory row. Click <strong>Save order</strong> when done — changes go live on the trade portal within ~30s.</p>
+                    <p className="adm-section-note">Matches the live trade portal order (cached). Drag to reorder within a category — changes save automatically to the website. Select a category in the sidebar for subcategory ordering.</p>
                   </div>
                   <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                     <button
@@ -3232,7 +3284,14 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                       {reorderSaving ? 'Saving…' : 'Save order'}
                     </button>
                     <button
-                      onClick={() => { setSelectedIds(new Set()); setReorderDirty(false); invalidateAdminCache(); void loadReorderProducts(); }}
+                      onClick={() => {
+                        setSelectedIds(new Set());
+                        setReorderDirty(false);
+                        reorderAllCacheRef.current = null;
+                        invalidateSortOrderStore();
+                        invalidateAdminCache();
+                        void loadReorderProducts({ forceCatalog: true });
+                      }}
                       className="adm-btn-ghost"
                       type="button"
                     >
@@ -3343,11 +3402,11 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                     taxonomyTree={taxonomyTree}
                     loading={loading}
                     dragDisabled={reorderSearchActive}
+                    savingOrder={reorderSaving}
                     onEditProduct={openContentEdit}
                     onEditSubcategory={setEditTaxonomyModal}
                     onDeleteSubcategory={(sub) => void openDeleteSubcategory(sub)}
-                    onPersistOrder={() => {}}
-                    autoPersist={false}
+                    onOrderCommitted={(next, meta) => void commitReorderOrder(next, meta)}
                   />
                 </div>
 

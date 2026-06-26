@@ -710,10 +710,11 @@ export default function ProductManagerEngine({
                 taxonomyTree={tree}
                 loading={isLoading}
                 dragDisabled={!!debouncedSearch}
+                savingOrder={reorderSaving}
                 onEditProduct={onEditProduct}
                 onEditSubcategory={onEditCategory}
                 onDeleteSubcategory={onDeleteSubcategory}
-                autoPersist={false}
+                onOrderCommitted={(next) => void persistOrder(next)}
               />
               </>
             ) : (

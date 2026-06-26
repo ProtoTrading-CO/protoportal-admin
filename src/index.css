@@ -2448,6 +2448,22 @@ body.adm-is-reorder-dragging .adm-reorder-card--dragging {
   font-size: 13px;
 }
 
+.adm-loading-inline--overlay {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  margin: -12px -12px 8px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.92);
+  border-bottom: 1px solid #e5e7eb;
+  backdrop-filter: blur(4px);
+}
+
+.adm-reorder-card {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 180px;
+}
+
 .adm-modal-backdrop {
   position: fixed;
   inset: 0;

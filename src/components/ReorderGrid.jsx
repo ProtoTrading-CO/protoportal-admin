@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Grip, Loader2, Pencil, Trash2 } from 'lucide-react';
 import { LEGACY_NAV_ALIASES } from '../lib/taxonomy';
 import { subcategoryOptionsFromTree } from '../lib/taxonomyAdmin';
@@ -72,6 +72,11 @@ function groupBySubcategory(products, mainCategoryId, tree, selectedPath = []) {
   return ordered;
 }
 
+function buildGroups(products, mainCategoryId, taxonomyTree, selectedPath) {
+  if (!selectedPath.length) return groupByMainCategory(products, taxonomyTree);
+  return groupBySubcategory(products, mainCategoryId, taxonomyTree, selectedPath);
+}
+
 function sameOrder(a, b) {
   return a.length === b.length && a.every((p, i) => p.id === b[i]?.id);
 }
@@ -141,6 +146,89 @@ function readGridColumnCount(gridEl) {
   return Math.max(1, tracks.length);
 }
 
+function reorderWithinGroup(groups, sourceGroupId, moveSet, targetId, { toTop = false } = {}) {
+  const sourceGroup = groups.find((g) => g.id === sourceGroupId);
+  if (!sourceGroup) return null;
+
+  let nextGroupProducts;
+  if (toTop) {
+    nextGroupProducts = reorderInsert(sourceGroup.products, moveSet, sourceGroup.products[0]?.id, { toTop: true });
+  } else if (!sourceGroup.products.some((p) => p.id === targetId)) {
+    return null;
+  } else {
+    nextGroupProducts = reorderInsert(sourceGroup.products, moveSet, targetId, { toTop: false });
+  }
+
+  if (nextGroupProducts === sourceGroup.products) return null;
+
+  const nextGroups = groups.map((g) => (
+    g.id === sourceGroupId ? { ...g, products: nextGroupProducts } : g
+  ));
+  return { nextGroups, groupId: sourceGroupId, flat: nextGroups.flatMap((g) => g.products) };
+}
+
+const ReorderCard = memo(function ReorderCard({
+  product,
+  isDragging,
+  isOver,
+  isSelected,
+  dragDisabled,
+  onToggleSelect,
+  onEditProduct,
+  onStartDrag,
+  scrollRef,
+}) {
+  return (
+    <div
+      data-reorder-id={product.id}
+      className={`adm-reorder-card${isDragging ? ' adm-reorder-card--dragging' : ''}${isOver ? ' adm-reorder-card--over' : ''}${isSelected ? ' adm-reorder-card--selected' : ''}`}
+    >
+      <div className="adm-reorder-card__bar">
+        <label
+          className="adm-reorder-check-wrap"
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <input
+            type="checkbox"
+            checked={isSelected}
+            onChange={() => {
+              onToggleSelect(product.id);
+              scrollRef.current?.focus({ preventScroll: true });
+            }}
+            className="adm-reorder-checkbox"
+            aria-label={`Select ${product.name}`}
+          />
+        </label>
+        {!dragDisabled && (
+          <span
+            className="adm-reorder-drag-handle"
+            aria-label={`Drag ${product.name}`}
+            onPointerDown={(e) => onStartDrag(product.id, e)}
+          >
+            <Grip size={13} />
+          </span>
+        )}
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onEditProduct(product); }}
+          className="adm-reorder-edit-btn"
+          title="Edit product"
+        >
+          <Pencil size={14} />
+        </button>
+      </div>
+      <div className="adm-thumb adm-thumb--reorder">
+        {product.image
+          ? <img draggable={false} loading="lazy" decoding="async" src={product.image} alt={product.name} />
+          : <span className="adm-muted">No image</span>}
+      </div>
+      <div className="adm-reorder-card-title">{product.name}</div>
+      <div className="adm-muted adm-reorder-card-code">{product.code}</div>
+    </div>
+  );
+});
+
 export default function ReorderGrid({
   products,
   onProductsChange,
@@ -154,13 +242,14 @@ export default function ReorderGrid({
   onEditProduct,
   onEditSubcategory,
   onDeleteSubcategory,
-  onPersistOrder,
-  autoPersist = false,
+  onOrderCommitted,
+  savingOrder = false,
 }) {
   const scrollRef = useRef(null);
   const gridRef = useRef(null);
   const scrollRafRef = useRef(null);
   const dragIdRef = useRef(null);
+  const dragGroupIdRef = useRef(null);
   const overIdRef = useRef(null);
   const moveSetRef = useRef(new Set());
   const pointerRef = useRef({ x: 0, y: 0 });
@@ -174,24 +263,24 @@ export default function ReorderGrid({
   const [overId, setOverId] = useState(null);
   const [draggingSet, setDraggingSet] = useState(() => new Set());
 
-  const groups = useMemo(() => {
-    if (!selectedPath.length) {
-      return groupByMainCategory(products, taxonomyTree);
-    }
-    return groupBySubcategory(products, mainCategoryId, taxonomyTree, selectedPath);
-  }, [products, mainCategoryId, taxonomyTree, selectedPath]);
+  const groups = useMemo(
+    () => buildGroups(products, mainCategoryId, taxonomyTree, selectedPath),
+    [products, mainCategoryId, taxonomyTree, selectedPath],
+  );
 
   const getMoveSet = useCallback((id) => (
     selectedIds.has(id) ? new Set(selectedIds) : new Set([id])
   ), [selectedIds]);
 
-  const applyReorder = useCallback((targetId, toTop = false) => {
-    onProductsChange((prev) => {
-      const next = reorderInsert(prev, moveSetRef.current, targetId, { toTop });
-      orderRef.current = next;
-      return next;
-    });
-  }, [onProductsChange]);
+  const commitGroupReorder = useCallback((sourceGroupId, targetId, { toTop = false } = {}) => {
+    const currentGroups = buildGroups(orderRef.current, mainCategoryId, taxonomyTree, selectedPath);
+    const result = reorderWithinGroup(currentGroups, sourceGroupId, moveSetRef.current, targetId, { toTop });
+    if (!result) return;
+
+    orderRef.current = result.flat;
+    onProductsChange(result.flat);
+    onOrderCommitted?.(result.flat, { groupId: result.groupId });
+  }, [mainCategoryId, taxonomyTree, selectedPath, onProductsChange, onOrderCommitted]);
 
   const autoScroll = useCallback((clientY) => {
     const el = scrollRef.current;
@@ -220,6 +309,7 @@ export default function ReorderGrid({
     autoScroll(y);
     const nextOver = resolveDropTarget(x, y);
     const currentDrag = dragIdRef.current;
+    const sourceGroupId = dragGroupIdRef.current;
 
     if (!nextOver || nextOver === currentDrag || moveSetRef.current.has(nextOver)) {
       if (overIdRef.current !== null) {
@@ -229,14 +319,22 @@ export default function ReorderGrid({
       return;
     }
 
+    if (nextOver !== '__top__') {
+      const targetGroup = groups.find((g) => g.products.some((p) => p.id === nextOver));
+      if (!targetGroup || targetGroup.id !== sourceGroupId) {
+        if (overIdRef.current !== null) {
+          overIdRef.current = null;
+          setOverId(null);
+        }
+        return;
+      }
+    }
+
     if (nextOver === overIdRef.current) return;
 
     overIdRef.current = nextOver;
     setOverId(nextOver);
-
-    if (nextOver === '__top__') applyReorder(null, true);
-    else applyReorder(nextOver, false);
-  }, [autoScroll, resolveDropTarget, applyReorder]);
+  }, [autoScroll, resolveDropTarget, groups]);
 
   const stopDragListeners = useRef(() => {});
 
@@ -259,16 +357,23 @@ export default function ReorderGrid({
     captureIdRef.current = null;
 
     const hadDrag = !!dragIdRef.current;
+    const sourceGroupId = dragGroupIdRef.current;
+    const dropTarget = overIdRef.current;
+
+    if (hadDrag && sourceGroupId && dropTarget) {
+      if (dropTarget === '__top__') commitGroupReorder(sourceGroupId, null, { toTop: true });
+      else commitGroupReorder(sourceGroupId, dropTarget, { toTop: false });
+    }
+
     dragIdRef.current = null;
+    dragGroupIdRef.current = null;
     overIdRef.current = null;
     moveSetRef.current = new Set();
     setDragId(null);
     setOverId(null);
     setDraggingSet(new Set());
     document.body.classList.remove('adm-is-reorder-dragging');
-
-    if (hadDrag && autoPersist) onPersistOrder?.(orderRef.current);
-  }, [onPersistOrder, autoPersist]);
+  }, [commitGroupReorder]);
 
   const onPointerMove = useCallback((e) => {
     pointerRef.current = { x: e.clientX, y: e.clientY };
@@ -291,7 +396,7 @@ export default function ReorderGrid({
   const onPointerUp = useCallback(() => endDrag(), [endDrag]);
 
   const startDrag = useCallback((productId, e) => {
-    if (dragDisabled) return;
+    if (dragDisabled || savingOrder) return;
     if (e.button !== 0) return;
     e.preventDefault();
     e.stopPropagation();
@@ -299,8 +404,12 @@ export default function ReorderGrid({
     captureIdRef.current = e.pointerId;
     e.currentTarget.setPointerCapture?.(e.pointerId);
 
+    const sourceGroup = groups.find((g) => g.products.some((p) => p.id === productId));
+    if (!sourceGroup) return;
+
     const moveSet = getMoveSet(productId);
     dragIdRef.current = productId;
+    dragGroupIdRef.current = sourceGroup.id;
     moveSetRef.current = moveSet;
     overIdRef.current = null;
 
@@ -319,13 +428,13 @@ export default function ReorderGrid({
       window.removeEventListener('pointerup', up);
       window.removeEventListener('pointercancel', up);
     };
-  }, [dragDisabled, getMoveSet, onPointerMove, onPointerUp]);
+  }, [dragDisabled, savingOrder, getMoveSet, onPointerMove, onPointerUp, groups]);
 
   useEffect(() => () => endDrag(), [endDrag]);
 
   useEffect(() => {
     const onKeyDown = (e) => {
-      if (dragDisabled || !selectedIds?.size) return;
+      if (dragDisabled || savingOrder || !selectedIds?.size) return;
       if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown' && e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
       const tag = e.target?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
@@ -338,6 +447,7 @@ export default function ReorderGrid({
 
       const cols = readGridColumnCount(gridRef.current);
       let changed = false;
+      let changedGroupId = null;
       const nextGroups = groups.map((group) => {
         if (changed) return group;
         const inGroup = group.products.some((p) => selectedIds.has(p.id));
@@ -345,6 +455,7 @@ export default function ReorderGrid({
         const reordered = moveBlockGrid(group.products, selectedIds, direction, cols);
         if (reordered === group.products) return group;
         changed = true;
+        changedGroupId = group.id;
         return { ...group, products: reordered };
       });
 
@@ -352,16 +463,22 @@ export default function ReorderGrid({
       const next = nextGroups.flatMap((g) => g.products);
       orderRef.current = next;
       onProductsChange(next);
+      onOrderCommitted?.(next, { groupId: changedGroupId });
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [dragDisabled, selectedIds, groups, onProductsChange]);
+  }, [dragDisabled, savingOrder, selectedIds, groups, onProductsChange, onOrderCommitted]);
 
   return (
     <div className="adm-reorder-content" ref={scrollRef} tabIndex={0}>
       {loading && (
         <div className="adm-loading-inline">
           <Loader2 size={18} className="spin" /> Loading products…
+        </div>
+      )}
+      {savingOrder && (
+        <div className="adm-loading-inline adm-loading-inline--overlay">
+          <Loader2 size={18} className="spin" /> Saving order to live site…
         </div>
       )}
       {!loading && products.length === 0 && (
@@ -403,61 +520,20 @@ export default function ReorderGrid({
                 </div>
               )}
             </div>
-            {group.products.map((product) => {
-              const isDragging = draggingSet.has(product.id);
-              const isOver = overId === product.id && !isDragging;
-              const isSelected = selectedIds.has(product.id);
-              return (
-                <div
-                  key={product.id}
-                  data-reorder-id={product.id}
-                  className={`adm-reorder-card${isDragging ? ' adm-reorder-card--dragging' : ''}${isOver ? ' adm-reorder-card--over' : ''}${isSelected ? ' adm-reorder-card--selected' : ''}`}
-                >
-                  <div className="adm-reorder-card__bar">
-                    <label
-                      className="adm-reorder-check-wrap"
-                      onPointerDown={(e) => e.stopPropagation()}
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={isSelected}
-                        onChange={() => {
-                          onToggleSelect(product.id);
-                          scrollRef.current?.focus({ preventScroll: true });
-                        }}
-                        className="adm-reorder-checkbox"
-                        aria-label={`Select ${product.name}`}
-                      />
-                    </label>
-                    {!dragDisabled && (
-                      <span
-                        className="adm-reorder-drag-handle"
-                        aria-label={`Drag ${product.name}`}
-                        onPointerDown={(e) => startDrag(product.id, e)}
-                      >
-                        <Grip size={13} />
-                      </span>
-                    )}
-                    <button
-                      type="button"
-                      onClick={(e) => { e.stopPropagation(); onEditProduct(product); }}
-                      className="adm-reorder-edit-btn"
-                      title="Edit product"
-                    >
-                      <Pencil size={14} />
-                    </button>
-                  </div>
-                  <div className="adm-thumb adm-thumb--reorder">
-                    {product.image
-                      ? <img draggable={false} src={product.image} alt={product.name} />
-                      : <span className="adm-muted">No image</span>}
-                  </div>
-                  <div className="adm-reorder-card-title">{product.name}</div>
-                  <div className="adm-muted adm-reorder-card-code">{product.code}</div>
-                </div>
-              );
-            })}
+            {group.products.map((product) => (
+              <ReorderCard
+                key={product.id}
+                product={product}
+                isDragging={draggingSet.has(product.id)}
+                isOver={overId === product.id && !draggingSet.has(product.id)}
+                isSelected={selectedIds.has(product.id)}
+                dragDisabled={dragDisabled}
+                onToggleSelect={onToggleSelect}
+                onEditProduct={onEditProduct}
+                onStartDrag={startDrag}
+                scrollRef={scrollRef}
+              />
+            ))}
           </div>
         ))}
       </div>
