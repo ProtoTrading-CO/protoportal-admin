@@ -69,7 +69,8 @@ function PmMobileProductCard({
   status,
   selected,
   showStockColumn,
-  onToggleSelect,
+  onSelectClick,
+  onRowClick,
   onEditProduct,
   onMakeLive,
   mutations,
@@ -78,12 +79,17 @@ function PmMobileProductCard({
   onShowToast,
 }) {
   return (
-    <article className={`pm-mobile-card${selected.has(item.id) ? ' pm-mobile-card--selected' : ''}`}>
+    <article
+      className={`pm-mobile-card${selected.has(item.id) ? ' pm-mobile-card--selected' : ''}`}
+      onClick={(e) => onRowClick?.(e, item.id, item, index)}
+      style={{ cursor: 'pointer' }}
+    >
       <div className="pm-mobile-card-top">
         <input
           type="checkbox"
           checked={selected.has(item.id)}
-          onChange={(e) => onToggleSelect(item.id, item, { shiftKey: e.nativeEvent.shiftKey, index })}
+          onMouseDown={(e) => onSelectClick(e, item.id, item, index)}
+          readOnly
           style={{ accentColor: '#8B1A1A', cursor: 'pointer' }}
           aria-label={`Select ${item.sku}`}
         />
@@ -250,6 +256,7 @@ export default function ProductManagerEngine({
   const [categoryStackNav, setCategoryStackNav] = useState(null);
   const selectedRowsRef = useRef(new Map());
   const lastSelectIdxRef = useRef(null);
+  const rowsRef = useRef([]);
   const panelTopRef = useRef(null);
   const isMobile = useMediaQuery('(max-width: 900px)');
 
@@ -309,6 +316,7 @@ export default function ProductManagerEngine({
     enabled: status !== 'approval',
   });
   const rows = data?.rows || [];
+  rowsRef.current = rows;
   const total = data?.total || 0;
   const archiveOosLive = status === 'archived' && archiveStockView === 'zero';
   const tree = taxonomyTree.length ? taxonomyTree : (data?.tree || []);
@@ -390,19 +398,21 @@ export default function ProductManagerEngine({
     }
   };
 
-  const toggleSelect = (id, item, { shiftKey = false, index = null } = {}) => {
+  const handleProductSelect = useCallback((id, item, index, shiftKey) => {
     setSelectAllView(false);
+    const currentRows = rowsRef.current;
     setSelected((prev) => {
       const next = new Set(prev);
       if (
         shiftKey
         && lastSelectIdxRef.current !== null
         && index !== null
+        && index >= 0
         && index !== lastSelectIdxRef.current
       ) {
         const start = Math.min(lastSelectIdxRef.current, index);
         const end = Math.max(lastSelectIdxRef.current, index);
-        const rangeRows = rows.slice(start, end + 1);
+        const rangeRows = currentRows.slice(start, end + 1);
         const allSelected = rangeRows.length > 0 && rangeRows.every((r) => next.has(r.id));
         for (const row of rangeRows) {
           if (allSelected) {
@@ -422,7 +432,24 @@ export default function ProductManagerEngine({
       }
       return next;
     });
-    if (index !== null) lastSelectIdxRef.current = index;
+    if (index !== null && index >= 0) lastSelectIdxRef.current = index;
+  }, []);
+
+  const onProductSelectClick = useCallback((e, id, item, index) => {
+    if (e.button !== undefined && e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    handleProductSelect(id, item, index, e.shiftKey);
+  }, [handleProductSelect]);
+
+  const onProductRowClick = useCallback((e, id, item, index) => {
+    if (e.defaultPrevented) return;
+    if (e.target.closest('button, a, input, label, .adm-icon-btn')) return;
+    handleProductSelect(id, item, index, e.shiftKey);
+  }, [handleProductSelect]);
+
+  const toggleSelect = (id, item, opts = {}) => {
+    handleProductSelect(id, item, opts.index ?? null, opts.shiftKey ?? false);
   };
 
   const allPageSelected = rows.length > 0 && rows.every((r) => selected.has(r.id));
@@ -430,6 +457,7 @@ export default function ProductManagerEngine({
   const clearSelection = () => {
     setSelected(new Set());
     selectedRowsRef.current = new Map();
+    lastSelectIdxRef.current = null;
     setSelectAllView(false);
   };
 
@@ -944,7 +972,8 @@ export default function ProductManagerEngine({
                         status={archiveOosLive ? 'live' : status}
                         selected={selected}
                         showStockColumn={showStockColumn}
-                        onToggleSelect={toggleSelect}
+                        onSelectClick={onProductSelectClick}
+                        onRowClick={onProductRowClick}
                         onEditProduct={onEditProduct}
                         onMakeLive={makeLive}
                         mutations={mutations}
@@ -962,6 +991,10 @@ export default function ProductManagerEngine({
                     )}
                   </div>
                 ) : (
+                <>
+                <p className="adm-muted pm-shift-hint" style={{ fontSize: 12, margin: '0 0 8px' }}>
+                  Tip: click a checkbox, then <strong>Shift+click</strong> another row or checkbox to select everything in between.
+                </p>
                 <div className="adm-list pm-list">
                   <div
                     className="adm-list-head pm-list-head"
@@ -985,13 +1018,15 @@ export default function ProductManagerEngine({
                     <div
                       key={item.id}
                       className={`adm-list-row${selected.has(item.id) ? ' adm-list-row--selected' : ''}`}
-                      style={{ gridTemplateColumns: ROW_COLUMNS[status] || ROW_COLUMNS.live }}
+                      style={{ gridTemplateColumns: ROW_COLUMNS[status] || ROW_COLUMNS.live, cursor: 'pointer' }}
+                      onClick={(e) => onProductRowClick(e, item.id, item, index)}
                     >
                       <div>
                         <input
                           type="checkbox"
                           checked={selected.has(item.id)}
-                          onChange={(e) => toggleSelect(item.id, item, { shiftKey: e.nativeEvent.shiftKey, index })}
+                          onMouseDown={(e) => onProductSelectClick(e, item.id, item, index)}
+                          readOnly
                           style={{ accentColor: '#8B1A1A', cursor: 'pointer' }}
                           aria-label={`Select ${item.sku}`}
                         />
@@ -1127,6 +1162,7 @@ export default function ProductManagerEngine({
                     </p>
                   )}
                 </div>
+                </>
                 )}
                 <Pager page={page} total={total} pageSize={pageSize} onPageChange={handlePageChange} />
               </>
