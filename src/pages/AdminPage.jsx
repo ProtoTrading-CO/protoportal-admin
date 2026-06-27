@@ -93,7 +93,7 @@ import {
 } from '../lib/taxonomyAdmin';
 import { approveCustomer, deleteCustomer, fetchCustomersPage, fetchProtoActiveCustomersPage, seedProtoActiveCustomers, updateProtoActiveCustomer, updateCustomerAdmin } from '../lib/customers';
 import { supabase } from '../lib/supabase';
-import { buildOrderNoteSections, createEmailOrderItems, generateOrderPdfBase64, buildEmailItemsFromOrder, base64ToBlob, resolveCustomerOrderPricing, deriveAutoNotesFromItems } from '../lib/orderDocuments';
+import { buildOrderNoteSections, createEmailOrderItems, generateOrderPdfBase64, buildEmailItemsFromOrder, base64ToBlob, resolveCustomerOrderPricing, deriveAutoNotesFromItems, resolveDeliveryMethod } from '../lib/orderDocuments';
 import { displayOrderNumber, buildFulfillmentUrl } from '../lib/orderNumber';
 import { fetchPresaleInvoices, uploadPresaleInvoice } from '../lib/presaleInvoice';
 import { fetchConfirmationSent, markConfirmationSent, fetchPaymentRecords, uploadPop, setPaymentStatus } from '../lib/orderPayment';
@@ -1172,13 +1172,35 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
       : `Send order confirmation to ${email}? (No presale invoice uploaded yet)`;
     if (!window.confirm(confirmMsg)) return;
 
+    let orderForSend = order;
+    let deliveryMethod = resolveDeliveryMethod(order);
+    if (!deliveryMethod) {
+      const pick = window.prompt(
+        'Delivery method was not saved on this order.\n\nType proto for "Proto to deliver"\nType own for "Customer elected their own courier"',
+        'proto',
+      );
+      if (pick === null) return;
+      const raw = String(pick).trim().toLowerCase().startsWith('own') || pick.trim() === '2'
+        ? "Customer's own courier"
+        : 'Proto Trading delivers';
+      try {
+        await updateOrderAdmin(order.id, { delivery_method: raw });
+        orderForSend = { ...order, delivery_method: raw };
+        deliveryMethod = raw;
+        setOrders((prev) => prev.map((item) => (item.id === order.id ? { ...item, delivery_method: raw } : item)));
+      } catch (e) {
+        showToast(e.message || 'Could not save delivery method', 'error');
+        return;
+      }
+    }
+
     setSaving(`send-${order.id}`);
     try {
-      const emailItems = buildEmailItemsFromOrder(order);
+      const emailItems = buildEmailItemsFromOrder(orderForSend);
       const autoNotes = deriveAutoNotesFromItems(emailItems).join('\n');
       const { hasPrices, total, items: customerItems } = resolveCustomerOrderPricing(emailItems);
       const pdfBase64 = await generateOrderPdfBase64({
-        order,
+        order: orderForSend,
         items: customerItems,
         autoNotes,
         userNotes: order.order_change_notes || '',
@@ -1220,6 +1242,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
           senderName: activeFulfillmentUser?.name || '',
           confirmationStoragePath: urlData.path,
           pdfFilename: `proto-order-confirmation-${displayOrderNumber(order)}.pdf`,
+          deliveryMethod: orderForSend.delivery_method || deliveryMethod || '',
         }),
       });
       const emailData = await emailRes.json();
