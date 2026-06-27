@@ -66,10 +66,13 @@ export async function requestPasswordReset(email) {
   if (!isAllowedAdminEmail(normalized)) {
     throw new Error('This email is not authorized for the admin dashboard.');
   }
-  const { error } = await supabase.auth.resetPasswordForEmail(normalized, {
-    redirectTo: `${window.location.origin}/`,
+  const res = await fetch('/api/admin-forgot-password', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: normalized }),
   });
-  if (error) throw error;
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Failed to send reset email');
 }
 
 export function onAuthStateChange(callback) {

@@ -10,6 +10,7 @@ import {
 import { setImageGenOperator } from './lib/imageGenSession';
 import QueryProvider from './components/QueryProvider';
 import AdminLoginPage from './components/AdminLoginPage';
+import AdminResetPasswordPage from './components/AdminResetPasswordPage';
 
 const AdminPage = lazy(() => import('./pages/AdminPage'));
 const FulfillmentPage = lazy(() => import('./pages/FulfillmentPage'));
@@ -27,12 +28,23 @@ const loadingFallback = (
 export default function Root() {
   const path = window.location.pathname;
   const isFulfillment = path === '/fulfillment' || path === '/f' || path.startsWith('/f/');
+  const isResetPassword = path === '/reset-password';
 
   if (isFulfillment) {
     return (
       <Suspense fallback={loadingFallback}>
         <FulfillmentPage />
       </Suspense>
+    );
+  }
+
+  if (isResetPassword) {
+    const token = new URLSearchParams(window.location.search).get('token') || '';
+    return (
+      <AdminResetPasswordPage
+        token={token}
+        onDone={() => { window.location.replace('/'); }}
+      />
     );
   }
 

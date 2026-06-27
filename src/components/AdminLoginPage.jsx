@@ -20,7 +20,7 @@ export default function AdminLoginPage({ forbidden = false, onSignedIn }) {
     try {
       if (mode === 'forgot') {
         await requestPasswordReset(email);
-        setInfo('If your account exists, a password reset link was sent to your email.');
+        setInfo('Check your inbox for a reset link from Proto Admin (sent via online@proto.co.za).');
         return;
       }
       await signIn(email, password);
