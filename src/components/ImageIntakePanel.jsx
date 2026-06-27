@@ -152,7 +152,7 @@ export default function ImageIntakePanel({ onShowToast }) {
           <h2 className="adm-section-title">Image Intake</h2>
           <p className="adm-section-note">
             Uses George&apos;s <code>product_image_intake.py</code> logic: STMAST lookup → create product if missing
-            (sell_price = PRICE_A × 1.15, rounded to R0.50) → upload to Cloudflare R2{' '}
+            (sell_price ex VAT in ERP; website price = PRICE_A × 1.15 rounded up to whole rand) → upload to Cloudflare R2{' '}
             <code>proto-images/&#123;SKU&#125;/&#123;slot&#125;.jpg</code> when R2 env vars are set (otherwise Supabase{' '}
             <code>product-images</code>). Catalogue rows on <code>website_stock</code> get the public image URL.
             STMAST lookup needs <code>STOCK_SQL_BRIDGE_URL</code> (office SQL bridge) or{' '}

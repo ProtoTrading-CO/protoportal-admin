@@ -20,6 +20,15 @@
     },
     "api/apply-dormant-live.js": {
       "maxDuration": 60
+    },
+    "api/stock-actions.js": {
+      "maxDuration": 60
+    },
+    "api/category-sort-order.js": {
+      "maxDuration": 30
+    },
+    "api/catalog.js": {
+      "maxDuration": 60
     }
   },
   "crons": [

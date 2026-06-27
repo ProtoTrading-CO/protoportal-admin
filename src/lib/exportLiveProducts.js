@@ -50,7 +50,7 @@ function productToCatalogRow(p, tree, status) {
     'Subcategory 4 (taxonomy)': taxLabels[4] || '',
     'Category path (taxonomy)': taxLabels.join(' > '),
     'Category path IDs': pathIds.join(' / '),
-    'Price (ex VAT)': p.price ?? '',
+    'Price (incl. VAT)': p.price ?? '',
     'Sell price': p.sellPrice ?? '',
     'Stock on hand': p.stockOnHand ?? p.stockQty ?? '',
     'Available stock': p.availableStock ?? '',

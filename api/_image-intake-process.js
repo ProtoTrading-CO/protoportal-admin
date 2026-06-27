@@ -85,10 +85,10 @@ function toDecimal(value) {
   return Number.isFinite(n) ? n : 0;
 }
 
-/** PRICE_A * 1.15 rounded to nearest 0.50 — matches George's calculate_sell_price */
+/** PRICE_A * 1.15 rounded up to whole rand — website catalogue price (incl. VAT). */
 function calculateSellPrice(priceA) {
   const vatInclusive = toDecimal(priceA) * 1.15;
-  return Math.round(vatInclusive * 2) / 2;
+  return Math.ceil(vatInclusive);
 }
 
 function buildInsertPayload(sqlRow, detected) {

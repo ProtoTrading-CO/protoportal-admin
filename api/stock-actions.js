@@ -7,11 +7,21 @@ import { reorderStagedImageSlots } from './_stage-dormant.js';
 
 const PAGE_SIZE = 1000;
 
-async function fetchAllRows(supabase, table, { filter = null, orderBy = null } = {}) {
+/** Columns needed for admin catalogue adapt() — avoids select('*') timeouts on ~5k rows. */
+const LIVE_LIST_COLS = [
+  'sku', 'barcode', 'title', 'category',
+  'subcategory_one', 'subcategory_two', 'subcategory_three', 'subcategory_four',
+  'image_url_one', 'image_url_two', 'image_url_three', 'image_url_four',
+  'price', 'stock_qty', 'available_stock', 'is_new_arrival',
+  'original_description', 'pack_description', 'units_of_issue',
+  'created_at', 'updated_at', 'keep_live_when_oos',
+].join(', ');
+
+async function fetchAllRows(supabase, table, { filter = null, orderBy = null, select = '*' } = {}) {
   const rows = [];
   let from = 0;
   while (true) {
-    let q = supabase.from(table).select('*');
+    let q = supabase.from(table).select(select);
     if (orderBy) q = q.order(orderBy, { ascending: true });
     q = q.range(from, from + PAGE_SIZE - 1);
     if (filter) q = filter(q);
@@ -44,7 +54,7 @@ export default async function handler(req, res) {
   try {
     if (action === 'listLive') {
       const [rows, tree] = await Promise.all([
-        fetchAllRows(supabase, 'website_stock', { orderBy: 'title' }),
+        fetchAllRows(supabase, 'website_stock', { orderBy: 'title', select: LIVE_LIST_COLS }),
         loadTaxonomy().catch(() => []),
       ]);
       return res.status(200).json({ rows, tree });

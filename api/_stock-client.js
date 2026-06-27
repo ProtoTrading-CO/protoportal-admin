@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { findProductBySku, fetchProductLookupMap } from './_sku-match.js';
+import { websitePriceFromSellPrice } from './_pricing.js';
 
 /**
  * Stock Supabase client for serverless API routes.
@@ -98,7 +99,9 @@ export async function enrichRowsWithProductStock(supabase, rows, { includePrice 
       stock_qty: stockQty,
       available_stock: availableStock,
       ...(includePrice ? { sell_price: product.sell_price } : {}),
-      ...(includePrice && product.sell_price != null && !Number(r.price) ? { price: product.sell_price } : {}),
+      ...(includePrice && product.sell_price != null && !Number(r.price)
+        ? { price: websitePriceFromSellPrice(product.sell_price) }
+        : {}),
     };
   });
 }

@@ -831,9 +831,9 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     } finally { setLoading(false); }
   };
 
-  const reorderNavPath = reorderCategoryPath.length
-    ? reorderCategoryPath
-    : (reorderMainId ? [reorderMainId] : []);
+  const reorderNavPath = reorderCategoryPath;
+
+  const reorderCacheKey = reorderCategoryPath.length ? reorderMainId : '__all__';
 
   const reorderCategoryKey = sortOrderCategoryKey(reorderNavPath, taxonomyTree);
 
@@ -875,19 +875,23 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   }, [reorderNavPath, taxonomyTree]);
 
   const loadReorderProducts = async ({ forceCatalog = false, mainId = reorderMainId } = {}) => {
-    if (!mainId) {
+    const loadAll = !reorderCategoryPath.length;
+    const cacheKey = loadAll ? '__all__' : mainId;
+    if (!loadAll && !mainId) {
       setReorderProducts([]);
       return;
     }
-    const cached = reorderCacheByMainRef.current[mainId];
+    const cached = reorderCacheByMainRef.current[cacheKey];
     const firstLoad = !cached;
     if (firstLoad || forceCatalog) setLoading(true);
     setLoadingError('');
     try {
       if (!cached || forceCatalog) {
-        reorderCacheByMainRef.current[mainId] = await fetchReorderProducts({ mainCategory: mainId });
+        reorderCacheByMainRef.current[cacheKey] = await fetchReorderProducts({
+          mainCategory: loadAll ? 'all' : mainId,
+        });
       }
-      await applyReorderView(reorderCacheByMainRef.current[mainId]);
+      await applyReorderView(reorderCacheByMainRef.current[cacheKey]);
       setReorderDirty(false);
     } catch (err) {
       setLoadingError(err.message || 'Failed to load products');
@@ -924,10 +928,10 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
       });
       setReorderSortMeta({ updatedAt: json.updatedAt });
       setReorderDirty(false);
-      if (reorderMainId && reorderCacheByMainRef.current[reorderMainId]) {
+      if (reorderMainId && reorderCacheByMainRef.current[reorderCacheKey]) {
         const cachePath = reorderCategoryPath.length ? reorderCategoryPath : [reorderMainId];
-        reorderCacheByMainRef.current[reorderMainId] = mergeReorderIntoCategoryCache(
-          reorderCacheByMainRef.current[reorderMainId],
+        reorderCacheByMainRef.current[reorderCacheKey] = mergeReorderIntoCategoryCache(
+          reorderCacheByMainRef.current[reorderCacheKey],
           orderedProducts,
           cachePath,
         );
@@ -944,7 +948,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     } finally {
       setReorderSaving(false);
     }
-  }, [reorderSearch, reorderCategoryPath, reorderNavPath, reorderMainId, taxonomyTree, productsForSortSave, mergeReorderIntoCategoryCache]);
+  }, [reorderSearch, reorderCategoryPath, reorderNavPath, reorderMainId, reorderCacheKey, taxonomyTree, productsForSortSave, mergeReorderIntoCategoryCache]);
 
   const showToast = (message, type = 'success') => {
     setToast({ message, type });
@@ -1254,16 +1258,16 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   useEffect(() => { if (activeSection === 'pricing') void loadCategoryWorkingSet(pricingCategory, 'pricing'); }, [activeSection, pricingCategory]);
   useEffect(() => { void reloadTaxonomy(); }, []);
   useEffect(() => {
-    if (activeSection !== 'reorder' || !reorderMainId) return;
-    void loadReorderProducts({ mainId: reorderMainId });
-  }, [activeSection, reorderMainId]);
+    if (activeSection !== 'reorder') return;
+    void loadReorderProducts();
+  }, [activeSection, reorderCacheKey]);
 
   useEffect(() => {
-    if (activeSection !== 'reorder' || !reorderMainId) return;
-    const cached = reorderCacheByMainRef.current[reorderMainId];
+    if (activeSection !== 'reorder') return;
+    const cached = reorderCacheByMainRef.current[reorderCacheKey];
     if (!cached) return;
     void applyReorderView(cached);
-  }, [activeSection, reorderCategoryPath.join('/'), reorderCategoryKey, reorderMainId, taxonomyTree, applyReorderView]);
+  }, [activeSection, reorderCategoryPath.join('/'), reorderCategoryKey, reorderCacheKey, taxonomyTree, applyReorderView]);
   useEffect(() => { if (activeSection === 'orders' && orders.length === 0) void loadOrders(); }, [activeSection]);
   useEffect(() => {
     if (activeSection !== 'orders') return undefined;
@@ -1724,7 +1728,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     'Website SKU': p.websiteSku || '',
     'Parent SKU': p.parentSku || '',
     Category: p.category || '',
-    'Price (excl. VAT)': p.price,
+    'Price (incl. VAT)': p.price,
     'Stock Qty': p.stockQty,
   });
 
@@ -2810,7 +2814,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                             <span title="Barcode (customer code)">BC: {product.barcode || product.code}</span>
                             {product.websiteSku && <span title="Website SKU" style={{ marginLeft: 8 }}>WSK: {product.websiteSku}</span>}
                             {product.parentSku && <span title="Parent SKU" style={{ marginLeft: 8 }}>PSK: {product.parentSku}</span>}
-                            {product.price > 0 && <span title="Price excl. VAT" style={{ marginLeft: 8, fontWeight: 700, color: '#374151' }}>R{Number(product.price).toFixed(2)}</span>}
+                            {product.price > 0 && <span title="Price incl. VAT" style={{ marginLeft: 8, fontWeight: 700, color: '#374151' }}>R{Math.round(Number(product.price))}</span>}
                           </div>
                         </div>
                         <div>
@@ -3411,12 +3415,12 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                     selectedIds={selectedIds}
                     onToggleSelect={toggleSelectReorder}
                     mainCategoryId={reorderMainId}
-                    selectedPath={reorderNavPath}
+                    selectedPath={reorderCategoryPath}
                     taxonomyTree={taxonomyTree}
                     loading={loading}
                     dragDisabled={reorderSearchActive}
                     savingOrder={reorderSaving}
-                    emptyHint={reorderMainId ? undefined : 'Select a category in the sidebar to load products.'}
+                    emptyHint={undefined}
                     onEditProduct={openContentEdit}
                     onEditSubcategory={setEditTaxonomyModal}
                     onDeleteSubcategory={(sub) => void openDeleteSubcategory(sub)}

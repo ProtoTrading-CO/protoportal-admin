@@ -71,11 +71,18 @@ export const RECYCLE_ARCHIVED_BY = 'recycle-bin';
 export const AUTO_OOS_ARCHIVED_BY = 'auto-oos';
 
 async function stockAction(body) {
-  const res = await fetch('/api/stock-actions', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
+  let res;
+  try {
+    res = await fetch('/api/stock-actions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  } catch (err) {
+    throw new Error(err?.message?.includes('fetch')
+      ? 'Failed to fetch catalogue — server may be busy; try Refresh'
+      : (err.message || 'Stock action failed'));
+  }
   const json = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(json.error || 'Stock action failed');
   return json;
