@@ -73,7 +73,7 @@ export default function OrderWhatsappNotify({ orderId }) {
   const allOk = log.sent > 0 && log.failed === 0 && log.ok;
   const noToken = log.skippedNoToken;
   const noTeam = log.skippedNoTeam;
-  const blockedStatus = log.emailSent && !log.statusAdvanced;
+  const blockedStatus = log.emailSent && !log.statusAdvanced && !log.advanceOnEmailOnly;
 
   return (
     <div className={`oa-wa-notify${allFailed || noToken || noTeam || blockedStatus ? ' oa-wa-notify--err' : partial ? ' oa-wa-notify--warn' : ' oa-wa-notify--ok'}`}>
@@ -104,7 +104,11 @@ export default function OrderWhatsappNotify({ orderId }) {
       {allFailed && !noToken && !noTeam && (
         <p className="oa-wa-notify-msg">
           WhatsApp failed for all {log.teamSize || 'team'} member(s) via <code>{log.template || 'proto_order_notis'}</code>
-          {log.templateCategory ? ` (${log.templateCategory})` : ''}. Check the errors below or retry.
+          {log.templateCategory ? ` (${log.templateCategory})` : ''}.
+          {log.utilityTemplate === false
+            ? ' UTILITY templates do not need an open chat session — check team numbers in Order Requests → Team and WATI template approval.'
+            : ' Check team WhatsApp numbers in Order Requests → Team (placeholder numbers like 27821234501 will fail).'}
+          {' '}You can retry below.
         </p>
       )}
       {partial && (

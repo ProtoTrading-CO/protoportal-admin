@@ -7330,6 +7330,15 @@ html, body { background: #f5f5f5; color: #111827; }
   margin-bottom: 16px; padding: 10px 12px; border-radius: 10px;
   background: #fef2f2; border: 1px solid #fecaca; color: #b91c1c; font-size: 13px;
 }
+.adm-login-info {
+  margin-bottom: 16px; padding: 10px 12px; border-radius: 10px;
+  background: #ecfdf5; border: 1px solid #a7f3d0; color: #047857; font-size: 13px;
+}
+.adm-login-link {
+  background: none; border: none; padding: 0; color: #dc2626; font-size: 12px;
+  cursor: pointer; text-decoration: underline;
+}
+.adm-login-link:hover { color: #b91c1c; }
 .adm-login-form { display: flex; flex-direction: column; gap: 14px; }
 .adm-login-submit { width: 100%; justify-content: center; margin-top: 4px; }
 .adm-login-foot {

@@ -305,7 +305,7 @@ export default function ReorderGrid({
     count: virtualRows.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: (index) => estimateRowHeight(virtualRows[index]),
-    overscan: 4,
+    overscan: 2,
   });
 
   useEffect(() => {
