@@ -85,10 +85,9 @@ function toDecimal(value) {
   return Number.isFinite(n) ? n : 0;
 }
 
-/** PRICE_A * 1.15 rounded up to whole rand — website catalogue price (incl. VAT). */
+/** ERP PRICE_A is already VAT-inclusive from Bladerunner sync. */
 function calculateSellPrice(priceA) {
-  const vatInclusive = toDecimal(priceA) * 1.15;
-  return Math.ceil(vatInclusive);
+  return toDecimal(priceA);
 }
 
 function buildInsertPayload(sqlRow, detected) {

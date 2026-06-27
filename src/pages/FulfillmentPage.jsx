@@ -337,7 +337,18 @@ export default function FulfillmentPage() {
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Save failed');
-      window.location.href = `/?section=orders&orderTab=sent&focusOrder=${encodeURIComponent(orderId)}`;
+      const adminUrl = `/?section=orders&orderTab=sent&focusOrder=${encodeURIComponent(orderId)}`;
+      if (window.opener && !window.opener.closed) {
+        try {
+          window.opener.location.href = adminUrl;
+          window.opener.focus();
+          window.close();
+          return;
+        } catch {
+          // Fall through to same-tab navigation.
+        }
+      }
+      window.location.replace(adminUrl);
     } catch (e) { setStatusMsg({ type: 'err', text: e.message }); }
     finally { setSaving(false); }
   };

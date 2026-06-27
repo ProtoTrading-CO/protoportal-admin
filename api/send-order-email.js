@@ -159,10 +159,20 @@ function buildEmailHtml({
 
   <div style="background:#111111;padding:0">
     <div style="height:4px;background:#c40000"></div>
-    <div style="padding:28px 32px 22px">
-      <div style="color:#c40000;font-size:11px;font-weight:800;letter-spacing:0.1em;text-transform:uppercase;margin-bottom:8px">Proto Trading</div>
-      <h1 style="color:#ffffff;margin:0;font-size:26px;font-weight:800;line-height:1.2">Order Confirmation</h1>
-      <div style="color:#cbd5e1;font-size:13px;margin-top:10px;font-weight:600">${escapeHtml(orderNumber)}${dateStr ? ` · ${dateStr}` : ''}</div>
+    <div style="padding:24px 32px 20px;display:flex;align-items:center;justify-content:space-between;gap:16px">
+      <div style="display:flex;align-items:center;gap:14px;min-width:0">
+        <img src="https://protoportal-admin.vercel.app/proto-logo.png" width="44" height="44" alt="Proto Trading" style="display:block;border-radius:8px;flex-shrink:0">
+        <div style="min-width:0">
+          <div style="font-size:18px;font-weight:800;line-height:1.2;letter-spacing:0.02em">
+            <span style="color:#ffffff">PROTO</span><span style="color:#dc2626"> TRADING</span>
+          </div>
+          <div style="color:#94a3b8;font-size:10px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;margin-top:4px">Order Confirmation</div>
+        </div>
+      </div>
+      <div style="text-align:right;flex-shrink:0">
+        <div style="color:#ffffff;font-size:15px;font-weight:800">${escapeHtml(orderNumber)}</div>
+        ${dateStr ? `<div style="color:#94a3b8;font-size:12px;font-weight:600;margin-top:4px">${dateStr}</div>` : ''}
+      </div>
     </div>
   </div>
 
