@@ -93,7 +93,7 @@ import {
 } from '../lib/taxonomyAdmin';
 import { approveCustomer, deleteCustomer, fetchCustomersPage, fetchProtoActiveCustomersPage, seedProtoActiveCustomers, updateProtoActiveCustomer, updateCustomerAdmin } from '../lib/customers';
 import { supabase } from '../lib/supabase';
-import { buildOrderNoteSections, createEmailOrderItems, generateOrderPdfBase64, buildEmailItemsFromOrder, base64ToBlob, resolveCustomerOrderPricing } from '../lib/orderDocuments';
+import { buildOrderNoteSections, createEmailOrderItems, generateOrderPdfBase64, buildEmailItemsFromOrder, base64ToBlob, resolveCustomerOrderPricing, deriveAutoNotesFromItems } from '../lib/orderDocuments';
 import { displayOrderNumber, buildFulfillmentUrl } from '../lib/orderNumber';
 import { fetchPresaleInvoices, uploadPresaleInvoice } from '../lib/presaleInvoice';
 import { fetchConfirmationSent, markConfirmationSent, fetchPaymentRecords, uploadPop, setPaymentStatus } from '../lib/orderPayment';
@@ -559,6 +559,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
 
   const [orders, setOrders] = useState([]);
   const [orderTab, setOrderTab] = useState('new');
+  const [focusOrderId, setFocusOrderId] = useState('');
   const [orderSubView, setOrderSubView] = useState('list');
   const [orderSearch, setOrderSearch] = useState('');
   const [fulfillmentSettingsOpen, setFulfillmentSettingsOpen] = useState(false);
@@ -1174,10 +1175,12 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     setSaving(`send-${order.id}`);
     try {
       const emailItems = buildEmailItemsFromOrder(order);
+      const autoNotes = deriveAutoNotesFromItems(emailItems).join('\n');
       const { hasPrices, total, items: customerItems } = resolveCustomerOrderPricing(emailItems);
       const pdfBase64 = await generateOrderPdfBase64({
         order,
         items: customerItems,
+        autoNotes,
         userNotes: order.order_change_notes || '',
         assignedTo: activeFulfillmentUser?.name || '',
         total,
@@ -1208,6 +1211,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
           orderNumber: displayOrderNumber(order),
           orderDate: order.created_at,
           items: customerItems,
+          autoNotes,
           userNotes: order.order_change_notes || '',
           assignedTo: activeFulfillmentUser?.name || '',
           total,
@@ -1257,6 +1261,30 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   useEffect(() => { if (activeSection === 'customers') void loadCustomers(); }, [activeSection, customerPage, customerTab, customerSearch]);
   useEffect(() => { if (activeSection === 'pricing') void loadCategoryWorkingSet(pricingCategory, 'pricing'); }, [activeSection, pricingCategory]);
   useEffect(() => { void reloadTaxonomy(); }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const section = params.get('section');
+    const tab = params.get('orderTab');
+    const focus = params.get('focusOrder');
+    if (section) setActiveSection(section);
+    if (tab) setOrderTab(tab);
+    if (focus) setFocusOrderId(focus);
+    if (section || tab || focus) {
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!focusOrderId || activeSection !== 'orders' || !orders.length) return;
+    setExpandedOrderId(focusOrderId);
+    const timer = setTimeout(() => {
+      const el = document.querySelector(`[data-order-id="${focusOrderId}"]`);
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      setFocusOrderId('');
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [focusOrderId, activeSection, orders]);
   useEffect(() => {
     if (activeSection !== 'reorder') return;
     void loadReorderProducts();
@@ -3968,8 +3996,9 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                     return (
                       <div key={order.id}>
                         <div
-                          className="adm-list-row adm-order-row"
+                          className={`adm-list-row adm-order-row${focusOrderId === order.id ? ' adm-order-row--focus' : ''}`}
                           style={{ gridTemplateColumns: orderListGridCols, cursor: 'pointer' }}
+                          data-order-id={order.id}
                           onClick={() => setExpandedOrderId(isExpanded ? null : order.id)}
                         >
                           <div>
