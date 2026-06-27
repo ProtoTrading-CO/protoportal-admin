@@ -8,7 +8,7 @@ import {
 /** Customer-facing order confirmation PDF/email — staff preview may still show prices. */
 export const SHOW_CUSTOMER_PRICES = false;
 
-export { buildOrderNoteSections, deriveAutoNotesFromItems } from '../../lib/order-format.mjs';
+export { buildOrderNoteSections, deriveAutoNotesFromItems, resolveDeliveryMethod } from '../../lib/order-format.mjs';
 
 export function stripPricesFromOrderItems(items = []) {
   return items.map(({ unitPrice, price, ...rest }) => rest);
@@ -137,13 +137,24 @@ function detectImageFormat(dataUrl) {
 }
 
 const COL = {
-  img: { x: 40, w: 48 },
-  code: { x: 96, w: 68 },
-  name: { x: 168, w: 168 },
-  ord: { x: 338, w: 32 },
-  stock: { x: 374, w: 52 },
-  total: { x: 430, w: 85 },
+  img: { x: 40, w: 42 },
+  code: { x: 86, w: 58 },
+  name: { x: 146, w: 138 },
+  ord: { x: 286, w: 36 },
+  stock: { x: 324, w: 46 },
+  pick: { x: 374, w: 30 },
+  total: { x: 408, w: 87 },
 };
+
+function colCenter(col) {
+  return col.x + col.w / 2;
+}
+
+function drawEmptyCheckbox(doc, x, y, size = 13) {
+  doc.setDrawColor(71, 85, 105);
+  doc.setLineWidth(0.9);
+  doc.rect(x, y, size, size, 'S');
+}
 
 const ROW_LINE = 11;
 const ROW_PAD = 14;
@@ -214,9 +225,9 @@ export async function generateOrderPdfBase64({
   y = 132;
 
   // ── Customer details ──────────────────────────────────────────────────
-  const primaryName = details.find((d) => d.label === 'Business')?.value
-    || details.find((d) => d.label === 'Contact')?.value
-    || 'Customer';
+  const customerRow = details.find((d) => d.label === 'Customer');
+  const businessRow = details.find((d) => d.label === 'Business');
+  const primaryName = customerRow?.value || businessRow?.value || 'Customer';
   doc.setTextColor(15, 23, 42);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(13);
@@ -241,7 +252,16 @@ export async function generateOrderPdfBase64({
   };
 
   for (const row of details) {
-    if (row.label === 'Business' || row.label === 'Contact') continue;
+    if (row.label === 'Customer') continue;
+    if (row.label === 'Delivery') {
+      ensureSpace(20);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9.5);
+      doc.setTextColor(15, 23, 42);
+      doc.text(`Delivery: ${row.value}`, margin, y);
+      y += 18;
+      continue;
+    }
     detail(row.label, row.value);
   }
   y += 10;
@@ -259,11 +279,13 @@ export async function generateOrderPdfBase64({
   doc.setFontSize(8);
   doc.text('CODE', COL.code.x, y + 14);
   doc.text('PRODUCT', COL.name.x, y + 14);
-  doc.text('ORD', COL.ord.x, y + 14);
+  doc.text('ORD', colCenter(COL.ord), y + 14, { align: 'center' });
   doc.setFontSize(6.5);
-  doc.text('STOCK', COL.stock.x, y + 10);
-  doc.text('AVAIL.', COL.stock.x, y + 17);
-  if (hasPrices) doc.text('TOTAL', COL.total.x, y + 14);
+  doc.text('STOCK', colCenter(COL.stock), y + 10, { align: 'center' });
+  doc.text('AVAIL.', colCenter(COL.stock), y + 17, { align: 'center' });
+  doc.setFontSize(7);
+  doc.text('PICK', colCenter(COL.pick), y + 14, { align: 'center' });
+  if (hasPrices) doc.text('TOTAL', COL.total.x + COL.total.w, y + 14, { align: 'right' });
   y += 28;
 
   // ── Line items ────────────────────────────────────────────────────────
@@ -338,11 +360,16 @@ export async function generateOrderPdfBase64({
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(10);
     doc.setTextColor(100, 116, 139);
-    doc.text(String(orderedQty), COL.ord.x, textY + 4, { maxWidth: COL.ord.w });
+    doc.text(String(orderedQty), colCenter(COL.ord), textY + 4, { align: 'center' });
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(10);
     doc.setTextColor(item.removed ? 220 : 15, item.removed ? 38 : 23, item.removed ? 38 : 42);
-    doc.text(item.removed ? '0' : String(confirmedQty), COL.stock.x + COL.stock.w / 2, textY + 4, { align: 'center', maxWidth: COL.stock.w });
+    doc.text(item.removed ? '0' : String(confirmedQty), colCenter(COL.stock), textY + 4, { align: 'center' });
+
+    const boxSize = 13;
+    const boxX = colCenter(COL.pick) - boxSize / 2;
+    const boxY = y + (rowH - boxSize) / 2;
+    drawEmptyCheckbox(doc, boxX, boxY, boxSize);
 
     if (hasPrices && lineTotal != null) {
       doc.setFont('helvetica', 'normal');

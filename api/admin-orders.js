@@ -71,6 +71,7 @@ export default async function handler(req, res) {
       'status', 'final_items', 'original_items', 'order_change_notes', 'order_match',
       'replacement_map', 'viewed_at', 'paid_at', 'delivered_at', 'total_ex_vat',
       'handed_over_at', 'order_in_progress_at', 'order_sent_at', 'payment_received_at',
+      'delivery_method',
     ]);
     const sanitized = {};
     for (const [key, value] of Object.entries(patch)) {

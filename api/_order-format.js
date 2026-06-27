@@ -1,5 +1,6 @@
 export {
   formatDeliveryMethod,
+  resolveDeliveryMethod,
   stripNoteBullet,
   deriveAutoNotesFromItems,
   buildOrderNoteSections,
