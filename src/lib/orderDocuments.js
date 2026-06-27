@@ -8,7 +8,7 @@ import {
 /** Customer-facing order confirmation PDF/email — staff preview may still show prices. */
 export const SHOW_CUSTOMER_PRICES = false;
 
-export { buildOrderNoteSections, deriveAutoNotesFromItems, resolveDeliveryMethod } from '../../lib/order-format.mjs';
+export { buildOrderNoteSections, deriveAutoNotesFromItems, resolveDeliveryMethod, formatDeliveryMethod } from '../../lib/order-format.mjs';
 
 export function stripPricesFromOrderItems(items = []) {
   return items.map(({ unitPrice, price, ...rest }) => rest);

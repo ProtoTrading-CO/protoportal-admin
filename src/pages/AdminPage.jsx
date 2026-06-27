@@ -93,7 +93,7 @@ import {
 } from '../lib/taxonomyAdmin';
 import { approveCustomer, deleteCustomer, fetchCustomersPage, fetchProtoActiveCustomersPage, seedProtoActiveCustomers, updateProtoActiveCustomer, updateCustomerAdmin } from '../lib/customers';
 import { supabase } from '../lib/supabase';
-import { buildOrderNoteSections, createEmailOrderItems, generateOrderPdfBase64, buildEmailItemsFromOrder, base64ToBlob, resolveCustomerOrderPricing, deriveAutoNotesFromItems, resolveDeliveryMethod } from '../lib/orderDocuments';
+import { buildOrderNoteSections, createEmailOrderItems, generateOrderPdfBase64, buildEmailItemsFromOrder, base64ToBlob, resolveCustomerOrderPricing, deriveAutoNotesFromItems, resolveDeliveryMethod, formatDeliveryMethod } from '../lib/orderDocuments';
 import { displayOrderNumber, buildFulfillmentUrl } from '../lib/orderNumber';
 import { fetchPresaleInvoices, uploadPresaleInvoice } from '../lib/presaleInvoice';
 import { fetchConfirmationSent, markConfirmationSent, fetchPaymentRecords, uploadPop, setPaymentStatus } from '../lib/orderPayment';
@@ -1005,6 +1005,47 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     [confirmationSent],
   );
 
+  const saveDeliveryMethod = async (order, rawValue) => {
+    try {
+      await updateOrderAdmin(order.id, { delivery_method: rawValue });
+      setOrders((prev) => prev.map((item) => (
+        item.id === order.id ? { ...item, delivery_method: rawValue } : item
+      )));
+      showToast(`Delivery set: ${formatDeliveryMethod(rawValue)}`);
+    } catch (e) {
+      showToast(e.message || 'Could not save delivery method', 'error');
+    }
+  };
+
+  const renderDeliveryPicker = (order) => {
+    const current = order.delivery_method || '';
+    const isProto = current.includes('Proto') || current.toLowerCase().includes('proto');
+    const isOwn = current.includes('own') || current.toLowerCase().includes('courier');
+    return (
+      <div className="adm-delivery-pick">
+        <span className="adm-oc-label">Delivery</span>
+        <div className="adm-delivery-options">
+          <button
+            type="button"
+            className={`adm-delivery-btn${isProto ? ' adm-delivery-btn--active' : ''}`}
+            onClick={() => void saveDeliveryMethod(order, 'Proto Trading delivers')}
+          >
+            Proto to deliver
+          </button>
+          <button
+            type="button"
+            className={`adm-delivery-btn${isOwn ? ' adm-delivery-btn--active' : ''}`}
+            onClick={() => void saveDeliveryMethod(order, "Customer's own courier")}
+          >
+            Customer own courier
+          </button>
+        </div>
+        {!current && <span className="adm-delivery-hint">Select delivery before sending</span>}
+        {current && <span className="adm-delivery-set">✓ {formatDeliveryMethod(current)}</span>}
+      </div>
+    );
+  };
+
   const renderOrderConfirmationActions = (order) => {
     if (normalizeOrderStatus(order.status) !== 'order sent') return null;
     if (confirmationSentIds.has(order.id)) return null;
@@ -1013,6 +1054,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     const sending = saving === `send-${order.id}`;
     return (
       <div className="adm-oc-col">
+        {renderDeliveryPicker(order)}
         <span className="adm-oc-label">Order Confirmation</span>
         <label className="adm-oc-upload-btn">
           {uploading ? <Loader2 size={13} className="spin" /> : <Upload size={13} />}
@@ -1172,27 +1214,13 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
       : `Send order confirmation to ${email}? (No presale invoice uploaded yet)`;
     if (!window.confirm(confirmMsg)) return;
 
-    let orderForSend = order;
-    let deliveryMethod = resolveDeliveryMethod(order);
+    const deliveryMethod = resolveDeliveryMethod(order);
     if (!deliveryMethod) {
-      const pick = window.prompt(
-        'Delivery method was not saved on this order.\n\nType proto for "Proto to deliver"\nType own for "Customer elected their own courier"',
-        'proto',
-      );
-      if (pick === null) return;
-      const raw = String(pick).trim().toLowerCase().startsWith('own') || pick.trim() === '2'
-        ? "Customer's own courier"
-        : 'Proto Trading delivers';
-      try {
-        await updateOrderAdmin(order.id, { delivery_method: raw });
-        orderForSend = { ...order, delivery_method: raw };
-        deliveryMethod = raw;
-        setOrders((prev) => prev.map((item) => (item.id === order.id ? { ...item, delivery_method: raw } : item)));
-      } catch (e) {
-        showToast(e.message || 'Could not save delivery method', 'error');
-        return;
-      }
+      showToast('Select Proto to deliver or Customer own courier above, then send again.', 'error');
+      return;
     }
+
+    const orderForSend = order;
 
     setSaving(`send-${order.id}`);
     try {
