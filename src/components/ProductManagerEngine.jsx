@@ -65,6 +65,7 @@ function CatalogSkeleton() {
 
 function PmMobileProductCard({
   item,
+  index,
   status,
   selected,
   showStockColumn,
@@ -82,7 +83,7 @@ function PmMobileProductCard({
         <input
           type="checkbox"
           checked={selected.has(item.id)}
-          onChange={() => onToggleSelect(item.id, item)}
+          onChange={(e) => onToggleSelect(item.id, item, { shiftKey: e.nativeEvent.shiftKey, index })}
           style={{ accentColor: '#8B1A1A', cursor: 'pointer' }}
           aria-label={`Select ${item.sku}`}
         />
@@ -248,6 +249,7 @@ export default function ProductManagerEngine({
   const [categoryDrawerOpen, setCategoryDrawerOpen] = useState(false);
   const [categoryStackNav, setCategoryStackNav] = useState(null);
   const selectedRowsRef = useRef(new Map());
+  const lastSelectIdxRef = useRef(null);
   const panelTopRef = useRef(null);
   const isMobile = useMediaQuery('(max-width: 900px)');
 
@@ -284,11 +286,13 @@ export default function ProductManagerEngine({
     setPage(1);
     setSelected(new Set());
     selectedRowsRef.current = new Map();
+    lastSelectIdxRef.current = null;
     setSelectAllView(false);
   }, [status, debouncedSearch, categoryPath.join('/'), archiveStockView]);
 
   const handlePageChange = useCallback((nextPage) => {
     setPage(nextPage);
+    lastSelectIdxRef.current = null;
     scrollToPageTop();
   }, []);
 
@@ -386,11 +390,30 @@ export default function ProductManagerEngine({
     }
   };
 
-  const toggleSelect = (id, item) => {
+  const toggleSelect = (id, item, { shiftKey = false, index = null } = {}) => {
     setSelectAllView(false);
     setSelected((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) {
+      if (
+        shiftKey
+        && lastSelectIdxRef.current !== null
+        && index !== null
+        && index !== lastSelectIdxRef.current
+      ) {
+        const start = Math.min(lastSelectIdxRef.current, index);
+        const end = Math.max(lastSelectIdxRef.current, index);
+        const rangeRows = rows.slice(start, end + 1);
+        const allSelected = rangeRows.length > 0 && rangeRows.every((r) => next.has(r.id));
+        for (const row of rangeRows) {
+          if (allSelected) {
+            next.delete(row.id);
+            selectedRowsRef.current.delete(row.id);
+          } else {
+            next.add(row.id);
+            selectedRowsRef.current.set(row.id, row);
+          }
+        }
+      } else if (next.has(id)) {
         next.delete(id);
         selectedRowsRef.current.delete(id);
       } else {
@@ -399,6 +422,7 @@ export default function ProductManagerEngine({
       }
       return next;
     });
+    if (index !== null) lastSelectIdxRef.current = index;
   };
 
   const allPageSelected = rows.length > 0 && rows.every((r) => selected.has(r.id));
@@ -912,10 +936,11 @@ export default function ProductManagerEngine({
               <>
                 {isMobile ? (
                   <div className="pm-mobile-list">
-                    {rows.map((item) => (
+                    {rows.map((item, index) => (
                       <PmMobileProductCard
                         key={item.id}
                         item={item}
+                        index={index}
                         status={archiveOosLive ? 'live' : status}
                         selected={selected}
                         showStockColumn={showStockColumn}
@@ -956,7 +981,7 @@ export default function ProductManagerEngine({
                     {showStockColumn && <span>Stock</span>}
                     <span>Actions</span>
                   </div>
-                  {rows.map((item) => (
+                  {rows.map((item, index) => (
                     <div
                       key={item.id}
                       className={`adm-list-row${selected.has(item.id) ? ' adm-list-row--selected' : ''}`}
@@ -966,7 +991,7 @@ export default function ProductManagerEngine({
                         <input
                           type="checkbox"
                           checked={selected.has(item.id)}
-                          onChange={() => toggleSelect(item.id, item)}
+                          onChange={(e) => toggleSelect(item.id, item, { shiftKey: e.nativeEvent.shiftKey, index })}
                           style={{ accentColor: '#8B1A1A', cursor: 'pointer' }}
                           aria-label={`Select ${item.sku}`}
                         />
