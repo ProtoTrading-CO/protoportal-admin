@@ -518,6 +518,8 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   const [reorderSaving, setReorderSaving] = useState(false);
   const [reorderSortMeta, setReorderSortMeta] = useState({ updatedAt: null });
   const reorderCacheByMainRef = useRef({});
+  const reorderSaveTimerRef = useRef(null);
+  const pendingReorderSaveRef = useRef(null);
   const [taxonomyTree, setTaxonomyTree] = useState(categories);
   const [toast, setToast] = useState(null);
   const [moveModalOpen, setMoveModalOpen] = useState(false);
@@ -951,6 +953,22 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     }
   }, [reorderSearch, reorderCategoryPath, reorderNavPath, reorderMainId, reorderCacheKey, taxonomyTree, productsForSortSave, mergeReorderIntoCategoryCache]);
 
+  const scheduleReorderSave = useCallback((orderedProducts, meta) => {
+    pendingReorderSaveRef.current = { orderedProducts, meta };
+    if (reorderSaveTimerRef.current) clearTimeout(reorderSaveTimerRef.current);
+    reorderSaveTimerRef.current = setTimeout(() => {
+      const pending = pendingReorderSaveRef.current;
+      pendingReorderSaveRef.current = null;
+      if (pending) void commitReorderOrder(pending.orderedProducts, pending.meta);
+    }, 450);
+  }, [commitReorderOrder]);
+
+  useEffect(() => () => {
+    if (reorderSaveTimerRef.current) clearTimeout(reorderSaveTimerRef.current);
+  }, []);
+
+  const reorderBrowseAll = !reorderCategoryPath.length;
+
   const showToast = (message, type = 'success') => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 4000);
@@ -1289,8 +1307,12 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   }, [focusOrderId, activeSection, orders]);
   useEffect(() => {
     if (activeSection !== 'reorder') return;
+    if (!reorderCategoryPath.length && mainCategories[0]?.id) {
+      setReorderCategoryPath([mainCategories[0].id]);
+      return;
+    }
     void loadReorderProducts();
-  }, [activeSection, reorderCacheKey]);
+  }, [activeSection, reorderCacheKey, reorderCategoryPath.length, mainCategories]);
 
   useEffect(() => {
     if (activeSection !== 'reorder') return;
@@ -3319,7 +3341,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                 <div className="adm-section-head adm-section-head--reorder">
                   <div>
                     <h2 className="adm-section-title">Reorder Grid</h2>
-                    <p className="adm-section-note">Matches the live trade portal order (cached). Drag to reorder within a category — changes save automatically to the website. Select a category in the sidebar for subcategory ordering.</p>
+                    <p className="adm-section-note">Matches the live trade portal order (cached). Pick a category in the sidebar — drag to reorder within that category. Changes save automatically after you drop.</p>
                   </div>
                   <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                     <button
@@ -3448,13 +3470,13 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                     selectedPath={reorderCategoryPath}
                     taxonomyTree={taxonomyTree}
                     loading={loading}
-                    dragDisabled={reorderSearchActive}
+                    dragDisabled={reorderSearchActive || reorderBrowseAll}
                     savingOrder={reorderSaving}
-                    emptyHint={undefined}
+                    emptyHint={reorderBrowseAll ? 'Select a category in the sidebar to load products for reordering.' : undefined}
                     onEditProduct={openContentEdit}
                     onEditSubcategory={setEditTaxonomyModal}
                     onDeleteSubcategory={(sub) => void openDeleteSubcategory(sub)}
-                    onOrderCommitted={(next, meta) => void commitReorderOrder(next, meta)}
+                    onOrderCommitted={(next, meta) => scheduleReorderSave(next, meta)}
                   />
                 </div>
 

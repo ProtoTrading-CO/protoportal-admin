@@ -60,6 +60,18 @@ export async function signOut() {
   if (error) throw error;
 }
 
+export async function requestPasswordReset(email) {
+  const normalized = String(email || '').trim().toLowerCase();
+  if (!normalized) throw new Error('Email is required');
+  if (!isAllowedAdminEmail(normalized)) {
+    throw new Error('This email is not authorized for the admin dashboard.');
+  }
+  const { error } = await supabase.auth.resetPasswordForEmail(normalized, {
+    redirectTo: `${window.location.origin}/`,
+  });
+  if (error) throw error;
+}
+
 export function onAuthStateChange(callback) {
   return supabase.auth.onAuthStateChange((_event, session) => {
     callback(session);
