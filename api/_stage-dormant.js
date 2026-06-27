@@ -1,6 +1,5 @@
 import { stagingExpiresAt, collectImageUrlsFromRow, removeStagingObjects, isExpiredStaging, resolveLiveImageUrl, storagePathFromPublicUrl, buildLiveObjectPath, publicUrlForPath, repairSkuLiveStagingUrls } from './_staging-storage.js';
 import { findProductBySku, fetchProductLookupMap } from './_sku-match.js';
-import { websitePriceFromSellPrice } from './_pricing.js';
 
 const LIVE_SELECT = `
   id, sku, barcode, title, original_description,
@@ -217,11 +216,10 @@ export async function validateStockReady(sb, barcode) {
   const product = findProductBySku(lookupMap, key);
   if (!product) return { ok: false, error: `No stock record for "${key}" — add price and SOH in the stock system first` };
 
-  const priceExVat = readStock(product.sell_price);
-  if (priceExVat === null || priceExVat <= 0) {
+  const price = readStock(product.sell_price);
+  if (price === null || price <= 0) {
     return { ok: false, error: `Missing or zero price for "${key}" in stock system` };
   }
-  const price = websitePriceFromSellPrice(priceExVat);
 
   const soh = readStock(product.available_stock) ?? readStock(product.stock_qty);
   if (soh === null) {
@@ -249,12 +247,11 @@ export async function batchValidateStockReady(sb, barcodes) {
       result.set(key, { ok: false, error: `No stock record for "${key}" — add price and SOH in the stock system first` });
       continue;
     }
-    const priceExVat = readStock(product.sell_price);
-    if (priceExVat === null || priceExVat <= 0) {
+    const price = readStock(product.sell_price);
+    if (price === null || price <= 0) {
       result.set(key, { ok: false, error: `Missing or zero price for "${key}" in stock system` });
       continue;
     }
-    const price = websitePriceFromSellPrice(priceExVat);
     const soh = readStock(product.available_stock) ?? readStock(product.stock_qty);
     if (soh === null) {
       result.set(key, { ok: false, error: `Missing stock/SOH for "${key}" in stock system` });

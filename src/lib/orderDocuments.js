@@ -1,8 +1,14 @@
 import { jsPDF } from 'jspdf';
 import { displayOrderNumber, buildFulfillmentUrl } from './orderNumber';
+import {
+  buildOrderNoteSections,
+  customerDetailRows,
+} from '../../lib/order-format.mjs';
 
 /** Customer-facing order confirmation PDF/email — staff preview may still show prices. */
 export const SHOW_CUSTOMER_PRICES = false;
+
+export { buildOrderNoteSections, deriveAutoNotesFromItems } from '../../lib/order-format.mjs';
 
 export function stripPricesFromOrderItems(items = []) {
   return items.map(({ unitPrice, price, ...rest }) => rest);
@@ -19,16 +25,6 @@ export function resolveCustomerOrderPricing(items = []) {
       .reduce((sum, item) => sum + (Number(item.unitPrice ?? item.price ?? 0) * (item.qty || 0)), 0)
     : null;
   return { hasPrices, total, items };
-}
-
-export function buildOrderNoteSections({ assignedTo = '', autoNotes = '', userNotes = '' } = {}) {
-  const autoLines = String(autoNotes || '').split('\n').map((line) => line.trim()).filter(Boolean);
-  const userLines = String(userNotes || '').split('\n').map((line) => line.trim()).filter(Boolean);
-  return [
-    assignedTo ? { title: 'Handled by', lines: [assignedTo] } : null,
-    autoLines.length ? { title: 'Order changes', lines: autoLines } : null,
-    userLines.length ? { title: 'Additional notes', lines: userLines } : null,
-  ].filter(Boolean);
 }
 
 export function buildCombinedNotes(payload = {}) {
@@ -142,11 +138,11 @@ function detectImageFormat(dataUrl) {
 
 const COL = {
   img: { x: 40, w: 48 },
-  code: { x: 96, w: 70 },
-  name: { x: 170, w: 176 },
-  ord: { x: 350, w: 34 },
-  conf: { x: 388, w: 34 },
-  total: { x: 426, w: 89 },
+  code: { x: 96, w: 68 },
+  name: { x: 168, w: 168 },
+  ord: { x: 338, w: 32 },
+  stock: { x: 374, w: 52 },
+  total: { x: 430, w: 85 },
 };
 
 const ROW_LINE = 11;
@@ -177,13 +173,11 @@ export async function generateOrderPdfBase64({
   };
 
   const orderNumber = displayOrderNumber(order);
-  const customerName = order?.customers?.name || 'Customer';
-  const customerEmail = order?.customers?.email || '';
-  const businessName = order?.customers?.business_name || '';
   const dateStr = new Date(order?.created_at || Date.now()).toLocaleDateString('en-ZA', {
     day: 'numeric', month: 'long', year: 'numeric',
   });
   const linkUrl = includeInternalLink ? (fulfillmentUrl || buildFulfillmentUrl(order?.id)) : '';
+  const details = customerDetailRows(order);
 
   // ── Header band (black bar with Proto logo) ─────────────────────────────
   doc.setFillColor(196, 0, 0);
@@ -219,18 +213,19 @@ export async function generateOrderPdfBase64({
   doc.text(dateStr, pageWidth - margin, 64, { align: 'right' });
   y = 132;
 
-  // ── Customer details (full sign-up record) ──────────────────────────────
-  const c = order?.customers || {};
-  const contactName = c.contact_name || c.name || customerName;
+  // ── Customer details ──────────────────────────────────────────────────
+  const primaryName = details.find((d) => d.label === 'Business')?.value
+    || details.find((d) => d.label === 'Contact')?.value
+    || 'Customer';
   doc.setTextColor(15, 23, 42);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(13);
-  doc.text(businessName || contactName, margin, y);
-  y += 17;
+  doc.text(primaryName, margin, y);
+  y += 20;
 
   const detail = (label, value) => {
     if (!value) return;
-    ensureSpace(14);
+    ensureSpace(16);
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(8.5);
     doc.setTextColor(100, 116, 139);
@@ -238,38 +233,36 @@ export async function generateOrderPdfBase64({
     doc.text(labelText, margin, y);
     const lw = doc.getTextWidth(labelText);
     doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9.5);
     doc.setTextColor(30, 41, 59);
     const vlines = doc.splitTextToSize(String(value), contentWidth - lw);
-    doc.text(vlines, margin + lw, y, { lineHeightFactor: 1.25 });
-    y += Math.max(13, vlines.length * 12);
+    doc.text(vlines, margin + lw, y, { lineHeightFactor: 1.35 });
+    y += Math.max(15, vlines.length * 13);
   };
 
-  if (businessName && contactName && businessName !== contactName) detail('Contact', contactName);
-  detail('Email', customerEmail);
-  detail('Phone', c.phone);
-  detail('VAT number', c.vat_number);
-  detail('Account code', c.account_code || c.customer_code);
-  detail('Business type', c.business_type);
-  detail('Location', [c.city, c.province, c.country].filter(Boolean).join(', '));
-  detail('Company address', c.company_address);
-  detail('Delivery address', c.delivery_address);
-  detail('Delivery method', order?.delivery_method);
-  y += 8;
+  for (const row of details) {
+    if (row.label === 'Business' || row.label === 'Contact') continue;
+    detail(row.label, row.value);
+  }
+  y += 10;
 
   // ── Table header ──────────────────────────────────────────────────────
   ensureSpace(30);
   doc.setFillColor(17, 17, 17);
   doc.rect(margin, y, contentWidth, 22, 'F');
   doc.setFillColor(196, 0, 0);
-  doc.rect(COL.conf.x - 4, y, COL.conf.w + 8, 22, 'F');
+  doc.rect(COL.stock.x - 4, y, COL.stock.w + 8, 22, 'F');
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(8);
+  doc.setFontSize(7);
   doc.setTextColor(255, 255, 255);
   doc.text('IMG', COL.img.x + 4, y + 14);
+  doc.setFontSize(8);
   doc.text('CODE', COL.code.x, y + 14);
   doc.text('PRODUCT', COL.name.x, y + 14);
   doc.text('ORD', COL.ord.x, y + 14);
-  doc.text('CONF', COL.conf.x, y + 14);
+  doc.setFontSize(6.5);
+  doc.text('STOCK', COL.stock.x, y + 10);
+  doc.text('AVAIL.', COL.stock.x, y + 17);
   if (hasPrices) doc.text('TOTAL', COL.total.x, y + 14);
   y += 28;
 
@@ -347,8 +340,9 @@ export async function generateOrderPdfBase64({
     doc.setTextColor(100, 116, 139);
     doc.text(String(orderedQty), COL.ord.x, textY + 4, { maxWidth: COL.ord.w });
     doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
     doc.setTextColor(item.removed ? 220 : 15, item.removed ? 38 : 23, item.removed ? 38 : 42);
-    doc.text(item.removed ? '—' : String(confirmedQty), COL.conf.x, textY + 4, { maxWidth: COL.conf.w });
+    doc.text(item.removed ? '0' : String(confirmedQty), COL.stock.x + COL.stock.w / 2, textY + 4, { align: 'center', maxWidth: COL.stock.w });
 
     if (hasPrices && lineTotal != null) {
       doc.setFont('helvetica', 'normal');
@@ -377,27 +371,44 @@ export async function generateOrderPdfBase64({
     y += 40;
   }
 
-  const notes = buildOrderNoteSections({ assignedTo: '', autoNotes, userNotes });
-  notes.forEach((section) => {
-    ensureSpace(40);
+  const noteSections = buildOrderNoteSections({ assignedTo: '', autoNotes, userNotes });
+  const changeSection = noteSections.find((s) => s.title === 'Order changes');
+  const extraSection = noteSections.find((s) => s.title === 'Additional notes');
+  const handledSection = noteSections.find((s) => s.title === 'Handled by');
+
+  const renderNoteBlock = (section, { emphasize = false } = {}) => {
+    if (!section?.lines?.length) return;
+    ensureSpace(48);
+    doc.setFillColor(emphasize ? 255 : 248, emphasize ? 251 : 250, emphasize ? 235 : 252);
+    doc.setDrawColor(emphasize ? 251 : 226, emphasize ? 191 : 232, emphasize ? 36 : 240);
+    const blockH = 28 + section.lines.length * 16;
+    ensureSpace(blockH);
+    doc.roundedRect(margin, y, contentWidth, blockH, 4, 4, emphasize ? 'FD' : 'F');
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(11);
+    doc.setFontSize(emphasize ? 12 : 11);
     doc.setTextColor(15, 23, 42);
-    doc.text(section.title, margin, y);
-    y += 16;
+    doc.text(section.title, margin + 12, y + 18);
+    y += 28;
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(10);
     doc.setTextColor(55, 65, 81);
     section.lines.forEach((line) => {
-      const lines = doc.splitTextToSize(`• ${line}`, contentWidth - 8);
+      const lines = doc.splitTextToSize(line, contentWidth - 28);
       lines.forEach((ln) => {
-        ensureSpace(14);
-        doc.text(ln, margin + 6, y, { maxWidth: contentWidth - 12 });
-        y += 14;
+        ensureSpace(16);
+        doc.text(ln, margin + 14, y, { maxWidth: contentWidth - 28 });
+        y += 15;
       });
     });
+    y += 14;
+  };
+
+  if (handledSection) renderNoteBlock(handledSection);
+  if (changeSection) renderNoteBlock(changeSection);
+  if (extraSection) {
     y += 8;
-  });
+    renderNoteBlock(extraSection, { emphasize: true });
+  }
 
   if (linkUrl) {
     ensureSpace(36);

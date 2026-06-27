@@ -12,6 +12,7 @@ import {
   saveActiveUserId,
 } from '../lib/fulfillmentUsers';
 import { generateOrderPdfBase64, createEmailOrderItems, openPdfBase64Preview } from '../lib/orderDocuments';
+import { formatDeliveryMethod } from '../../lib/order-format.mjs';
 import { displayOrderNumber, buildFulfillmentUrl } from '../lib/orderNumber';
 import { isVictorSender, CUSTOMER_SEND_FORBIDDEN } from '../lib/fulfillmentAuth';
 import { getOrderAccessFromUrl } from '../lib/adminKey';
@@ -122,6 +123,7 @@ export default function FulfillmentPage() {
   const userPickerRef = useRef(null);
   const [userPickerOpen, setUserPickerOpen] = useState(false);
   const [categoryLabels, setCategoryLabels] = useState({ uncategorized: 'Other / Uncategorized' });
+  const [lightboxImage, setLightboxImage] = useState('');
 
   const activeUser = useMemo(
     () => users.find((u) => u.id === activeUserId) || null,
@@ -270,9 +272,9 @@ export default function FulfillmentPage() {
   const autoNotes = useMemo(() => {
     const lines = [];
     items.forEach((item) => {
-      if (item.removed) lines.push(`• ${item.code} — ${item.name}: Out of stock`);
-      else if (item.swapped) lines.push(`• ${item.originalCode} — ${item.originalName}: Substituted with ${item.code}`);
-      else if (item.finalQty !== item.qty) lines.push(`• ${item.code} — ${item.name}: Qty ${item.qty} → ${item.finalQty}`);
+      if (item.removed) lines.push(`${item.code} — ${item.name}: Out of stock`);
+      else if (item.swapped) lines.push(`${item.originalCode} — ${item.originalName}: Substituted with ${item.code}`);
+      else if (item.finalQty !== item.qty) lines.push(`${item.code} — ${item.name}: Qty ${item.qty} → ${item.finalQty}`);
     });
     return lines.join('\n');
   }, [items]);
@@ -312,7 +314,6 @@ export default function FulfillmentPage() {
   const total = items.filter((it) => !it.removed).reduce((s, it) => s + it.finalQty * (it.unitPrice || it.price || 0), 0);
   const hasPrices = items.some((it) => it.unitPrice || it.price);
   const buildFinalItems = () => items.filter((it) => !it.removed).map(({ removed, finalQty, swapped, originalCode, originalName, idx, mainCategoryId, mainCategoryLabel, ...rest }) => ({ ...rest, qty: finalQty }));
-  const combinedNotes = [autoNotes, userNotes].filter(Boolean).join('\n\n');
 
   const doSave = async () => {
     if (!victorCanSave) {
@@ -328,7 +329,7 @@ export default function FulfillmentPage() {
         body: JSON.stringify({
           id: orderId,
           final_items: buildFinalItems(),
-          ...(combinedNotes ? { notes: combinedNotes } : {}),
+          ...(userNotes.trim() ? { notes: userNotes.trim() } : {}),
           advanceWorkflow: 'order sent',
           senderUserId: activeUser?.id || '',
           senderName: activeUser?.name || '',
@@ -336,7 +337,18 @@ export default function FulfillmentPage() {
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Save failed');
-      setStatusMsg({ type: 'ok', text: 'Order saved — find it under Order Confirmation to upload invoice and send to customer.' });
+      const adminUrl = `/?section=orders&orderTab=sent&focusOrder=${encodeURIComponent(orderId)}`;
+      if (window.opener && !window.opener.closed) {
+        try {
+          window.opener.location.href = adminUrl;
+          window.opener.focus();
+          window.close();
+          return;
+        } catch {
+          // Fall through to same-tab navigation.
+        }
+      }
+      window.location.replace(adminUrl);
     } catch (e) { setStatusMsg({ type: 'err', text: e.message }); }
     finally { setSaving(false); }
   };
@@ -366,7 +378,11 @@ export default function FulfillmentPage() {
       <div key={`${item.productId || item.code}-${idx}`}>
         <div className={`ff-item-row${item.removed ? ' ff-item-row--removed' : ''}${!editable ? ' ff-item-row--readonly' : ''}`}>
           <div className="ff-item-img">
-            {item.image ? <img src={item.image} alt="" /> : <span>IMG</span>}
+            {item.image ? (
+              <button type="button" className="ff-item-img-btn" onClick={() => setLightboxImage(item.image)} aria-label="View product image">
+                <img src={item.image} alt="" />
+              </button>
+            ) : <span>IMG</span>}
           </div>
           <div className="ff-item-body">
             <div className="ff-item-code">{item.code}</div>
@@ -454,7 +470,7 @@ export default function FulfillmentPage() {
             <div className="ff-hero-customer">{order.customers?.name || 'Customer'}</div>
             <div className="ff-hero-email">{order.customers?.email || '—'}</div>
             {order.delivery_method && (
-              <div className="ff-hero-delivery">🚚 {order.delivery_method}</div>
+              <div className="ff-hero-delivery">🚚 {formatDeliveryMethod(order.delivery_method)}</div>
             )}
           </div>
           <div className="ff-hero-progress" aria-label={`${completedCount} of ${totalSections} sections complete`}>
@@ -573,6 +589,15 @@ export default function FulfillmentPage() {
           </div>
         )}
       </div>
+
+      {lightboxImage && (
+        <div className="ff-lightbox" role="dialog" aria-modal="true" onClick={() => setLightboxImage('')}>
+          <button type="button" className="ff-lightbox-close" onClick={() => setLightboxImage('')} aria-label="Close image">
+            <X size={22} />
+          </button>
+          <img src={lightboxImage} alt="Product" className="ff-lightbox-img" onClick={(e) => e.stopPropagation()} />
+        </div>
+      )}
     </div>
   );
 }
