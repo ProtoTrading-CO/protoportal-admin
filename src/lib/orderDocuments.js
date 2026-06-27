@@ -137,27 +137,27 @@ function detectImageFormat(dataUrl) {
 }
 
 const COL = {
-  img: { x: 40, w: 42 },
-  code: { x: 86, w: 58 },
-  name: { x: 146, w: 138 },
-  ord: { x: 286, w: 36 },
-  stock: { x: 324, w: 46 },
-  pick: { x: 374, w: 30 },
-  total: { x: 408, w: 87 },
+  img: { x: 40, w: 40 },
+  code: { x: 84, w: 54 },
+  name: { x: 140, w: 128 },
+  ord: { x: 270, w: 40 },
+  stock: { x: 312, w: 52 },
+  pick: { x: 368, w: 28 },
+  total: { x: 400, w: 75 },
 };
 
 function colCenter(col) {
   return col.x + col.w / 2;
 }
 
-function drawEmptyCheckbox(doc, x, y, size = 13) {
+function drawEmptyCheckbox(doc, x, y, size = 12) {
   doc.setDrawColor(71, 85, 105);
   doc.setLineWidth(0.9);
   doc.rect(x, y, size, size, 'S');
 }
 
-const ROW_LINE = 11;
-const ROW_PAD = 14;
+const ROW_LINE = 12;
+const ROW_PAD = 18;
 
 export async function generateOrderPdfBase64({
   order,
@@ -222,7 +222,7 @@ export async function generateOrderPdfBase64({
   doc.setFontSize(9);
   doc.setTextColor(150, 150, 150);
   doc.text(dateStr, pageWidth - margin, 64, { align: 'right' });
-  y = 132;
+  y = 140;
 
   // ── Customer details ──────────────────────────────────────────────────
   const customerRow = details.find((d) => d.label === 'Customer');
@@ -230,13 +230,13 @@ export async function generateOrderPdfBase64({
   const primaryName = customerRow?.value || businessRow?.value || 'Customer';
   doc.setTextColor(15, 23, 42);
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(13);
+  doc.setFontSize(14);
   doc.text(primaryName, margin, y);
-  y += 20;
+  y += 22;
 
   const detail = (label, value) => {
     if (!value) return;
-    ensureSpace(16);
+    ensureSpace(18);
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(8.5);
     doc.setTextColor(100, 116, 139);
@@ -244,34 +244,37 @@ export async function generateOrderPdfBase64({
     doc.text(labelText, margin, y);
     const lw = doc.getTextWidth(labelText);
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(9.5);
+    doc.setFontSize(10);
     doc.setTextColor(30, 41, 59);
     const vlines = doc.splitTextToSize(String(value), contentWidth - lw);
-    doc.text(vlines, margin + lw, y, { lineHeightFactor: 1.35 });
-    y += Math.max(15, vlines.length * 13);
+    doc.text(vlines, margin + lw, y, { lineHeightFactor: 1.4 });
+    y += Math.max(18, vlines.length * 14);
   };
 
   for (const row of details) {
     if (row.label === 'Customer') continue;
     if (row.label === 'Delivery') {
-      ensureSpace(20);
+      ensureSpace(22);
+      doc.setFillColor(255, 247, 237);
+      doc.setDrawColor(251, 191, 36);
+      doc.roundedRect(margin, y - 10, contentWidth, 24, 4, 4, 'FD');
       doc.setFont('helvetica', 'bold');
-      doc.setFontSize(9.5);
+      doc.setFontSize(10);
       doc.setTextColor(15, 23, 42);
-      doc.text(`Delivery: ${row.value}`, margin, y);
-      y += 18;
+      doc.text(`Delivery: ${row.value}`, margin + 10, y + 4);
+      y += 28;
       continue;
     }
     detail(row.label, row.value);
   }
-  y += 10;
+  y += 14;
 
   // ── Table header ──────────────────────────────────────────────────────
-  ensureSpace(30);
+  ensureSpace(34);
   doc.setFillColor(17, 17, 17);
-  doc.rect(margin, y, contentWidth, 22, 'F');
+  doc.rect(margin, y, contentWidth, 24, 'F');
   doc.setFillColor(196, 0, 0);
-  doc.rect(COL.stock.x - 4, y, COL.stock.w + 8, 22, 'F');
+  doc.rect(COL.stock.x - 4, y, COL.stock.w + COL.pick.w + 12, 24, 'F');
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(7);
   doc.setTextColor(255, 255, 255);
@@ -285,8 +288,8 @@ export async function generateOrderPdfBase64({
   doc.text('AVAIL.', colCenter(COL.stock), y + 17, { align: 'center' });
   doc.setFontSize(7);
   doc.text('PICK', colCenter(COL.pick), y + 14, { align: 'center' });
-  if (hasPrices) doc.text('TOTAL', COL.total.x + COL.total.w, y + 14, { align: 'right' });
-  y += 28;
+  if (hasPrices) doc.text('TOTAL', COL.total.x + COL.total.w, y + 15, { align: 'right' });
+  y += 32;
 
   // ── Line items ────────────────────────────────────────────────────────
   for (const item of items) {
@@ -304,9 +307,9 @@ export async function generateOrderPdfBase64({
     doc.setFontSize(9);
     const nameLines = doc.splitTextToSize(nameText, COL.name.w).slice(0, 2);
     const textLines = Math.max(1, Math.min(2, codeLines.length), nameLines.length);
-    const rowH = Math.max(48, ROW_PAD + textLines * ROW_LINE);
+    const rowH = Math.max(54, ROW_PAD + textLines * ROW_LINE);
 
-    ensureSpace(rowH + 6);
+    ensureSpace(rowH + 8);
 
     if (item.removed) doc.setFillColor(255, 245, 245);
     else if (orderedQty !== confirmedQty) doc.setFillColor(255, 251, 235);
@@ -329,7 +332,7 @@ export async function generateOrderPdfBase64({
       doc.rect(COL.img.x + 2, imgY, 44, 44, 'F');
     }
 
-    const textY = y + 12;
+    const textY = y + 14;
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(8);
     doc.setTextColor(item.removed ? 148 : 71, item.removed ? 163 : 85, item.removed ? 184 : 105);
@@ -366,7 +369,7 @@ export async function generateOrderPdfBase64({
     doc.setTextColor(item.removed ? 220 : 15, item.removed ? 38 : 23, item.removed ? 38 : 42);
     doc.text(item.removed ? '0' : String(confirmedQty), colCenter(COL.stock), textY + 4, { align: 'center' });
 
-    const boxSize = 13;
+    const boxSize = 12;
     const boxX = colCenter(COL.pick) - boxSize / 2;
     const boxY = y + (rowH - boxSize) / 2;
     drawEmptyCheckbox(doc, boxX, boxY, boxSize);
@@ -398,9 +401,15 @@ export async function generateOrderPdfBase64({
     y += 40;
   }
 
-  const noteSections = buildOrderNoteSections({ assignedTo: '', autoNotes, userNotes });
+  const noteSections = buildOrderNoteSections({
+    assignedTo: '',
+    autoNotes,
+    userNotes,
+    customerNotes: order?.customer_notes || '',
+  });
   const changeSection = noteSections.find((s) => s.title === 'Order changes');
   const extraSection = noteSections.find((s) => s.title === 'Additional notes');
+  const customerNotesSection = noteSections.find((s) => s.title === 'Customer notes');
   const handledSection = noteSections.find((s) => s.title === 'Handled by');
 
   const renderNoteBlock = (section, { emphasize = false } = {}) => {
@@ -431,6 +440,7 @@ export async function generateOrderPdfBase64({
   };
 
   if (handledSection) renderNoteBlock(handledSection);
+  if (customerNotesSection) renderNoteBlock(customerNotesSection, { emphasize: true });
   if (changeSection) renderNoteBlock(changeSection);
   if (extraSection) {
     y += 8;

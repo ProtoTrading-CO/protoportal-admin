@@ -76,6 +76,7 @@ function buildEmailHtml({
   items,
   autoNotes,
   userNotes,
+  customerNotes = '',
   assignedTo,
   total,
   hasPrices = false,
@@ -88,7 +89,7 @@ function buildEmailHtml({
 
   const showPrices = hasPrices && items.some((item) => !item.removed);
   const pickCell = '<td style="padding:12px;text-align:center"><span style="display:inline-block;width:16px;height:16px;border:2px solid #64748b;border-radius:3px;background:#ffffff"></span></td>';
-  const noteSections = buildOrderNoteSections({ assignedTo, autoNotes, userNotes });
+  const noteSections = buildOrderNoteSections({ assignedTo, autoNotes, userNotes, customerNotes });
 
   const customerBlock = customerDetails.length ? `
     <div style="margin:0 0 22px;padding:16px 18px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px">
@@ -141,7 +142,7 @@ function buildEmailHtml({
   }).join('');
 
   const notesHtml = noteSections.map((section) => {
-    const isExtra = section.title === 'Additional notes';
+    const isExtra = section.title === 'Additional notes' || section.title === 'Customer notes';
     return `
     <div style="margin-top:${isExtra ? '28px' : '20px'};padding:${isExtra ? '18px 20px' : '14px 16px'};background:${isExtra ? '#fffbeb' : '#f8fafc'};border-radius:10px;border:1px solid ${isExtra ? '#fde68a' : '#e2e8f0'};${isExtra ? 'border-left:4px solid #f59e0b' : ''}">
       <div style="font-size:12px;font-weight:800;color:${isExtra ? '#92400e' : '#64748b'};text-transform:uppercase;letter-spacing:0.06em;margin-bottom:12px">${escapeHtml(section.title)}</div>
@@ -249,6 +250,7 @@ export default async function handler(req, res) {
     items = [],
     autoNotes: autoNotesBody,
     userNotes,
+    customerNotes: bodyCustomerNotes,
     assignedTo,
     total,
     hasPrices = false,
@@ -311,6 +313,7 @@ export default async function handler(req, res) {
     items,
     autoNotes,
     userNotes,
+    customerNotes: orderRow?.customer_notes || bodyCustomerNotes || '',
     assignedTo,
     total,
     hasPrices,
