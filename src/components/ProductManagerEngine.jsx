@@ -102,7 +102,7 @@ function PmMobileProductCard({
           <div className="adm-muted pm-mobile-card-meta">
             <span>BC: {item.barcode || item.code || '—'}</span>
             {item.sku && <span>WSK: {item.sku}</span>}
-            {item.price > 0 && <span>R{Number(item.price).toFixed(2)}</span>}
+            {item.price > 0 && <span>R{Math.round(Number(item.price))}</span>}
           </div>
           {item.categoryLabel && (
             <div className="adm-muted pm-mobile-card-cat">{item.categoryLabel}</div>
@@ -992,8 +992,8 @@ export default function ProductManagerEngine({
                           <span title="Barcode">BC: {item.barcode || item.code || '—'}</span>
                           {item.sku && <span title="Website SKU" style={{ marginLeft: 8 }}>WSK: {item.sku}</span>}
                           {item.price > 0 && (
-                            <span title="Price excl. VAT" style={{ marginLeft: 8, fontWeight: 700, color: '#374151' }}>
-                              R{Number(item.price).toFixed(2)}
+                            <span title="Price incl. VAT" style={{ marginLeft: 8, fontWeight: 700, color: '#374151' }}>
+                              R{Math.round(Number(item.price))}
                             </span>
                           )}
                         </div>

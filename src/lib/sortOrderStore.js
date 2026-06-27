@@ -14,11 +14,18 @@ export async function fetchSortOrderStore({ force = false } = {}) {
 
   _fetchPromise = fetch('/api/category-sort-order', { credentials: 'same-origin' })
     .then(async (res) => {
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'Failed to load sort order');
       _store = data;
       _fetchedAt = Date.now();
       return _store;
+    })
+    .catch((err) => {
+      _fetchPromise = null;
+      if (err?.message?.includes('fetch')) {
+        throw new Error('Failed to fetch sort order — try Refresh');
+      }
+      throw err;
     })
     .finally(() => {
       _fetchPromise = null;
