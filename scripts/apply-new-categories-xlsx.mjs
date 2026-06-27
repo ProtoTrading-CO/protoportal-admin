@@ -130,7 +130,7 @@ function extractMappingsFromSheet(sheetName, raw) {
   const countAtHeader = (headerRowIdx) => {
     const headers = (raw[headerRowIdx] || []).map((h) => norm(h));
     const skuCol = colIndex(headers, [/^website sku$/i, /^sku$/i]);
-    const pathCol = colIndex(headers, [/^corrected proposed path$/i, /^target path$/i, /^new path$/i, /^full path$/i, /^category path$/i]);
+    const pathCol = colIndex(headers, [/^corrected proposed path$/i, /^recommended path$/i, /^target path$/i, /^new path$/i, /^full path$/i, /^category path$/i]);
     const catCol = colIndex(headers, [/^category$/i]);
     const sub1Col = colIndex(headers, [/^subcategory one$/i, /^subcategory 1$/i, /^sub 1$/i]);
     if (skuCol < 0) return 0;
@@ -173,7 +173,7 @@ function extractMappingsFromSheet(sheetName, raw) {
 
   const headers = (raw[bestStart] || []).map((h) => norm(h));
   const skuCol = colIndex(headers, [/^website sku$/i, /^sku$/i]);
-  const pathCol = colIndex(headers, [/^corrected proposed path$/i, /^target path$/i, /^new path$/i, /^full path$/i, /^category path$/i]);
+  const pathCol = colIndex(headers, [/^corrected proposed path$/i, /^recommended path$/i, /^target path$/i, /^new path$/i, /^full path$/i, /^category path$/i]);
   const catCol = colIndex(headers, [/^category$/i]);
   const sub1Col = colIndex(headers, [/^subcategory one$/i, /^subcategory 1$/i]);
   const sub2Col = colIndex(headers, [/^subcategory two$/i, /^subcategory 2$/i]);
