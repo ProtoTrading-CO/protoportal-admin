@@ -343,4 +343,11 @@ if (APPLY_IF_PENDING && done > 0 && existsSync(PENDING_FILE)) {
   console.log('Removed data/category-moves.pending');
 }
 
+if (APPLY_IF_PENDING) {
+  if (done < updates.length) {
+    console.warn(`Warning: ${updates.length - done} updates failed — build will continue.`);
+  }
+  process.exit(0);
+}
+
 process.exit(done === updates.length ? 0 : 1);
