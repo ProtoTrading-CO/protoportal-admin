@@ -2649,7 +2649,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
               </div>
             )}
 
-            {activeSection === 'catalogue' && (
+            <div style={{ display: activeSection === 'catalogue' ? 'block' : 'none' }}>
               <ProductManagerEngine
                 taxonomyTree={taxonomyTree}
                 onShowToast={showToast}
@@ -2668,7 +2668,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                   window.scrollTo({ top: 0, behavior: 'instant' });
                 }}
               />
-            )}
+            </div>
 
             {activeSection === 'analytics' && (
               <AnalyticsHub />

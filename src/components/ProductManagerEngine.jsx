@@ -315,7 +315,8 @@ export default function ProductManagerEngine({
   const { data, isLoading, isFetching, isPlaceholderData } = useCatalogQuery(catalogParams, {
     enabled: status !== 'approval',
   });
-  const rows = data?.rows || [];
+  const rowsStale = Boolean(data && data.page !== page);
+  const rows = rowsStale ? [] : (data?.rows || []);
   rowsRef.current = rows;
   const total = data?.total || 0;
   const archiveOosLive = status === 'archived' && archiveStockView === 'zero';
@@ -324,6 +325,14 @@ export default function ProductManagerEngine({
   const categoryKey = categoryPath.length
     ? sortOrderCategoryKey(categoryPath, tree)
     : '__all__';
+
+  useEffect(() => {
+    for (const row of rows) {
+      if (selectedRowsRef.current.has(row.id)) {
+        selectedRowsRef.current.set(row.id, row);
+      }
+    }
+  }, [rows, page]);
 
   const loadSortOrder = useCallback(async (baseRows) => {
     if (!categoryPath.length || categoryKey === '__all__') return;
@@ -455,6 +464,7 @@ export default function ProductManagerEngine({
   };
 
   const allPageSelected = rows.length > 0 && rows.every((r) => selected.has(r.id));
+  const selectedOnPage = rows.filter((r) => selected.has(r.id)).length;
 
   const clearSelection = () => {
     setSelected(new Set());
@@ -465,7 +475,15 @@ export default function ProductManagerEngine({
 
   const toggleSelectAllPage = () => {
     if (allPageSelected) {
-      clearSelection();
+      setSelectAllView(false);
+      setSelected((prev) => {
+        const next = new Set(prev);
+        for (const item of rows) {
+          next.delete(item.id);
+          selectedRowsRef.current.delete(item.id);
+        }
+        return next;
+      });
       return;
     }
     setSelectAllView(false);
@@ -637,7 +655,7 @@ export default function ProductManagerEngine({
     }
   };
 
-  const showSkeleton = isLoading && !isPlaceholderData && !data;
+  const showSkeleton = (isLoading && !isPlaceholderData && !data) || (rowsStale && isFetching);
   const addSubParentId = categoryPath[0] || tree[0]?.id || '';
   const categoryLabels = useMemo(() => resolvePathLabels(tree, categoryPath), [tree, categoryPath]);
   const categoryFilterLabel = categoryLabels.length
@@ -885,7 +903,12 @@ export default function ProductManagerEngine({
               )}
               {selected.size > 0 && (
                 <div className="pm-bulk-bar">
-                  <span>{selected.size} selected</span>
+                  <span>
+                    {selected.size} selected
+                    {total > rows.length && selectedOnPage < selected.size && (
+                      <> · {selectedOnPage} on this page</>
+                    )}
+                  </span>
                   <button
                     type="button"
                     className="adm-btn-ghost adm-btn--sm"
