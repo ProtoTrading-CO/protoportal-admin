@@ -88,18 +88,26 @@ const SEGMENT_LABELS = {
   wool: 'Wool',
 };
 
-/** Move 3 Excel labels → canonical DB/taxonomy paths */
-const MOVE3_PATH_OVERRIDES = {
-  'beads & jewellery making > beads by material > beads': 'Beads > Beads By Material > Beads',
-  'beads & jewellery making > seed beads > seed beads': 'Beads > Glass & Crystal > Seed Beads',
-  'out of beads > jewellery > findings / components': 'Jewellery > Findings',
-  'out of beads > jewellery > finished jewellery': 'Jewellery > Jewellery',
-  'out of beads > packaging & display > display / packaging': 'Packaging & Storage > Display > Display / Packaging',
-  'out of beads > watches > fashion watches': 'Electronics & Accessories > Clocks & Watches > Watches',
-};
+/** Move 3: normalize Excel destination paths to catalogue taxonomy */
+function buildMove3TargetPath(parts) {
+  const raw = parts.map(norm).filter(Boolean);
+  if (!raw.length) return '';
 
-function normPath(s) {
-  return String(s ?? '').trim().toLowerCase();
+  let labels = raw;
+  if (raw[0].toLowerCase() === 'out of beads') {
+    labels = raw.slice(1);
+  } else if (raw[0].toLowerCase() === 'beads & jewellery making') {
+    labels = ['Beads', ...raw.slice(1)];
+  }
+
+  if (labels[0]?.toLowerCase() === 'packaging & display') {
+    labels[0] = 'Packaging & Storage';
+  }
+  if (labels[0]?.toLowerCase() === 'watches') {
+    return 'Electronics & Accessories > Clocks & Watches > Watches';
+  }
+
+  return labels.join(' > ');
 }
 
 function norm(v) {
@@ -141,18 +149,13 @@ function fieldsMatch(row, fields) {
 }
 
 function resolveTargetFields(targetPath) {
-  const overridden = MOVE3_PATH_OVERRIDES[normPath(targetPath)] || targetPath;
-  const strict = resolvePathFields(tree, overridden);
-  if (strict) return { fields: strict, targetPath: overridden };
+  const strict = resolvePathFields(tree, targetPath);
+  if (strict) return { fields: strict, targetPath };
 
-  const labels = pathStringToLabels(overridden).map(normalizeSegment);
+  const labels = pathStringToLabels(targetPath).map(normalizeSegment);
   if (labels.length >= 2) {
     const main = labels[0]?.toLowerCase();
-    if (main === 'textiles') {
-      const canonical = [SEGMENT_LABELS.textiles, ...labels.slice(1)];
-      return { fields: labelsToDbFields(canonical), targetPath: canonical.join(' > ') };
-    }
-    if (main === 'beads' || main === 'packaging & storage') {
+    if (main === 'textiles' || main === 'beads' || main === 'jewellery' || main === 'packaging & storage' || main === 'electronics & accessories') {
       return { fields: labelsToDbFields(labels), targetPath: labels.join(' > ') };
     }
   }
@@ -215,7 +218,9 @@ function parseMove3(filePath, raw) {
       kid4Col >= 0 ? norm(row[kid4Col]) : '',
     ].filter(Boolean);
     if (!sku || parts.length < 2) continue;
-    mappings.push({ sku, targetPath: parts.join(' > '), source: `${filePath}:row${r + 1}` });
+    const targetPath = buildMove3TargetPath(parts);
+    if (!targetPath) continue;
+    mappings.push({ sku, targetPath, source: `${filePath}:row${r + 1}` });
   }
   return mappings;
 }
