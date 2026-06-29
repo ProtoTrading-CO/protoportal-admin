@@ -232,7 +232,7 @@ export default function ProductManagerEngine({
   initialStatus = 'live',
 }) {
   const [status, setStatus] = useState(initialStatus);
-  const [archiveStockView, setArchiveStockView] = useState('zero');
+  const [archiveStockView, setArchiveStockView] = useState('archived');
   const [reorderMode, setReorderMode] = useState(false);
 
   useEffect(() => {
@@ -321,7 +321,7 @@ export default function ProductManagerEngine({
   const rows = rowsStale ? [] : (data?.rows || []);
   rowsRef.current = rows;
   const total = data?.total || 0;
-  const archiveOosLive = status === 'archived' && archiveStockView === 'zero';
+  const archiveNegativeLive = status === 'archived' && archiveStockView === 'negative';
   const tree = taxonomyTree.length ? taxonomyTree : (data?.tree || []);
 
   const categoryKey = categoryPath.length
@@ -824,24 +824,24 @@ export default function ProductManagerEngine({
               {status === 'archived' && (
                 <>
                   <p className="adm-section-note" style={{ margin: '0 0 8px', width: '100%' }}>
-                    {archiveStockView === 'zero'
-                      ? 'Live products with 0 or negative ERP stock. Select all, then Archive all to hide them from the trade website.'
-                      : 'Products in the archive table. Click Make live to restore to the website catalogue.'}
+                    {archiveStockView === 'negative'
+                      ? 'Live products with negative ERP stock. Zero-stock items are not shown here.'
+                      : 'Archived products hidden from the trade website. Zero-stock items are not shown here.'}
                   </p>
                   <div className="pm-archive-stock-toggle" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', width: '100%', marginBottom: 8 }}>
                     <button
                       type="button"
-                      className={`adm-btn-ghost adm-btn--sm${archiveStockView === 'zero' ? ' adm-tab--active' : ''}`}
-                      onClick={() => setArchiveStockView('zero')}
+                      className={`adm-btn-ghost adm-btn--sm${archiveStockView === 'archived' ? ' adm-tab--active' : ''}`}
+                      onClick={() => setArchiveStockView('archived')}
                     >
-                      0 / negative stock
+                      Archived
                     </button>
                     <button
                       type="button"
-                      className={`adm-btn-ghost adm-btn--sm${archiveStockView === 'all' ? ' adm-tab--active' : ''}`}
-                      onClick={() => setArchiveStockView('all')}
+                      className={`adm-btn-ghost adm-btn--sm${archiveStockView === 'negative' ? ' adm-tab--active' : ''}`}
+                      onClick={() => setArchiveStockView('negative')}
                     >
-                      Show all
+                      Negative stock
                     </button>
                     {!isLoading && (
                       <span className="adm-pill" style={{ marginLeft: 'auto', fontSize: 12 }}>
@@ -951,7 +951,7 @@ export default function ProductManagerEngine({
                       <button type="button" className="adm-btn-red adm-btn--sm" onClick={() => runBulk({ mutateAsync: (sku) => mutations.softDelete.mutateAsync({ sku, fromArchive: false }) })}>To recycle</button>
                     </>
                   )}
-                  {status === 'archived' && archiveOosLive && (
+                  {status === 'archived' && archiveNegativeLive && (
                     <>
                       <button
                         type="button"
@@ -964,7 +964,7 @@ export default function ProductManagerEngine({
                       <button type="button" className="adm-btn-red adm-btn--sm" onClick={() => runBulk({ mutateAsync: (sku) => mutations.softDelete.mutateAsync({ sku, fromArchive: false }) })}>To recycle</button>
                     </>
                   )}
-                  {status === 'archived' && !archiveOosLive && (
+                  {status === 'archived' && !archiveNegativeLive && (
                     <>
                       <button
                         type="button"
@@ -1032,7 +1032,7 @@ export default function ProductManagerEngine({
                         key={item.id}
                         item={item}
                         index={index}
-                        status={archiveOosLive ? 'live' : status}
+                        status={archiveNegativeLive ? 'live' : status}
                         selected={selected}
                         showStockColumn={showStockColumn}
                         onCheckboxClick={onProductCheckboxClick}
@@ -1047,9 +1047,11 @@ export default function ProductManagerEngine({
                     ))}
                     {!rows.length && !isLoading && (
                       <p className="adm-empty">
-                        {status === 'archived' && archiveStockView === 'zero'
-                          ? 'No live products with 0 or negative stock.'
-                          : 'No products in this view.'}
+                        {status === 'archived' && archiveStockView === 'negative'
+                          ? 'No live products with negative stock.'
+                          : status === 'archived'
+                            ? 'No archived products (zero-stock items are hidden).'
+                            : 'No products in this view.'}
                       </p>
                     )}
                   </div>
@@ -1171,13 +1173,13 @@ export default function ProductManagerEngine({
                             <button type="button" className="adm-btn-red adm-btn--sm" onClick={() => recycleSku(item.sku, false)}>To recycle</button>
                           </>
                         )}
-                        {status === 'archived' && archiveOosLive && (
+                        {status === 'archived' && archiveNegativeLive && (
                           <>
                             <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => mutations.archive.mutate(item.sku, { onSuccess: () => onRefreshStats?.() })}>Archive</button>
                             <button type="button" className="adm-btn-red adm-btn--sm" onClick={() => recycleSku(item.sku, false)}>To recycle</button>
                           </>
                         )}
-                        {status === 'archived' && !archiveOosLive && (
+                        {status === 'archived' && !archiveNegativeLive && (
                           <>
                             <button type="button" className="adm-btn-red adm-btn--sm" onClick={() => makeLive(item)}>
                               <ArchiveRestore size={14} /> Make live
@@ -1219,9 +1221,11 @@ export default function ProductManagerEngine({
                   ))}
                   {!rows.length && !isLoading && (
                     <p className="adm-empty">
-                      {status === 'archived' && archiveStockView === 'zero'
-                        ? 'No archived products with 0 or negative stock.'
-                        : 'No products in this view.'}
+                      {status === 'archived' && archiveStockView === 'negative'
+                        ? 'No live products with negative stock.'
+                        : status === 'archived'
+                          ? 'No archived products (zero-stock items are hidden).'
+                          : 'No products in this view.'}
                     </p>
                   )}
                 </div>

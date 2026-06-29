@@ -9,7 +9,8 @@ import {
   paginateRows,
   resolveCategoryFilters,
   applyCategoryFiltersToQuery,
-  isZeroOrNegativeStock,
+  isExactlyZeroStock,
+  isNegativeStock,
 } from './_catalog-adapt.js';
 
 const VALID_STATUS = new Set(['live', 'archived', 'new-items', 'approval', 'recycle']);
@@ -194,19 +195,22 @@ export default async function handler(req, res) {
         search, categoryPath, tree, page, pageSize, sort, archivedBy: 'recycle-bin',
       });
     } else if (status === 'archived') {
-      const stockFilter = String(req.query.stockFilter || 'zero').trim();
-      if (stockFilter === 'zero') {
-        // Live website_stock rows with ERP SOH <= 0 (archived_products is often empty)
+      const stockFilter = String(req.query.stockFilter || 'archived').trim();
+      if (stockFilter === 'negative') {
+        // Live products with negative ERP stock only — zeros excluded.
         let rows = await fetchAllLiveRows(sb, { search, categoryPath, tree, sort });
         rows = await enrichRowsWithProductStock(sb, rows);
-        rows = rows.filter(isZeroOrNegativeStock);
+        rows = rows.filter(isNegativeStock);
         const pageSlice = paginateRows(rows, page, pageSize);
-        result = { ...pageSlice, archived: false, archiveView: 'oos-live' };
+        result = { ...pageSlice, archived: false, archiveView: 'negative-live' };
         stockAlreadyEnriched = true;
       } else {
-        result = await queryArchivedPaginated(sb, {
-          search, categoryPath, tree, page, pageSize, sort, excludeBy: EXCLUDE_ARCHIVED,
-        });
+        let rows = await fetchAllArchivedRows(sb, { search, categoryPath, tree, sort, excludeBy: EXCLUDE_ARCHIVED });
+        rows = await enrichRowsWithProductStock(sb, rows);
+        rows = rows.filter((r) => !isExactlyZeroStock(r));
+        const pageSlice = paginateRows(rows, page, pageSize);
+        result = { ...pageSlice, archived: true, archiveView: 'archived' };
+        stockAlreadyEnriched = true;
       }
     } else if (status === 'new-items') {
       const liveSkus = await fetchLiveSkus(sb);
