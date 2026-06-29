@@ -11,7 +11,7 @@ export function isWritingCorrectionExcluded(productName) {
 export function isWritingCorrectionProduct(productName) {
   const n = String(productName || '').toUpperCase();
   if (isWritingCorrectionExcluded(n)) return false;
-  return /PEN|PENCIL|MARKER|HIGHLIGHTER|ERASER|CORRECTION|CRAYON|CHALK|FINELINER|BALLPOINT|FIBRE\s*TIP|FIBER\s*TIP|ROLLERBALL|ROLLER\s*BALL/i.test(n);
+  return /\bPEN\b|\bPENCIL\b|MARKER|HIGHLIGHTER|\bERASER\b|CORRECTION|CRAYON|\bCHALK\b|FINELINER|BALLPOINT|FIBRE\s*TIP|FIBER\s*TIP|ROLLERBALL|ROLLER\s*BALL/i.test(n);
 }
 
 export function inferWritingCorrectionPath(productName) {
@@ -34,7 +34,7 @@ export function inferWritingCorrectionPath(productName) {
     return `${BASE} > Colour Pencils and Crayons`;
   }
 
-  if (/\bPEN\b|PENCIL|BALLPOINT|GEL\s*PEN|FINELINER|FIBRE\s*TIP|FIBER\s*TIP|ROLLERBALL|ROLLER\s*BALL/i.test(n)) {
+  if (/\bPEN\b|\bPENCIL\b|BALLPOINT|GEL\s*PEN|FINELINER|FIBRE\s*TIP|FIBER\s*TIP|ROLLERBALL|ROLLER\s*BALL/i.test(n)) {
     return `${BASE} > Pens and Pencils`;
   }
 

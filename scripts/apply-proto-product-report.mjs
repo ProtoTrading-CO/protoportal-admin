@@ -14,6 +14,7 @@
  * Usage:
  *   node scripts/apply-proto-product-report.mjs data/proto-product-report.xlsx
  *   node scripts/apply-proto-product-report.mjs data/proto-product-report.xlsx --apply
+ *   node scripts/apply-proto-product-report.mjs data/proto-product-report.xlsx --apply --missing-only
  */
 
 import XLSX from 'xlsx';
@@ -24,7 +25,7 @@ import { fileURLToPath } from 'url';
 import { restoreArchivedToLive } from '../api/_ensure-product.js';
 import { findProductBySku, fetchProductLookupMap } from '../api/_sku-match.js';
 import { loadBundledTaxonomy, resolvePathFields } from './lib/taxonomy-paths.mjs';
-import { inferCategoryPathFromName } from './lib/product-name-category.mjs';
+import { inferCategoryPathFromName, categoryFieldsFromLiveRow } from './lib/product-name-category.mjs';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dir, '..');
@@ -33,6 +34,7 @@ const PARALLEL = 30;
 
 const args = new Set(process.argv.slice(2));
 const APPLY = args.has('--apply');
+const MISSING_ONLY = args.has('--missing-only');
 const fileArg = process.argv.slice(2).find((a) => !a.startsWith('-'));
 const filePath = fileArg || DEFAULT_FILE;
 
@@ -89,6 +91,7 @@ function productPath(row) {
 
 async function loadCatalogueMaps() {
   const liveBySku = new Map();
+  const liveByBarcode = new Map();
   const archivedBySku = new Map();
 
   for (const table of ['website_stock', 'archived_products']) {
@@ -102,15 +105,20 @@ async function loadCatalogueMaps() {
       for (const row of data || []) {
         const k = normSku(row.sku).toUpperCase();
         if (!k) continue;
-        if (table === 'website_stock') liveBySku.set(k, row);
-        else archivedBySku.set(k, row);
+        if (table === 'website_stock') {
+          liveBySku.set(k, row);
+          const bc = String(row.barcode || '').trim().toUpperCase();
+          if (bc && !liveByBarcode.has(bc)) liveByBarcode.set(bc, row);
+        } else {
+          archivedBySku.set(k, row);
+        }
       }
       if (!data?.length || data.length < 1000) break;
       from += 1000;
     }
   }
 
-  return { liveBySku, archivedBySku };
+  return { liveBySku, liveByBarcode, archivedBySku };
 }
 
 function resolveErpProduct(lookupMap, sku, barcode) {
@@ -122,10 +130,36 @@ function resolveErpProduct(lookupMap, sku, barcode) {
   return null;
 }
 
-function buildCategoryFields(name, sku, erpDescription = '') {
+function buildCategoryFields(name, sku, erpDescription = '', liveByBarcode, erp) {
   const path = inferCategoryPathFromName(name, sku, erpDescription);
-  if (!path) return null;
-  return resolvePathFields(tree, path);
+  if (path) {
+    const fields = resolvePathFields(tree, path);
+    if (fields) return { fields, source: 'name' };
+  }
+
+  const erpKey = String(erp?.sku || '').trim().toUpperCase();
+  const nameBarcode = extractBarcodeFromName(name).toUpperCase();
+  for (const key of [erpKey, nameBarcode]) {
+    if (!key) continue;
+    const sibling = liveByBarcode?.get(key);
+    const fields = categoryFieldsFromLiveRow(sibling);
+    if (fields) return { fields, source: 'sibling_barcode' };
+  }
+
+  return null;
+}
+
+function needsStockSync(live, erp) {
+  if (!erp) return false;
+  const price = Number(erp.sell_price);
+  const erpPrice = Number.isFinite(price) && price > 0 ? price : null;
+  const livePrice = Number(live.price);
+  const liveStock = Number(live.stock_qty ?? live.available_stock ?? 0);
+  const erpStock = Number(erp.stock_qty ?? erp.available_stock ?? 0);
+  if (erpPrice != null && livePrice !== erpPrice) return true;
+  if (liveStock !== erpStock) return true;
+  if (Number(live.available_stock ?? 0) !== Number(erp.available_stock ?? erpStock)) return true;
+  return false;
 }
 
 function stockPatchFromErp(product) {
@@ -150,8 +184,8 @@ async function main() {
   const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { defval: '' });
   console.log(`Loaded ${rows.length} rows from ${filePath}\n`);
 
-  const { liveBySku, archivedBySku } = await loadCatalogueMaps();
-  console.log(`Catalogue: ${liveBySku.size} live SKUs\n`);
+  const { liveBySku, liveByBarcode, archivedBySku } = await loadCatalogueMaps();
+  console.log(`Catalogue: ${liveBySku.size} live SKUs${MISSING_ONLY ? ' (missing-only mode)' : ''}\n`);
 
   const report = [];
   const erpKeys = new Set();
@@ -186,6 +220,8 @@ async function main() {
     skipArchived: 0,
     skipNoCategory: 0,
     skipMissingSku: 0,
+    skipUnchanged: 0,
+    categorizeFromSibling: 0,
     errors: 0,
   };
   const log = [];
@@ -208,10 +244,10 @@ async function main() {
 
     if (live) {
       if (!item.inStock) {
-        toArchive.push(item);
+        if (!MISSING_ONLY) toArchive.push(item);
         continue;
       }
-      toSync.push({ item, live, erp });
+      if (!MISSING_ONLY) toSync.push({ item, live, erp });
       continue;
     }
 
@@ -221,14 +257,15 @@ async function main() {
       continue;
     }
 
-    const catFields = buildCategoryFields(item.name, item.sku, erp?.description || '');
-    if (!catFields) {
+    const cat = buildCategoryFields(item.name, item.sku, erp?.description || '', liveByBarcode, erp);
+    if (!cat) {
       stats.skipNoCategory++;
       log.push({ sku: item.sku, action: 'skip_no_category', name: item.name.slice(0, 60) });
       continue;
     }
+    if (cat.source === 'sibling_barcode') stats.categorizeFromSibling++;
 
-    toInsert.push({ item, erp, catFields });
+    toInsert.push({ item, erp, catFields: cat.fields });
   }
 
   if (APPLY) {
@@ -255,20 +292,31 @@ async function main() {
     });
 
     await runParallel(toSync, async ({ item, live, erp }) => {
-      const patch = erp ? stockPatchFromErp(erp) : { updated_at: new Date().toISOString() };
-      const catFields = buildCategoryFields(item.name, item.sku, erp?.description || '');
+      const patch = {};
       let needsCat = false;
-      if (catFields && (
-        live.category !== catFields.category
-        || (live.subcategory_one || null) !== (catFields.subcategory_one || null)
-        || (live.subcategory_two || null) !== (catFields.subcategory_two || null)
-        || (live.subcategory_three || null) !== (catFields.subcategory_three || null)
+      const cat = buildCategoryFields(item.name, item.sku, erp?.description || '', liveByBarcode, erp);
+
+      if (erp && needsStockSync(live, erp)) {
+        Object.assign(patch, stockPatchFromErp(erp));
+      }
+
+      if (cat && (
+        live.category !== cat.fields.category
+        || (live.subcategory_one || null) !== (cat.fields.subcategory_one || null)
+        || (live.subcategory_two || null) !== (cat.fields.subcategory_two || null)
+        || (live.subcategory_three || null) !== (cat.fields.subcategory_three || null)
       )) {
         if (!live.subcategory_two || live.subcategory_one === live.category) {
-          Object.assign(patch, catFields);
+          Object.assign(patch, cat.fields);
           needsCat = true;
         }
       }
+
+      if (!Object.keys(patch).length) {
+        stats.skipUnchanged++;
+        return;
+      }
+      patch.updated_at = new Date().toISOString();
 
       const { error } = await sb.from('website_stock').update(patch).eq('sku', item.sku);
       if (error) {
@@ -335,8 +383,8 @@ async function main() {
     stats.syncLive = toSync.length;
     stats.insert = toInsert.length;
     stats.categorize = toSync.filter(({ live, item, erp }) => {
-      const catFields = buildCategoryFields(item.name, item.sku, erp?.description || '');
-      return catFields && (!live.subcategory_two || live.subcategory_one === live.category);
+      const cat = buildCategoryFields(item.name, item.sku, erp?.description || '', liveByBarcode, erp);
+      return cat && (!live.subcategory_two || live.subcategory_one === live.category);
     }).length;
     for (const item of toArchive) log.push({ sku: item.sku, action: 'would_archive' });
     for (const item of toRestore) log.push({ sku: item.sku, action: 'would_restore' });
