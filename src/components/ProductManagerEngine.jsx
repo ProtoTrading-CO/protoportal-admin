@@ -30,7 +30,7 @@ import { queryClient } from '../lib/queryClient';
 import { queryKeys } from '../lib/queryKeys';
 import { getActiveImageBatch, subscribeImageBatch } from '../lib/imageBatchTracker';
 import { sortOrderCategoryKey, lookupSortOrder, applySkuOrder, sortOrderLookupKeys } from '../lib/taxonomy';
-import { exportProductsCatalogXlsx, exportAllProductsCatalogXlsx } from '../lib/exportLiveProducts';
+import { exportProductsCatalogXlsx, exportAllProductsCatalogXlsx, exportSelectedProductsXlsx } from '../lib/exportLiveProducts';
 
 const STATUS_META = {
   live: { label: 'Live', icon: PackagePlus },
@@ -247,6 +247,7 @@ export default function ProductManagerEngine({
   const [reorderDirty, setReorderDirty] = useState(false);
   const [reorderSaving, setReorderSaving] = useState(false);
   const [exportingXlsx, setExportingXlsx] = useState(false);
+  const [exportingSelected, setExportingSelected] = useState(false);
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
   const [selectAllView, setSelectAllView] = useState(false);
   const [selectingAll, setSelectingAll] = useState(false);
@@ -613,6 +614,29 @@ export default function ProductManagerEngine({
     }
   };
 
+  const handleExportSelected = async () => {
+    const products = [...selected]
+      .map((id) => selectedRowsRef.current.get(id))
+      .filter(Boolean);
+    if (!selected.size) {
+      onShowToast?.('Select at least one product', 'error');
+      return;
+    }
+    setExportingSelected(true);
+    try {
+      const count = await exportSelectedProductsXlsx(products, {
+        status,
+        taxonomyTree,
+        selectedIds: [...selected],
+      });
+      onShowToast?.(`Exported ${count} selected product${count === 1 ? '' : 's'} to Excel`, 'success');
+    } catch (err) {
+      onShowToast?.(err.message || 'Export failed', 'error');
+    } finally {
+      setExportingSelected(false);
+    }
+  };
+
   const showSkeleton = isLoading && !isPlaceholderData && !data;
   const addSubParentId = categoryPath[0] || tree[0]?.id || '';
   const categoryLabels = useMemo(() => resolvePathLabels(tree, categoryPath), [tree, categoryPath]);
@@ -862,6 +886,16 @@ export default function ProductManagerEngine({
               {selected.size > 0 && (
                 <div className="pm-bulk-bar">
                   <span>{selected.size} selected</span>
+                  <button
+                    type="button"
+                    className="adm-btn-ghost adm-btn--sm"
+                    disabled={exportingSelected || exportingXlsx}
+                    onClick={() => void handleExportSelected()}
+                  >
+                    {exportingSelected
+                      ? <><Loader2 size={14} className="spin" /> Exporting…</>
+                      : <><FileSpreadsheet size={14} /> Export selected</>}
+                  </button>
                   {(status === 'live' || status === 'archived') && (
                     <button
                       type="button"
