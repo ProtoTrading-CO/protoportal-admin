@@ -48,8 +48,10 @@ export function filterByCategoryPath(rows, categoryPath, tree = null) {
   }
   return rows.filter((r) => {
     const cp = rowCategoryPath(r, tree);
-    const depth = Math.min(cp.length, categoryPath.length);
-    return depth > 0 && categoryPath.slice(0, depth).every((seg, i) => cp[i] === seg);
+    // Product must be at same depth or deeper than the selected category — prevents
+    // loose parent-only rows (e.g. School & Office with no sub) appearing in every child.
+    return cp.length >= categoryPath.length
+      && categoryPath.every((seg, i) => cp[i] === seg);
   });
 }
 
