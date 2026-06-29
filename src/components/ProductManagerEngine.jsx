@@ -69,8 +69,8 @@ function PmMobileProductCard({
   status,
   selected,
   showStockColumn,
-  onSelectClick,
-  onRowClick,
+  onCheckboxClick,
+  onRowShiftClick,
   onEditProduct,
   onMakeLive,
   mutations,
@@ -81,14 +81,13 @@ function PmMobileProductCard({
   return (
     <article
       className={`pm-mobile-card${selected.has(item.id) ? ' pm-mobile-card--selected' : ''}`}
-      onClick={(e) => onRowClick?.(e, item.id, item, index)}
-      style={{ cursor: 'pointer' }}
+      onClick={(e) => onRowShiftClick?.(e, item.id, item, index)}
     >
       <div className="pm-mobile-card-top">
         <input
           type="checkbox"
           checked={selected.has(item.id)}
-          onMouseDown={(e) => onSelectClick(e, item.id, item, index)}
+          onClick={(e) => onCheckboxClick(e, item.id, item, index)}
           readOnly
           style={{ accentColor: '#8B1A1A', cursor: 'pointer' }}
           aria-label={`Select ${item.sku}`}
@@ -398,32 +397,29 @@ export default function ProductManagerEngine({
     }
   };
 
-  const handleProductSelect = useCallback((id, item, index, shiftKey) => {
+  const handleProductSelect = useCallback((id, item, index, { shiftKey = false, ctrlKey = false } = {}) => {
     setSelectAllView(false);
     const currentRows = rowsRef.current;
+    const idx = index !== null && index >= 0 ? index : null;
+
+    if (shiftKey && lastSelectIdxRef.current !== null && idx !== null) {
+      const start = Math.min(lastSelectIdxRef.current, idx);
+      const end = Math.max(lastSelectIdxRef.current, idx);
+      const rangeRows = currentRows.slice(start, end + 1);
+      setSelected((prev) => {
+        const next = new Set(prev);
+        for (const row of rangeRows) {
+          next.add(row.id);
+          selectedRowsRef.current.set(row.id, row);
+        }
+        return next;
+      });
+      return;
+    }
+
     setSelected((prev) => {
       const next = new Set(prev);
-      if (
-        shiftKey
-        && lastSelectIdxRef.current !== null
-        && index !== null
-        && index >= 0
-        && index !== lastSelectIdxRef.current
-      ) {
-        const start = Math.min(lastSelectIdxRef.current, index);
-        const end = Math.max(lastSelectIdxRef.current, index);
-        const rangeRows = currentRows.slice(start, end + 1);
-        const allSelected = rangeRows.length > 0 && rangeRows.every((r) => next.has(r.id));
-        for (const row of rangeRows) {
-          if (allSelected) {
-            next.delete(row.id);
-            selectedRowsRef.current.delete(row.id);
-          } else {
-            next.add(row.id);
-            selectedRowsRef.current.set(row.id, row);
-          }
-        }
-      } else if (next.has(id)) {
+      if (next.has(id)) {
         next.delete(id);
         selectedRowsRef.current.delete(id);
       } else {
@@ -432,24 +428,29 @@ export default function ProductManagerEngine({
       }
       return next;
     });
-    if (index !== null && index >= 0) lastSelectIdxRef.current = index;
+    if (!ctrlKey && idx !== null) lastSelectIdxRef.current = idx;
   }, []);
 
-  const onProductSelectClick = useCallback((e, id, item, index) => {
-    if (e.button !== undefined && e.button !== 0) return;
-    e.preventDefault();
+  const onProductCheckboxClick = useCallback((e, id, item, index) => {
     e.stopPropagation();
-    handleProductSelect(id, item, index, e.shiftKey);
+    handleProductSelect(id, item, index, {
+      shiftKey: e.shiftKey,
+      ctrlKey: e.ctrlKey || e.metaKey,
+    });
   }, [handleProductSelect]);
 
-  const onProductRowClick = useCallback((e, id, item, index) => {
-    if (e.defaultPrevented) return;
+  const onProductRowShiftClick = useCallback((e, id, item, index) => {
+    if (!e.shiftKey) return;
     if (e.target.closest('button, a, input, label, .adm-icon-btn')) return;
-    handleProductSelect(id, item, index, e.shiftKey);
+    e.preventDefault();
+    handleProductSelect(id, item, index, { shiftKey: true });
   }, [handleProductSelect]);
 
   const toggleSelect = (id, item, opts = {}) => {
-    handleProductSelect(id, item, opts.index ?? null, opts.shiftKey ?? false);
+    handleProductSelect(id, item, opts.index ?? null, {
+      shiftKey: opts.shiftKey ?? false,
+      ctrlKey: opts.ctrlKey ?? false,
+    });
   };
 
   const allPageSelected = rows.length > 0 && rows.every((r) => selected.has(r.id));
@@ -972,8 +973,8 @@ export default function ProductManagerEngine({
                         status={archiveOosLive ? 'live' : status}
                         selected={selected}
                         showStockColumn={showStockColumn}
-                        onSelectClick={onProductSelectClick}
-                        onRowClick={onProductRowClick}
+                        onCheckboxClick={onProductCheckboxClick}
+                        onRowShiftClick={onProductRowShiftClick}
                         onEditProduct={onEditProduct}
                         onMakeLive={makeLive}
                         mutations={mutations}
@@ -993,7 +994,7 @@ export default function ProductManagerEngine({
                 ) : (
                 <>
                 <p className="adm-muted pm-shift-hint" style={{ fontSize: 12, margin: '0 0 8px' }}>
-                  Tip: click a checkbox, then <strong>Shift+click</strong> another row or checkbox to select everything in between.
+                  Checkboxes to select · <strong>Shift+click</strong> a second row/checkbox for a range · <strong>Ctrl/Cmd+click</strong> to toggle without moving the anchor
                 </p>
                 <div className="adm-list pm-list">
                   <div
@@ -1018,14 +1019,14 @@ export default function ProductManagerEngine({
                     <div
                       key={item.id}
                       className={`adm-list-row${selected.has(item.id) ? ' adm-list-row--selected' : ''}`}
-                      style={{ gridTemplateColumns: ROW_COLUMNS[status] || ROW_COLUMNS.live, cursor: 'pointer' }}
-                      onClick={(e) => onProductRowClick(e, item.id, item, index)}
+                      style={{ gridTemplateColumns: ROW_COLUMNS[status] || ROW_COLUMNS.live }}
+                      onClick={(e) => onProductRowShiftClick(e, item.id, item, index)}
                     >
                       <div>
                         <input
                           type="checkbox"
                           checked={selected.has(item.id)}
-                          onMouseDown={(e) => onProductSelectClick(e, item.id, item, index)}
+                          onClick={(e) => onProductCheckboxClick(e, item.id, item, index)}
                           readOnly
                           style={{ accentColor: '#8B1A1A', cursor: 'pointer' }}
                           aria-label={`Select ${item.sku}`}
