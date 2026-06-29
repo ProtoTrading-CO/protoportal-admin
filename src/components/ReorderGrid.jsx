@@ -219,7 +219,7 @@ const ReorderCard = memo(function ReorderCard({
             type="checkbox"
             checked={isSelected}
             onChange={() => {
-              onToggleSelect(product.id);
+              onToggleSelect(product.id, product);
               scrollRef.current?.focus({ preventScroll: true });
             }}
             className="adm-reorder-checkbox"

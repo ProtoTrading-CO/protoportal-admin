@@ -61,6 +61,12 @@ function productToCatalogRow(p, tree, status) {
     'Image URL 2': firstImageUrl(p.secondaryImage || p.images?.[1]),
     'Image URL 3': firstImageUrl(p.imageThree || p.images?.[2]),
     'Image URL 4': firstImageUrl(p.imageFour || p.images?.[3]),
+    'All image URLs': [p.image, p.secondaryImage, p.imageThree, p.imageFour, ...(p.images || [])]
+      .map(firstImageUrl)
+      .filter((url, i, arr) => url && arr.indexOf(url) === i)
+      .join(', '),
+    'Keep live when OOS': p.keepLiveWhenOos ? 'Yes' : 'No',
+    'Still live': p.stillLive ? 'Yes' : 'No',
     'New arrival': p.isNew ? 'Yes' : 'No',
     'In stock': p.inStock === false ? 'No' : 'Yes',
     'Archived by': p.archivedBy || '',
@@ -155,6 +161,59 @@ function walkCategoryTree(nodes, ancestors = [], rows = []) {
 
 function buildCategoryTreeSheet(tree) {
   return walkCategoryTree(tree);
+}
+
+async function resolveProductsForExport(products, selectedIds, status) {
+  const byId = new Map((products || []).map((p) => [p.id || p.sku, p]));
+  const resolved = [];
+  const missing = [];
+
+  for (const id of selectedIds) {
+    const row = byId.get(id);
+    if (row) resolved.push(row);
+    else missing.push(id);
+  }
+
+  if (!missing.length) return resolved;
+
+  const catalogRows = await fetchAllCatalogProducts(status);
+  const catalogById = new Map(catalogRows.map((r) => [r.id || r.sku, r]));
+  for (const id of missing) {
+    const row = catalogById.get(id);
+    if (row) resolved.push(row);
+  }
+  return resolved;
+}
+
+/**
+ * Export only the selected products with full catalogue columns
+ * (code, price, description, image URLs, categories, stock, etc.).
+ */
+export async function exportSelectedProductsXlsx(products, {
+  status = 'live',
+  taxonomyTree = [],
+  selectedIds = [],
+} = {}) {
+  const XLSX = await import('xlsx');
+  const tree = Array.isArray(taxonomyTree) ? taxonomyTree : [];
+  const ids = [...new Set((selectedIds.length ? selectedIds : (products || []).map((p) => p.id || p.sku))
+    .map((id) => String(id || '').trim())
+    .filter(Boolean))];
+
+  if (!ids.length) throw new Error('No products selected');
+
+  const resolved = await resolveProductsForExport(products, ids, status);
+  if (!resolved.length) throw new Error('Could not load selected products for export');
+
+  const sheetRows = sortCatalogRows(resolved.map((p) => productToCatalogRow(p, tree, status)));
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.json_to_sheet(sheetRows);
+  XLSX.utils.book_append_sheet(wb, ws, `Selected (${sheetRows.length})`.slice(0, 31));
+
+  const stamp = new Date().toISOString().slice(0, 10);
+  const statusSlug = String(status).replace(/[^a-z0-9]+/gi, '-').toLowerCase();
+  XLSX.writeFile(wb, `proto-selected-${statusSlug}-${sheetRows.length}-${stamp}.xlsx`);
+  return sheetRows.length;
 }
 
 /** Export catalogue with full DB + taxonomy categories and all product fields. */
