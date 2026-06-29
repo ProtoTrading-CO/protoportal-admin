@@ -80,9 +80,11 @@ export function parseWatiSendResult({ ok, status, json }) {
 }
 
 export async function watiEnsureContact(baseUrl, token, phone, name) {
+  const digits = normalizeWhatsapp(phone);
+  if (!digits) throw new Error('Invalid phone number');
   const { json } = await watiFetch(baseUrl, token, '/api/v1/addContact', {
-    name: name || 'Fulfilment',
-    phoneNumber: phone,
+    name: sanitizeTemplateParam(name || 'Fulfilment', 120),
+    phoneNumber: digits,
     allowBroadcast: true,
   });
   return json;

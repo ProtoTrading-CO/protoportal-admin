@@ -2334,8 +2334,8 @@ body.adm-is-reorder-dragging .adm-reorder-card--dragging {
 }
 
 .adm-product-thumb {
-  width: 72px;
-  height: 72px;
+  width: 96px;
+  height: 96px;
   object-fit: contain;
   border-radius: 6px;
   background: #f3f4f6;
@@ -2410,7 +2410,7 @@ body.adm-is-reorder-dragging .adm-reorder-card--dragging {
 }
 
 .adm-thumb--reorder {
-  height: 72px;
+  height: 96px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2427,7 +2427,7 @@ body.adm-is-reorder-dragging .adm-reorder-card--dragging {
 
 .adm-reorder-card-title {
   font-weight: 600;
-  font-size: 11px;
+  font-size: 13px;
   margin-top: 6px;
   line-height: 1.35;
   color: #374151;
@@ -2437,7 +2437,7 @@ body.adm-is-reorder-dragging .adm-reorder-card--dragging {
   -webkit-box-orient: vertical;
 }
 
-.adm-reorder-card-code { font-size: 10px; color: #9ca3af; }
+.adm-reorder-card-code { font-size: 11px; color: #9ca3af; }
 
 .adm-loading-inline {
   display: flex;
@@ -2461,7 +2461,7 @@ body.adm-is-reorder-dragging .adm-reorder-card--dragging {
 
 .adm-reorder-card {
   content-visibility: auto;
-  contain-intrinsic-size: auto 180px;
+  contain-intrinsic-size: auto 200px;
 }
 
 .adm-modal-backdrop {
@@ -7205,7 +7205,7 @@ html, body { background: #f5f5f5; color: #111827; }
   gap: 10px;
   align-items: start;
 }
-.pm-mobile-card-thumb { width: 56px; height: 56px; }
+.pm-mobile-card-thumb { width: 72px; height: 72px; }
 .pm-mobile-card-main {
   min-width: 0;
   display: flex;

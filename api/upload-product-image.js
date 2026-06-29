@@ -18,26 +18,30 @@ export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   if (req.method !== 'POST') return res.status(405).end();
 
-  const { filename, contentType, base64 } = req.body || {};
+  const { filename, contentType, base64, sku, imageSlot } = req.body || {};
   if (!filename || !contentType || !base64) {
     return res.status(400).json({ error: 'filename, contentType, and base64 are required' });
   }
 
   const supabase = getStockAdminClient();
 
-  // Ensure bucket exists (public so URLs work without auth)
   await supabase.storage.createBucket(BUCKET, { public: true }).catch(() => {});
 
   const buffer = Buffer.from(base64, 'base64');
-  const safeName = `${Date.now()}-${filename.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+  const safeSku = String(sku || '').trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '');
+  const slot = Math.min(4, Math.max(1, Number(imageSlot) || 1));
+  const ext = String(filename).split('.').pop()?.toLowerCase() || 'jpg';
+  const objectPath = safeSku
+    ? `${safeSku}/${slot}.${ext.replace(/[^a-z0-9]/g, '')}`
+    : `${Date.now()}-${filename.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
 
   const { error } = await supabase.storage
     .from(BUCKET)
-    .upload(safeName, buffer, { contentType, upsert: false });
+    .upload(objectPath, buffer, { contentType, upsert: Boolean(safeSku) });
 
   if (error) return res.status(400).json({ error: error.message });
 
-  const { data: { publicUrl } } = supabase.storage.from(BUCKET).getPublicUrl(safeName);
+  const { data: { publicUrl } } = supabase.storage.from(BUCKET).getPublicUrl(objectPath);
 
-  return res.status(200).json({ url: publicUrl });
+  return res.status(200).json({ url: publicUrl, path: objectPath });
 }

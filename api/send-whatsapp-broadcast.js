@@ -8,6 +8,7 @@ import {
   normalizePhone,
   watiRequest,
 } from './_wati.js';
+import { parseWatiSendResult } from './_wati-notify.js';
 
 export default async function handler(req, res) {
   if (!(await requireAdminKey(req, res))) return;
@@ -47,7 +48,7 @@ export default async function handler(req, res) {
 
     for (const contact of filtered) {
       try {
-        await watiRequest(`/api/v1/sendTemplateMessage?whatsappNumber=${contact.phone}`, {
+        const json = await watiRequest(`/api/v1/sendTemplateMessage?whatsappNumber=${contact.phone}`, {
           method: 'POST',
           body: {
             template_name: templateName,
@@ -55,6 +56,11 @@ export default async function handler(req, res) {
             parameters: [],
           },
         });
+        const parsed = parseWatiSendResult({ ok: true, status: 200, json });
+        if (!parsed.success) {
+          failed.push({ phone: contact.phone, name: contact.displayName, error: parsed.error || 'WATI rejected send' });
+          continue;
+        }
         sent += 1;
       } catch (error) {
         failed.push({ phone: contact.phone, name: contact.displayName, error: error.message });

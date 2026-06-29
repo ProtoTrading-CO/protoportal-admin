@@ -1,5 +1,6 @@
 import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { queryKeys } from '../lib/queryKeys';
+import { readApiJson } from '../lib/apiError';
 
 export const CATALOG_STATUSES = ['live', 'archived', 'approval', 'recycle'];
 
@@ -25,10 +26,15 @@ async function fetchCatalog(params) {
   if (params.search) qs.set('search', params.search);
   if (params.categoryPath?.length) qs.set('categoryPath', JSON.stringify(params.categoryPath));
   if (params.stockFilter) qs.set('stockFilter', params.stockFilter);
-  const res = await fetch(`/api/catalog?${qs}`);
-  const json = await res.json();
-  if (!res.ok) throw new Error(json.error || 'Catalog fetch failed');
-  return json;
+  try {
+    const res = await fetch(`/api/catalog?${qs}`);
+    return readApiJson(res, { fallback: 'Catalog fetch failed — try Refresh' });
+  } catch (err) {
+    if (err.message?.includes('fetch') || err.name === 'TypeError') {
+      throw new Error('Failed to fetch catalogue — server may be busy; try Refresh');
+    }
+    throw err;
+  }
 }
 
 /** Fetch every row matching catalog filters (paged server reads). */
