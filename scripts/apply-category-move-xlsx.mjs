@@ -6,6 +6,7 @@
  *   • Move 1: Website SKU + Proposed Existing Path (+ Move Needed = YES)
  *   • Move 2: SKU + Final Main Category / Final Category / Final Subcategory
  *   • Move 3: SKU + Final Main Menu / Final Kid 1–4 (+ Recommended Action)
+ *   • Move 5: SKU + Proposed Path (+ Decision contains MOVE) — stationery review sheet
  *
  * Usage:
  *   node scripts/apply-category-move-xlsx.mjs data/category-move-1.xlsx data/category-move-2.xlsx
@@ -29,6 +30,8 @@ import {
 const __dir = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dir, '..');
 const PENDING_FILE = join(ROOT, 'data/category-moves.pending');
+const MOVE5_PENDING_FILE = join(ROOT, 'data/category-move-5.pending');
+const MOVE5_FILE = join(ROOT, 'data/category-move-5.xlsx');
 const BUNDLED_FILES = [
   join(ROOT, 'data/category-move-1.xlsx'),
   join(ROOT, 'data/category-move-2.xlsx'),
@@ -42,10 +45,22 @@ const DRY_RUN = !APPLY && !APPLY_IF_PENDING;
 const PAGE = 1000;
 
 const filePaths = process.argv.slice(2).filter((a) => !a.startsWith('-'));
-const inputFiles = BUNDLED || APPLY_IF_PENDING ? BUNDLED_FILES : filePaths;
 
-if (APPLY_IF_PENDING && !existsSync(PENDING_FILE)) {
-  console.log('No category-moves.pending — skipping.');
+function resolveInputFiles() {
+  if (APPLY_IF_PENDING) {
+    const files = [];
+    if (existsSync(PENDING_FILE)) files.push(...BUNDLED_FILES);
+    if (existsSync(MOVE5_PENDING_FILE) && existsSync(MOVE5_FILE)) files.push(MOVE5_FILE);
+    return files;
+  }
+  if (BUNDLED) return BUNDLED_FILES;
+  return filePaths;
+}
+
+const inputFiles = resolveInputFiles();
+
+if (APPLY_IF_PENDING && !inputFiles.length) {
+  console.log('No pending category moves — skipping.');
   process.exit(0);
 }
 
@@ -220,7 +235,7 @@ function resolveTargetFields(targetPath) {
   const labels = pathStringToLabels(targetPath).map(normalizeSegment);
   if (labels.length >= 2) {
     const main = labels[0]?.toLowerCase();
-    if (main === 'textiles' || main === 'beads' || main === 'jewellery' || main === 'packaging & storage' || main === 'electronics & accessories') {
+    if (main === 'textiles' || main === 'beads' || main === 'jewellery' || main === 'packaging & storage' || main === 'electronics & accessories' || main === 'stationery') {
       return { fields: labelsToDbFields(labels), targetPath: labels.join(' > ') };
     }
   }
@@ -234,6 +249,30 @@ function colIndex(headers, patterns) {
     if (i >= 0) return i;
   }
   return -1;
+}
+
+function parseMove5(filePath, raw) {
+  const mappings = [];
+  const headers = (raw[0] || []).map((h) => norm(h));
+  const skuCol = colIndex(headers, [/^sku$/i, /^website sku$/i]);
+  const pathCol = colIndex(headers, [/^proposed path$/i]);
+  const decisionCol = colIndex(headers, [/^decision$/i]);
+  if (skuCol < 0 || pathCol < 0) return mappings;
+
+  for (let r = 1; r < raw.length; r++) {
+    const row = raw[r];
+    if (!row?.some((c) => norm(c))) continue;
+    if (decisionCol >= 0) {
+      const decision = norm(row[decisionCol]).toUpperCase();
+      if (decision && !/MOVE/i.test(decision)) continue;
+    }
+
+    const sku = normalizeSku(row[skuCol]);
+    const targetPath = norm(row[pathCol]);
+    if (!sku || !targetPath) continue;
+    mappings.push({ sku, targetPath, source: `${filePath}:row${r + 1}` });
+  }
+  return mappings;
 }
 
 function parseMove1(filePath, raw) {
@@ -303,6 +342,9 @@ function parseWorkbook(filePath) {
   const raw = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', blankrows: false });
   const headers = (raw[0] || []).map((h) => norm(h).toLowerCase());
 
+  if (headers.includes('proposed path') && headers.includes('current path')) {
+    return { type: 'move5', mappings: parseMove5(filePath, raw) };
+  }
   if (headers.includes('proposed existing path')) {
     return { type: 'move1', mappings: parseMove1(filePath, raw) };
   }
@@ -445,9 +487,15 @@ for (const u of updates) {
 
 console.log(`\n✓ Applied ${done}/${updates.length} category updates.`);
 
-if (APPLY_IF_PENDING && done > 0 && existsSync(PENDING_FILE)) {
-  unlinkSync(PENDING_FILE);
-  console.log('Removed data/category-moves.pending');
+if (APPLY_IF_PENDING && done > 0) {
+  if (existsSync(PENDING_FILE) && inputFiles.some((f) => BUNDLED_FILES.includes(f))) {
+    unlinkSync(PENDING_FILE);
+    console.log('Removed data/category-moves.pending');
+  }
+  if (existsSync(MOVE5_PENDING_FILE) && inputFiles.includes(MOVE5_FILE)) {
+    unlinkSync(MOVE5_PENDING_FILE);
+    console.log('Removed data/category-move-5.pending');
+  }
 }
 
 if (APPLY_IF_PENDING) {
