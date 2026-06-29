@@ -74,13 +74,27 @@ function safeSearchTerm(search) {
   return String(search || '').replace(/[%',()\\]/g, ' ').trim();
 }
 
+function applyCatalogSearchFilter(q, term) {
+  if (!term) return q;
+  return q.or([
+    `title.ilike.%${term}%`,
+    `sku.ilike.%${term}%`,
+    `barcode.ilike.%${term}%`,
+    `category.ilike.%${term}%`,
+    `subcategory_one.ilike.%${term}%`,
+    `subcategory_two.ilike.%${term}%`,
+    `subcategory_three.ilike.%${term}%`,
+    `subcategory_four.ilike.%${term}%`,
+  ].join(','));
+}
+
 async function queryLivePaginated(sb, { search, categoryPath, tree, page, pageSize, sort }) {
   const from = (page - 1) * pageSize;
   const to = from + pageSize - 1;
   let q = sb.from('website_stock').select('*', { count: 'exact' });
   const term = safeSearchTerm(search);
   if (term) {
-    q = q.or(`title.ilike.%${term}%,sku.ilike.%${term}%,barcode.ilike.%${term}%`);
+    q = applyCatalogSearchFilter(q, term);
   }
   q = applyCategoryFiltersToQuery(q, resolveCategoryFilters(tree, categoryPath));
   if (sort === 'updated') q = q.order('updated_at', { ascending: false });
@@ -98,7 +112,7 @@ async function queryArchivedPaginated(sb, { search, categoryPath, tree, page, pa
   if (archivedBy) q = q.eq('archived_by', archivedBy);
   const term = safeSearchTerm(search);
   if (term) {
-    q = q.or(`title.ilike.%${term}%,sku.ilike.%${term}%,barcode.ilike.%${term}%`);
+    q = applyCatalogSearchFilter(q, term);
   }
   q = applyCategoryFiltersToQuery(q, resolveCategoryFilters(tree, categoryPath));
   if (excludeBy?.length) {

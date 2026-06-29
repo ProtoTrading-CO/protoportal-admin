@@ -34,7 +34,7 @@ export default async function handler(req, res) {
   for (const email of emails) {
     const { data: customer, error: findErr } = await supabase
       .from('customers')
-      .select('id, email, is_approved')
+      .select('id, email, is_approved, customer_code')
       .eq('email', email)
       .maybeSingle();
     if (findErr) {
@@ -47,6 +47,10 @@ export default async function handler(req, res) {
     }
     if (customer.is_approved) {
       approved.push({ email, id: customer.id, already: true });
+      continue;
+    }
+    if (!String(customer.customer_code || '').trim()) {
+      failed.push({ email, error: 'Missing customer code — assign a code before approving' });
       continue;
     }
     const { error } = await supabase

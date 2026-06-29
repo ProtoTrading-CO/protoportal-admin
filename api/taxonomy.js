@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import {
   addCategoryNode,
   addSubcategoryNode,
+  buildCategoryProductCounts,
   buildRenameFilter,
   countProductsForNode,
   deleteNodeCascade,
@@ -10,6 +11,7 @@ import {
   findNodeContext,
   loadTaxonomy,
   renameNodeLabel,
+  resolveLabelsFromPathIds,
   saveTaxonomy,
 } from './_taxonomy-utils.js';
 
@@ -43,6 +45,10 @@ export default async function handler(req, res) {
   if (req.method === 'GET') {
     try {
       const categories = await loadTaxonomy();
+      if (req.query.counts === '1') {
+        const counts = await buildCategoryProductCounts(getStockClient(), categories);
+        return res.status(200).json({ categories, counts });
+      }
       return res.status(200).json({ categories });
     } catch (err) {
       return res.status(500).json({ error: err.message || 'Failed to load taxonomy' });

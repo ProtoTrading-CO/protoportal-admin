@@ -1,6 +1,6 @@
 import { requireAdminKey } from './_admin-auth.js';
 import { createClient } from '@supabase/supabase-js';
-import { labelsToDbFields, loadTaxonomy, resolveLabelsForSubcategory } from './_taxonomy-utils.js';
+import { labelsToDbFields, loadTaxonomy, resolveLabelsForSubcategory, resolveLabelsFromPathIds } from './_taxonomy-utils.js';
 import { restoreArchivedToLive } from './_ensure-product.js';
 
 function getStockClient() {
@@ -65,7 +65,7 @@ export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   if (req.method !== 'POST') return res.status(405).end();
 
-  const { action, skus, categoryId, subcategoryId } = req.body || {};
+  const { action, skus, categoryId, subcategoryId, categoryPathIds } = req.body || {};
   const normalizedSkus = [...new Set((skus || []).map((s) => String(s).trim()).filter(Boolean))];
   if (!normalizedSkus.length) return res.status(400).json({ error: 'No products selected' });
 
@@ -73,11 +73,27 @@ export default async function handler(req, res) {
 
   try {
     if (action === 'move') {
-      if (!categoryId) return res.status(400).json({ error: 'Main category is required' });
+      if (!categoryId && !(Array.isArray(categoryPathIds) && categoryPathIds.length)) {
+        return res.status(400).json({ error: 'Destination category is required' });
+      }
       const tree = await loadTaxonomy();
-      const labels = resolveLabelsForSubcategory(tree, categoryId, subcategoryId);
-      if (labels.length < 2) return res.status(400).json({ error: 'Subcategory is required' });
+      let labels;
+      try {
+        if (Array.isArray(categoryPathIds) && categoryPathIds.length >= 2) {
+          labels = resolveLabelsFromPathIds(tree, categoryPathIds);
+        } else {
+          if (!categoryId) return res.status(400).json({ error: 'Main category is required' });
+          if (!subcategoryId) return res.status(400).json({ error: 'Choose a subcategory destination' });
+          labels = resolveLabelsForSubcategory(tree, categoryId, subcategoryId);
+        }
+      } catch (err) {
+        return res.status(400).json({ error: err.message || 'Invalid category path' });
+      }
+      if (labels.length < 2) {
+        return res.status(400).json({ error: 'Choose a main category and at least one subcategory' });
+      }
       const dbFields = labelsToDbFields(labels);
+      const destinationPath = labels.join(' › ');
 
       const results = [];
       for (const sku of normalizedSkus) {
@@ -88,6 +104,7 @@ export default async function handler(req, res) {
         ok: failed.length === 0,
         moved: results.filter((r) => r.ok).length,
         failed,
+        destinationPath,
       });
     }
 

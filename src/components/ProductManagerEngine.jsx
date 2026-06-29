@@ -227,6 +227,8 @@ export default function ProductManagerEngine({
   onDeleteSubcategory,
   onDeleteNode,
   onRefreshTaxonomy,
+  onCategoryReorder,
+  categoryProductCounts = {},
   initialStatus = 'live',
 }) {
   const [status, setStatus] = useState(initialStatus);
@@ -285,7 +287,7 @@ export default function ProductManagerEngine({
   }, [status, onShowToast]);
 
   useEffect(() => {
-    const t = setTimeout(() => setDebouncedSearch(searchInput.trim()), 300);
+    const t = setTimeout(() => setDebouncedSearch(searchInput.trim()), 200);
     return () => clearTimeout(t);
   }, [searchInput]);
 
@@ -790,6 +792,9 @@ export default function ProductManagerEngine({
               onEditNode={onEditCategory}
               onDeleteNode={onDeleteNode}
               onAddChild={onAddSubcategory}
+              onReorder={onCategoryReorder}
+              reorderMainCategoriesOnly
+              productCounts={categoryProductCounts}
             />
           </aside>
           <div className="adm-panel-main">
@@ -1300,6 +1305,7 @@ export default function ProductManagerEngine({
               className="pm-cat-drawer-sidebar"
               isActive={categoryDrawerOpen}
               onStackNavChange={handleCategoryStackNavChange}
+              productCounts={categoryProductCounts}
             />
           </div>
         </>

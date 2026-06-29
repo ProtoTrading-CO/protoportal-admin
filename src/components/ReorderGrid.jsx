@@ -40,7 +40,7 @@ function groupByMainCategory(products, tree) {
 }
 
 function groupBySubcategory(products, mainCategoryId, tree, selectedPath = []) {
-  const subs = subcategoryOptionsFromTree(tree, mainCategoryId);
+  const subs = subcategoryOptionsFromTree(tree || [], mainCategoryId);
   const allSubs = new Map();
   function walk(nodes, prefix = '') {
     for (const n of nodes || []) {
@@ -49,7 +49,7 @@ function groupBySubcategory(products, mainCategoryId, tree, selectedPath = []) {
       walk(n.children, label);
     }
   }
-  walk(subs.length ? subs : tree.find((c) => c.id === mainCategoryId)?.children || []);
+  walk(subs.length ? subs : (tree || []).find((c) => c.id === mainCategoryId)?.children || []);
 
   const groups = new Map();
   products.forEach((p) => {
@@ -262,7 +262,7 @@ export default function ReorderGrid({
   onToggleSelect,
   mainCategoryId,
   selectedPath = [],
-  taxonomyTree,
+  taxonomyTree = [],
   loading,
   dragDisabled = false,
   onEditProduct,
@@ -304,7 +304,7 @@ export default function ReorderGrid({
   const rowVirtualizer = useVirtualizer({
     count: virtualRows.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: (index) => estimateRowHeight(virtualRows[index]),
+    estimateSize: (index) => estimateRowHeight(virtualRows[index] ?? { type: 'header' }),
     overscan: 2,
   });
 

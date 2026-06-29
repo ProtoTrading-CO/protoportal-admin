@@ -144,6 +144,7 @@ function CategoryRow({
   onDrillIn,
   stackMode = false,
   showDragHandle = false,
+  productCount = null,
 }) {
   const isSelected = selectedPath.length > 0 && selectedPath[selectedPath.length - 1] === node.id;
   const isOnPath = selectedPath.includes(node.id);
@@ -176,7 +177,12 @@ function CategoryRow({
         onClick={onSelect}
         title={node.label}
       >
-        <span className="cat-sidebar-label">{node.label}</span>
+        <span className="cat-sidebar-label">
+          {node.label}
+          {productCount != null && productCount > 0 && (
+            <span className="cat-sidebar-count">{productCount}</span>
+          )}
+        </span>
       </button>
       {stackMode && hasChildren && onDrillIn && (
         <button
@@ -273,6 +279,7 @@ function TreeBranch({
   forceOpen,
   onReorderSiblings,
   showDragHandle = false,
+  productCounts = {},
 }) {
   const hasChildren = node.children?.length > 0;
   const pathHere = [...ancestors, node.id];
@@ -294,6 +301,7 @@ function TreeBranch({
         onDeleteNode={onDeleteNode}
         onAddChild={onAddChild}
         showDragHandle={showDragHandle}
+        productCount={productCounts[node.id]}
       />
       {hasChildren && open && (
         onReorderSiblings ? (
@@ -317,6 +325,7 @@ function TreeBranch({
                 forceOpen={forceOpen}
                 onReorderSiblings={onReorderSiblings}
                 showDragHandle={showHandle}
+                productCounts={productCounts}
               />
             )}
           />
@@ -335,6 +344,7 @@ function TreeBranch({
               onDeleteNode={onDeleteNode}
               onAddChild={onAddChild}
               forceOpen={forceOpen}
+              productCounts={productCounts}
             />
           ))
         )
@@ -492,6 +502,8 @@ export default function CategorySidebar({
   isActive = true,
   onStackNavChange,
   onReorder,
+  productCounts = {},
+  reorderMainCategoriesOnly = false,
 }) {
   const [expanded, setExpanded] = useState(() => new Set());
   const [collapsed, setCollapsed] = useState(() => new Set());
@@ -590,13 +602,15 @@ export default function CategorySidebar({
   // Called from DraggableSiblingList at any level. parentId=null means root.
   const handleReorderSiblings = (parentId, newSiblings) => {
     if (!onReorder) return;
+    if (reorderMainCategoriesOnly && parentId != null) return;
     const newTree = parentId == null
       ? newSiblings
       : reorderChildrenInTree(tree, parentId, newSiblings);
     onReorder(newTree);
   };
 
-  const canDrag = !!onReorder && !filterQuery;
+  const canDragMain = !!onReorder && !filterQuery;
+  const childReorder = canDragMain && !reorderMainCategoriesOnly;
 
   return (
     <div className={`cat-sidebar-wrap${stackMode ? ' cat-sidebar-wrap--stack' : ''}${className ? ` ${className}` : ''}`}>
@@ -622,7 +636,12 @@ export default function CategorySidebar({
           onClick={() => onSelectPath([])}
         >
           <FolderTree size={16} strokeWidth={2.2} />
-          <span>All categories</span>
+          <span>
+            All categories
+            {productCounts.__all__ > 0 && (
+              <span className="cat-sidebar-count">{productCounts.__all__}</span>
+            )}
+          </span>
         </button>
         )}
 
@@ -632,7 +651,12 @@ export default function CategorySidebar({
             className={`cat-sidebar-all cat-sidebar-all--sub${selectedPath[0] === '__uncategorized__' ? ' cat-sidebar-all--active' : ''}`}
             onClick={() => onSelectPath(['__uncategorized__'])}
           >
-            <span>Uncategorized{uncategorizedCount > 0 ? ` (${uncategorizedCount})` : ''}</span>
+            <span>
+              Uncategorized
+              {(uncategorizedCount > 0 || productCounts.__uncategorized__ > 0) && (
+                <span className="cat-sidebar-count">{uncategorizedCount || productCounts.__uncategorized__}</span>
+              )}
+            </span>
           </button>
         )}
 
@@ -649,7 +673,7 @@ export default function CategorySidebar({
             browsePath={browsePath}
             setBrowsePath={setBrowsePath}
           />
-        ) : canDrag ? (
+        ) : canDragMain ? (
           <DraggableSiblingList
             nodes={displayTree}
             parentId={null}
@@ -670,8 +694,10 @@ export default function CategorySidebar({
                   onDeleteNode={onDeleteNode}
                   onAddChild={onAddChild}
                   showDragHandle={showHandle}
+                  productCount={productCounts[node.id]}
                 />
                 {node.children?.length && isOpen(node.id) && (
+                  childReorder ? (
                   <DraggableSiblingList
                     nodes={node.children}
                     parentId={node.id}
@@ -692,9 +718,29 @@ export default function CategorySidebar({
                         forceOpen={false}
                         onReorderSiblings={handleReorderSiblings}
                         showDragHandle={showChildHandle}
+                        productCounts={productCounts}
                       />
                     )}
                   />
+                  ) : (
+                    node.children.map((child) => (
+                      <TreeBranch
+                        key={child.id}
+                        node={child}
+                        depth={1}
+                        selectedPath={selectedPath}
+                        onSelectPath={onSelectPath}
+                        isOpen={isOpen}
+                        onToggle={toggle}
+                        ancestors={[node.id]}
+                        onEditNode={onEditNode}
+                        onDeleteNode={onDeleteNode}
+                        onAddChild={onAddChild}
+                        forceOpen={false}
+                        productCounts={productCounts}
+                      />
+                    ))
+                  )
                 )}
               </div>
             )}
@@ -715,6 +761,7 @@ export default function CategorySidebar({
                 onEditNode={onEditNode}
                 onDeleteNode={onDeleteNode}
                 onAddChild={onAddChild}
+                productCount={productCounts[node.id]}
               />
               {node.children?.length && isOpen(node.id) && node.children.map((child) => (
                 <TreeBranch

@@ -1,15 +1,25 @@
 import bundledCategories from '../data/categories.json';
 import { labelToSlug } from './taxonomy';
 
-export async function fetchTaxonomy() {
+export async function fetchTaxonomy({ withCounts = false } = {}) {
   try {
-    const res = await fetch('/api/taxonomy');
+    const qs = withCounts ? '?counts=1' : '';
+    const res = await fetch(`/api/taxonomy${qs}`);
     if (!res.ok) throw new Error(`Taxonomy ${res.status}`);
     const json = await res.json();
-    return json.categories || bundledCategories;
+    return withCounts
+      ? { categories: json.categories || bundledCategories, counts: json.counts || {} }
+      : (json.categories || bundledCategories);
   } catch {
-    return bundledCategories;
+    return withCounts ? { categories: bundledCategories, counts: {} } : bundledCategories;
   }
+}
+
+export async function fetchCategoryProductCounts() {
+  const res = await fetch('/api/taxonomy?counts=1');
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || 'Failed to load category counts');
+  return json.counts || {};
 }
 
 export async function renameTaxonomyNode(id, label) {

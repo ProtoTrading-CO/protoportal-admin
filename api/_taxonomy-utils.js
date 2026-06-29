@@ -279,3 +279,51 @@ export async function countProductsForNode(supabase, ctx) {
   if (error) throw error;
   return count || 0;
 }
+
+/** Resolve taxonomy labels from an id path (main + subcategory ids). */
+export function resolveLabelsFromPathIds(tree, pathIds = []) {
+  const ids = (pathIds || []).filter(Boolean);
+  if (!ids.length) throw new Error('Category path is required');
+  const labels = [];
+  let nodes = tree || [];
+  for (const id of ids) {
+    const node = nodes.find((n) => n.id === id);
+    if (!node) throw new Error(`Unknown category id: ${id}`);
+    labels.push(node.label);
+    nodes = node.children || [];
+  }
+  return labels;
+}
+
+const STOCK_CATEGORY_COLS = 'category,subcategory_one,subcategory_two,subcategory_three,subcategory_four';
+
+/** Count live products per taxonomy node (includes all descendants). */
+export async function buildCategoryProductCounts(supabase, tree) {
+  const counts = { __uncategorized__: 0, __all__: 0 };
+  let from = 0;
+  const PAGE = 1000;
+
+  while (true) {
+    const { data, error } = await supabase
+      .from('website_stock')
+      .select(STOCK_CATEGORY_COLS)
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+    const batch = data || [];
+    for (const row of batch) {
+      counts.__all__ += 1;
+      const { categoryPath } = resolveCategoryIds(row, tree);
+      if (!categoryPath.length) {
+        counts.__uncategorized__ += 1;
+        continue;
+      }
+      for (const id of categoryPath) {
+        counts[id] = (counts[id] || 0) + 1;
+      }
+    }
+    if (batch.length < PAGE) break;
+    from += PAGE;
+  }
+
+  return counts;
+}

@@ -86,6 +86,7 @@ import {
   createSubcategory,
   deleteTaxonomyNode,
   fetchTaxonomy,
+  fetchCategoryProductCounts,
   flattenSubcategories,
   renameTaxonomyNode,
   replaceFullTaxonomy,
@@ -111,7 +112,8 @@ import CrmContactsModal from '../components/CrmContactsModal';
 import WhatsappPanel from '../components/WhatsappPanel';
 import { fuzzyFilter } from '../lib/fuzzySearch';
 import ReorderGrid from '../components/ReorderGrid';
-import CategorySidebar from '../components/CategorySidebar';
+import CategorySidebar, { resolvePathLabels } from '../components/CategorySidebar';
+import SectionErrorBoundary from '../components/SectionErrorBoundary';
 import ComingSoonPanel from '../components/ComingSoonPanel';
 import ApprovalPanel from '../components/ApprovalPanel';
 import FulfillmentSettingsModal from '../components/FulfillmentSettingsModal';
@@ -498,6 +500,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
 
   const [customerTab, setCustomerTab] = useState('regular');
   const [customerSearch, setCustomerSearch] = useState('');
+  const [customerSearchDebounced, setCustomerSearchDebounced] = useState('');
   const [customerPage, setCustomerPage] = useState(1);
   const [customerRows, setCustomerRows] = useState([]);
   const [customerTotal, setCustomerTotal] = useState(0);
@@ -598,7 +601,13 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   const [popupSaving, setPopupSaving] = useState(false);
   const [popupUploading, setPopupUploading] = useState(false);
 
-  const mainCategories = taxonomyTree.map((item) => ({ id: item.id, label: item.label }));
+  const [categoryProductCounts, setCategoryProductCounts] = useState({});
+
+  const mainCategories = useMemo(
+    () => taxonomyTree.map((item) => ({ id: item.id, label: item.label })),
+    [taxonomyTree],
+  );
+  const firstMainCategoryId = mainCategories[0]?.id || '';
   const reorderMainId = reorderCategoryPath[0] || mainCategories[0]?.id || '';
 
   const crmBusinessTypeOptions = useMemo(() => (
@@ -625,7 +634,11 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   useEffect(() => { setProductPage(1); }, [productSearchDebounced, productCategoryPath.join('|'), productPageSize]);
   useEffect(() => { setArchivePage(1); }, [archiveSearch, archiveCategoryPath.join('|')]);
   useEffect(() => { setRecyclePage(1); }, [recycleSearch]);
-  useEffect(() => { setCustomerPage(1); }, [customerTab, customerSearch]);
+  useEffect(() => {
+    const timer = setTimeout(() => setCustomerSearchDebounced(customerSearch.trim()), 300);
+    return () => clearTimeout(timer);
+  }, [customerSearch]);
+  useEffect(() => { setCustomerPage(1); }, [customerTab, customerSearchDebounced]);
   useEffect(() => { if (activeSection === 'crm') void loadCrmCustomers(1); }, [crmFilters.businessTypes.join('|'), crmFilters.joinedStatuses.join('|'), crmSearch]);
   useEffect(() => { if (activeSection === 'crm' && !crmTemplates.length && !crmTemplatesLoading) void loadCrmTemplates(); }, [activeSection, crmTemplates.length, crmTemplatesLoading]);
   useEffect(() => { if (activeSection === 'banner') void loadBannerEditor(); }, [activeSection]);
@@ -775,8 +788,8 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     setLoading(true);
     try {
       const data = customerTab === 'proto-active'
-        ? await fetchProtoActiveCustomersPage({ page: customerPage, pageSize: ADMIN_PAGE_SIZE, searchQuery: customerSearch })
-        : await fetchCustomersPage({ page: customerPage, pageSize: ADMIN_PAGE_SIZE, tab: customerTab, searchQuery: customerSearch });
+        ? await fetchProtoActiveCustomersPage({ page: customerPage, pageSize: ADMIN_PAGE_SIZE, searchQuery: customerSearchDebounced })
+        : await fetchCustomersPage({ page: customerPage, pageSize: ADMIN_PAGE_SIZE, tab: customerTab, searchQuery: customerSearchDebounced });
       setCustomerRows(data.rows);
       setCustomerTotal(data.total);
       if (data.migrationRequired && data.message) showToast(data.message, 'warning');
@@ -873,7 +886,10 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     if (reorderNavPath.length) {
       setReorderSortMeta(sortMetaForPath(store, reorderNavPath, taxonomyTree));
     }
-    setReorderProducts(ordered);
+    setReorderProducts((prev) => {
+      if (prev.length === ordered.length && prev.every((p, i) => p.id === ordered[i]?.id)) return prev;
+      return ordered;
+    });
     return ordered;
   }, [reorderNavPath, taxonomyTree]);
 
@@ -978,6 +994,10 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     const tree = await fetchTaxonomy();
     setTaxonomyTree(tree);
     setLiveTaxonomyTree(tree);
+    try {
+      const counts = await fetchCategoryProductCounts();
+      setCategoryProductCounts(counts);
+    } catch { /* optional */ }
     return tree;
   };
 
@@ -1278,7 +1298,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
       window.scrollTo({ top: 0, behavior: 'auto' });
     }
   }, [productPage, archivePage, recyclePage, activeSection]);
-  useEffect(() => { if (activeSection === 'customers') void loadCustomers(); }, [activeSection, customerPage, customerTab, customerSearch]);
+  useEffect(() => { if (activeSection === 'customers') void loadCustomers(); }, [activeSection, customerPage, customerTab, customerSearchDebounced]);
   useEffect(() => { if (activeSection === 'pricing') void loadCategoryWorkingSet(pricingCategory, 'pricing'); }, [activeSection, pricingCategory]);
   useEffect(() => { void reloadTaxonomy(); }, []);
 
@@ -1305,21 +1325,23 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     }, 300);
     return () => clearTimeout(timer);
   }, [focusOrderId, activeSection, orders]);
-  useEffect(() => {
-    if (activeSection !== 'reorder') return;
-    if (!reorderCategoryPath.length && mainCategories[0]?.id) {
-      setReorderCategoryPath([mainCategories[0].id]);
-      return;
-    }
-    void loadReorderProducts();
-  }, [activeSection, reorderCacheKey, reorderCategoryPath.length, mainCategories]);
+  const reorderPathKey = reorderCategoryPath.join('/');
 
   useEffect(() => {
     if (activeSection !== 'reorder') return;
+    if (!reorderCategoryPath.length && firstMainCategoryId) {
+      setReorderCategoryPath([firstMainCategoryId]);
+      return;
+    }
+    if (!reorderCategoryPath.length) return;
+
     const cached = reorderCacheByMainRef.current[reorderCacheKey];
-    if (!cached) return;
-    void applyReorderView(cached);
-  }, [activeSection, reorderCategoryPath.join('/'), reorderCategoryKey, reorderCacheKey, taxonomyTree, applyReorderView]);
+    if (cached) {
+      void applyReorderView(cached);
+      return;
+    }
+    void loadReorderProducts();
+  }, [activeSection, reorderCacheKey, reorderPathKey, firstMainCategoryId]);
   useEffect(() => { if (activeSection === 'orders' && orders.length === 0) void loadOrders(); }, [activeSection]);
   useEffect(() => {
     if (activeSection !== 'orders') return undefined;
@@ -2035,9 +2057,11 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     ].filter(Boolean);
     const finalSubId = moveChild4Id || moveChild3Id || moveChild2Id || moveChild1Id;
     if (!selectedIds.size || categoryPathIds.length < 2) {
-      showToast('Choose a main category and at least one child category', 'error');
+      showToast('Choose a main category and at least one subcategory', 'error');
       return;
     }
+    const destinationLabel = resolvePathLabels(taxonomyTree, categoryPathIds).join(' › ');
+    if (!window.confirm(`Move ${selectedIds.size} product(s) to:\n${destinationLabel}?`)) return;
     setSaving('bulk-move');
     const count = selectedIds.size;
     try {
@@ -2050,11 +2074,21 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
       setMoveModalOpen(false);
       setSelectedIds(new Set());
       setReorderCategoryPath(categoryPathIds);
-      await loadReorderProducts();
+      invalidateAdminCache();
+      invalidateProductCache();
+      await loadReorderProducts({ forceCatalog: true, mainId: moveCategoryId });
       queryClient.invalidateQueries({ queryKey: ['catalog'] });
-      showToast(`Moved ${count} product(s)`);
+      void fetchCategoryProductCounts().then(setCategoryProductCounts).catch(() => {});
+      showToast(`Moved ${count} product(s) to ${destinationLabel}`);
     } catch (err) {
-      showToast(err.message || 'Move failed', 'error');
+      if (err.partial && err.result?.moved) {
+        setMoveModalOpen(false);
+        setSelectedIds(new Set());
+        invalidateAdminCache();
+        queryClient.invalidateQueries({ queryKey: ['catalog'] });
+        void loadReorderProducts({ forceCatalog: true, mainId: moveCategoryId });
+      }
+      showToast(err.message || 'Move failed', err.partial ? 'warning' : 'error');
     } finally { setSaving(''); }
   };
 
@@ -2662,6 +2696,8 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                 onDeleteSubcategory={(sub) => void openDeleteSubcategory(sub)}
                 onDeleteNode={(node) => void openDeleteSubcategory(node)}
                 onRefreshTaxonomy={reloadTaxonomy}
+                onCategoryReorder={handleCategoryReorder}
+                categoryProductCounts={categoryProductCounts}
                 onImageFix={(products) => {
                   setImageFixRequest({ id: Date.now(), products });
                   setActiveSection('apollo');
@@ -3337,6 +3373,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
 
             {/* REORDER */}
             {activeSection === 'reorder' && (
+              <SectionErrorBoundary name="reorder-grid" title="Reorder Grid crashed" resetKey={reorderCacheKey}>
               <div className="adm-panel adm-panel--reorder">
                 <div className="adm-section-head adm-section-head--reorder">
                   <div>
@@ -3458,6 +3495,9 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                       selectedPath={reorderCategoryPath}
                       onSelectPath={(path) => { setReorderCategoryPath(path); setSelectedIds(new Set()); setReorderSearch(''); }}
                       onAddChild={(parentId) => setNewSubModal({ parentId, label: '' })}
+                      onReorder={handleCategoryReorder}
+                      reorderMainCategoriesOnly
+                      productCounts={categoryProductCounts}
                     />
                   </aside>
 
@@ -3486,6 +3526,10 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                   const child3Options = childrenOf(taxonomyTree, moveChild2Id);
                   const child4Options = childrenOf(taxonomyTree, moveChild3Id);
                   const deepestId = moveChild4Id || moveChild3Id || moveChild2Id || moveChild1Id;
+                  const movePreviewPath = [moveCategoryId, moveChild1Id, moveChild2Id, moveChild3Id, moveChild4Id].filter(Boolean);
+                  const movePreviewLabel = movePreviewPath.length >= 2
+                    ? resolvePathLabels(taxonomyTree, movePreviewPath).join(' › ')
+                    : 'Select a main category and subcategory';
                   return (
                     <div className="adm-modal-backdrop" onClick={() => setMoveModalOpen(false)}>
                       <div className="adm-modal adm-modal--form" onClick={(e) => e.stopPropagation()}>
@@ -3494,6 +3538,9 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                           <button type="button" className="adm-modal-close" onClick={() => setMoveModalOpen(false)} aria-label="Close"><X size={18} /></button>
                         </div>
                         <p className="adm-modal-note">Choose the destination category for these products.</p>
+                        <p className="adm-modal-note" style={{ fontWeight: 700, color: '#334155' }}>
+                          Destination: {movePreviewLabel}
+                        </p>
                         <div className="adm-modal-body">
                           <label className="adm-field">
                             <span className="adm-field-label">Main category</span>
@@ -3709,6 +3756,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                   <div className={`adm-toast adm-toast--${toast.type}`}>{toast.message}</div>
                 )}
               </div>
+              </SectionErrorBoundary>
             )}
 
             {/* CUSTOMERS */}
