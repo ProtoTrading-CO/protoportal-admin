@@ -23,32 +23,118 @@ export function isSemiPreciousProduct(productName, sku = '') {
   return /SEMI[\s-]*PRECIOUS/.test(n) || /^SP-\d+-/.test(s);
 }
 
-/** Best-effort category path from product title (no size/colour variants). */
-export function inferCategoryPathFromName(productName, sku = '') {
+function inferGlassPearlPath(productName) {
   const n = String(productName || '').toUpperCase();
+  const m = n.match(/GLASS\s*PEARL\s*(\d+)\s*MM/);
+  if (m) return `Beads > Glass & Crystal > Pearls > SIZE: ${m[1]}mm`;
+  if (/GLASS\s*PEARL/.test(n)) return 'Beads > Glass & Crystal > Pearls';
+  return null;
+}
 
-  if (isWoodBeadName(n)) return inferWoodBeadPath(n);
-  if (isSemiPreciousProduct(n, sku)) return inferSemiPreciousPath(n, sku);
-  if (isArtSupplyProduct(n)) return inferArtSupplyPath(n);
-  if (isWritingCorrectionProduct(n)) return inferWritingCorrectionPath(n);
+function inferFashionBagPath(productName) {
+  const n = String(productName || '').toUpperCase();
+  if (/BAG\s*STRAP/.test(n)) return 'Fashion & Accessories > Leather > Bag Straps';
+  if (/LEATHER\s+SLING|LEATHER\s+BAG|LEATHER\s+HANDBAG/.test(n)) {
+    return 'Fashion & Accessories > Leather > Ladies Sling & Crossbody';
+  }
+  if (/CLUTCH|WRISTLET/.test(n)) return 'Fashion & Accessories > Synthetic Bags > Wristlets & Clutches';
+  if (/COIN\s*PURSE|SMALL\s*ACCESSOR/.test(n)) {
+    return 'Fashion & Accessories > Synthetic Bags > Small Accessories';
+  }
+  if (/BACKPACK|SHOULDER\s*BAG/.test(n)) return 'Fashion & Accessories > Synthetic Bags > Backpack & Shoulder';
+  if (/TOTE/.test(n)) return 'Fashion & Accessories > Synthetic Bags > Tote';
+  if (/SHOPPER/.test(n)) return 'Fashion & Accessories > Synthetic Bags > Shopper';
+  if (/SLING\s*BAG|CROSSBODY/.test(n)) return 'Fashion & Accessories > Synthetic Bags > Sling & Crossbody';
+  if (/LADIES\s*BAG|HANDBAG|BOUTIQUE\s*BAG|\bBAG\b/.test(n)) {
+    return 'Fashion & Accessories > Synthetic Bags > Handbags';
+  }
+  return null;
+}
 
-  if (/RIBBON|GROSGRAIN|PETERSHAM|ORGANZA|SATIN RIBBON|JUTE RIBBON/i.test(n)) {
+/** Best-effort category path from product title and optional ERP description. */
+export function inferCategoryPathFromName(productName, sku = '', erpDescription = '') {
+  const n = String(productName || '').toUpperCase();
+  const erp = String(erpDescription || '').toUpperCase();
+  const text = `${n} ${erp}`.trim();
+
+  if (isWoodBeadName(text)) return inferWoodBeadPath(text);
+  if (isSemiPreciousProduct(text, sku)) return inferSemiPreciousPath(text, sku);
+  if (isArtSupplyProduct(text)) return inferArtSupplyPath(text);
+  if (isWritingCorrectionProduct(text)) return inferWritingCorrectionPath(text);
+
+  const pearl = inferGlassPearlPath(text);
+  if (pearl) return pearl;
+
+  if (/RIBBON|GROSGRAIN|PETERSHAM|ORGANZA|SATIN RIBBON|JUTE RIBBON/i.test(text)) {
     return 'Textiles > Ribbon';
   }
-  if (/\bYARN\b|\bWOOL\b/i.test(n)) return 'Textiles > Yarn > Wool';
+  if (/\bYARN\b|\bWOOL\b/i.test(text)) return 'Textiles > Yarn > Wool';
+  if (/IRON\s*ON\s*PATCH/.test(text)) return 'Fashion & Accessories > Iron-On Patch';
 
-  if (/EXERCISE BOOK|COUNTER BOOK|MANUSCRIPT BOOK|MEMO BOOK|EXAM PAD|SKETCH PAD|NOTEBOOK|DIARY|PLANNER/i.test(n)) {
+  const bag = inferFashionBagPath(text);
+  if (bag) return bag;
+
+  if (/FEDORA|SUNHAT|PANAMA|\bHAT\b|\bCAP\b/.test(text)) {
+    return 'Fashion & Accessories > Hats & Caps > Fedora';
+  }
+  if (/SCARF/i.test(text)) return 'Fashion & Accessories > Scarves';
+
+  if (/EXERCISE BOOK|COUNTER BOOK|MANUSCRIPT BOOK|MEMO BOOK|EXAM PAD|SKETCH PAD|NOTEBOOK|DIARY|PLANNER/i.test(text)) {
     return 'Stationery > School & Office > Books & Notebooks';
   }
-  if (/ENVELOPE/i.test(n)) return 'Stationery > School & Office > Accessories';
-  if (/ERASER/i.test(n)) return 'Stationery > School & Office > Writing & Correction > Correction and Erasing';
+  if (/ENVELOPE/i.test(text)) return 'Stationery > School & Office > Accessories';
+  if (/ERASER/i.test(text)) return 'Stationery > School & Office > Writing & Correction > Correction and Erasing';
 
-  if (/FINDING|CLASP|CRIMP|JUMPRING|EARRING HOOK|EYEPIN|HEADPIN/i.test(n)) {
+  if (/CLAY|PLASTICINE|PLAYDOUGH|CRAZY\s*CRAFTY/i.test(text)) {
+    return 'Arts and Crafts > Art Supplies > Sculpting & Moulding > Clay';
+  }
+  if (/STICKER/i.test(text)) return 'Arts and Crafts > Crafts > Stickers';
+  if (/EMBROIDERY/i.test(text)) return 'Arts and Crafts > Crafts > Embroidery';
+
+  if (/NECKLACE\s*CHAIN|\bCHAIN\b.*NECKLACE/.test(text)) {
+    return 'Jewellery > Findings > Stringing Materials > Chain';
+  }
+  if (/SUEDE\s*CORD|IMITATION\s*SUEDE|\bCORD\b/.test(text)) {
+    return 'Jewellery > Findings > Stringing Materials > Cord';
+  }
+  if (/NYLON\s*THREAD|BONDED\s*NYLON|\bTHREAD\b/.test(text)) {
+    return 'Jewellery > Findings > Stringing Materials > Threads';
+  }
+  if (/WIRE\b|MEMORY\s*WIRE/.test(text)) return 'Jewellery > Findings > Stringing Materials > Wire';
+  if (/ELASTIC\b/.test(text)) return 'Jewellery > Findings > Stringing Materials > Elastic';
+
+  if (/FINDING|CLASP|CRIMP|JUMPRING|EARRING\s*HOOK|EYEPIN|HEADPIN|CALOTTE/i.test(text)) {
     return 'Jewellery > Findings';
   }
-  if (/SEED BEAD/i.test(n)) return 'Beads > Glass & Crystal > Seed Beads';
+  if (/DISPLAY\s*STAND|JEWELLERY\s*TOOL|PLIER/i.test(text)) {
+    return 'Jewellery > Jewellery Tools and Equipment';
+  }
 
-  if (/\bBEAD\b/i.test(n)) return 'Beads > Glass & Crystal';
+  if (/GLASS\s*CRYSTAL|ACRYLIC\s*DIAMOND|RONDELLE|MURANO|CZECH|GLASS\s*FOIL/i.test(text)) {
+    return 'Beads > Glass & Crystal';
+  }
+  if (/GLASS\s*BEAD/i.test(text)) return 'Beads > Glass & Crystal';
+  if (/EARTH\s*STONE/i.test(text)) return 'Beads > Semi-Precious';
+  if (/SEED\s*BEAD/i.test(text)) return 'Beads > Glass & Crystal > Seed Beads';
+  if (/METAL|ALUMINIUM|CONE|BRASS|NICKEL/i.test(text)) return 'Beads > Beads By Material > Beads';
+
+  if (/ZIPLOCK/i.test(text)) return 'Packaging & Storage > Packaging Packets and Bags > Ziplock';
+  if (/PVC\s*PLASTIC|RESEALABLE\s*PACKET/i.test(text)) {
+    return 'Packaging & Storage > Packaging Packets and Bags > Resealable PVC';
+  }
+  if (/DISPLAY\s*TAG/i.test(text)) return 'Packaging & Storage > Tags > Jewellery';
+
+  if (/\bD-RING\b|\bD\s*RING\b/i.test(text)) return 'Bag & Belt Components > Square and D-Rings';
+  if (/\bSLIDER\b/i.test(text)) return 'Bag & Belt Components > Sliders';
+  if (/\bBUCKLE\b/i.test(text)) return 'Bag & Belt Components > Buckles';
+
+  if (/SOFT\s*TOY/i.test(text)) return 'Kids Toys & Games > Soft Toys';
+  if (/FIDGET|KIDS\s*TOY|\bTOY\b/i.test(text)) return 'Kids Toys & Games > Kids Toys';
+
+  if (/\bCHAIN\b/i.test(text)) return 'Jewellery > Findings > Stringing Materials > Chain';
+  if (/\bPURSE\b/i.test(text)) return 'Fashion & Accessories > Synthetic Bags > Wristlets & Clutches';
+
+  if (/\bBEAD\b/i.test(text)) return 'Beads > Glass & Crystal';
 
   return null;
 }

@@ -2,9 +2,14 @@
 /**
  * Apply Proto Product Report (SKU, Name, In Stock, Images).
  *
- * • In Stock = No  → archive live catalogue rows
- * • In Stock = Yes → sync price/SOH from public.products; add missing SKUs (ERP only)
- * • Skips duplicates already on website_stock / archived_products
+ * • In Stock = No  + live on site → archive
+ * • In Stock = Yes + archived     → restore to live
+ * • Not on site (not duplicate SKU) → insert with categories + Supabase SOH/price
+ * • Live on site                  → sync price/SOH from public.products
+ *
+ * Excel "In Stock" only drives archive/restore — not whether missing SKUs are added.
+ * Barcode for ERP lookup is taken from the product name (…barcode…) at the end.
+ * Stock and pricing always come from public.products (Supabase), never the spreadsheet.
  *
  * Usage:
  *   node scripts/apply-proto-product-report.mjs data/proto-product-report.xlsx
@@ -16,6 +21,7 @@ import { createClient } from '@supabase/supabase-js';
 import { existsSync, writeFileSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
+import { restoreArchivedToLive } from '../api/_ensure-product.js';
 import { findProductBySku, fetchProductLookupMap } from '../api/_sku-match.js';
 import { loadBundledTaxonomy, resolvePathFields } from './lib/taxonomy-paths.mjs';
 import { inferCategoryPathFromName } from './lib/product-name-category.mjs';
@@ -23,6 +29,7 @@ import { inferCategoryPathFromName } from './lib/product-name-category.mjs';
 const __dir = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dir, '..');
 const DEFAULT_FILE = join(ROOT, 'data/proto-product-report.xlsx');
+const PARALLEL = 30;
 
 const args = new Set(process.argv.slice(2));
 const APPLY = args.has('--apply');
@@ -62,7 +69,8 @@ function parseInStock(val) {
   return null;
 }
 
-function extractBarcodeFromName(name) {
+/** Barcode is in the product description/name, usually in parentheses at the end. */
+export function extractBarcodeFromName(name) {
   const m = String(name || '').match(/\(([^)]+)\)\s*$/);
   return m ? m[1].trim() : '';
 }
@@ -82,7 +90,6 @@ function productPath(row) {
 async function loadCatalogueMaps() {
   const liveBySku = new Map();
   const archivedBySku = new Map();
-  const allSkus = new Set();
 
   for (const table of ['website_stock', 'archived_products']) {
     let from = 0;
@@ -95,8 +102,6 @@ async function loadCatalogueMaps() {
       for (const row of data || []) {
         const k = normSku(row.sku).toUpperCase();
         if (!k) continue;
-        allSkus.add(k);
-        if (row.barcode) allSkus.add(String(row.barcode).trim().toUpperCase());
         if (table === 'website_stock') liveBySku.set(k, row);
         else archivedBySku.set(k, row);
       }
@@ -105,15 +110,20 @@ async function loadCatalogueMaps() {
     }
   }
 
-  return { liveBySku, archivedBySku, allSkus };
+  return { liveBySku, archivedBySku };
 }
 
 function resolveErpProduct(lookupMap, sku, barcode) {
-  return findProductBySku(lookupMap, sku) || (barcode ? findProductBySku(lookupMap, barcode) : null);
+  const direct = findProductBySku(lookupMap, sku) || (barcode ? findProductBySku(lookupMap, barcode) : null);
+  if (direct) return direct;
+  if (barcode && /[A-Za-z]$/.test(barcode)) {
+    return findProductBySku(lookupMap, barcode.slice(0, -1));
+  }
+  return null;
 }
 
-function buildCategoryFields(name, sku) {
-  const path = inferCategoryPathFromName(name, sku);
+function buildCategoryFields(name, sku, erpDescription = '') {
+  const path = inferCategoryPathFromName(name, sku, erpDescription);
   if (!path) return null;
   return resolvePathFields(tree, path);
 }
@@ -128,13 +138,19 @@ function stockPatchFromErp(product) {
   };
 }
 
+async function runParallel(items, fn) {
+  for (let i = 0; i < items.length; i += PARALLEL) {
+    await Promise.all(items.slice(i, i + PARALLEL).map(fn));
+  }
+}
+
 async function main() {
   const wb = XLSX.readFile(filePath, { cellDates: true, raw: false });
   const sheetName = wb.SheetNames[0];
   const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { defval: '' });
   console.log(`Loaded ${rows.length} rows from ${filePath}\n`);
 
-  const { liveBySku, archivedBySku, allSkus } = await loadCatalogueMaps();
+  const { liveBySku, archivedBySku } = await loadCatalogueMaps();
   console.log(`Catalogue: ${liveBySku.size} live SKUs\n`);
 
   const report = [];
@@ -163,45 +179,84 @@ async function main() {
 
   const stats = {
     archive: 0,
+    restore: 0,
     syncLive: 0,
     categorize: 0,
     insert: 0,
     skipArchived: 0,
-    skipNoErp: 0,
-    skipDuplicate: 0,
-    skipNotOnSite: 0,
+    skipNoCategory: 0,
+    skipMissingSku: 0,
     errors: 0,
   };
   const log = [];
 
+  const toArchive = [];
+  const toRestore = [];
+  const toSync = [];
+  const toInsert = [];
+
   for (const item of report) {
-    if (item.action === 'skip') continue;
+    if (item.action === 'skip') {
+      stats.skipMissingSku++;
+      continue;
+    }
 
     const skuKey = item.sku.toUpperCase();
     const live = liveBySku.get(skuKey);
     const archived = archivedBySku.get(skuKey);
     const erp = resolveErpProduct(lookupMap, item.sku, item.barcode);
 
-    if (!item.inStock) {
-      if (live) {
-        if (APPLY) {
-          const { error } = await sb.rpc('archive_product', { p_sku: item.sku, p_by: 'proto-report' });
-          if (error) { stats.errors++; log.push({ sku: item.sku, action: 'archive', error: error.message }); }
-          else { stats.archive++; log.push({ sku: item.sku, action: 'archived' }); }
-        } else {
-          stats.archive++;
-          log.push({ sku: item.sku, action: 'would_archive' });
-        }
-      } else {
-        stats.skipNotOnSite++;
+    if (live) {
+      if (!item.inStock) {
+        toArchive.push(item);
+        continue;
       }
+      toSync.push({ item, live, erp });
       continue;
     }
 
-    // In stock = Yes
-    if (live) {
+    if (archived) {
+      if (item.inStock) toRestore.push(item);
+      else stats.skipArchived++;
+      continue;
+    }
+
+    const catFields = buildCategoryFields(item.name, item.sku, erp?.description || '');
+    if (!catFields) {
+      stats.skipNoCategory++;
+      log.push({ sku: item.sku, action: 'skip_no_category', name: item.name.slice(0, 60) });
+      continue;
+    }
+
+    toInsert.push({ item, erp, catFields });
+  }
+
+  if (APPLY) {
+    await runParallel(toArchive, async (item) => {
+      const { error } = await sb.rpc('archive_product', { p_sku: item.sku, p_by: 'proto-report' });
+      if (error) {
+        stats.errors++;
+        log.push({ sku: item.sku, action: 'archive', error: error.message });
+      } else {
+        stats.archive++;
+        log.push({ sku: item.sku, action: 'archived' });
+      }
+    });
+
+    await runParallel(toRestore, async (item) => {
+      try {
+        await restoreArchivedToLive(sb, item.sku);
+        stats.restore++;
+        log.push({ sku: item.sku, action: 'restored' });
+      } catch (err) {
+        stats.errors++;
+        log.push({ sku: item.sku, action: 'restore', error: err.message });
+      }
+    });
+
+    await runParallel(toSync, async ({ item, live, erp }) => {
       const patch = erp ? stockPatchFromErp(erp) : { updated_at: new Date().toISOString() };
-      const catFields = buildCategoryFields(item.name, item.sku);
+      const catFields = buildCategoryFields(item.name, item.sku, erp?.description || '');
       let needsCat = false;
       if (catFields && (
         live.category !== catFields.category
@@ -209,86 +264,85 @@ async function main() {
         || (live.subcategory_two || null) !== (catFields.subcategory_two || null)
         || (live.subcategory_three || null) !== (catFields.subcategory_three || null)
       )) {
-        // Only recategorize when loose or only one level deep
         if (!live.subcategory_two || live.subcategory_one === live.category) {
           Object.assign(patch, catFields);
           needsCat = true;
         }
       }
 
-      if (APPLY) {
-        const { error } = await sb.from('website_stock').update(patch).eq('sku', item.sku);
-        if (error) { stats.errors++; log.push({ sku: item.sku, action: 'sync', error: error.message }); }
-        else {
-          stats.syncLive++;
-          if (needsCat) stats.categorize++;
-          log.push({ sku: item.sku, action: needsCat ? 'synced+categorized' : 'synced', from: productPath(live) });
-        }
+      const { error } = await sb.from('website_stock').update(patch).eq('sku', item.sku);
+      if (error) {
+        stats.errors++;
+        log.push({ sku: item.sku, action: 'sync', error: error.message });
       } else {
         stats.syncLive++;
         if (needsCat) stats.categorize++;
+        log.push({ sku: item.sku, action: needsCat ? 'synced+categorized' : 'synced' });
       }
-      continue;
-    }
+    });
 
-    if (archived) {
-      stats.skipArchived++;
-      continue;
-    }
+    for (let i = 0; i < toInsert.length; i += 100) {
+      const chunk = toInsert.slice(i, i + 100);
+      const insertRows = chunk.map(({ item, erp, catFields }) => {
+        const imgs = item.images;
+        return {
+          sku: item.sku,
+          barcode: erp?.sku || item.barcode || item.sku,
+          title: item.name || erp?.description || item.sku,
+          original_description: item.name || erp?.description || item.sku,
+          ...catFields,
+          ...(erp ? stockPatchFromErp(erp) : { stock_qty: 0, available_stock: 0 }),
+          image_url_one: imgs[0] || null,
+          image_url_two: imgs[1] || null,
+          image_url_three: imgs[2] || null,
+          image_url_four: imgs[3] || null,
+        };
+      });
 
-    if (allSkus.has(skuKey) || (item.barcode && allSkus.has(item.barcode.toUpperCase()))) {
-      stats.skipDuplicate++;
-      continue;
-    }
-
-    if (!erp) {
-      stats.skipNoErp++;
-      log.push({ sku: item.sku, action: 'skip_no_erp', name: item.name.slice(0, 50) });
-      continue;
-    }
-
-    const catFields = buildCategoryFields(item.name, item.sku);
-    if (!catFields) {
-      stats.skipNoErp++;
-      log.push({ sku: item.sku, action: 'skip_no_category', name: item.name.slice(0, 50) });
-      continue;
-    }
-
-    const imgs = item.images;
-    const insertRow = {
-      sku: item.sku,
-      barcode: erp.sku,
-      title: item.name || erp.description || item.sku,
-      original_description: item.name || erp.description || item.sku,
-      ...catFields,
-      ...stockPatchFromErp(erp),
-      image_url_one: imgs[0] || null,
-      image_url_two: imgs[1] || null,
-      image_url_three: imgs[2] || null,
-      image_url_four: imgs[3] || null,
-    };
-
-    if (APPLY) {
-      const { error } = await sb.from('website_stock').insert(insertRow);
+      const { error } = await sb.from('website_stock').insert(insertRows);
       if (error) {
-        stats.errors++;
-        log.push({ sku: item.sku, action: 'insert', error: error.message });
+        for (const { item, catFields } of chunk) {
+          const row = insertRows.find((r) => r.sku === item.sku);
+          const { error: oneErr } = await sb.from('website_stock').insert(row);
+          if (oneErr) {
+            stats.errors++;
+            log.push({ sku: item.sku, action: 'insert', error: oneErr.message });
+          } else {
+            stats.insert++;
+            log.push({ sku: item.sku, action: 'inserted', path: Object.values(catFields).filter(Boolean).join(' > ') });
+            await sb.rpc('upsert_website_product_from_stock', { p_website_sku: item.sku });
+          }
+        }
       } else {
-        stats.insert++;
-        allSkus.add(skuKey);
-        liveBySku.set(skuKey, insertRow);
-        log.push({ sku: item.sku, action: 'inserted', path: Object.values(catFields).filter(Boolean).join(' > ') });
-        await sb.rpc('upsert_website_product_from_stock', { p_website_sku: item.sku });
+        stats.insert += chunk.length;
+        for (const { item, catFields } of chunk) {
+          log.push({ sku: item.sku, action: 'inserted', path: Object.values(catFields).filter(Boolean).join(' > ') });
+        }
+        await runParallel(chunk, async ({ item }) => {
+          await sb.rpc('upsert_website_product_from_stock', { p_website_sku: item.sku });
+        });
       }
-    } else {
-      stats.insert++;
-      log.push({ sku: item.sku, action: 'would_insert', path: Object.values(catFields).filter(Boolean).join(' > ') });
+      if ((i + 100) % 500 === 0 || i + 100 >= toInsert.length) {
+        console.log(`Insert progress: ${Math.min(i + 100, toInsert.length)}/${toInsert.length}`);
+      }
     }
-  }
 
-  if (APPLY) {
     const { error } = await sb.rpc('sync_website_from_products');
     if (error) console.warn('sync_website_from_products:', error.message);
+  } else {
+    stats.archive = toArchive.length;
+    stats.restore = toRestore.length;
+    stats.syncLive = toSync.length;
+    stats.insert = toInsert.length;
+    stats.categorize = toSync.filter(({ live, item, erp }) => {
+      const catFields = buildCategoryFields(item.name, item.sku, erp?.description || '');
+      return catFields && (!live.subcategory_two || live.subcategory_one === live.category);
+    }).length;
+    for (const item of toArchive) log.push({ sku: item.sku, action: 'would_archive' });
+    for (const item of toRestore) log.push({ sku: item.sku, action: 'would_restore' });
+    for (const { item, catFields } of toInsert) {
+      log.push({ sku: item.sku, action: 'would_insert', path: Object.values(catFields).filter(Boolean).join(' > ') });
+    }
   }
 
   console.log('Summary:', stats);
