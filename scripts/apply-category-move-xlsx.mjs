@@ -110,6 +110,71 @@ function buildMove3TargetPath(parts) {
   return labels.join(' > ');
 }
 
+const BEAD_MATERIAL_PATHS = {
+  'glass / crystal / pearl': 'Beads > Glass & Crystal',
+  'plastic / acrylic / ccb': 'Beads > Plastic & Crystal',
+  'stone / natural': 'Beads > Natural',
+  metal: 'Beads > Metal',
+  wood: 'Beads > Wood',
+};
+
+function inferFindingsPath(productName) {
+  const n = String(productName || '').toUpperCase();
+  if (/EARRING\s*HOOK|EAR\s*HOOP/.test(n)) return 'Jewellery > Findings > Earring Hooks';
+  if (/CLASP|CALOTTE/.test(n)) return 'Jewellery > Findings > Clasps';
+  if (/CRIMP/.test(n)) return 'Jewellery > Findings > Crimps';
+  if (/JUMPRING|JUMP\s*RING/.test(n)) return 'Jewellery > Findings > Jumprings & Split Rings';
+  if (/EYEPIN|EYE\s*PIN|HEAD\s*PIN|HEADPIN/.test(n)) return 'Jewellery > Findings > Eye & Head Pins';
+  if (/\bCHAIN\b/.test(n)) return 'Jewellery > Findings > Stringing Materials > Chain';
+  if (/THREAD/.test(n)) return 'Jewellery > Findings > Stringing Materials > Threads';
+  if (/\bWIRE\b/.test(n)) return 'Jewellery > Findings > Stringing Materials > Wire';
+  if (/ELASTIC/.test(n)) return 'Jewellery > Findings > Stringing Materials > Elastic';
+  if (/\bCORD\b/.test(n)) return 'Jewellery > Findings > Stringing Materials > Cord';
+  if (/\bRING\b/.test(n) && !/JUMPRING|EARRING/.test(n)) return 'Jewellery > Findings > Rings';
+  return 'Jewellery > Findings';
+}
+
+/** Move 3: split into material / product-type subcategories (catalogue SKUs only). */
+function buildMove3SubdividedTargetPath(row) {
+  const finalKid1 = norm(row['Final Kid 1']);
+  const finalKid2 = norm(row['Final Kid 2']);
+  const suggestedKid3 = norm(row['Suggested Kid 3']).toLowerCase();
+  const productName = norm(row.ProductName || row['Product name']);
+
+  if (finalKid1 === 'Beads By Material' && finalKid2 === 'Beads') {
+    const materialPath = BEAD_MATERIAL_PATHS[suggestedKid3];
+    if (materialPath) return materialPath;
+    return buildMove3TargetPath(['Beads & Jewellery Making', finalKid1, finalKid2]);
+  }
+
+  if (finalKid1 === 'Seed Beads') {
+    return 'Beads > Glass & Crystal > Seed Beads';
+  }
+
+  if (finalKid2 === 'Findings / Components') {
+    return inferFindingsPath(productName);
+  }
+
+  if (finalKid2 === 'Display / Packaging') {
+    if (/TAG/i.test(productName)) return 'Packaging & Storage > Tags > Jewellery';
+    if (/DISPLAY|STAND/i.test(productName)) return 'Packaging & Storage > Display > Jewellery';
+    return buildMove3TargetPath(['Out of Beads', 'Packaging & Display', finalKid2]);
+  }
+
+  if (finalKid2 === 'Finished Jewellery') {
+    return 'Jewellery > Jewellery';
+  }
+
+  const parts = [
+    row['Final Main Menu'],
+    row['Final Kid 1'],
+    row['Final Kid 2'],
+    row['Final Kid 3'],
+    row['Final Kid 4'],
+  ].map(norm).filter(Boolean);
+  return buildMove3TargetPath(parts);
+}
+
 function norm(v) {
   if (v == null) return '';
   const s = String(v).trim();
@@ -192,35 +257,21 @@ function parseMove1(filePath, raw) {
   return mappings;
 }
 
-function parseMove3(filePath, raw) {
+function parseMove3(filePath, sheet) {
   const mappings = [];
-  const headers = (raw[0] || []).map((h) => norm(h));
-  const skuCol = colIndex(headers, [/^website sku$/i, /^sku$/i]);
-  const mainCol = colIndex(headers, [/^final main menu$/i]);
-  const kid1Col = colIndex(headers, [/^final kid 1$/i]);
-  const kid2Col = colIndex(headers, [/^final kid 2$/i]);
-  const kid3Col = colIndex(headers, [/^final kid 3$/i]);
-  const kid4Col = colIndex(headers, [/^final kid 4$/i]);
-  const actionCol = colIndex(headers, [/^recommended action$/i]);
-  if (skuCol < 0 || mainCol < 0) return mappings;
+  const rows = XLSX.utils.sheet_to_json(sheet, { defval: '', raw: false });
 
-  for (let r = 1; r < raw.length; r++) {
-    const row = raw[r];
-    if (!row?.some((c) => norm(c))) continue;
-    if (actionCol >= 0 && !/move/i.test(norm(row[actionCol]))) continue;
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    if (!Object.values(row).some((c) => norm(c))) continue;
+    if (norm(row['Recommended Action']) && !/move/i.test(norm(row['Recommended Action']))) continue;
 
-    const sku = normalizeSku(row[skuCol]);
-    const parts = [
-      norm(row[mainCol]),
-      kid1Col >= 0 ? norm(row[kid1Col]) : '',
-      kid2Col >= 0 ? norm(row[kid2Col]) : '',
-      kid3Col >= 0 ? norm(row[kid3Col]) : '',
-      kid4Col >= 0 ? norm(row[kid4Col]) : '',
-    ].filter(Boolean);
-    if (!sku || parts.length < 2) continue;
-    const targetPath = buildMove3TargetPath(parts);
+    const sku = normalizeSku(row.SKU);
+    if (!sku) continue;
+
+    const targetPath = buildMove3SubdividedTargetPath(row);
     if (!targetPath) continue;
-    mappings.push({ sku, targetPath, source: `${filePath}:row${r + 1}` });
+    mappings.push({ sku, targetPath, source: `${filePath}:row${i + 2}` });
   }
   return mappings;
 }
@@ -259,7 +310,7 @@ function parseWorkbook(filePath) {
     return { type: 'move2', mappings: parseMove2(filePath, raw) };
   }
   if (headers.includes('final main menu')) {
-    return { type: 'move3', mappings: parseMove3(filePath, raw) };
+    return { type: 'move3', mappings: parseMove3(filePath, sheet) };
   }
   throw new Error(`Unrecognized workbook format: ${filePath}`);
 }
