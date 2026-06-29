@@ -41,13 +41,11 @@ const DRY_RUN = !APPLY && !APPLY_IF_PENDING;
 const PAGE = 1000;
 
 const filePaths = process.argv.slice(2).filter((a) => !a.startsWith('-'));
-const inputFiles = BUNDLED ? BUNDLED_FILES : filePaths;
+const inputFiles = BUNDLED || APPLY_IF_PENDING ? BUNDLED_FILES : filePaths;
 
-if (APPLY_IF_PENDING) {
-  if (!existsSync(PENDING_FILE)) {
-    console.log('No category-moves.pending — skipping.');
-    process.exit(0);
-  }
+if (APPLY_IF_PENDING && !existsSync(PENDING_FILE)) {
+  console.log('No category-moves.pending — skipping.');
+  process.exit(0);
 }
 
 if (!inputFiles.length) {
