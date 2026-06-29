@@ -5,6 +5,7 @@
  * Supports:
  *   • Move 1: Website SKU + Proposed Existing Path (+ Move Needed = YES)
  *   • Move 2: SKU + Final Main Category / Final Category / Final Subcategory
+ *   • Move 3: SKU + Final Main Menu / Final Kid 1–4 (+ Recommended Action)
  *
  * Usage:
  *   node scripts/apply-category-move-xlsx.mjs data/category-move-1.xlsx data/category-move-2.xlsx
@@ -87,6 +88,28 @@ const SEGMENT_LABELS = {
   wool: 'Wool',
 };
 
+/** Move 3: normalize Excel destination paths to catalogue taxonomy */
+function buildMove3TargetPath(parts) {
+  const raw = parts.map(norm).filter(Boolean);
+  if (!raw.length) return '';
+
+  let labels = raw;
+  if (raw[0].toLowerCase() === 'out of beads') {
+    labels = raw.slice(1);
+  } else if (raw[0].toLowerCase() === 'beads & jewellery making') {
+    labels = ['Beads', ...raw.slice(1)];
+  }
+
+  if (labels[0]?.toLowerCase() === 'packaging & display') {
+    labels[0] = 'Packaging & Storage';
+  }
+  if (labels[0]?.toLowerCase() === 'watches') {
+    return 'Electronics & Accessories > Clocks & Watches > Watches';
+  }
+
+  return labels.join(' > ');
+}
+
 function norm(v) {
   if (v == null) return '';
   const s = String(v).trim();
@@ -130,12 +153,11 @@ function resolveTargetFields(targetPath) {
   if (strict) return { fields: strict, targetPath };
 
   const labels = pathStringToLabels(targetPath).map(normalizeSegment);
-  if (labels[0]?.toLowerCase() === 'textiles' && labels.length >= 2) {
-    const canonical = [SEGMENT_LABELS.textiles, ...labels.slice(1)];
-    return {
-      fields: labelsToDbFields(canonical),
-      targetPath: canonical.join(' > '),
-    };
+  if (labels.length >= 2) {
+    const main = labels[0]?.toLowerCase();
+    if (main === 'textiles' || main === 'beads' || main === 'jewellery' || main === 'packaging & storage' || main === 'electronics & accessories') {
+      return { fields: labelsToDbFields(labels), targetPath: labels.join(' > ') };
+    }
   }
 
   return null;
@@ -165,6 +187,39 @@ function parseMove1(filePath, raw) {
     const sku = normalizeSku(row[skuCol]);
     const targetPath = norm(row[pathCol]);
     if (!sku || !targetPath) continue;
+    mappings.push({ sku, targetPath, source: `${filePath}:row${r + 1}` });
+  }
+  return mappings;
+}
+
+function parseMove3(filePath, raw) {
+  const mappings = [];
+  const headers = (raw[0] || []).map((h) => norm(h));
+  const skuCol = colIndex(headers, [/^website sku$/i, /^sku$/i]);
+  const mainCol = colIndex(headers, [/^final main menu$/i]);
+  const kid1Col = colIndex(headers, [/^final kid 1$/i]);
+  const kid2Col = colIndex(headers, [/^final kid 2$/i]);
+  const kid3Col = colIndex(headers, [/^final kid 3$/i]);
+  const kid4Col = colIndex(headers, [/^final kid 4$/i]);
+  const actionCol = colIndex(headers, [/^recommended action$/i]);
+  if (skuCol < 0 || mainCol < 0) return mappings;
+
+  for (let r = 1; r < raw.length; r++) {
+    const row = raw[r];
+    if (!row?.some((c) => norm(c))) continue;
+    if (actionCol >= 0 && !/move/i.test(norm(row[actionCol]))) continue;
+
+    const sku = normalizeSku(row[skuCol]);
+    const parts = [
+      norm(row[mainCol]),
+      kid1Col >= 0 ? norm(row[kid1Col]) : '',
+      kid2Col >= 0 ? norm(row[kid2Col]) : '',
+      kid3Col >= 0 ? norm(row[kid3Col]) : '',
+      kid4Col >= 0 ? norm(row[kid4Col]) : '',
+    ].filter(Boolean);
+    if (!sku || parts.length < 2) continue;
+    const targetPath = buildMove3TargetPath(parts);
+    if (!targetPath) continue;
     mappings.push({ sku, targetPath, source: `${filePath}:row${r + 1}` });
   }
   return mappings;
@@ -202,6 +257,9 @@ function parseWorkbook(filePath) {
   }
   if (headers.includes('final main category')) {
     return { type: 'move2', mappings: parseMove2(filePath, raw) };
+  }
+  if (headers.includes('final main menu')) {
+    return { type: 'move3', mappings: parseMove3(filePath, raw) };
   }
   throw new Error(`Unrecognized workbook format: ${filePath}`);
 }

@@ -319,6 +319,28 @@
     "label": "Beads",
     "children": [
       {
+        "id": "beads-by-material",
+        "label": "Beads By Material",
+        "children": [
+          {
+            "id": "beads-by-material-beads",
+            "label": "Beads",
+            "children": []
+          }
+        ]
+      },
+      {
+        "id": "seed-beads-branch",
+        "label": "Seed Beads",
+        "children": [
+          {
+            "id": "seed-beads-leaf",
+            "label": "Seed Beads",
+            "children": []
+          }
+        ]
+      },
+      {
         "id": "glass-crystal",
         "label": "Glass & Crystal",
         "children": [
@@ -845,6 +867,11 @@
             "children": []
           }
         ]
+      },
+      {
+        "id": "findings-components",
+        "label": "Findings / Components",
+        "children": []
       },
       {
         "id": "findings",
@@ -1917,6 +1944,11 @@
         "id": "display",
         "label": "Display",
         "children": [
+          {
+            "id": "display-packaging",
+            "label": "Display / Packaging",
+            "children": []
+          },
           {
             "id": "display-jewellery",
             "label": "Jewellery",
