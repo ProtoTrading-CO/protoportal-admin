@@ -25,6 +25,7 @@ import {
   pathStringToLabels,
   resolvePathFields,
 } from './lib/taxonomy-paths.mjs';
+import { inferWoodBeadPath, isWoodBeadName } from './lib/wood-bead-paths.mjs';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dir, '..');
@@ -142,6 +143,7 @@ function buildMove3SubdividedTargetPath(row) {
   const productName = norm(row.ProductName || row['Product name']);
 
   if (finalKid1 === 'Beads By Material' && finalKid2 === 'Beads') {
+    if (isWoodBeadName(productName)) return inferWoodBeadPath(productName);
     const materialPath = BEAD_MATERIAL_PATHS[suggestedKid3];
     if (materialPath) return materialPath;
     return buildMove3TargetPath(['Beads & Jewellery Making', finalKid1, finalKid2]);
