@@ -5,6 +5,7 @@
  * Supports:
  *   • Move 1: Website SKU + Proposed Existing Path (+ Move Needed = YES)
  *   • Move 2: SKU + Final Main Category / Final Category / Final Subcategory
+ *   • Move 3: SKU + Final Main Menu / Final Kid 1–4 (+ Recommended Action)
  *
  * Usage:
  *   node scripts/apply-category-move-xlsx.mjs data/category-move-1.xlsx data/category-move-2.xlsx
@@ -87,6 +88,20 @@ const SEGMENT_LABELS = {
   wool: 'Wool',
 };
 
+/** Move 3 Excel labels → canonical DB/taxonomy paths */
+const MOVE3_PATH_OVERRIDES = {
+  'beads & jewellery making > beads by material > beads': 'Beads > Beads By Material > Beads',
+  'beads & jewellery making > seed beads > seed beads': 'Beads > Glass & Crystal > Seed Beads',
+  'out of beads > jewellery > findings / components': 'Jewellery > Findings',
+  'out of beads > jewellery > finished jewellery': 'Jewellery > Jewellery',
+  'out of beads > packaging & display > display / packaging': 'Packaging & Storage > Display > Display / Packaging',
+  'out of beads > watches > fashion watches': 'Electronics & Accessories > Clocks & Watches > Watches',
+};
+
+function normPath(s) {
+  return String(s ?? '').trim().toLowerCase();
+}
+
 function norm(v) {
   if (v == null) return '';
   const s = String(v).trim();
@@ -126,16 +141,20 @@ function fieldsMatch(row, fields) {
 }
 
 function resolveTargetFields(targetPath) {
-  const strict = resolvePathFields(tree, targetPath);
-  if (strict) return { fields: strict, targetPath };
+  const overridden = MOVE3_PATH_OVERRIDES[normPath(targetPath)] || targetPath;
+  const strict = resolvePathFields(tree, overridden);
+  if (strict) return { fields: strict, targetPath: overridden };
 
-  const labels = pathStringToLabels(targetPath).map(normalizeSegment);
-  if (labels[0]?.toLowerCase() === 'textiles' && labels.length >= 2) {
-    const canonical = [SEGMENT_LABELS.textiles, ...labels.slice(1)];
-    return {
-      fields: labelsToDbFields(canonical),
-      targetPath: canonical.join(' > '),
-    };
+  const labels = pathStringToLabels(overridden).map(normalizeSegment);
+  if (labels.length >= 2) {
+    const main = labels[0]?.toLowerCase();
+    if (main === 'textiles') {
+      const canonical = [SEGMENT_LABELS.textiles, ...labels.slice(1)];
+      return { fields: labelsToDbFields(canonical), targetPath: canonical.join(' > ') };
+    }
+    if (main === 'beads' || main === 'packaging & storage') {
+      return { fields: labelsToDbFields(labels), targetPath: labels.join(' > ') };
+    }
   }
 
   return null;
@@ -166,6 +185,37 @@ function parseMove1(filePath, raw) {
     const targetPath = norm(row[pathCol]);
     if (!sku || !targetPath) continue;
     mappings.push({ sku, targetPath, source: `${filePath}:row${r + 1}` });
+  }
+  return mappings;
+}
+
+function parseMove3(filePath, raw) {
+  const mappings = [];
+  const headers = (raw[0] || []).map((h) => norm(h));
+  const skuCol = colIndex(headers, [/^website sku$/i, /^sku$/i]);
+  const mainCol = colIndex(headers, [/^final main menu$/i]);
+  const kid1Col = colIndex(headers, [/^final kid 1$/i]);
+  const kid2Col = colIndex(headers, [/^final kid 2$/i]);
+  const kid3Col = colIndex(headers, [/^final kid 3$/i]);
+  const kid4Col = colIndex(headers, [/^final kid 4$/i]);
+  const actionCol = colIndex(headers, [/^recommended action$/i]);
+  if (skuCol < 0 || mainCol < 0) return mappings;
+
+  for (let r = 1; r < raw.length; r++) {
+    const row = raw[r];
+    if (!row?.some((c) => norm(c))) continue;
+    if (actionCol >= 0 && !/move/i.test(norm(row[actionCol]))) continue;
+
+    const sku = normalizeSku(row[skuCol]);
+    const parts = [
+      norm(row[mainCol]),
+      kid1Col >= 0 ? norm(row[kid1Col]) : '',
+      kid2Col >= 0 ? norm(row[kid2Col]) : '',
+      kid3Col >= 0 ? norm(row[kid3Col]) : '',
+      kid4Col >= 0 ? norm(row[kid4Col]) : '',
+    ].filter(Boolean);
+    if (!sku || parts.length < 2) continue;
+    mappings.push({ sku, targetPath: parts.join(' > '), source: `${filePath}:row${r + 1}` });
   }
   return mappings;
 }
@@ -202,6 +252,9 @@ function parseWorkbook(filePath) {
   }
   if (headers.includes('final main category')) {
     return { type: 'move2', mappings: parseMove2(filePath, raw) };
+  }
+  if (headers.includes('final main menu')) {
+    return { type: 'move3', mappings: parseMove3(filePath, raw) };
   }
   throw new Error(`Unrecognized workbook format: ${filePath}`);
 }
