@@ -491,12 +491,12 @@ for (const u of updates) {
 
 console.log(`\n✓ Applied ${done}/${updates.length} category updates.`);
 
-if (APPLY_IF_PENDING && done > 0) {
-  if (existsSync(PENDING_FILE) && inputFiles.some((f) => BUNDLED_FILES.includes(f))) {
+if (APPLY_IF_PENDING) {
+  if (existsSync(PENDING_FILE) && inputFiles.some((f) => BUNDLED_FILES.includes(f)) && done === updates.length) {
     unlinkSync(PENDING_FILE);
     console.log('Removed data/category-moves.pending');
   }
-  if (existsSync(MOVE5_PENDING_FILE) && inputFiles.includes(MOVE5_FILE)) {
+  if (existsSync(MOVE5_PENDING_FILE) && inputFiles.includes(MOVE5_FILE) && done === updates.length) {
     unlinkSync(MOVE5_PENDING_FILE);
     console.log('Removed data/category-move-5.pending');
   }
