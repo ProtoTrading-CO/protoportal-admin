@@ -232,6 +232,7 @@ export default function ProductManagerEngine({
   initialStatus = 'live',
 }) {
   const [status, setStatus] = useState(initialStatus);
+  const [archiveStockView, setArchiveStockView] = useState('archived');
   const [reorderMode, setReorderMode] = useState(false);
 
   useEffect(() => {
@@ -296,7 +297,7 @@ export default function ProductManagerEngine({
     selectedRowsRef.current = new Map();
     lastSelectIdxRef.current = null;
     setSelectAllView(false);
-  }, [status, debouncedSearch, categoryPath.join('/')]);
+  }, [status, debouncedSearch, categoryPath.join('/'), archiveStockView]);
 
   const handlePageChange = useCallback((nextPage) => {
     setPage(nextPage);
@@ -310,7 +311,8 @@ export default function ProductManagerEngine({
     pageSize: reorderMode && status === 'live' ? 500 : pageSize,
     search: debouncedSearch,
     categoryPath,
-  }), [status, page, pageSize, debouncedSearch, categoryPath, reorderMode]);
+    stockFilter: status === 'archived' ? archiveStockView : undefined,
+  }), [status, page, pageSize, debouncedSearch, categoryPath, reorderMode, archiveStockView]);
 
   const { data, isLoading, isFetching, isPlaceholderData } = useCatalogQuery(catalogParams, {
     enabled: status !== 'approval',
@@ -319,6 +321,7 @@ export default function ProductManagerEngine({
   const rows = rowsStale ? [] : (data?.rows || []);
   rowsRef.current = rows;
   const total = data?.total || 0;
+  const archiveNegativeLive = status === 'archived' && archiveStockView === 'negative';
   const tree = taxonomyTree.length ? taxonomyTree : (data?.tree || []);
 
   const categoryKey = categoryPath.length
@@ -503,6 +506,7 @@ export default function ProductManagerEngine({
         status,
         search: debouncedSearch,
         categoryPath,
+        stockFilter: status === 'archived' ? archiveStockView : undefined,
       });
       selectedRowsRef.current = new Map(allRows.map((r) => [r.id, r]));
       setSelected(new Set(allRows.map((r) => r.id)));
@@ -818,9 +822,34 @@ export default function ProductManagerEngine({
             )}
             <div className="adm-toolbar pm-toolbar">
               {status === 'archived' && (
-                <p className="adm-section-note" style={{ margin: '0 0 8px', width: '100%' }}>
-                  Archived products hidden from the trade website. Zero-stock items are not shown here. Click Make live to restore to the catalogue.
-                </p>
+                <>
+                  <p className="adm-section-note" style={{ margin: '0 0 8px', width: '100%' }}>
+                    {archiveStockView === 'negative'
+                      ? 'Live products with negative ERP stock. Zero-stock items are not shown here.'
+                      : 'Archived products hidden from the trade website. Zero-stock items are not shown here.'}
+                  </p>
+                  <div className="pm-archive-stock-toggle" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', width: '100%', marginBottom: 8 }}>
+                    <button
+                      type="button"
+                      className={`adm-btn-ghost adm-btn--sm${archiveStockView === 'archived' ? ' adm-tab--active' : ''}`}
+                      onClick={() => setArchiveStockView('archived')}
+                    >
+                      Archived
+                    </button>
+                    <button
+                      type="button"
+                      className={`adm-btn-ghost adm-btn--sm${archiveStockView === 'negative' ? ' adm-tab--active' : ''}`}
+                      onClick={() => setArchiveStockView('negative')}
+                    >
+                      Negative stock
+                    </button>
+                    {!isLoading && (
+                      <span className="adm-pill" style={{ marginLeft: 'auto', fontSize: 12 }}>
+                        {total} product{total === 1 ? '' : 's'}
+                      </span>
+                    )}
+                  </div>
+                </>
               )}
               <label className="adm-search">
                 <Search size={15} />
@@ -922,7 +951,20 @@ export default function ProductManagerEngine({
                       <button type="button" className="adm-btn-red adm-btn--sm" onClick={() => runBulk({ mutateAsync: (sku) => mutations.softDelete.mutateAsync({ sku, fromArchive: false }) })}>To recycle</button>
                     </>
                   )}
-                  {status === 'archived' && (
+                  {status === 'archived' && archiveNegativeLive && (
+                    <>
+                      <button
+                        type="button"
+                        className="adm-btn-ghost adm-btn--sm"
+                        disabled={bulkActionPending}
+                        onClick={() => void bulkArchiveSelected()}
+                      >
+                        {bulkActionPending ? 'Archiving…' : 'Archive all'}
+                      </button>
+                      <button type="button" className="adm-btn-red adm-btn--sm" onClick={() => runBulk({ mutateAsync: (sku) => mutations.softDelete.mutateAsync({ sku, fromArchive: false }) })}>To recycle</button>
+                    </>
+                  )}
+                  {status === 'archived' && !archiveNegativeLive && (
                     <>
                       <button
                         type="button"
@@ -990,7 +1032,7 @@ export default function ProductManagerEngine({
                         key={item.id}
                         item={item}
                         index={index}
-                        status={status}
+                        status={archiveNegativeLive ? 'live' : status}
                         selected={selected}
                         showStockColumn={showStockColumn}
                         onCheckboxClick={onProductCheckboxClick}
@@ -1004,7 +1046,13 @@ export default function ProductManagerEngine({
                       />
                     ))}
                     {!rows.length && !isLoading && (
-                      <p className="adm-empty">No products in this view.</p>
+                      <p className="adm-empty">
+                        {status === 'archived' && archiveStockView === 'negative'
+                          ? 'No live products with negative stock.'
+                          : status === 'archived'
+                            ? 'No archived products (zero-stock items are hidden).'
+                            : 'No products in this view.'}
+                      </p>
                     )}
                   </div>
                 ) : (
@@ -1125,7 +1173,13 @@ export default function ProductManagerEngine({
                             <button type="button" className="adm-btn-red adm-btn--sm" onClick={() => recycleSku(item.sku, false)}>To recycle</button>
                           </>
                         )}
-                        {status === 'archived' && (
+                        {status === 'archived' && archiveNegativeLive && (
+                          <>
+                            <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => mutations.archive.mutate(item.sku, { onSuccess: () => onRefreshStats?.() })}>Archive</button>
+                            <button type="button" className="adm-btn-red adm-btn--sm" onClick={() => recycleSku(item.sku, false)}>To recycle</button>
+                          </>
+                        )}
+                        {status === 'archived' && !archiveNegativeLive && (
                           <>
                             <button type="button" className="adm-btn-red adm-btn--sm" onClick={() => makeLive(item)}>
                               <ArchiveRestore size={14} /> Make live
@@ -1166,7 +1220,13 @@ export default function ProductManagerEngine({
                     </div>
                   ))}
                   {!rows.length && !isLoading && (
-                    <p className="adm-empty">No products in this view.</p>
+                    <p className="adm-empty">
+                      {status === 'archived' && archiveStockView === 'negative'
+                        ? 'No live products with negative stock.'
+                        : status === 'archived'
+                          ? 'No archived products (zero-stock items are hidden).'
+                          : 'No products in this view.'}
+                    </p>
                   )}
                 </div>
                 </>

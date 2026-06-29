@@ -154,3 +154,8 @@ export function isExactlyZeroStock(row) {
   const soh = readStockOnHand(row);
   return soh === 0;
 }
+
+export function isNegativeStock(row) {
+  const soh = readStockOnHand(row);
+  return soh !== null && soh < 0;
+}
