@@ -25,6 +25,8 @@ import {
   pathStringToLabels,
   resolvePathFields,
 } from './lib/taxonomy-paths.mjs';
+import { inferWoodBeadPath, isWoodBeadName } from './lib/wood-bead-paths.mjs';
+import { inferSemiPreciousPath, isSemiPreciousProduct } from './lib/semi-precious-paths.mjs';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dir, '..');
@@ -140,8 +142,11 @@ function buildMove3SubdividedTargetPath(row) {
   const finalKid2 = norm(row['Final Kid 2']);
   const suggestedKid3 = norm(row['Suggested Kid 3']).toLowerCase();
   const productName = norm(row.ProductName || row['Product name']);
+  const sku = norm(row.SKU);
 
   if (finalKid1 === 'Beads By Material' && finalKid2 === 'Beads') {
+    if (isWoodBeadName(productName)) return inferWoodBeadPath(productName);
+    if (isSemiPreciousProduct(productName, sku)) return inferSemiPreciousPath(productName, sku);
     const materialPath = BEAD_MATERIAL_PATHS[suggestedKid3];
     if (materialPath) return materialPath;
     return buildMove3TargetPath(['Beads & Jewellery Making', finalKid1, finalKid2]);

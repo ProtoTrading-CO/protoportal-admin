@@ -23,6 +23,7 @@ import CategorySidebar, { resolvePathLabels } from './CategorySidebar';
 import ReorderGrid from './ReorderGrid';
 import ApprovalPanel from './ApprovalPanel';
 import BulkProductEditModal from './BulkProductEditModal';
+import BulkCategoryMoveModal from './BulkCategoryMoveModal';
 import { useCatalogQuery, buildCatalogParams, fetchAllCatalogRows, CATALOG_STATUSES } from '../hooks/useCatalog';
 import { useCatalogMutations } from '../hooks/useCatalogMutations';
 import { useMediaQuery } from '../hooks/useMediaQuery';
@@ -30,6 +31,7 @@ import { queryClient } from '../lib/queryClient';
 import { queryKeys } from '../lib/queryKeys';
 import { getActiveImageBatch, subscribeImageBatch } from '../lib/imageBatchTracker';
 import { sortOrderCategoryKey, lookupSortOrder, applySkuOrder, sortOrderLookupKeys } from '../lib/taxonomy';
+import { bulkMoveProducts } from '../lib/products';
 import { exportProductsCatalogXlsx, exportAllProductsCatalogXlsx, exportSelectedProductsXlsx } from '../lib/exportLiveProducts';
 
 const STATUS_META = {
@@ -251,6 +253,8 @@ export default function ProductManagerEngine({
   const [exportingXlsx, setExportingXlsx] = useState(false);
   const [exportingSelected, setExportingSelected] = useState(false);
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
+  const [moveModalOpen, setMoveModalOpen] = useState(false);
+  const [movePending, setMovePending] = useState(false);
   const [selectAllView, setSelectAllView] = useState(false);
   const [selectingAll, setSelectingAll] = useState(false);
   const [bulkActionPending, setBulkActionPending] = useState(false);
@@ -615,6 +619,41 @@ export default function ProductManagerEngine({
     }
   };
 
+  const confirmBulkMove = async ({ categoryPathIds, categoryId, subcategoryId, previewLabel }) => {
+    const skus = [...selected];
+    if (!skus.length || categoryPathIds.length < 2) {
+      onShowToast?.('Choose a main category and at least one subcategory', 'error');
+      return;
+    }
+    if (!window.confirm(`Move ${skus.length} product(s) to:\n${previewLabel}?`)) return;
+    setMovePending(true);
+    const count = skus.length;
+    try {
+      await bulkMoveProducts({
+        skus,
+        categoryId,
+        subcategoryId,
+        categoryPathIds,
+      });
+      setMoveModalOpen(false);
+      clearSelection();
+      setCategoryPath(categoryPathIds);
+      queryClient.invalidateQueries({ queryKey: ['catalog'] });
+      onRefreshStats?.();
+      onShowToast?.(`Moved ${count} product(s) to ${previewLabel}`, 'success');
+    } catch (err) {
+      if (err.partial) {
+        setMoveModalOpen(false);
+        clearSelection();
+        queryClient.invalidateQueries({ queryKey: ['catalog'] });
+        onRefreshStats?.();
+      }
+      onShowToast?.(err.message || 'Move failed', err.partial ? 'warning' : 'error');
+    } finally {
+      setMovePending(false);
+    }
+  };
+
   const recycleSku = (sku, fromArchive) => mutations.softDelete.mutate(
     { sku, fromArchive },
     { onSuccess: () => onRefreshStats?.() },
@@ -931,6 +970,15 @@ export default function ProductManagerEngine({
                       onClick={() => setBulkEditOpen(true)}
                     >
                       <Pencil size={14} /> Bulk edit
+                    </button>
+                  )}
+                  {(status === 'live' || status === 'archived') && (
+                    <button
+                      type="button"
+                      className="adm-btn-ghost adm-btn--sm"
+                      onClick={() => setMoveModalOpen(true)}
+                    >
+                      <FolderTree size={14} /> Move category
                     </button>
                   )}
                   {(status === 'live' || status === 'archived') && onImageFix && (
@@ -1321,6 +1369,20 @@ export default function ProductManagerEngine({
           onRefreshTaxonomy={onRefreshTaxonomy}
         />
       )}
+
+      <BulkCategoryMoveModal
+        open={moveModalOpen && selected.size > 0}
+        count={selected.size}
+        tree={tree}
+        initialCategoryId={categoryPath[0] || ''}
+        pending={movePending}
+        onClose={() => setMoveModalOpen(false)}
+        onConfirm={(dest) => void confirmBulkMove(dest)}
+        onAddSubcategory={onAddSubcategory ? (parentId) => {
+          setMoveModalOpen(false);
+          onAddSubcategory(parentId);
+        } : undefined}
+      />
     </div>
   );
 }
