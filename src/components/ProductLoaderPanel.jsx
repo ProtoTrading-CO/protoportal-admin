@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import categories from '../data/categories.json';
 import { isImageFile } from '../lib/parseIntakeFilename.js';
+import { readApiJson } from '../lib/apiError.js';
 
 function displayTitle(...candidates) {
   for (const candidate of candidates) {
@@ -271,14 +272,13 @@ export default function ProductLoaderPanel({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ filenames: files.map((f) => f.name) }),
       });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || 'Folder scan failed');
+      const json = await readApiJson(res, { fallback: 'Folder scan failed' });
 
       const fileByName = new Map(files.map((f) => [f.name, f]));
       const merged = (json.items || []).map((item) => ({
         ...item,
         file: fileByName.get(item.filename) || null,
-        status: item.warnings?.includes('not_in_catalog') ? 'unmatched' : 'ready',
+        status: item.canPublish ? 'ready' : 'unmatched',
         processError: '',
       }));
 
@@ -328,8 +328,7 @@ export default function ProductLoaderPanel({
             imageSlot: item.imageSlot,
           }),
         });
-        const uploadJson = await uploadRes.json();
-        if (!uploadRes.ok) throw new Error(uploadJson.error || 'Upload failed');
+        const uploadJson = await readApiJson(uploadRes, { fallback: 'Upload failed' });
 
         const catId = item.websiteRow?.category
           ? (taxonomyTree.find((c) => c.label === item.websiteRow.category)?.id || batchDefaultCategoryId)
@@ -361,12 +360,13 @@ export default function ProductLoaderPanel({
             subcategoryOne: sub1Label,
             subcategoryTwo: item.websiteRow?.subcategory_two || null,
             description: item.websiteRow?.original_description || item.sqlRow?.title || '',
+            stockQty: item.sqlRow?.onhand ?? item.websiteRow?.stock_qty,
+            availableStock: item.sqlRow?.available ?? item.websiteRow?.available_stock,
             categoryConfidence: item.websiteRow ? 1 : 0.5,
             publishMode: 'direct',
           }),
         });
-        const publishJson = await publishRes.json();
-        if (!publishRes.ok) throw new Error(publishJson.error || 'Publish failed');
+        const publishJson = await readApiJson(publishRes, { fallback: 'Publish failed' });
 
         ok += 1;
         setBatchItems((prev) => prev.map((row) => (
@@ -505,10 +505,10 @@ export default function ProductLoaderPanel({
     setLookingUp(true);
     try {
       const res = await fetch(`/api/product-loader-lookup?code=${encodeURIComponent(sku)}`);
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || 'Lookup failed');
+      const json = await readApiJson(res, { fallback: 'Lookup failed' });
       setLookupData(json);
       setMatchedBy(json.matchedBy || null);
+      if (json.resolvedCode) setCode(json.resolvedCode);
       if (json.websiteRow) {
         const ws = json.websiteRow;
         if (!edit.categoryId) {
@@ -547,10 +547,10 @@ export default function ProductLoaderPanel({
 
     try {
       const res = await fetch(`/api/product-loader-lookup?code=${encodeURIComponent(c)}`);
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || 'Lookup failed');
+      const json = await readApiJson(res, { fallback: 'Lookup failed' });
       setLookupData(json);
       setMatchedBy(json.matchedBy || null);
+      if (json.resolvedCode) setCode(json.resolvedCode);
 
       // Pre-fill from existing website row
       if (json.websiteRow) {
@@ -575,6 +575,10 @@ export default function ProductLoaderPanel({
           setImageUrl(json.existingImages[0]);
           setImageSource('existing');
         }
+      }
+      if (!json.websiteRow && json.sqlRow) {
+        setCategorySource('existing');
+        setImageSlot(1);
       }
       if (codeOverride) {
         singleProductRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -610,10 +614,15 @@ export default function ProductLoaderPanel({
       const res = await fetch('/api/upload-product-image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ filename: fileObj.name, contentType: fileObj.type, base64: fileBase64 }),
+        body: JSON.stringify({
+          filename: fileObj.name,
+          contentType: fileObj.type,
+          base64: fileBase64,
+          sku: code,
+          imageSlot,
+        }),
       });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || 'Upload failed');
+      const json = await readApiJson(res, { fallback: 'Upload failed' });
       setImageUrl(json.url);
       setImageSource('upload');
     } catch (err) {
@@ -633,17 +642,20 @@ export default function ProductLoaderPanel({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ filename: fileObj.name, contentType: fileObj.type, base64: fileBase64 }),
       });
-      const transformJson = await transformRes.json();
-      if (!transformRes.ok) throw new Error(transformJson.error || 'Transform failed');
+      const transformJson = await readApiJson(transformRes, { fallback: 'Transform failed' });
 
-      // Upload transformed result to get a permanent (non-staging) URL
       const uploadRes = await fetch('/api/upload-product-image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ filename: `${code}-bg-removed.jpg`, contentType: 'image/jpeg', base64: transformJson.base64 }),
+        body: JSON.stringify({
+          filename: `${code}-bg-removed.jpg`,
+          contentType: 'image/jpeg',
+          base64: transformJson.base64,
+          sku: code,
+          imageSlot,
+        }),
       });
-      const uploadJson = await uploadRes.json();
-      if (!uploadRes.ok) throw new Error(uploadJson.error || 'Upload failed');
+      const uploadJson = await readApiJson(uploadRes, { fallback: 'Upload failed' });
 
       setImageUrl(uploadJson.url);
       setImageSource('upload_transformed');
@@ -675,8 +687,7 @@ export default function ProductLoaderPanel({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ filename: `${code}.jpg`, contentType, base64: b64 }),
       });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || 'Analysis failed');
+      const json = await readApiJson(res, { fallback: 'Analysis failed' });
 
       const suggestedId = GEMINI_CATEGORY_MAP[json.category] || '';
       if (suggestedId) {
@@ -742,12 +753,13 @@ export default function ProductLoaderPanel({
           subcategoryThree: sub3Node?.label || sub3Id || null,
           subcategoryFour: sub4Node?.label || sub4Id || null,
           description: websiteRow?.original_description || sqlRow?.title || '',
+          stockQty: sqlRow?.onhand ?? websiteRow?.stock_qty,
+          availableStock: sqlRow?.available ?? websiteRow?.available_stock,
           categoryConfidence: categorySource === 'gemini' ? 0.85 : 1.0,
           publishMode: 'direct',
         }),
       });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || 'Publish failed');
+      const json = await readApiJson(res, { fallback: 'Publish failed' });
       setPublishResult(json);
       if (dormantRows.some((r) => r.sku === json.sku)) {
         await dormantApi({ action: 'remove', code: json.sku }).catch(() => {});

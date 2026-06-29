@@ -346,6 +346,7 @@ export default function BulkProductEditModal({
       childOneId: applyCategory.childOneId,
       childTwoId: applyCategory.childTwoId,
       childThreeId: applyCategory.childThreeId,
+      childFourId: applyCategory.childFourId,
     })));
     onShowToast?.(`Category applied to ${rows.length} products`, 'success');
   };

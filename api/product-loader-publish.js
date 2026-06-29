@@ -31,6 +31,9 @@ export default async function handler(req, res) {
     publishedBy,
     publishMode = 'direct',
     categoryConfidence,
+    stockQty,
+    availableStock,
+    barcode: bodyBarcode,
   } = req.body || {};
 
   const sku = String(code || '').trim().toUpperCase();
@@ -59,6 +62,7 @@ export default async function handler(req, res) {
   }
 
   const now = new Date().toISOString();
+  const erpBarcode = String(bodyBarcode || existing?.barcode || sku).trim();
 
   const patch = {
     title: String(title || sku).trim(),
@@ -71,6 +75,8 @@ export default async function handler(req, res) {
   };
 
   if (description) patch.original_description = String(description).trim();
+  if (stockQty != null && Number.isFinite(Number(stockQty))) patch.stock_qty = Number(stockQty);
+  if (availableStock != null && Number.isFinite(Number(availableStock))) patch.available_stock = Number(availableStock);
 
   let action;
   let writeError;
@@ -83,13 +89,15 @@ export default async function handler(req, res) {
     action = 'create';
     const insertRow = {
       sku,
-      barcode: sku,
+      barcode: erpBarcode,
       title: patch.title,
       price: patch.price,
       category: patch.category,
       subcategory_one: patch.subcategory_one,
       subcategory_two: patch.subcategory_two || null,
       original_description: patch.original_description || patch.title,
+      stock_qty: patch.stock_qty ?? 0,
+      available_stock: patch.available_stock ?? patch.stock_qty ?? 0,
       image_url_one: null,
       image_url_two: null,
       image_url_three: null,

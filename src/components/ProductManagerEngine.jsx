@@ -23,6 +23,7 @@ import CategorySidebar, { resolvePathLabels } from './CategorySidebar';
 import ReorderGrid from './ReorderGrid';
 import ApprovalPanel from './ApprovalPanel';
 import BulkProductEditModal from './BulkProductEditModal';
+import BulkMoveModal from './BulkMoveModal';
 import { useCatalogQuery, buildCatalogParams, fetchAllCatalogRows, CATALOG_STATUSES } from '../hooks/useCatalog';
 import { useCatalogMutations } from '../hooks/useCatalogMutations';
 import { useMediaQuery } from '../hooks/useMediaQuery';
@@ -31,6 +32,7 @@ import { queryKeys } from '../lib/queryKeys';
 import { getActiveImageBatch, subscribeImageBatch } from '../lib/imageBatchTracker';
 import { sortOrderCategoryKey, lookupSortOrder, applySkuOrder, sortOrderLookupKeys } from '../lib/taxonomy';
 import { exportProductsCatalogXlsx, exportAllProductsCatalogXlsx, exportSelectedProductsXlsx } from '../lib/exportLiveProducts';
+import { bulkMoveProducts, invalidateAdminCache } from '../lib/products';
 
 const STATUS_META = {
   live: { label: 'Live', icon: PackagePlus },
@@ -40,10 +42,10 @@ const STATUS_META = {
 };
 
 const ROW_COLUMNS = {
-  live: '32px 72px 2fr 140px 120px',
-  archived: '32px 72px 2fr 140px 120px',
-  approval: '32px 72px 2fr 120px',
-  recycle: '32px 72px 2fr 120px',
+  live: '32px 96px 2fr 140px 140px',
+  archived: '32px 96px 2fr 140px 140px',
+  approval: '32px 96px 2fr 140px',
+  recycle: '32px 96px 2fr 140px',
 };
 
 const STOCK_STATUSES = new Set(['live', 'archived']);
@@ -251,6 +253,8 @@ export default function ProductManagerEngine({
   const [exportingXlsx, setExportingXlsx] = useState(false);
   const [exportingSelected, setExportingSelected] = useState(false);
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
+  const [moveModalOpen, setMoveModalOpen] = useState(false);
+  const [moveSaving, setMoveSaving] = useState(false);
   const [selectAllView, setSelectAllView] = useState(false);
   const [selectingAll, setSelectingAll] = useState(false);
   const [bulkActionPending, setBulkActionPending] = useState(false);
@@ -260,6 +264,8 @@ export default function ProductManagerEngine({
   const lastSelectIdxRef = useRef(null);
   const rowsRef = useRef([]);
   const panelTopRef = useRef(null);
+  const reorderSaveTimerRef = useRef(null);
+  const pendingReorderSaveRef = useRef(null);
   const isMobile = useMediaQuery('(max-width: 900px)');
 
   const mutations = useCatalogMutations();
@@ -395,17 +401,64 @@ export default function ProductManagerEngine({
           legacyKeys: sortOrderLookupKeys(categoryPath, tree).filter((k) => k !== categoryKey),
         }),
       });
-      const json = await res.json();
+      const json = await res.json().catch(() => ({}));
       if (res.status === 409) {
         onShowToast?.(json.error || 'Reorder conflict — reload', 'error');
         void loadSortOrder();
         return;
       }
-      if (!res.ok) throw new Error(json.error);
+      if (!res.ok) throw new Error(json.error || 'Failed to save sort order');
       setSortOrderMeta({ updatedAt: json.updatedAt });
+      setReorderDirty(false);
       onShowToast?.('Sort order saved — live site updates within ~30s', 'success');
     } catch (err) {
-      onShowToast?.(err.message, 'error');
+      onShowToast?.(err.message || 'Failed to save sort order', 'error');
+      setReorderDirty(true);
+    }
+  };
+
+  const scheduleReorderSave = useCallback((orderedProducts) => {
+    pendingReorderSaveRef.current = orderedProducts;
+    if (reorderSaveTimerRef.current) clearTimeout(reorderSaveTimerRef.current);
+    reorderSaveTimerRef.current = setTimeout(() => {
+      const pending = pendingReorderSaveRef.current;
+      pendingReorderSaveRef.current = null;
+      if (pending) void persistOrder(pending);
+    }, 450);
+  }, [categoryKey, categoryPath, tree, onShowToast]);
+
+  useEffect(() => () => {
+    if (reorderSaveTimerRef.current) clearTimeout(reorderSaveTimerRef.current);
+  }, []);
+
+  const confirmBulkMove = async ({ categoryPathIds, categoryId, subcategoryId, destinationLabel }) => {
+    const skus = [...selected];
+    if (!skus.length || categoryPathIds.length < 2) {
+      onShowToast?.('Choose a main category and at least one subcategory', 'error');
+      return;
+    }
+    if (!window.confirm(`Move ${skus.length} product(s) to:\n${destinationLabel}?`)) return;
+    setMoveSaving(true);
+    try {
+      await bulkMoveProducts({ skus, categoryId, subcategoryId, categoryPathIds });
+      setMoveModalOpen(false);
+      clearSelection();
+      setCategoryPath(categoryPathIds);
+      invalidateAdminCache();
+      queryClient.invalidateQueries({ queryKey: ['catalog'] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.dashboardStats() });
+      onRefreshStats?.();
+      onShowToast?.(`Moved ${skus.length} product(s) to ${destinationLabel}`, 'success');
+    } catch (err) {
+      if (err.partial) {
+        setMoveModalOpen(false);
+        clearSelection();
+        invalidateAdminCache();
+        queryClient.invalidateQueries({ queryKey: ['catalog'] });
+      }
+      onShowToast?.(err.message || 'Move failed', err.partial ? 'warning' : 'error');
+    } finally {
+      setMoveSaving(false);
     }
   };
 
@@ -924,6 +977,15 @@ export default function ProductManagerEngine({
                       ? <><Loader2 size={14} className="spin" /> Exporting…</>
                       : <><FileSpreadsheet size={14} /> Export selected</>}
                   </button>
+                  {(status === 'live' || (status === 'archived' && !archiveNegativeLive)) && selected.size > 0 && (
+                    <button
+                      type="button"
+                      className="adm-btn-ghost adm-btn--sm"
+                      onClick={() => setMoveModalOpen(true)}
+                    >
+                      Move
+                    </button>
+                  )}
                   {(status === 'live' || status === 'archived') && (
                     <button
                       type="button"
@@ -1020,7 +1082,7 @@ export default function ProductManagerEngine({
                 onEditProduct={onEditProduct}
                 onEditSubcategory={onEditCategory}
                 onDeleteSubcategory={onDeleteSubcategory}
-                onOrderCommitted={(next) => void persistOrder(next)}
+                onOrderCommitted={(next) => scheduleReorderSave(next)}
               />
               </>
             ) : (
@@ -1325,6 +1387,20 @@ export default function ProductManagerEngine({
           onRefreshTaxonomy={onRefreshTaxonomy}
         />
       )}
+
+      <BulkMoveModal
+        open={moveModalOpen}
+        count={selected.size}
+        taxonomyTree={tree}
+        initialCategoryId={categoryPath[0] || tree[0]?.id || ''}
+        saving={moveSaving}
+        onClose={() => setMoveModalOpen(false)}
+        onConfirm={(payload) => void confirmBulkMove(payload)}
+        onAddSubcategory={(parentId) => {
+          setMoveModalOpen(false);
+          onAddSubcategory?.(parentId);
+        }}
+      />
     </div>
   );
 }
