@@ -9,34 +9,12 @@ import {
   paginateRows,
   resolveCategoryFilters,
   applyCategoryFiltersToQuery,
-  isZeroOrNegativeStock,
+  isExactlyZeroStock,
 } from './_catalog-adapt.js';
 
 const VALID_STATUS = new Set(['live', 'archived', 'new-items', 'approval', 'recycle']);
 const EXCLUDE_ARCHIVED = ['new-products', 'recycle-bin'];
 const PAGE_CHUNK = 1000;
-
-async function fetchAllLiveRows(sb, { search, categoryPath, tree, sort }) {
-  const rows = [];
-  let from = 0;
-  while (true) {
-    let q = sb.from('website_stock').select('*');
-    const term = safeSearchTerm(search);
-    if (term) {
-      q = q.or(`title.ilike.%${term}%,sku.ilike.%${term}%,barcode.ilike.%${term}%`);
-    }
-    q = applyCategoryFiltersToQuery(q, resolveCategoryFilters(tree, categoryPath));
-    if (sort === 'updated') q = q.order('updated_at', { ascending: false });
-    else q = q.order('title', { ascending: true });
-    q = q.range(from, from + PAGE_CHUNK - 1);
-    const { data, error } = await q;
-    if (error) throw error;
-    rows.push(...(data || []));
-    if ((data || []).length < PAGE_CHUNK) break;
-    from += PAGE_CHUNK;
-  }
-  return rows;
-}
 
 async function fetchAllArchivedRows(sb, { archivedBy, excludeBy, sort }) {
   const rows = [];
@@ -194,20 +172,13 @@ export default async function handler(req, res) {
         search, categoryPath, tree, page, pageSize, sort, archivedBy: 'recycle-bin',
       });
     } else if (status === 'archived') {
-      const stockFilter = String(req.query.stockFilter || 'zero').trim();
-      if (stockFilter === 'zero') {
-        // Live website_stock rows with ERP SOH <= 0 (archived_products is often empty)
-        let rows = await fetchAllLiveRows(sb, { search, categoryPath, tree, sort });
-        rows = await enrichRowsWithProductStock(sb, rows);
-        rows = rows.filter(isZeroOrNegativeStock);
-        const pageSlice = paginateRows(rows, page, pageSize);
-        result = { ...pageSlice, archived: false, archiveView: 'oos-live' };
-        stockAlreadyEnriched = true;
-      } else {
-        result = await queryArchivedPaginated(sb, {
-          search, categoryPath, tree, page, pageSize, sort, excludeBy: EXCLUDE_ARCHIVED,
-        });
-      }
+      // Archived catalogue only — never show live OOS or zero-stock rows here.
+      let rows = await fetchAllArchivedRows(sb, { search, categoryPath, tree, sort, excludeBy: EXCLUDE_ARCHIVED });
+      rows = await enrichRowsWithProductStock(sb, rows);
+      rows = rows.filter((r) => !isExactlyZeroStock(r));
+      const pageSlice = paginateRows(rows, page, pageSize);
+      result = { ...pageSlice, archived: true, archiveView: 'archived' };
+      stockAlreadyEnriched = true;
     } else if (status === 'new-items') {
       const liveSkus = await fetchLiveSkus(sb);
       const allRows = await fetchAllArchivedRows(sb, { archivedBy: 'new-products', sort });

@@ -232,7 +232,6 @@ export default function ProductManagerEngine({
   initialStatus = 'live',
 }) {
   const [status, setStatus] = useState(initialStatus);
-  const [archiveStockView, setArchiveStockView] = useState('zero');
   const [reorderMode, setReorderMode] = useState(false);
 
   useEffect(() => {
@@ -297,7 +296,7 @@ export default function ProductManagerEngine({
     selectedRowsRef.current = new Map();
     lastSelectIdxRef.current = null;
     setSelectAllView(false);
-  }, [status, debouncedSearch, categoryPath.join('/'), archiveStockView]);
+  }, [status, debouncedSearch, categoryPath.join('/')]);
 
   const handlePageChange = useCallback((nextPage) => {
     setPage(nextPage);
@@ -311,8 +310,7 @@ export default function ProductManagerEngine({
     pageSize: reorderMode && status === 'live' ? 500 : pageSize,
     search: debouncedSearch,
     categoryPath,
-    stockFilter: status === 'archived' ? archiveStockView : undefined,
-  }), [status, page, pageSize, debouncedSearch, categoryPath, reorderMode, archiveStockView]);
+  }), [status, page, pageSize, debouncedSearch, categoryPath, reorderMode]);
 
   const { data, isLoading, isFetching, isPlaceholderData } = useCatalogQuery(catalogParams, {
     enabled: status !== 'approval',
@@ -321,7 +319,6 @@ export default function ProductManagerEngine({
   const rows = rowsStale ? [] : (data?.rows || []);
   rowsRef.current = rows;
   const total = data?.total || 0;
-  const archiveOosLive = status === 'archived' && archiveStockView === 'zero';
   const tree = taxonomyTree.length ? taxonomyTree : (data?.tree || []);
 
   const categoryKey = categoryPath.length
@@ -506,7 +503,6 @@ export default function ProductManagerEngine({
         status,
         search: debouncedSearch,
         categoryPath,
-        stockFilter: status === 'archived' ? archiveStockView : undefined,
       });
       selectedRowsRef.current = new Map(allRows.map((r) => [r.id, r]));
       setSelected(new Set(allRows.map((r) => r.id)));
@@ -822,34 +818,9 @@ export default function ProductManagerEngine({
             )}
             <div className="adm-toolbar pm-toolbar">
               {status === 'archived' && (
-                <>
-                  <p className="adm-section-note" style={{ margin: '0 0 8px', width: '100%' }}>
-                    {archiveStockView === 'zero'
-                      ? 'Live products with 0 or negative ERP stock. Select all, then Archive all to hide them from the trade website.'
-                      : 'Products in the archive table. Click Make live to restore to the website catalogue.'}
-                  </p>
-                  <div className="pm-archive-stock-toggle" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', width: '100%', marginBottom: 8 }}>
-                    <button
-                      type="button"
-                      className={`adm-btn-ghost adm-btn--sm${archiveStockView === 'zero' ? ' adm-tab--active' : ''}`}
-                      onClick={() => setArchiveStockView('zero')}
-                    >
-                      0 / negative stock
-                    </button>
-                    <button
-                      type="button"
-                      className={`adm-btn-ghost adm-btn--sm${archiveStockView === 'all' ? ' adm-tab--active' : ''}`}
-                      onClick={() => setArchiveStockView('all')}
-                    >
-                      Show all
-                    </button>
-                    {!isLoading && (
-                      <span className="adm-pill" style={{ marginLeft: 'auto', fontSize: 12 }}>
-                        {total} product{total === 1 ? '' : 's'}
-                      </span>
-                    )}
-                  </div>
-                </>
+                <p className="adm-section-note" style={{ margin: '0 0 8px', width: '100%' }}>
+                  Archived products hidden from the trade website. Zero-stock items are not shown here. Click Make live to restore to the catalogue.
+                </p>
               )}
               <label className="adm-search">
                 <Search size={15} />
@@ -951,20 +922,7 @@ export default function ProductManagerEngine({
                       <button type="button" className="adm-btn-red adm-btn--sm" onClick={() => runBulk({ mutateAsync: (sku) => mutations.softDelete.mutateAsync({ sku, fromArchive: false }) })}>To recycle</button>
                     </>
                   )}
-                  {status === 'archived' && archiveOosLive && (
-                    <>
-                      <button
-                        type="button"
-                        className="adm-btn-ghost adm-btn--sm"
-                        disabled={bulkActionPending}
-                        onClick={() => void bulkArchiveSelected()}
-                      >
-                        {bulkActionPending ? 'Archiving…' : 'Archive all'}
-                      </button>
-                      <button type="button" className="adm-btn-red adm-btn--sm" onClick={() => runBulk({ mutateAsync: (sku) => mutations.softDelete.mutateAsync({ sku, fromArchive: false }) })}>To recycle</button>
-                    </>
-                  )}
-                  {status === 'archived' && !archiveOosLive && (
+                  {status === 'archived' && (
                     <>
                       <button
                         type="button"
@@ -1032,7 +990,7 @@ export default function ProductManagerEngine({
                         key={item.id}
                         item={item}
                         index={index}
-                        status={archiveOosLive ? 'live' : status}
+                        status={status}
                         selected={selected}
                         showStockColumn={showStockColumn}
                         onCheckboxClick={onProductCheckboxClick}
@@ -1046,11 +1004,7 @@ export default function ProductManagerEngine({
                       />
                     ))}
                     {!rows.length && !isLoading && (
-                      <p className="adm-empty">
-                        {status === 'archived' && archiveStockView === 'zero'
-                          ? 'No live products with 0 or negative stock.'
-                          : 'No products in this view.'}
-                      </p>
+                      <p className="adm-empty">No products in this view.</p>
                     )}
                   </div>
                 ) : (
@@ -1171,13 +1125,7 @@ export default function ProductManagerEngine({
                             <button type="button" className="adm-btn-red adm-btn--sm" onClick={() => recycleSku(item.sku, false)}>To recycle</button>
                           </>
                         )}
-                        {status === 'archived' && archiveOosLive && (
-                          <>
-                            <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => mutations.archive.mutate(item.sku, { onSuccess: () => onRefreshStats?.() })}>Archive</button>
-                            <button type="button" className="adm-btn-red adm-btn--sm" onClick={() => recycleSku(item.sku, false)}>To recycle</button>
-                          </>
-                        )}
-                        {status === 'archived' && !archiveOosLive && (
+                        {status === 'archived' && (
                           <>
                             <button type="button" className="adm-btn-red adm-btn--sm" onClick={() => makeLive(item)}>
                               <ArchiveRestore size={14} /> Make live
@@ -1218,11 +1166,7 @@ export default function ProductManagerEngine({
                     </div>
                   ))}
                   {!rows.length && !isLoading && (
-                    <p className="adm-empty">
-                      {status === 'archived' && archiveStockView === 'zero'
-                        ? 'No archived products with 0 or negative stock.'
-                        : 'No products in this view.'}
-                    </p>
+                    <p className="adm-empty">No products in this view.</p>
                   )}
                 </div>
                 </>

@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 /**
- * Permanently delete archived catalogue rows that cannot sync to public.products.
+ * Permanently delete archived catalogue rows that cannot sync to public.products,
+ * and/or all zero-stock archived rows (nothing with 0 SOH left in Archive).
  *
  * Usage:
  *   node scripts/purge-unsynced-archived.mjs
  *   node scripts/purge-unsynced-archived.mjs --apply
+ *   node scripts/purge-unsynced-archived.mjs --apply --zero-only
  */
 
 import { createClient } from '@supabase/supabase-js';
@@ -12,6 +14,8 @@ import { findProductBySku, fetchProductLookupMap } from '../api/_sku-match.js';
 import { extractErpCodeFromDescription, resolveErpSkuFromDescription } from './fix-barcode-from-description.mjs';
 
 const APPLY = process.argv.includes('--apply');
+const ZERO_ONLY = process.argv.includes('--zero-only');
+const KEEP_ARCHIVED_BY = new Set(['new-products', 'recycle-bin']);
 const BATCH = 100;
 const PARALLEL = 40;
 
@@ -54,6 +58,11 @@ async function runParallel(items, fn) {
   }
 }
 
+function effectiveStock(row, erp) {
+  const n = Number(erp?.available_stock ?? erp?.stock_qty ?? row.available_stock ?? row.stock_qty ?? 0);
+  return Number.isFinite(n) ? n : 0;
+}
+
 async function permanentlyDelete(sku) {
   await sb.from('website_stock').delete().eq('sku', sku);
   const { error: archErr } = await sb.from('archived_products').delete().eq('sku', sku);
@@ -66,9 +75,9 @@ async function main() {
 
   const archived = await fetchAll(
     'archived_products',
-    'sku, barcode, title, original_description, archived_by',
+    'sku, barcode, title, original_description, archived_by, stock_qty, available_stock',
   );
-  console.log(`Archived rows: ${archived.length}`);
+  console.log(`Archived rows: ${archived.length}${ZERO_ONLY ? ' (zero-only purge)' : ''}`);
 
   const keys = [...new Set(archived.flatMap((r) => {
     const desc = extractErpCodeFromDescription(r.original_description || r.title);
@@ -82,20 +91,35 @@ async function main() {
 
   const toDelete = [];
   const toKeep = [];
+
   for (const row of archived) {
-    if (resolveErp(lookupMap, row)) toKeep.push(row.sku);
-    else toDelete.push(row.sku);
+    if (KEEP_ARCHIVED_BY.has(row.archived_by)) {
+      toKeep.push(row.sku);
+      continue;
+    }
+
+    const erp = resolveErp(lookupMap, row);
+    const stock = effectiveStock(row, erp);
+
+    if (ZERO_ONLY) {
+      if (stock === 0) toDelete.push({ sku: row.sku, reason: 'zero_stock' });
+      else toKeep.push(row.sku);
+      continue;
+    }
+
+    if (!erp) toDelete.push({ sku: row.sku, reason: 'no_erp' });
+    else toKeep.push(row.sku);
   }
 
-  console.log(`Can sync (keep in archive): ${toKeep.length}`);
-  console.log(`Cannot sync (permanent delete): ${toDelete.length}`);
+  console.log(`Can sync / non-zero (keep): ${toKeep.length}`);
+  console.log(`Permanent delete: ${toDelete.length}${ZERO_ONLY ? ' (zero stock only)' : ' (no ERP)'}`);
 
   if (APPLY && toDelete.length) {
     let deleted = 0;
     let errors = 0;
     for (let i = 0; i < toDelete.length; i += BATCH) {
       const chunk = toDelete.slice(i, i + BATCH);
-      await runParallel(chunk, async (sku) => {
+      await runParallel(chunk, async ({ sku }) => {
         try {
           await permanentlyDelete(sku);
           deleted++;

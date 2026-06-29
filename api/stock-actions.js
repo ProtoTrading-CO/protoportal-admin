@@ -4,6 +4,7 @@ import { getStockClient, enrichRowsWithProductStock } from './_stock-client.js';
 import { ensureProductFromCatalogueRow, restoreArchivedToLive } from './_ensure-product.js';
 import { collectImageUrlsFromRow, removeStagingObjects } from './_staging-storage.js';
 import { reorderStagedImageSlots } from './_stage-dormant.js';
+import { isExactlyZeroStock } from './_catalog-adapt.js';
 
 const PAGE_SIZE = 1000;
 
@@ -79,7 +80,10 @@ export default async function handler(req, res) {
       const withLiveFlag = filtered.map((r) => (
         archivedBy === 'new-products' ? { ...r, still_live: liveSkuSet.has(r.sku) } : r
       ));
-      const rows = await enrichRowsWithProductStockLocal(supabase, withLiveFlag);
+      let rows = await enrichRowsWithProductStockLocal(supabase, withLiveFlag);
+      if (Array.isArray(excludeArchivedBy) && excludeArchivedBy.length) {
+        rows = rows.filter((r) => !isExactlyZeroStock(r));
+      }
       return res.status(200).json({ rows, tree });
     }
 
