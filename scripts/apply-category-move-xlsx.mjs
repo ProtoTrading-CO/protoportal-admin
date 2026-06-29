@@ -199,6 +199,10 @@ function norm(v) {
 
 function normalizeSku(v) {
   if (v == null || v === '') return '';
+  if (v instanceof Date && !Number.isNaN(v.getTime())) {
+    // Excel sometimes parses dash SKUs like 12-2006 as dates.
+    return `${v.getUTCMonth() + 1}-${v.getUTCFullYear()}`;
+  }
   if (typeof v === 'number' && Number.isFinite(v)) return String(Math.trunc(v));
   return norm(v);
 }
