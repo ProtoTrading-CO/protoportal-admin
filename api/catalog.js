@@ -11,6 +11,7 @@ import {
   applyCategoryFiltersToQuery,
   isExactlyZeroStock,
   isNegativeStock,
+  isPublishableOnWebsite,
 } from './_catalog-adapt.js';
 import { isMotarroBrowsePath, isMotarroProduct } from './_mottaro-category.js';
 
@@ -220,7 +221,18 @@ export default async function handler(req, res) {
     let result;
     let stockAlreadyEnriched = false;
     if (status === 'live') {
-      result = await queryLivePaginated(sb, { search, categoryPath, tree, page, pageSize, sort });
+      let rows;
+      if (isMotarroBrowsePath(categoryPath)) {
+        rows = await fetchAllMotarroRows(sb, { search, categoryPath, tree, sort });
+      } else {
+        rows = await fetchAllLiveRows(sb, { search, categoryPath, tree, sort });
+      }
+      rows = await enrichRowsWithProductStock(sb, rows);
+      rows = rows.filter(isPublishableOnWebsite);
+      rows = applySearchFilter(rows, search);
+      const pageSlice = paginateRows(rows, page, pageSize);
+      result = { ...pageSlice, archived: false };
+      stockAlreadyEnriched = true;
     } else if (status === 'recycle') {
       result = await queryArchivedPaginated(sb, {
         search, categoryPath, tree, page, pageSize, sort, archivedBy: 'recycle-bin',
