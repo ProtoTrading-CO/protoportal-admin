@@ -17,13 +17,13 @@ export function isHalfRandPrice(price) {
   return Math.round((n % 1) * 100) === 50;
 }
 
-/** Format a website price for display — round to nearest rand except .50 endings stay as X.50. */
+/** Format a website price for display — always two decimals (.00 or .50). */
 export function formatWebsitePrice(price) {
   const n = catalogueDisplayPrice(price);
-  if (!n) return '0';
+  if (!n) return '0.00';
   if (isHalfRandPrice(n)) {
     const whole = Math.floor(n + 1e-9);
     return `${whole}.50`;
   }
-  return String(Math.round(n));
+  return `${Math.round(n)}.00`;
 }
