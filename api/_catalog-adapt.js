@@ -5,6 +5,7 @@ import {
   isMotarroBrowsePath,
   isMotarroProduct,
 } from './_mottaro-category.js';
+import { isExactlyZeroStock, isPublishableOnWebsite, isNegativeStock } from '../lib/catalog-stock.mjs';
 
 const SUB_FIELDS = ['subcategory_one', 'subcategory_two', 'subcategory_three', 'subcategory_four'];
 
@@ -160,12 +161,4 @@ export function isZeroOrNegativeStock(row) {
   return soh === null ? false : soh <= 0;
 }
 
-export function isExactlyZeroStock(row) {
-  const soh = readStockOnHand(row);
-  return soh === 0;
-}
-
-export function isNegativeStock(row) {
-  const soh = readStockOnHand(row);
-  return soh !== null && soh < 0;
-}
+export { isExactlyZeroStock, isPublishableOnWebsite, isNegativeStock };
