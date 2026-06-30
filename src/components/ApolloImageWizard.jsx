@@ -34,6 +34,7 @@ import {
   recipeSummary,
   runReprocessBatch,
 } from '../lib/reprocessQueue';
+import { uploadFolderSources } from '../lib/apolloFolderUpload';
 import { finishImageBatch, startImageBatch, updateImageBatch } from '../lib/imageBatchTracker';
 import {
   createImageGenBatchId,
@@ -159,6 +160,8 @@ export default function ApolloImageWizard({
   const [selectedProducts, setSelectedProducts] = useState([]);
   const [selectedProductsLoading, setSelectedProductsLoading] = useState(false);
   const [imageReorderSavingSku, setImageReorderSavingSku] = useState('');
+  const [folderItems, setFolderItems] = useState([]);
+  const [folderUploading, setFolderUploading] = useState(false);
 
   const abortRef = useRef(null);
   const batchIdRef = useRef(null);
@@ -503,10 +506,29 @@ export default function ApolloImageWizard({
 
       generatedProductsRef.current = products;
       const expanded = expandProductSlots(products, { defaultSlots: activeSlots });
+
+      let folderSourceBySku = {};
+      const selectedFolderItems = folderItems.filter(
+        (item) => item.file && selectedIds.has(item.sku),
+      );
+      if (selectedFolderItems.length) {
+        setFolderUploading(true);
+        onShowToast?.('Uploading folder images…', 'success');
+        try {
+          folderSourceBySku = await uploadFolderSources(selectedFolderItems);
+        } catch (uploadErr) {
+          onShowToast?.(uploadErr.message || 'Folder upload failed', 'error');
+          setStep(1);
+          return;
+        } finally {
+          setFolderUploading(false);
+        }
+      }
+
       const initial = expanded.flatMap((p) => p.slots.map((slot) => ({
         sku: p.sku,
         name: p.name,
-        thumbUrl: p.images?.[slot - 1] || p.image || null,
+        thumbUrl: folderSourceBySku[p.sku] || p.images?.[slot - 1] || p.image || null,
         slot,
         status: 'pending',
         message: 'Queued…',
@@ -532,6 +554,7 @@ export default function ApolloImageWizard({
       await runReprocessBatch(expanded, {
         slotPlans,
         batchId,
+        folderSourceBySku,
         signal: ac.signal,
         onItemUpdate: (index, patch) => {
           const item = initial[index];
@@ -744,6 +767,9 @@ export default function ApolloImageWizard({
           taxonomyTree={taxonomyTree}
           selectedIds={selectedIds}
           onSelectedIdsChange={setSelectedIds}
+          folderItems={folderItems}
+          onFolderItemsChange={setFolderItems}
+          onShowToast={onShowToast}
         />
       ) : null}
 
@@ -1086,8 +1112,9 @@ export default function ApolloImageWizard({
                   {budgetStatus.daily?.limitUsd ? ` · today ${((budgetStatus.daily.spentUsd || 0) + batchCostEstimate.totalUsd).toFixed(2)} / ${budgetStatus.daily.limitUsd} daily` : ''}
                 </p>
               )}
-              <button type="button" className="adm-btn-red" disabled={!canNext() || busy || budgetStatus?.blocked} onClick={() => void startGen()}>
-                <Sparkles size={14} /> Generate {totalJobs} image{totalJobs === 1 ? '' : 's'}
+              <button type="button" className="adm-btn-red" disabled={!canNext() || busy || folderUploading || budgetStatus?.blocked} onClick={() => void startGen()}>
+                {folderUploading ? <Loader2 size={14} className="spin" /> : <Sparkles size={14} />}
+                {folderUploading ? 'Uploading folder…' : `Generate ${totalJobs} image${totalJobs === 1 ? '' : 's'}`}
               </button>
             </div>
           )}

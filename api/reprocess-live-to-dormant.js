@@ -46,6 +46,7 @@ export default async function handler(req, res) {
     imageStyle,
     targetSlot = 1,
     sourceSlot,
+    sourceImageUrl,
     referenceImageUrl,
   } = req.body || {};
   const cleanSku = String(sku || '').trim();
@@ -88,8 +89,11 @@ export default async function handler(req, res) {
       return res.status(404).json({ error: `Live product "${cleanSku}" not found` });
     }
 
-    const srcSlot = sourceSlot ? Math.min(4, Math.max(1, Number(sourceSlot))) : firstSourceSlot(row);
-    const sourceUrl = readSlotUrl(row, srcSlot);
+    const overrideUrl = String(sourceImageUrl || '').trim();
+    const srcSlot = overrideUrl
+      ? null
+      : (sourceSlot ? Math.min(4, Math.max(1, Number(sourceSlot))) : firstSourceSlot(row));
+    const sourceUrl = overrideUrl || readSlotUrl(row, srcSlot);
     if (!sourceUrl) {
       return res.status(400).json({ error: 'Product has no source image to reprocess' });
     }

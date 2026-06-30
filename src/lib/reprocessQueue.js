@@ -23,6 +23,7 @@ export async function reprocessOneToDormant(sku, {
   imageStyle,
   targetSlot = 1,
   sourceSlot,
+  sourceImageUrl,
   referenceImageUrl,
   batchId,
   retries = 5,
@@ -43,6 +44,7 @@ export async function reprocessOneToDormant(sku, {
         imageStyle: imageStyle || undefined,
         targetSlot,
         sourceSlot,
+        sourceImageUrl: sourceImageUrl || undefined,
         referenceImageUrl: referenceImageUrl || undefined,
         batchId,
       }),
@@ -77,12 +79,13 @@ function styleMessage(imageStyle, slot) {
 
 /** @typedef {{ enabled?: boolean, style?: string, prompt?: string, referenceUrl?: string }} SlotPlan */
 
-function buildWorkItems(products, slotPlans = {}) {
+function buildWorkItems(products, slotPlans = {}, { folderSourceBySku = {} } = {}) {
   const enabledSlots = [1, 2, 3, 4].filter((s) => slotPlans[s]?.enabled);
   const work = [];
 
   for (const p of products) {
     if (!p?.sku) continue;
+    const folderUrl = String(folderSourceBySku[p.sku] || '').trim();
     const images = p.images || p.imageUrls || [
       p.imageUrl || p.image,
       p.imageTwo,
@@ -93,17 +96,19 @@ function buildWorkItems(products, slotPlans = {}) {
       const idx = slot - 1;
       return !!(images[idx] || (slot === 1 && (p.imageUrl || p.image)));
     };
-    const primarySource = hasImage(1) ? 1 : enabledSlots.find((s) => hasImage(s)) || 1;
+    const primarySource = folderUrl ? null : (hasImage(1) ? 1 : enabledSlots.find((s) => hasImage(s)) || 1);
+    const thumbFromFolder = folderUrl || null;
 
     for (const slot of enabledSlots) {
       const plan = slotPlans[slot] || {};
-      const sourceForSlot = hasImage(slot) ? slot : primarySource;
+      const sourceForSlot = folderUrl ? null : (hasImage(slot) ? slot : primarySource);
       work.push({
         sku: p.sku,
         title: p.title || p.name || p.sku,
-        thumbUrl: hasImage(slot) ? (images[slot - 1] || p.imageUrl || p.image) : (images[0] || p.imageUrl || p.image),
+        thumbUrl: thumbFromFolder || (hasImage(slot) ? (images[slot - 1] || p.imageUrl || p.image) : (images[0] || p.imageUrl || p.image)),
         slot,
         sourceSlot: sourceForSlot,
+        sourceImageUrl: folderUrl || undefined,
         style: plan.style || 'shadow',
         prompt: String(plan.prompt || '').trim(),
         referenceUrl: String(plan.referenceUrl || '').trim(),
@@ -133,10 +138,11 @@ async function runWithConcurrency(items, concurrency, worker, { signal } = {}) {
 export async function runReprocessBatch(products, {
   slotPlans,
   batchId,
+  folderSourceBySku,
   onItemUpdate,
   signal,
 } = {}) {
-  const queue = buildWorkItems(products, slotPlans);
+  const queue = buildWorkItems(products, slotPlans, { folderSourceBySku });
   const results = { done: 0, failed: 0, items: Array(queue.length).fill(null) };
 
   await runWithConcurrency(queue, BATCH_CONCURRENCY, async (item, i) => {
@@ -151,7 +157,8 @@ export async function runReprocessBatch(products, {
         prompt: item.prompt || undefined,
         imageStyle: item.style,
         targetSlot: item.slot,
-        sourceSlot: item.sourceSlot || 1,
+        sourceSlot: item.sourceImageUrl ? undefined : (item.sourceSlot || 1),
+        sourceImageUrl: item.sourceImageUrl || undefined,
         referenceImageUrl: item.referenceUrl || undefined,
         batchId,
         signal,
