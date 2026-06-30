@@ -51,6 +51,45 @@ const ROW_COLUMNS = {
 
 const STOCK_STATUSES = new Set(['live', 'archived']);
 
+function MultiCategoryBadge({ item, tree }) {
+  if (!item?.isMultiCategory) return null;
+  const primary = [item.categoryLabel, ...(item.subcategoryLabels || [])].filter(Boolean).join(' › ');
+  const mottaroLabels = item.alternateCategoryPath?.length
+    ? resolvePathLabels(tree, item.alternateCategoryPath).join(' › ')
+    : 'Mottaro';
+  return (
+    <span
+      title={`Primary: ${primary}\nAlso in: ${mottaroLabels}`}
+      style={{
+        fontSize: 10,
+        fontWeight: 700,
+        color: '#5b21b6',
+        background: '#ede9fe',
+        borderRadius: 4,
+        padding: '1px 6px',
+        whiteSpace: 'nowrap',
+      }}
+    >
+      Multi-category
+    </span>
+  );
+}
+
+function ProductCategoryLine({ item }) {
+  if (!item.categoryLabel && !item.isMultiCategory) return null;
+  const primary = [item.categoryLabel, ...(item.subcategoryLabels || [])].filter(Boolean).join(' › ');
+  return (
+    <div className="adm-muted" style={{ fontSize: 11 }}>
+      {primary}
+      {item.isMultiCategory && item.alternateCategoryPath?.length > 1 && (
+        <span style={{ display: 'block', color: '#6d28d9', marginTop: 2 }}>
+          + Mottaro › {item.alternateCategoryPath.slice(1).map((id) => id.replace(/^mottaro-/, '').replace(/-/g, ' ')).join(' › ')}
+        </span>
+      )}
+    </div>
+  );
+}
+
 function formatStockUnits(qty) {
   const n = qty === null || qty === undefined ? 0 : Number(qty);
   return `${Number.isFinite(n) ? n : 0} units`;
@@ -80,6 +119,7 @@ function PmMobileProductCard({
   onRefreshStats,
   recycleSku,
   onShowToast,
+  tree,
 }) {
   return (
     <article
@@ -108,13 +148,14 @@ function PmMobileProductCard({
           {item.isNew && (
             <span className="pm-mobile-card-badge" style={{ background: '#0f766e', color: '#fff' }}>New arrival</span>
           )}
+          <MultiCategoryBadge item={item} tree={tree} />
           <div className="adm-muted pm-mobile-card-meta">
             <span>BC: {item.barcode || item.code || '—'}</span>
             {item.sku && <span>WSK: {item.sku}</span>}
             {item.price > 0 && <span>R{formatWebsitePrice(item.price)}</span>}
           </div>
           {item.categoryLabel && (
-            <div className="adm-muted pm-mobile-card-cat">{item.categoryLabel}</div>
+            <ProductCategoryLine item={item} />
           )}
           {showStockColumn && (
             <div className="pm-mobile-card-stock">
@@ -1106,6 +1147,7 @@ export default function ProductManagerEngine({
                         onRefreshStats={onRefreshStats}
                         recycleSku={recycleSku}
                         onShowToast={onShowToast}
+                        tree={tree}
                       />
                     ))}
                     {!rows.length && !isLoading && (
@@ -1175,6 +1217,7 @@ export default function ProductManagerEngine({
                           {item.isNew && (
                             <span style={{ fontSize: 10, fontWeight: 700, color: '#fff', background: '#0f766e', borderRadius: 4, padding: '1px 5px' }}>New arrival</span>
                           )}
+                          <MultiCategoryBadge item={item} tree={tree} />
                         </div>
                         <div className="adm-muted" style={{ fontSize: 11 }}>
                           <span title="Barcode">BC: {item.barcode || item.code || '—'}</span>
@@ -1185,9 +1228,7 @@ export default function ProductManagerEngine({
                             </span>
                           )}
                         </div>
-                        {item.categoryLabel && (
-                          <div className="adm-muted" style={{ fontSize: 11 }}>{item.categoryLabel}</div>
-                        )}
+                        <ProductCategoryLine item={item} />
                         {status === 'approval' && item.stockError && (
                           <span className="adm-list-warn" style={{ fontSize: 11 }}>{item.stockError}</span>
                         )}

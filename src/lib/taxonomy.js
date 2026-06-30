@@ -1,4 +1,5 @@
 import categories from '../data/categories.json';
+import { inferMotarroPathFromRow, isMotarroBrowsePath, isMotarroProduct, motarroPathMatchesFilter } from '../../lib/mottaro-category.mjs';
 
 // IMPORTANT: this MUST stay identical to labelToSlug in scripts/lib/master.mjs.
 // The category generator fails on slug collisions, which guarantees this is a
@@ -57,7 +58,6 @@ export const LEGACY_NAV_ALIASES = {
   'events-parties': 'party-events-seasonals',
   'food-drinks': 'confectionery',
   'homeware-kitchen': 'homeware',
-  'motarro': 'stationery',
   'packaging': 'packaging-storage',
   'toys-games-kids': 'kids-toys-games',
 };
@@ -215,6 +215,22 @@ export function productMatchesNavPath(product, tree, navPath) {
   if (!Array.isArray(navPath) || !navPath.length) return true;
   if (navPath[0] === '__uncategorized__') {
     return !String(product.categoryLabel || '').trim() && !String(product.category || '').trim();
+  }
+
+  if (isMotarroBrowsePath(navPath)) {
+    if (!isMotarroProduct(product)) return false;
+    const row = {
+      title: product.title || product.name || '',
+      category: product.categoryLabel || '',
+      subcategory_one: product.subcategoryLabels?.[0] ?? null,
+      subcategory_two: product.subcategoryLabels?.[1] ?? null,
+      subcategory_three: product.subcategoryLabels?.[2] ?? null,
+      subcategory_four: product.subcategoryLabels?.[3] ?? null,
+    };
+    const mottaroPath = product.alternateCategoryPath?.length
+      ? product.alternateCategoryPath
+      : inferMotarroPathFromRow(row, tree);
+    return motarroPathMatchesFilter(mottaroPath, navPath);
   }
 
   const row = {

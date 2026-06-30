@@ -12,10 +12,35 @@ import {
   isExactlyZeroStock,
   isNegativeStock,
 } from './_catalog-adapt.js';
+import { isMotarroBrowsePath, isMotarroProduct } from './_mottaro-category.js';
 
 const VALID_STATUS = new Set(['live', 'archived', 'new-items', 'approval', 'recycle']);
 const EXCLUDE_ARCHIVED = ['new-products', 'recycle-bin'];
 const PAGE_CHUNK = 1000;
+
+async function fetchAllMotarroRows(sb, { search, categoryPath, tree, sort }) {
+  const rows = [];
+  let from = 0;
+  while (true) {
+    let q = sb.from('website_stock').select('*');
+    const term = safeSearchTerm(search);
+    if (term) {
+      q = q.or(`title.ilike.%${term}%,sku.ilike.%${term}%,barcode.ilike.%${term}%`);
+    } else {
+      q = q.or('title.ilike.%motarro%,title.ilike.%mottaro%,title.ilike.%monttaro%');
+    }
+    if (sort === 'updated') q = q.order('updated_at', { ascending: false });
+    else q = q.order('title', { ascending: true });
+    q = q.range(from, from + PAGE_CHUNK - 1);
+    const { data, error } = await q;
+    if (error) throw error;
+    const batch = (data || []).filter(isMotarroProduct);
+    rows.push(...batch);
+    if ((data || []).length < PAGE_CHUNK) break;
+    from += PAGE_CHUNK;
+  }
+  return filterByCategoryPath(rows, categoryPath, tree);
+}
 
 async function fetchAllLiveRows(sb, { search, categoryPath, tree, sort }) {
   const rows = [];
@@ -90,6 +115,12 @@ function applyCatalogSearchFilter(q, term) {
 }
 
 async function queryLivePaginated(sb, { search, categoryPath, tree, page, pageSize, sort }) {
+  if (isMotarroBrowsePath(categoryPath)) {
+    let rows = await fetchAllMotarroRows(sb, { search, categoryPath, tree, sort });
+    rows = applySearchFilter(rows, search);
+    const pageSlice = paginateRows(rows, page, pageSize);
+    return { ...pageSlice, archived: false };
+  }
   const from = (page - 1) * pageSize;
   const to = from + pageSize - 1;
   let q = sb.from('website_stock').select('*', { count: 'exact' });

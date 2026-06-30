@@ -2,6 +2,7 @@ import { adminProductSearch, fuzzyFilter } from './fuzzySearch';
 import { labelToSlug, resolveCategoryIdsFromTree, slugToLabel, slugToLabelFromTree, productMatchesNavPath, LEGACY_NAV_ALIASES } from './taxonomy';
 import { queryClient } from './queryClient';
 import { queryKeys } from './queryKeys';
+import { enrichMotarroCategoryFields } from '../../lib/mottaro-category.mjs';
 
 function categoryMainIdMatches(productMainId, targetMainId) {
   if (!targetMainId || !productMainId) return false;
@@ -113,7 +114,7 @@ function adapt(row, { archived = false, tree = null } = {}) {
   const subLabels = [row.subcategory_one, row.subcategory_two, row.subcategory_three, row.subcategory_four].filter(Boolean);
   const { categoryId, categoryPath } = resolveCategoryIdsFromTree(row, tree);
   const stock = stockFromRow(row);
-  return {
+  const base = {
     id: row.sku,
     code: row.barcode,
     barcode: row.barcode,
@@ -161,6 +162,7 @@ function adapt(row, { archived = false, tree = null } = {}) {
     yearlySales: 0,
     supplier: '',
   };
+  return enrichMotarroCategoryFields(base, row, tree, categoryPath);
 }
 
 async function loadLiveFromDB({ onProgress } = {}) {
