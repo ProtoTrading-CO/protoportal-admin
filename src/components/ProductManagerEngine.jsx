@@ -33,6 +33,7 @@ import { getActiveImageBatch, subscribeImageBatch } from '../lib/imageBatchTrack
 import { sortOrderCategoryKey, lookupSortOrder, applySkuOrder, sortOrderLookupKeys } from '../lib/taxonomy';
 import { exportProductsCatalogXlsx, exportAllProductsCatalogXlsx, exportSelectedProductsXlsx } from '../lib/exportLiveProducts';
 import { bulkMoveProducts, invalidateAdminCache } from '../lib/products';
+import { formatWebsitePrice } from '../lib/pricing';
 
 const STATUS_META = {
   live: { label: 'Live', icon: PackagePlus },
@@ -110,7 +111,7 @@ function PmMobileProductCard({
           <div className="adm-muted pm-mobile-card-meta">
             <span>BC: {item.barcode || item.code || '—'}</span>
             {item.sku && <span>WSK: {item.sku}</span>}
-            {item.price > 0 && <span>R{Math.round(Number(item.price))}</span>}
+            {item.price > 0 && <span>R{formatWebsitePrice(item.price)}</span>}
           </div>
           {item.categoryLabel && (
             <div className="adm-muted pm-mobile-card-cat">{item.categoryLabel}</div>
@@ -1180,7 +1181,7 @@ export default function ProductManagerEngine({
                           {item.sku && <span title="Website SKU" style={{ marginLeft: 8 }}>WSK: {item.sku}</span>}
                           {item.price > 0 && (
                             <span title="Price incl. VAT" style={{ marginLeft: 8, fontWeight: 700, color: '#374151' }}>
-                              R{Math.round(Number(item.price))}
+                              R{formatWebsitePrice(item.price)}
                             </span>
                           )}
                         </div>

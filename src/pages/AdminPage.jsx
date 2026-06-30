@@ -104,6 +104,7 @@ import OrderWorkflowBadge from '../components/OrderWorkflowBadge';
 import { fetchFulfillmentUsers, loadActiveUserId } from '../lib/fulfillmentUsers';
 import { isVictorSender, CUSTOMER_SEND_FORBIDDEN, PAYMENT_RECEIVED_FORBIDDEN } from '../lib/fulfillmentAuth';
 import { errorFromJson } from '../lib/apiError';
+import { formatWebsitePrice } from '../lib/pricing';
 import { fetchSpecials, saveSpecials } from '../lib/specials';
 import { fetchBanner, saveBanner, uploadBannerImage } from '../lib/banner';
 import { BANNER_LABEL, BANNER_ASPECT_CSS } from '../lib/bannerSpec';
@@ -2902,7 +2903,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                             <span title="Barcode (customer code)">BC: {product.barcode || product.code}</span>
                             {product.websiteSku && <span title="Website SKU" style={{ marginLeft: 8 }}>WSK: {product.websiteSku}</span>}
                             {product.parentSku && <span title="Parent SKU" style={{ marginLeft: 8 }}>PSK: {product.parentSku}</span>}
-                            {product.price > 0 && <span title="Price incl. VAT" style={{ marginLeft: 8, fontWeight: 700, color: '#374151' }}>R{Math.round(Number(product.price))}</span>}
+                            {product.price > 0 && <span title="Price incl. VAT" style={{ marginLeft: 8, fontWeight: 700, color: '#374151' }}>R{formatWebsitePrice(product.price)}</span>}
                           </div>
                         </div>
                         <div>
