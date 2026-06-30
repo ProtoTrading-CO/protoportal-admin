@@ -157,6 +157,7 @@ export default function ProductLoaderPanel({
 }) {
   const fileRef = useRef(null);
   const folderRef = useRef(null);
+  const singleImageRef = useRef(null);
 
   const [batchItems, setBatchItems] = useState([]);
   const [batchScanning, setBatchScanning] = useState(false);
@@ -166,6 +167,11 @@ export default function ProductLoaderPanel({
   const [batchDefaultSub1Id, setBatchDefaultSub1Id] = useState('');
   const [batchOverwrite, setBatchOverwrite] = useState(false);
   const [batchError, setBatchError] = useState('');
+  const [singleImageItem, setSingleImageItem] = useState(null);
+  const [singleImagePreview, setSingleImagePreview] = useState('');
+  const [singleImageScanning, setSingleImageScanning] = useState(false);
+  const [singleImageProcessing, setSingleImageProcessing] = useState(false);
+  const [singleImageError, setSingleImageError] = useState('');
   const [sqlLiveStatus, setSqlLiveStatus] = useState(null);
 
   const [dormantRows, setDormantRows] = useState([]);
@@ -255,6 +261,173 @@ export default function ProductLoaderPanel({
     setPublishError('');
   };
 
+  const lookupFilenames = async (filenames, files) => {
+    const res = await fetch('/api/product-loader-batch-lookup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filenames }),
+    });
+    const json = await readApiJson(res, { fallback: 'Lookup failed' });
+    const fileByName = new Map(files.map((f) => [f.name, f]));
+    return (json.items || []).map((item) => ({
+      ...item,
+      file: fileByName.get(item.filename) || null,
+      status: item.canPublish ? 'ready' : 'unmatched',
+      processError: '',
+    }));
+  };
+
+  const publishLoaderImageItem = async (item, { defaultCategoryId, defaultSub1Id, overwrite }) => {
+    if (!item?.file || !item.code) throw new Error('Missing image or product code');
+
+    const needsCategory = !item.websiteRow?.category;
+    if (needsCategory && !defaultCategoryId) {
+      throw new Error('Pick a default category for products not already on the website.');
+    }
+
+    const b64 = await fileToBase64(item.file);
+    const uploadRes = await fetch('/api/upload-product-image', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        filename: item.filename,
+        contentType: item.file.type || 'image/jpeg',
+        base64: b64,
+        sku: item.code,
+        imageSlot: item.imageSlot,
+      }),
+    });
+    const uploadJson = await readApiJson(uploadRes, { fallback: 'Upload failed' });
+
+    const catId = item.websiteRow?.category
+      ? (taxonomyTree.find((c) => c.label === item.websiteRow.category)?.id || defaultCategoryId)
+      : defaultCategoryId;
+    const sub1IdForItem = item.websiteRow?.subcategory_one
+      ? ((findNode(taxonomyTree, catId)?.children || []).find((c) => c.label === item.websiteRow.subcategory_one)?.id || defaultSub1Id)
+      : defaultSub1Id;
+
+    const catNode = findNode(taxonomyTree, catId);
+    const sub1Node = findNode(taxonomyTree, sub1IdForItem);
+    const categoryLabel = catNode?.label || item.websiteRow?.category || '';
+    const sub1Label = sub1Node?.label || item.websiteRow?.subcategory_one || categoryLabel;
+
+    if (!categoryLabel) throw new Error('No category available');
+
+    const publishRes = await fetch('/api/product-loader-publish', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        code: item.code,
+        title: item.title || item.sqlRow?.title || item.code,
+        price: item.price ?? item.sqlRow?.price ?? 0,
+        barcode: item.barcode || item.websiteRow?.barcode || item.code,
+        imageUrl: uploadJson.url,
+        imageSlot: item.imageSlot,
+        imageSource: 'upload',
+        overwriteImage: overwrite || item.warnings?.includes('image_exists'),
+        category: categoryLabel,
+        subcategoryOne: sub1Label,
+        subcategoryTwo: item.websiteRow?.subcategory_two || null,
+        description: item.websiteRow?.original_description || item.sqlRow?.title || '',
+        stockQty: item.sqlRow?.onhand ?? item.websiteRow?.stock_qty,
+        availableStock: item.sqlRow?.available ?? item.websiteRow?.available_stock,
+        categoryConfidence: item.websiteRow ? 1 : 0.5,
+        publishMode: 'direct',
+      }),
+    });
+    await readApiJson(publishRes, { fallback: 'Publish failed' });
+  };
+
+  const handleSingleImageSelect = async (fileList) => {
+    const file = [...(fileList || [])].filter(isImageFile)[0];
+    if (!file) {
+      setSingleImageError('Please choose an image file.');
+      return;
+    }
+
+    setSingleImageScanning(true);
+    setSingleImageError('');
+    setSingleImageItem(null);
+    if (singleImagePreview) {
+      try { URL.revokeObjectURL(singleImagePreview); } catch { /* ignore */ }
+      setSingleImagePreview('');
+    }
+
+    try {
+      const [item] = await lookupFilenames([file.name], [file]);
+      if (!item) throw new Error('Lookup failed');
+      setSingleImageItem(item);
+      setSingleImagePreview(URL.createObjectURL(file));
+      if (item.canPublish) {
+        onShowToast?.(`Matched ${item.code} — ${displayTitle(item.title, item.sqlRow?.title)}`, 'success');
+      } else {
+        onShowToast?.('No catalogue match for that filename', 'warning');
+      }
+    } catch (err) {
+      setSingleImageError(err.message || 'Image lookup failed');
+    } finally {
+      setSingleImageScanning(false);
+    }
+  };
+
+  const handleSingleImagePublish = async () => {
+    if (!singleImageItem || singleImageItem.status !== 'ready') return;
+    setSingleImageProcessing(true);
+    setSingleImageError('');
+    try {
+      await publishLoaderImageItem(singleImageItem, {
+        defaultCategoryId: batchDefaultCategoryId,
+        defaultSub1Id: batchDefaultSub1Id,
+        overwrite: batchOverwrite,
+      });
+      setSingleImageItem((prev) => (prev ? { ...prev, status: 'done', processError: '' } : prev));
+      onShowToast?.(`Published ${singleImageItem.code}`, 'success');
+    } catch (err) {
+      setSingleImageError(err.message || 'Publish failed');
+      setSingleImageItem((prev) => (prev ? { ...prev, status: 'error', processError: err.message } : prev));
+    } finally {
+      setSingleImageProcessing(false);
+    }
+  };
+
+  const handleSingleImageDormant = async () => {
+    if (!singleImageItem || singleImageItem.status !== 'ready' || !singleImageItem.code) return;
+    if (!batchDefaultCategoryId || !batchDefaultSub1Id) {
+      setSingleImageError('Pick a default category and subcategory for dormant queue.');
+      return;
+    }
+    const labels = categoryLabelsFromIds(taxonomyTree, batchDefaultCategoryId, batchDefaultSub1Id, '');
+    setSingleImageProcessing(true);
+    setSingleImageError('');
+    try {
+      await dormantApi({
+        action: 'save',
+        code: singleImageItem.code,
+        title: singleImageItem.title || singleImageItem.sqlRow?.title || singleImageItem.code,
+        price: singleImageItem.price ?? singleImageItem.sqlRow?.price ?? 0,
+        description: singleImageItem.websiteRow?.original_description || singleImageItem.sqlRow?.title || '',
+        category: singleImageItem.websiteRow?.category || labels.category,
+        subcategoryOne: singleImageItem.websiteRow?.subcategory_one || labels.subcategoryOne,
+        subcategoryTwo: singleImageItem.websiteRow?.subcategory_two || null,
+      });
+      await loadDormant();
+      onShowToast?.(`Added ${singleImageItem.code} to dormant queue`, 'success');
+    } catch (err) {
+      setSingleImageError(err.message);
+    } finally {
+      setSingleImageProcessing(false);
+    }
+  };
+
+  const clearSingleImage = () => {
+    if (singleImagePreview) {
+      try { URL.revokeObjectURL(singleImagePreview); } catch { /* ignore */ }
+    }
+    setSingleImagePreview('');
+    setSingleImageItem(null);
+    setSingleImageError('');
+  };
+
   const handleFolderSelect = async (fileList) => {
     const files = [...(fileList || [])].filter(isImageFile);
     if (!files.length) {
@@ -267,23 +440,10 @@ export default function ProductLoaderPanel({
     setBatchItems([]);
 
     try {
-      const res = await fetch('/api/product-loader-batch-lookup', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ filenames: files.map((f) => f.name) }),
-      });
-      const json = await readApiJson(res, { fallback: 'Folder scan failed' });
-
-      const fileByName = new Map(files.map((f) => [f.name, f]));
-      const merged = (json.items || []).map((item) => ({
-        ...item,
-        file: fileByName.get(item.filename) || null,
-        status: item.canPublish ? 'ready' : 'unmatched',
-        processError: '',
-      }));
-
+      const merged = await lookupFilenames(files.map((f) => f.name), files);
       setBatchItems(merged);
-      onShowToast?.(`Matched ${json.summary?.matched ?? 0} of ${json.summary?.total ?? merged.length} images`, 'success');
+      const matched = merged.filter((i) => i.canPublish).length;
+      onShowToast?.(`Matched ${matched} of ${merged.length} images`, 'success');
     } catch (err) {
       setBatchError(err.message || 'Folder scan failed');
     } finally {
@@ -316,58 +476,11 @@ export default function ProductLoaderPanel({
       )));
 
       try {
-        const b64 = await fileToBase64(item.file);
-        const uploadRes = await fetch('/api/upload-product-image', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            filename: item.filename,
-            contentType: item.file.type || 'image/jpeg',
-            base64: b64,
-            sku: item.code,
-            imageSlot: item.imageSlot,
-          }),
+        await publishLoaderImageItem(item, {
+          defaultCategoryId: batchDefaultCategoryId,
+          defaultSub1Id: batchDefaultSub1Id,
+          overwrite: batchOverwrite,
         });
-        const uploadJson = await readApiJson(uploadRes, { fallback: 'Upload failed' });
-
-        const catId = item.websiteRow?.category
-          ? (taxonomyTree.find((c) => c.label === item.websiteRow.category)?.id || batchDefaultCategoryId)
-          : batchDefaultCategoryId;
-        const sub1IdForItem = item.websiteRow?.subcategory_one
-          ? ((findNode(taxonomyTree, catId)?.children || []).find((c) => c.label === item.websiteRow.subcategory_one)?.id || batchDefaultSub1Id)
-          : batchDefaultSub1Id;
-
-        const catNode = findNode(taxonomyTree, catId);
-        const sub1Node = findNode(taxonomyTree, sub1IdForItem);
-        const categoryLabel = catNode?.label || item.websiteRow?.category || '';
-        const sub1Label = sub1Node?.label || item.websiteRow?.subcategory_one || categoryLabel;
-
-        if (!categoryLabel) throw new Error('No category available');
-
-        const publishRes = await fetch('/api/product-loader-publish', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            code: item.code,
-            title: item.title || item.sqlRow?.title || item.code,
-            price: item.price ?? item.sqlRow?.price ?? 0,
-            barcode: item.barcode || item.websiteRow?.barcode || item.code,
-            imageUrl: uploadJson.url,
-            imageSlot: item.imageSlot,
-            imageSource: 'upload',
-            overwriteImage: batchOverwrite || item.warnings?.includes('image_exists'),
-            category: categoryLabel,
-            subcategoryOne: sub1Label,
-            subcategoryTwo: item.websiteRow?.subcategory_two || null,
-            description: item.websiteRow?.original_description || item.sqlRow?.title || '',
-            stockQty: item.sqlRow?.onhand ?? item.websiteRow?.stock_qty,
-            availableStock: item.sqlRow?.available ?? item.websiteRow?.available_stock,
-            categoryConfidence: item.websiteRow ? 1 : 0.5,
-            publishMode: 'direct',
-          }),
-        });
-        const publishJson = await readApiJson(publishRes, { fallback: 'Publish failed' });
-
         ok += 1;
         setBatchItems((prev) => prev.map((row) => (
           row.filename === item.filename ? { ...row, status: 'done', processError: '' } : row
@@ -816,7 +929,7 @@ export default function ProductLoaderPanel({
       <div className="adm-section-head" style={{ marginBottom: 24 }}>
         <div>
           <h2 className="adm-section-title">Product Loader</h2>
-          <p className="adm-section-note">Publish products from Positill — one at a time or upload a whole image folder.</p>
+          <p className="adm-section-note">Publish products from Positill — upload one image, a whole folder, or look up a code manually.</p>
           {sqlLiveStatus?.bridgeConfigured && (
             <p style={{ fontSize: 12, marginTop: 6, fontWeight: 700, color: sqlLiveStatus.sqlConnectionTest ? '#15803d' : '#c2410c' }}>
               {sqlLiveStatus.sqlConnectionTest
@@ -826,6 +939,169 @@ export default function ProductLoaderPanel({
           )}
         </div>
       </div>
+
+      {/* Single image */}
+      <section style={{ marginBottom: 28, paddingBottom: 24, borderBottom: '2px solid #e5e7eb' }}>
+        <SectionHead title="Single image" />
+        <p style={{ fontSize: 13, color: '#64748b', margin: '0 0 12px', lineHeight: 1.5 }}>
+          Upload one image named with the product code — e.g. <code>8626100145.jpg</code> or <code>ME039-2-1.jpg</code>.
+          We look up title, price and stock automatically from the filename.
+        </p>
+
+        <div
+          role="button"
+          tabIndex={0}
+          style={{
+            border: '2px dashed #cbd5e1', borderRadius: 10, padding: '18px 16px', textAlign: 'center',
+            cursor: singleImageScanning || singleImageProcessing ? 'wait' : 'pointer', background: '#f8fafc', marginBottom: 12,
+          }}
+          onClick={() => !singleImageScanning && !singleImageProcessing && singleImageRef.current?.click()}
+          onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && singleImageRef.current?.click()}
+        >
+          <input
+            ref={singleImageRef}
+            type="file"
+            accept="image/*"
+            hidden
+            onChange={(e) => {
+              void handleSingleImageSelect(e.target.files);
+              e.target.value = '';
+            }}
+          />
+          {singleImageScanning ? (
+            <span style={{ fontSize: 13, color: '#64748b' }}><Loader2 size={16} className="spin" style={{ verticalAlign: 'middle', marginRight: 6 }} />Looking up product…</span>
+          ) : (
+            <span style={{ fontSize: 13, color: '#475569' }}><ImagePlus size={16} style={{ verticalAlign: 'middle', marginRight: 6 }} />Choose image</span>
+          )}
+        </div>
+
+        {singleImageError && <div style={{ color: '#dc2626', fontSize: 13, marginBottom: 10 }}>{singleImageError}</div>}
+
+        {singleImageItem && (
+          <div style={{ border: '1px solid #e2e8f0', borderRadius: 10, padding: 14, marginBottom: 12, background: '#fff' }}>
+            <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+              {singleImagePreview && (
+                <div style={{ width: 88, height: 88, borderRadius: 8, overflow: 'hidden', background: '#f8fafc', flexShrink: 0 }}>
+                  <img
+                    src={singleImagePreview}
+                    alt=""
+                    style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+                  />
+                </div>
+              )}
+              <div style={{ flex: 1, minWidth: 200 }}>
+                <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 4 }}>
+                  {singleImageItem.filename} · slot {singleImageItem.imageSlot}
+                </div>
+                <div style={{ fontSize: 15, fontWeight: 700, color: '#111827', marginBottom: 6 }}>
+                  {displayTitle(singleImageItem.title, singleImageItem.sqlRow?.title) || '—'}
+                </div>
+                <div style={{ fontSize: 13, color: '#475569', display: 'flex', gap: 14, flexWrap: 'wrap' }}>
+                  <span>Code: <strong>{singleImageItem.code || '—'}</strong></span>
+                  <span>Price: <strong>R{Number(singleImageItem.price ?? singleImageItem.sqlRow?.price ?? 0).toFixed(2)}</strong></span>
+                  <span>SOH: <strong>{singleImageItem.sqlRow?.available ?? singleImageItem.websiteRow?.available_stock ?? singleImageItem.websiteRow?.stock_qty ?? '—'}</strong></span>
+                </div>
+                {singleImageItem.status === 'unmatched' && (
+                  <p style={{ fontSize: 12, color: '#dc2626', margin: '8px 0 0' }}>Not found in catalogue — check the filename or use manual lookup below.</p>
+                )}
+                {singleImageItem.processError && (
+                  <p style={{ fontSize: 12, color: '#dc2626', margin: '8px 0 0' }}>{singleImageItem.processError}</p>
+                )}
+              </div>
+            </div>
+
+            {singleImageItem.status === 'ready' && (
+              <>
+                {(!singleImageItem.websiteRow?.category) && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 12 }}>
+                    <div>
+                      <label style={{ fontSize: 12, color: '#64748b', display: 'block', marginBottom: 4 }}>Category (required for new products)</label>
+                      <select
+                        className="adm-select adm-select--enhanced"
+                        style={{ width: '100%' }}
+                        value={batchDefaultCategoryId}
+                        onChange={(e) => { setBatchDefaultCategoryId(e.target.value); setBatchDefaultSub1Id(''); }}
+                      >
+                        <option value="">— Select category —</option>
+                        {taxonomyTree.map((cat) => (
+                          <option key={cat.id} value={cat.id}>{cat.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                    {batchSub1Options.length > 0 && (
+                      <div>
+                        <label style={{ fontSize: 12, color: '#64748b', display: 'block', marginBottom: 4 }}>Subcategory</label>
+                        <select
+                          className="adm-select adm-select--enhanced"
+                          style={{ width: '100%' }}
+                          value={batchDefaultSub1Id}
+                          onChange={(e) => setBatchDefaultSub1Id(e.target.value)}
+                        >
+                          <option value="">— Optional —</option>
+                          {batchSub1Options.map((opt) => (
+                            <option key={opt.id} value={opt.id}>{opt.label}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer', userSelect: 'none' }}>
+                      <input type="checkbox" checked={batchOverwrite} onChange={(e) => setBatchOverwrite(e.target.checked)} />
+                      Replace image if slot already filled
+                    </label>
+                  </div>
+                )}
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 14 }}>
+                <button
+                  type="button"
+                  className="adm-btn-red"
+                  onClick={() => void handleSingleImagePublish()}
+                  disabled={singleImageProcessing || singleImageScanning}
+                >
+                  {singleImageProcessing ? <Loader2 size={15} className="spin" /> : <Upload size={15} />}
+                  {singleImageProcessing ? 'Publishing…' : 'Upload & publish'}
+                </button>
+                <button
+                  type="button"
+                  className="adm-btn-ghost"
+                  onClick={() => void handleSingleImageDormant()}
+                  disabled={singleImageProcessing || singleImageScanning}
+                >
+                  <PackagePlus size={15} /> Add to dormant
+                </button>
+                <button
+                  type="button"
+                  className="adm-btn-ghost"
+                  onClick={() => {
+                    void handleLookup(singleImageItem.code);
+                    singleProductRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                  }}
+                  disabled={singleImageProcessing || !singleImageItem.code}
+                >
+                  Open manual flow
+                </button>
+                <button type="button" className="adm-btn-ghost" onClick={clearSingleImage} disabled={singleImageProcessing}>
+                  <X size={14} /> Clear
+                </button>
+              </div>
+              </>
+            )}
+
+            {singleImageItem.status !== 'ready' && (
+              <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
+                <button type="button" className="adm-btn-ghost" onClick={clearSingleImage}>
+                  <X size={14} /> Clear
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {!singleImageItem && (
+          <p style={{ fontSize: 12, color: '#94a3b8', margin: 0 }}>
+            New products need a default category below (folder section) before publishing.
+          </p>
+        )}
+      </section>
 
       {/* Folder batch */}
       <section style={{ marginBottom: 28, paddingBottom: 24, borderBottom: '2px solid #e5e7eb' }}>
