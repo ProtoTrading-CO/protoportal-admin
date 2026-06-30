@@ -161,6 +161,341 @@
     ]
   },
   {
+    "id": "mottaro",
+    "label": "Mottaro",
+    "children": [
+      {
+        "id": "mottaro-art-supplies",
+        "label": "Art Supplies",
+        "children": [
+          {
+            "id": "mottaro-paints",
+            "label": "Paints",
+            "children": [
+              {
+                "id": "mottaro-paints-acrylic",
+                "label": "Acrylic",
+                "children": []
+              },
+              {
+                "id": "mottaro-paints-oil",
+                "label": "Oil",
+                "children": []
+              },
+              {
+                "id": "mottaro-paints-tempera",
+                "label": "Tempera",
+                "children": []
+              }
+            ]
+          },
+          {
+            "id": "mottaro-brushes-applicators",
+            "label": "Brushes & Applicators",
+            "children": []
+          },
+          {
+            "id": "mottaro-canvas",
+            "label": "Canvas",
+            "children": [
+              {
+                "id": "mottaro-canvas-stretch",
+                "label": "Stretch",
+                "children": []
+              },
+              {
+                "id": "mottaro-canvas-panel",
+                "label": "Panel",
+                "children": []
+              },
+              {
+                "id": "mottaro-canvas-box",
+                "label": "Box",
+                "children": []
+              }
+            ]
+          },
+          {
+            "id": "mottaro-painting-tools-accessories",
+            "label": "Painting Tools & Accessories",
+            "children": []
+          },
+          {
+            "id": "mottaro-easels",
+            "label": "Easels",
+            "children": []
+          },
+          {
+            "id": "mottaro-sculpting-moulding",
+            "label": "Sculpting & Moulding",
+            "children": [
+              {
+                "id": "mottaro-clay",
+                "label": "Clay",
+                "children": []
+              },
+              {
+                "id": "mottaro-plasticine",
+                "label": "Plasticine",
+                "children": []
+              },
+              {
+                "id": "mottaro-playdough",
+                "label": "Playdough",
+                "children": []
+              }
+            ]
+          },
+          {
+            "id": "mottaro-sketch-draw",
+            "label": "Sketch & Draw",
+            "children": []
+          },
+          {
+            "id": "mottaro-art-aprons",
+            "label": "Aprons",
+            "children": []
+          },
+          {
+            "id": "mottaro-art-tools-equipment",
+            "label": "Tools and Equipment",
+            "children": []
+          },
+          {
+            "id": "mottaro-painting-palettes",
+            "label": "Painting Palettes",
+            "children": []
+          }
+        ]
+      },
+      {
+        "id": "mottaro-crafts",
+        "label": "Crafts",
+        "children": [
+          {
+            "id": "mottaro-crafts-fasteners",
+            "label": "Fasteners",
+            "children": []
+          },
+          {
+            "id": "mottaro-embroidery",
+            "label": "Embroidery",
+            "children": []
+          },
+          {
+            "id": "mottaro-craft-boards-supplies",
+            "label": "Craft Boards & Supplies",
+            "children": []
+          },
+          {
+            "id": "mottaro-masks",
+            "label": "Masks",
+            "children": []
+          },
+          {
+            "id": "mottaro-stickers",
+            "label": "Stickers",
+            "children": []
+          },
+          {
+            "id": "mottaro-decorative-items",
+            "label": "Decorative Items",
+            "children": []
+          },
+          {
+            "id": "mottaro-shredded-crepe",
+            "label": "Shredded and Crepe",
+            "children": []
+          },
+          {
+            "id": "mottaro-felt-bags",
+            "label": "Felt Bags",
+            "children": []
+          },
+          {
+            "id": "mottaro-wooden",
+            "label": "Wooden",
+            "children": []
+          },
+          {
+            "id": "mottaro-crafts-lights",
+            "label": "Lights",
+            "children": []
+          }
+        ]
+      },
+      {
+        "id": "mottaro-school-office",
+        "label": "School & Office",
+        "children": [
+          {
+            "id": "mottaro-writing-correction",
+            "label": "Writing & Correction",
+            "children": [
+              {
+                "id": "mottaro-pens-pencils",
+                "label": "Pens and Pencils",
+                "children": []
+              },
+              {
+                "id": "mottaro-colour-pencils-crayons",
+                "label": "Colour Pencils and Crayons",
+                "children": []
+              },
+              {
+                "id": "mottaro-markers-highlighters",
+                "label": "Markers and Highlighters",
+                "children": []
+              },
+              {
+                "id": "mottaro-correction-erasing",
+                "label": "Correction and Erasing",
+                "children": []
+              }
+            ]
+          },
+          {
+            "id": "mottaro-glues-adhesive-tape",
+            "label": "Glues and Adhesive Tape",
+            "children": [
+              {
+                "id": "mottaro-adhesives-holders",
+                "label": "Adhesives and Holders",
+                "children": []
+              },
+              {
+                "id": "mottaro-glues",
+                "label": "Glues",
+                "children": []
+              }
+            ]
+          },
+          {
+            "id": "mottaro-boards-markers",
+            "label": "Boards & Markers",
+            "children": []
+          },
+          {
+            "id": "mottaro-cutting-tools",
+            "label": "Cutting Tools",
+            "children": []
+          },
+          {
+            "id": "mottaro-stapling",
+            "label": "Stapling",
+            "children": []
+          },
+          {
+            "id": "mottaro-pencil-bags-cases",
+            "label": "Pencil Bags & Cases",
+            "children": []
+          },
+          {
+            "id": "mottaro-hole-punch",
+            "label": "Hole Punch",
+            "children": []
+          },
+          {
+            "id": "mottaro-stamps-ink",
+            "label": "Stamps & Ink",
+            "children": []
+          },
+          {
+            "id": "mottaro-sharpeners",
+            "label": "Sharpeners",
+            "children": []
+          },
+          {
+            "id": "mottaro-magnets",
+            "label": "Magnets",
+            "children": []
+          },
+          {
+            "id": "mottaro-measuring-viewing",
+            "label": "Measuring & Viewing",
+            "children": []
+          },
+          {
+            "id": "mottaro-calculators",
+            "label": "Calculators",
+            "children": []
+          },
+          {
+            "id": "mottaro-filing-organisation",
+            "label": "Filing & Organisation",
+            "children": []
+          },
+          {
+            "id": "mottaro-clipboards",
+            "label": "Clipboards",
+            "children": []
+          },
+          {
+            "id": "mottaro-books-notebooks",
+            "label": "Books & Notebooks",
+            "children": []
+          },
+          {
+            "id": "mottaro-labels-notes",
+            "label": "Labels & Notes",
+            "children": []
+          },
+          {
+            "id": "mottaro-colour-paper-boards",
+            "label": "Colour Paper and Boards",
+            "children": []
+          },
+          {
+            "id": "mottaro-book-covers-plastic",
+            "label": "Book Covers and Plastic",
+            "children": []
+          },
+          {
+            "id": "mottaro-desk-organisers",
+            "label": "Desk Organisers",
+            "children": []
+          },
+          {
+            "id": "mottaro-fasteners-clips",
+            "label": "Fasteners & Clips",
+            "children": []
+          },
+          {
+            "id": "mottaro-stationery-accessories",
+            "label": "Accessories",
+            "children": []
+          }
+        ]
+      },
+      {
+        "id": "mottaro-educational",
+        "label": "Educational",
+        "children": []
+      },
+      {
+        "id": "mottaro-other",
+        "label": "Other",
+        "children": [
+          {
+            "id": "mottaro-other-beads",
+            "label": "Beads & Jewellery",
+            "children": []
+          },
+          {
+            "id": "mottaro-other-fashion",
+            "label": "Fashion & Accessories",
+            "children": []
+          },
+          {
+            "id": "mottaro-other-general",
+            "label": "General",
+            "children": []
+          }
+        ]
+      }
+    ]
+  },
+  {
     "id": "stationery",
     "label": "Stationery",
     "children": [

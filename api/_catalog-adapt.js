@@ -1,4 +1,10 @@
 import { labelToSlug, resolveCategoryIds } from './_taxonomy-utils.js';
+import {
+  enrichMotarroCategoryFields,
+  filterRowsByMotarroPath,
+  isMotarroBrowsePath,
+  isMotarroProduct,
+} from './_mottaro-category.js';
 
 const SUB_FIELDS = ['subcategory_one', 'subcategory_two', 'subcategory_three', 'subcategory_four'];
 
@@ -43,6 +49,9 @@ export function applyCategoryFiltersToQuery(q, filters) {
 /** Filter rows whose category path starts with the given taxonomy id prefix. */
 export function filterByCategoryPath(rows, categoryPath, tree = null) {
   if (!Array.isArray(categoryPath) || !categoryPath.length) return rows;
+  if (isMotarroBrowsePath(categoryPath)) {
+    return filterRowsByMotarroPath(rows, categoryPath, tree);
+  }
   if (categoryPath[0] === '__uncategorized__') {
     return rows.filter((r) => !String(r.category || '').trim());
   }
@@ -77,7 +86,7 @@ export function adaptCatalogRow(row, tree, { archived = false } = {}) {
   const stockNum = soh !== null && soh !== undefined && soh !== ''
     ? Number(soh)
     : 0;
-  return {
+  const base = {
     id: row.sku,
     sku: row.sku,
     barcode: row.barcode,
@@ -119,6 +128,7 @@ export function adaptCatalogRow(row, tree, { archived = false } = {}) {
     stockReady: row._stockReady ?? null,
     stockError: row._stockError ?? null,
   };
+  return enrichMotarroCategoryFields(base, row, tree, categoryPath);
 }
 
 export function paginateRows(rows, page, pageSize) {

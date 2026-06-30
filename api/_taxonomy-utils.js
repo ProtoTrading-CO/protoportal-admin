@@ -1,6 +1,7 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { readSiteConfigJson, writeSiteConfigJson } from './_site-config.js';
+import { isMotarroProduct, inferMotarroPathFromRow } from './_mottaro-category.js';
 
 const TAXONOMY_FILE = 'taxonomy/categories.json';
 const BUNDLED_PATH = join(process.cwd(), 'src/data/categories.json');
@@ -315,10 +316,16 @@ export async function buildCategoryProductCounts(supabase, tree) {
       const { categoryPath } = resolveCategoryIds(row, tree);
       if (!categoryPath.length) {
         counts.__uncategorized__ += 1;
-        continue;
+      } else {
+        for (const id of categoryPath) {
+          counts[id] = (counts[id] || 0) + 1;
+        }
       }
-      for (const id of categoryPath) {
-        counts[id] = (counts[id] || 0) + 1;
+      if (isMotarroProduct(row)) {
+        const mottaroPath = inferMotarroPathFromRow(row, tree);
+        for (const id of mottaroPath) {
+          counts[id] = (counts[id] || 0) + 1;
+        }
       }
     }
     if (batch.length < PAGE) break;
