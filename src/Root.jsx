@@ -8,7 +8,6 @@ import {
   verifyAdminSession,
 } from './lib/auth';
 import { setImageGenOperator } from './lib/imageGenSession';
-import { resetIntercomVisitor, updateIntercomUser } from './lib/intercom';
 import QueryProvider from './components/QueryProvider';
 import AdminLoginPage from './components/AdminLoginPage';
 import AdminResetPasswordPage from './components/AdminResetPasswordPage';
@@ -133,22 +132,6 @@ function AdminGate() {
       window.removeEventListener('proto-admin-forbidden', onForbidden);
     };
   }, []);
-
-  useEffect(() => {
-    if (booting) return undefined;
-    const email = session?.user?.email || '';
-    if (session && isAllowedAdminEmail(email)) {
-      void updateIntercomUser({
-        id: session.user.id,
-        email,
-        name: session.user.user_metadata?.name || email.split('@')[0],
-        role: 'admin',
-      });
-    } else {
-      void resetIntercomVisitor();
-    }
-    return undefined;
-  }, [session, booting]);
 
   if (booting) return loadingFallback;
 
