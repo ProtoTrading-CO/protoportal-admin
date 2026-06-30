@@ -107,6 +107,7 @@ import { errorFromJson } from '../lib/apiError';
 import { formatWebsitePrice } from '../lib/pricing';
 import { fetchSpecials, saveSpecials } from '../lib/specials';
 import { fetchBanner, saveBanner, uploadBannerImage } from '../lib/banner';
+import { fetchCheckoutPromo, saveCheckoutPromo } from '../lib/checkoutPromo';
 import { BANNER_LABEL, BANNER_ASPECT_CSS } from '../lib/bannerSpec';
 import { fetchPopupSpecial, savePopupSpecial, uploadPopupImage } from '../lib/popupSpecial';
 import CrmContactsModal from '../components/CrmContactsModal';
@@ -599,6 +600,8 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   const [bannerUploading, setBannerUploading] = useState(false);
 
   const [popupForm, setPopupForm] = useState({ active: false, imageUrl: '', title: '' });
+  const [checkoutPromo, setCheckoutPromo] = useState({ active: true, code: 'PROTO75', percent: 7.5, label: '7.5% off your order' });
+  const [checkoutPromoSaving, setCheckoutPromoSaving] = useState(false);
   const [popupSaving, setPopupSaving] = useState(false);
   const [popupUploading, setPopupUploading] = useState(false);
 
@@ -643,7 +646,12 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   useEffect(() => { if (activeSection === 'crm') void loadCrmCustomers(1); }, [crmFilters.businessTypes.join('|'), crmFilters.joinedStatuses.join('|'), crmSearch]);
   useEffect(() => { if (activeSection === 'crm' && !crmTemplates.length && !crmTemplatesLoading) void loadCrmTemplates(); }, [activeSection, crmTemplates.length, crmTemplatesLoading]);
   useEffect(() => { if (activeSection === 'banner') void loadBannerEditor(); }, [activeSection]);
-  useEffect(() => { if (activeSection === 'specials') void loadPopupEditor(); }, [activeSection]);
+  useEffect(() => {
+    if (activeSection === 'specials') {
+      void loadPopupEditor();
+      void loadCheckoutPromoEditor();
+    }
+  }, [activeSection]);
 
   const processUploadFiles = async (files) => {
     const imageFiles = Array.from(files).filter((f) => f.type.startsWith('image/'));
@@ -977,7 +985,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
       const pending = pendingReorderSaveRef.current;
       pendingReorderSaveRef.current = null;
       if (pending) void commitReorderOrder(pending.orderedProducts, pending.meta);
-    }, 450);
+    }, 900);
   }, [commitReorderOrder]);
 
   useEffect(() => () => {
@@ -1924,6 +1932,30 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     finally { setPopupSaving(false); }
   };
 
+  const loadCheckoutPromoEditor = async () => {
+    try {
+      const data = await fetchCheckoutPromo({ force: true });
+      setCheckoutPromo({
+        active: !!data.active,
+        code: data.code || 'PROTO75',
+        percent: Number(data.percent) || 7.5,
+        label: data.label || '7.5% off your order',
+      });
+    } catch { /* ignore */ }
+  };
+
+  const saveCheckoutPromoEditor = async () => {
+    setCheckoutPromoSaving(true);
+    try {
+      await saveCheckoutPromo(checkoutPromo);
+      showToast('Checkout promo saved — applies on trade portal cart');
+    } catch (e) {
+      showToast(e.message || 'Failed to save checkout promo', 'error');
+    } finally {
+      setCheckoutPromoSaving(false);
+    }
+  };
+
   const handlePopupImage = async (file) => {
     if (!file) return;
     setPopupUploading(true);
@@ -2399,7 +2431,29 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     try {
       const selected = pricingProducts.filter((product) => selectedPricing.includes(product.id));
       await Promise.all(selected.map((product) => updateProduct(product.id, { price: Number(((product.price || 0) * (1 + delta / 100)).toFixed(2)) })));
+      const nextSpecials = [...specials];
+      const specialsIds = new Set(specials.map((s) => s.productId));
+      for (const product of selected) {
+        if (specialsIds.has(product.id)) continue;
+        if (nextSpecials.length >= 10) break;
+        nextSpecials.push({
+          productId: product.id,
+          productName: product.name,
+          productCode: product.code,
+          productImage: product.image || '',
+          deal: 'none',
+          discountPct: 10,
+          bogoX: 1,
+          bogoY: 1,
+        });
+        specialsIds.add(product.id);
+      }
+      if (nextSpecials.length !== specials.length) {
+        await saveSpecials(nextSpecials);
+        setSpecials(nextSpecials);
+      }
       await loadCategoryWorkingSet(pricingCategory, 'pricing');
+      showToast(`Updated ${selected.length} product price(s) — added to This Week's Specials`);
     } finally { setSaving(''); }
   };
 
@@ -2742,11 +2796,17 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                 onShowToast={showToast}
                 initialCode={productLoaderCode}
                 onInitialCodeConsumed={() => setProductLoaderCode('')}
-                onGoToApollo={(sku) => {
-                  setImageFixRequest({
-                    id: Date.now(),
-                    products: [{ id: sku, sku, name: sku, title: sku }],
-                  });
+                onGoToApollo={(productsOrSku) => {
+                  const products = Array.isArray(productsOrSku)
+                    ? productsOrSku
+                    : [{
+                      id: String(productsOrSku || ''),
+                      sku: String(productsOrSku || ''),
+                      name: String(productsOrSku || ''),
+                      title: String(productsOrSku || ''),
+                    }];
+                  if (!products[0]?.sku) return;
+                  setImageFixRequest({ id: Date.now(), products });
                   setActiveSection('apollo');
                 }}
               />
@@ -3121,6 +3181,36 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                     ))}
                   </div>
                 )}
+
+                <hr style={{ margin: '32px 0', border: 'none', borderTop: '1px solid #e5e7eb' }} />
+                <div className="adm-section-head">
+                  <div>
+                    <h3 className="adm-subtitle"><DollarSign size={16} /> PROTO75 — Cart checkout discount</h3>
+                    <p className="adm-section-note">Amount deducted at cart checkout on site.proto.co.za when customers enter the promo code.</p>
+                  </div>
+                  <button type="button" onClick={() => void loadCheckoutPromoEditor()} className="adm-btn-ghost"><RefreshCw size={15} /></button>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, maxWidth: 720, marginBottom: 8 }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 14, fontWeight: 600 }}>
+                    <input type="checkbox" checked={checkoutPromo.active} onChange={(e) => setCheckoutPromo((p) => ({ ...p, active: e.target.checked }))} style={{ accentColor: '#dc2626' }} />
+                    Active at checkout
+                  </label>
+                  <label>
+                    <span className="adm-muted" style={{ fontSize: 12, fontWeight: 700 }}>Promo code</span>
+                    <input className="adm-field-input" style={{ width: '100%' }} value={checkoutPromo.code} onChange={(e) => setCheckoutPromo((p) => ({ ...p, code: e.target.value.toUpperCase() }))} />
+                  </label>
+                  <label>
+                    <span className="adm-muted" style={{ fontSize: 12, fontWeight: 700 }}>Discount %</span>
+                    <input className="adm-field-input" type="number" min="0" max="50" step="0.5" style={{ width: '100%' }} value={checkoutPromo.percent} onChange={(e) => setCheckoutPromo((p) => ({ ...p, percent: Number(e.target.value) }))} />
+                  </label>
+                  <label>
+                    <span className="adm-muted" style={{ fontSize: 12, fontWeight: 700 }}>Cart label</span>
+                    <input className="adm-field-input" style={{ width: '100%' }} value={checkoutPromo.label} onChange={(e) => setCheckoutPromo((p) => ({ ...p, label: e.target.value }))} />
+                  </label>
+                </div>
+                <button type="button" className="adm-btn-red" disabled={checkoutPromoSaving} onClick={() => void saveCheckoutPromoEditor()} style={{ marginBottom: 24 }}>
+                  {checkoutPromoSaving ? 'Saving…' : 'Save PROTO75 checkout promo'}
+                </button>
 
                 <hr style={{ margin: '32px 0', border: 'none', borderTop: '1px solid #e5e7eb' }} />
                 <div className="adm-section-head">
@@ -3961,7 +4051,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                 </div>
                 <div className="adm-checkbox-list">
                   {(pricingSubcategory === 'all' ? pricingProducts : pricingProducts.filter((p) => p.categoryPath?.[1] === pricingSubcategory)).map((product) => (
-                    <label key={product.id} className="adm-checkbox-row">
+                    <label key={product.id} className={`adm-checkbox-row${selectedPricing.includes(product.id) ? ' adm-checkbox-row--pricing-selected' : ''}`}>
                       <input type="checkbox" checked={selectedPricing.includes(product.id)} onChange={(e) => setSelectedPricing((prev) => e.target.checked ? [...prev, product.id] : prev.filter((id) => id !== product.id))} />
                       <span style={{ fontWeight: 700 }}>{product.name}</span>
                       <small className="adm-muted">{product.code}{product.price > 0 ? ` · R${Number(product.price).toFixed(2)}` : ''}</small>
@@ -4231,11 +4321,21 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                     )}
                   </div>
                   <div>
-                    <span className="adm-muted" style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Live preview ({BANNER_ASPECT_CSS.replace(' / ', '∶')})</span>
-                    <div style={{ border: '1px solid #e5e7eb', borderRadius: 16, overflow: 'hidden', background: '#f8fafc', aspectRatio: BANNER_ASPECT_CSS, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      {bannerForm.imageUrl
-                        ? <img src={bannerForm.imageUrl} alt="Banner preview" style={{ width: '100%', height: '100%', display: 'block', objectFit: 'cover' }} />
-                        : <span className="adm-muted">Empty — upload a {BANNER_LABEL} image</span>}
+                    <span className="adm-muted" style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Trade portal preview</span>
+                    <div className="adm-banner-preview-wrap">
+                      <div className="adm-banner-preview-chrome">
+                        <span>site.proto.co.za — Products</span>
+                      </div>
+                      <div className="catalog-page adm-banner-preview-page">
+                        <div className="site-hero-banner adm-banner-preview-hero">
+                          {bannerForm.imageUrl
+                            ? <img src={bannerForm.imageUrl} alt="Banner preview" />
+                            : <div className="adm-banner-preview-empty">No banner — empty space on live site</div>}
+                        </div>
+                        <div className="adm-banner-preview-grid">
+                          <div /><div /><div /><div />
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>

@@ -171,5 +171,15 @@ export default async function handler(req, res) {
     }
   }
 
+  if (req.method === 'DELETE') {
+    if (!(await requireAdminKey(req, res))) return;
+    const supabase = getAdminClient();
+    const { error } = await supabase.from('search_analytics').delete().gte('created_at', '1970-01-01');
+    if (error && !/does not exist/i.test(error.message)) {
+      return res.status(400).json({ error: error.message });
+    }
+    return res.status(200).json({ ok: true });
+  }
+
   return res.status(405).json({ error: 'Method not allowed' });
 }

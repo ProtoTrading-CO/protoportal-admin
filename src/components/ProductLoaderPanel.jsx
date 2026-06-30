@@ -17,16 +17,15 @@ import { isImageFile } from '../lib/parseIntakeFilename.js';
 import { readApiJson } from '../lib/apiError.js';
 import ProductLoaderSingleImage from './productLoader/ProductLoaderSingleImage';
 import ProductLoaderFolder from './productLoader/ProductLoaderFolder';
-import ProductLoaderDormantQueue from './productLoader/ProductLoaderDormantQueue';
 import ProductLoaderPublishHistory from './productLoader/ProductLoaderPublishHistory';
 import ProductLoaderPublishSuccess from './productLoader/ProductLoaderPublishSuccess';
+import ProductLoaderImageReplace from './productLoader/ProductLoaderImageReplace';
 
 const LOADER_TABS = [
   { id: 'single', label: 'Single Image' },
   { id: 'folder', label: 'Image Folder' },
-  { id: 'advanced', label: 'Advanced Editor' },
-  { id: 'dormant', label: 'Dormant Queue' },
   { id: 'history', label: 'Publish History' },
+  { id: 'image-replace', label: 'Image Replace' },
 ];
 
 function displayTitle(...candidates) {
@@ -956,9 +955,13 @@ export default function ProductLoaderPanel({
   };
 
   const openAdvanced = (code) => {
-    setActiveTab('advanced');
-    void handleLookup(code);
-    singleProductRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    setActiveTab('single');
+    onShowToast?.(`Open Single Image tab and upload an image for ${code}`, 'success');
+  };
+
+  const handleSendToApollo = (products) => {
+    if (!products?.length) return;
+    onGoToApollo?.(products);
   };
 
   return (
@@ -987,7 +990,6 @@ export default function ProductLoaderPanel({
             onClick={() => setActiveTab(tab.id)}
           >
             {tab.label}
-            {tab.id === 'dormant' && dormantRows.length > 0 ? ` (${dormantRows.length})` : ''}
           </button>
         ))}
       </nav>
@@ -1002,9 +1004,8 @@ export default function ProductLoaderPanel({
           batchOverwrite={batchOverwrite}
           setBatchOverwrite={setBatchOverwrite}
           onShowToast={onShowToast}
-          onOpenAdvanced={openAdvanced}
           onPublished={(result) => setPublishSuccess(result)}
-          onAddDormant={addItemToDormant}
+          onSendToApollo={handleSendToApollo}
           mainSiteUrl={mainSiteUrl}
         />
       )}
@@ -1019,23 +1020,7 @@ export default function ProductLoaderPanel({
           batchOverwrite={batchOverwrite}
           setBatchOverwrite={setBatchOverwrite}
           onShowToast={onShowToast}
-          onAddDormantBatch={addBatchToDormant}
-        />
-      )}
-
-      {activeTab === 'dormant' && (
-        <ProductLoaderDormantQueue
-          taxonomyTree={taxonomyTree}
-          rows={dormantRows}
-          edits={dormantEdits}
-          setEdits={setDormantEdits}
-          loading={dormantLoading}
-          saving={dormantSaving}
-          onRefresh={() => void loadDormant()}
-          onSaveCategories={saveDormantCategories}
-          onRemove={removeDormantRow}
-          onOpen={(row) => sendDormantToImageGen(row)}
-          onPublish={(row) => sendDormantToImageGen(row)}
+          onSendToApollo={handleSendToApollo}
         />
       )}
 
@@ -1046,374 +1031,10 @@ export default function ProductLoaderPanel({
         />
       )}
 
-      {activeTab === 'advanced' && (
-      <div ref={singleProductRef}>
-      <SectionHead title="Advanced Product Editor" />
-      <p className="pl-section-note">Background removal, Gemini category suggestions, slot selection, overwrite confirmation, and manual product creation.</p>
-
-      {/* Code lookup */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-        <input
-          style={{ flex: 1, border: '1.5px solid #e2e8f0', borderRadius: 10, padding: '10px 14px', fontSize: 14, fontWeight: 600, outline: 'none', letterSpacing: '0.04em' }}
-          placeholder="Positill code (e.g. 8626100145, MM007-6, 233B)"
-          value={code}
-          onChange={(e) => setCode(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && !lookingUp && handleLookup()}
-          disabled={lookingUp}
-        />
-        <button
-          type="button"
-          className="adm-btn-red"
-          onClick={() => void handleLookup()}
-          disabled={lookingUp || !code.trim()}
-        >
-          {lookingUp ? <Loader2 size={15} className="spin" /> : <RefreshCw size={15} />}
-          {lookingUp ? 'Looking up…' : 'Look up'}
-        </button>
-      </div>
-
-      {lookupError && (
-        <div style={{ color: '#dc2626', fontSize: 13, marginBottom: 16 }}>{lookupError}</div>
+      {activeTab === 'image-replace' && (
+        <ProductLoaderImageReplace onShowToast={onShowToast} />
       )}
 
-
-      {lookupData && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 20, marginTop: 8 }}>
-
-          {/* Product info card */}
-          <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: '14px 16px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
-              <div>
-                <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 3 }}>
-                Code: <strong style={{ color: '#475569' }}>{websiteRow?.sku || code}</strong>
-                {matchedBy === 'barcode' && (
-                  <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 700, padding: '1px 6px', borderRadius: 4, background: '#fef9c3', color: '#854d0e' }}>matched via barcode</span>
-                )}
-              </div>
-                <div style={{ fontSize: 16, fontWeight: 700, color: '#111827', marginBottom: 6 }}>
-                  {displayTitle(sqlRow?.title, websiteRow?.title) || '—'}
-                </div>
-                <div style={{ display: 'flex', gap: 16, fontSize: 13, color: '#475569', flexWrap: 'wrap' }}>
-                  <span>Price: <strong>R{Number(sqlRow?.price ?? websiteRow?.price ?? 0).toFixed(2)}</strong></span>
-                  {sqlRow?.available !== undefined && (
-                    <span>Available: <strong>{sqlRow.available} units</strong></span>
-                  )}
-                  {sqlRow?.dept && <span>Dept: <strong>{sqlRow.dept}</strong></span>}
-                </div>
-              </div>
-              <span style={{ fontSize: 11, fontWeight: 700, padding: '3px 8px', borderRadius: 6, background: websiteRow ? '#dcfce7' : '#fff7ed', color: websiteRow ? '#15803d' : '#c2410c', flexShrink: 0 }}>
-                {websiteRow ? 'On website' : 'New product'}
-              </span>
-            </div>
-          </div>
-
-          {/* Warnings */}
-          {(warnings.includes('price_zero') || warnings.includes('low_stock')) && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {warnings.includes('price_zero') && (
-                <WarnBanner msg="Price is R0.00 — confirm before publishing." />
-              )}
-              {warnings.includes('low_stock') && (
-                <WarnBanner msg="Stock on hand is 0 — product will show as out of stock on the website." />
-              )}
-            </div>
-          )}
-
-          {/* Category — assign before dormant save or publish */}
-          <section>
-            <SectionHead
-              title="Category"
-              action={imageUrl ? (
-                <button
-                  type="button"
-                  className="adm-btn-ghost adm-btn-sm"
-                  onClick={handleAnalyze}
-                  disabled={analyzing}
-                  title="Ask Gemini to suggest a category based on the product image"
-                >
-                  {analyzing ? <Loader2 size={12} className="spin" /> : <Sparkles size={12} />}
-                  {analyzing ? 'Analysing…' : 'Suggest from image'}
-                </button>
-              ) : null}
-            />
-
-            {categorySource === 'gemini' && (
-              <div style={{ fontSize: 12, color: '#7c3aed', marginBottom: 8, fontWeight: 600 }}>
-                ✦ Gemini suggestion — adjust if needed
-              </div>
-            )}
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <div>
-                <label style={{ fontSize: 12, color: '#64748b', display: 'block', marginBottom: 4 }}>Category *</label>
-                <select
-                  className="adm-select adm-select--enhanced"
-                  style={{ width: '100%' }}
-                  value={categoryId}
-                  onChange={(e) => { setCategoryId(e.target.value); setSub1Id(''); setSub2Id(''); setSub3Id(''); setSub4Id(''); setCategorySource('manual'); }}
-                >
-                  <option value="">— Select category —</option>
-                  {taxonomyTree.map((cat) => (
-                    <option key={cat.id} value={cat.id}>{cat.label}</option>
-                  ))}
-                </select>
-              </div>
-
-              {sub1Options.length > 0 && (
-                <div>
-                  <label style={{ fontSize: 12, color: '#64748b', display: 'block', marginBottom: 4 }}>Subcategory *</label>
-                  <select
-                    className="adm-select adm-select--enhanced"
-                    style={{ width: '100%' }}
-                    value={sub1Id}
-                    onChange={(e) => { setSub1Id(e.target.value); setSub2Id(''); setSub3Id(''); setSub4Id(''); }}
-                  >
-                    <option value="">— Select subcategory —</option>
-                    {sub1Options.map((opt) => (
-                      <option key={opt.id} value={opt.id}>{opt.label}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              {sub2Options.length > 0 && (
-                <div>
-                  <label style={{ fontSize: 12, color: '#64748b', display: 'block', marginBottom: 4 }}>Subcategory 2 <span style={{ color: '#94a3b8' }}>(optional)</span></label>
-                  <select
-                    className="adm-select adm-select--enhanced"
-                    style={{ width: '100%' }}
-                    value={sub2Id}
-                    onChange={(e) => { setSub2Id(e.target.value); setSub3Id(''); setSub4Id(''); }}
-                  >
-                    <option value="">— None —</option>
-                    {sub2Options.map((opt) => (
-                      <option key={opt.id} value={opt.id}>{opt.label}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              {sub3Options.length > 0 && (
-                <div>
-                  <label style={{ fontSize: 12, color: '#64748b', display: 'block', marginBottom: 4 }}>Subcategory 3 <span style={{ color: '#94a3b8' }}>(optional)</span></label>
-                  <select
-                    className="adm-select adm-select--enhanced"
-                    style={{ width: '100%' }}
-                    value={sub3Id}
-                    onChange={(e) => { setSub3Id(e.target.value); setSub4Id(''); }}
-                  >
-                    <option value="">— None —</option>
-                    {sub3Options.map((opt) => (
-                      <option key={opt.id} value={opt.id}>{opt.label}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              {sub4Options.length > 0 && (
-                <div>
-                  <label style={{ fontSize: 12, color: '#64748b', display: 'block', marginBottom: 4 }}>Subcategory 4 <span style={{ color: '#94a3b8' }}>(optional)</span></label>
-                  <select
-                    className="adm-select adm-select--enhanced"
-                    style={{ width: '100%' }}
-                    value={sub4Id}
-                    onChange={(e) => setSub4Id(e.target.value)}
-                  >
-                    <option value="">— None —</option>
-                    {sub4Options.map((opt) => (
-                      <option key={opt.id} value={opt.id}>{opt.label}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              {categoryId && sub1Id && (
-                <button
-                  type="button"
-                  className="adm-btn-ghost"
-                  onClick={() => void saveLookupToDormant()}
-                  disabled={dormantSaving === 'single'}
-                >
-                  {dormantSaving === 'single' ? <Loader2 size={14} className="spin" /> : <PackagePlus size={14} />}
-                  Save to dormant queue
-                </button>
-              )}
-            </div>
-          </section>
-
-          {/* Image section */}
-          <section>
-            <SectionHead title="Image" />
-
-            {/* Existing image thumbnails */}
-            {existingImages.length > 0 && (
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
-                {existingImages.map((url, i) => {
-                  const slotNum = i + 1;
-                  const isSelected = imageUrl === url && imageSource === 'existing';
-                  return (
-                    <button
-                      key={url}
-                      type="button"
-                      onClick={() => { setImageUrl(url); setImageSource('existing'); setImageSlot(slotNum); setFileObj(null); setFileBase64(''); }}
-                      style={{
-                        width: 80, height: 80, padding: 0, cursor: 'pointer', position: 'relative',
-                        border: `2px solid ${isSelected ? '#8B1A1A' : '#e2e8f0'}`,
-                        borderRadius: 10, overflow: 'hidden', background: 'none',
-                        transition: 'border-color 0.15s',
-                      }}
-                      title={`Use Image ${slotNum}`}
-                    >
-                      <img src={url} alt={`Image ${slotNum}`} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
-                      <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, background: 'rgba(0,0,0,0.55)', color: '#fff', fontSize: 10, textAlign: 'center', padding: '2px 0', fontWeight: 600 }}>
-                        Img {slotNum}
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* Slot selector */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
-              <span style={{ fontSize: 13, color: '#64748b' }}>Target slot:</span>
-              <select
-                className="adm-select adm-select--enhanced adm-select--compact"
-                value={imageSlot}
-                onChange={(e) => {
-                  const slot = Number(e.target.value);
-                  setImageSlot(slot);
-                  const slotUrl = websiteRow?.[SLOT_FIELDS[slot - 1]];
-                  if (slotUrl && imageSource === 'existing') {
-                    setImageUrl(slotUrl);
-                  }
-                }}
-              >
-                {[1, 2, 3, 4].map((s) => {
-                  const filled = Boolean(websiteRow?.[SLOT_FIELDS[s - 1]]);
-                  return (
-                    <option key={s} value={s}>
-                      Image {s} {filled ? '(filled)' : '(empty)'}
-                    </option>
-                  );
-                })}
-              </select>
-            </div>
-
-            {/* Upload drop zone */}
-            <div
-              role="button"
-              tabIndex={0}
-              style={{
-                border: `2px dashed ${dragOver ? '#8B1A1A' : fileObj ? '#16a34a' : '#cbd5e1'}`,
-                borderRadius: 10, padding: '20px 16px', textAlign: 'center', cursor: 'pointer',
-                background: dragOver ? '#fff5f5' : fileObj ? '#f0fdf4' : '#f8fafc',
-                transition: 'all 0.15s', marginBottom: fileObj ? 10 : 0,
-              }}
-              onClick={() => fileRef.current?.click()}
-              onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && fileRef.current?.click()}
-              onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-              onDragLeave={() => setDragOver(false)}
-              onDrop={(e) => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files?.[0]; if (f) handleFileSelect(f); }}
-            >
-              <input
-                ref={fileRef}
-                type="file"
-                accept="image/*"
-                hidden
-                onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFileSelect(f); e.target.value = ''; }}
-              />
-              <Upload size={16} style={{ marginRight: 6, verticalAlign: 'middle', color: fileObj ? '#16a34a' : '#94a3b8' }} />
-              <span style={{ fontSize: 13, color: fileObj ? '#15803d' : '#9ca3af' }}>
-                {fileObj ? fileObj.name : 'Click or drag an image to upload'}
-              </span>
-            </div>
-
-            {/* Upload / transform buttons */}
-            {fileObj && (
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <button type="button" className="adm-btn-red" onClick={handleUpload} disabled={uploading || transforming}>
-                  {uploading ? <Loader2 size={13} className="spin" /> : <Upload size={13} />}
-                  {uploading ? 'Uploading…' : 'Upload as-is'}
-                </button>
-                <button type="button" className="adm-btn-ghost" onClick={handleTransform} disabled={uploading || transforming}>
-                  {transforming ? <Loader2 size={13} className="spin" /> : <Sparkles size={13} />}
-                  {transforming ? 'Processing…' : 'Remove background + Upload'}
-                </button>
-              </div>
-            )}
-
-            {/* Image preview */}
-            {imageUrl && (
-              <div style={{ marginTop: 14, display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-                <img
-                  src={imageUrl}
-                  alt="Selected"
-                  style={{ width: 96, height: 96, objectFit: 'cover', borderRadius: 8, border: '1px solid #e2e8f0', flexShrink: 0 }}
-                />
-                <div style={{ fontSize: 12, color: '#64748b', paddingTop: 4, lineHeight: 1.8 }}>
-                  <div>Source: <strong style={{ color: '#374151' }}>
-                    {imageSource === 'existing' ? 'Existing website image' : imageSource === 'upload_transformed' ? 'Uploaded (BG removed)' : 'Uploaded'}
-                  </strong></div>
-                  <div>Target: <strong style={{ color: '#374151' }}>Image {imageSlot}</strong></div>
-                  {isOverwritingFilledSlot && (
-                    <div style={{ color: '#dc2626', fontWeight: 600 }}>Will replace existing image in slot {imageSlot}</div>
-                  )}
-                </div>
-              </div>
-            )}
-          </section>
-
-          {/* Confirmations + Publish */}
-          {imageUrl && categoryId && sub1Id && (
-            <section>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16 }}>
-                {warnings.includes('price_zero') && (
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer', color: '#92400e', userSelect: 'none' }}>
-                    <input type="checkbox" checked={priceZeroConfirmed} onChange={(e) => setPriceZeroConfirmed(e.target.checked)} />
-                    I confirm publishing with R0.00 price
-                  </label>
-                )}
-                {isOverwritingFilledSlot && (
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer', color: '#dc2626', userSelect: 'none' }}>
-                    <input type="checkbox" checked={overwriteConfirmed} onChange={(e) => setOverwriteConfirmed(e.target.checked)} />
-                    Replace the existing image in slot {imageSlot}
-                  </label>
-                )}
-              </div>
-
-              {/* Summary */}
-              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '10px 14px', fontSize: 12, color: '#475569', marginBottom: 16, lineHeight: 1.9 }}>
-                <strong style={{ color: '#111827' }}>Publishing:</strong>{' '}
-                {displayTitle(sqlRow?.title, websiteRow?.title, code) || code} ·{' '}
-                {findNode(taxonomyTree, categoryId)?.label || categoryId}
-                {sub1Id ? ` › ${findNode(taxonomyTree, sub1Id)?.label || sub1Id}` : ''}
-                {sub2Id ? ` › ${findNode(taxonomyTree, sub2Id)?.label || sub2Id}` : ''}
-                {sub3Id ? ` › ${findNode(taxonomyTree, sub3Id)?.label || sub3Id}` : ''}
-                {sub4Id ? ` › ${findNode(taxonomyTree, sub4Id)?.label || sub4Id}` : ''}
-                {' · '}Image {imageSlot} ({imageSource === 'existing' ? 'existing' : imageSource === 'upload_transformed' ? 'BG removed' : 'new'})
-              </div>
-
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-                <button
-                  type="button"
-                  className="adm-btn-red"
-                  onClick={handlePublish}
-                  disabled={!canPublish}
-                >
-                  {publishing ? <Loader2 size={15} className="spin" /> : <PackagePlus size={15} />}
-                  {publishing ? 'Publishing…' : websiteRow ? 'Update Product' : 'Publish New Product'}
-                </button>
-                {publishError && (
-                  <span style={{ fontSize: 13, color: '#dc2626' }}>{publishError}</span>
-                )}
-              </div>
-            </section>
-          )}
-        </div>
-      )}
-      </div>
-      )}
 
       {publishSuccess && (
         <ProductLoaderPublishSuccess
