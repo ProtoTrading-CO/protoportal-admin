@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { requireAdminKey } from './_admin-auth.js';
+import { logProductLoaderAudit } from './_product-loader-audit.js';
 
 function getStockClient() {
   return createClient(
@@ -34,6 +35,7 @@ export default async function handler(req, res) {
     stockQty,
     availableStock,
     barcode: bodyBarcode,
+    filename,
   } = req.body || {};
 
   const sku = String(code || '').trim().toUpperCase();
@@ -111,15 +113,15 @@ export default async function handler(req, res) {
 
   if (writeError) return res.status(400).json({ error: writeError.message });
 
-  await sb.from('product_publish_audit').insert({
+  await logProductLoaderAudit(sb, {
     sku,
     action,
     source: 'manual_product_loader',
-    publish_mode: String(publishMode || 'direct'),
-    image_slot: slot,
-    image_source: String(imageSource || 'upload'),
-    category_confidence: categoryConfidence != null ? Number(categoryConfidence) : null,
-    old_values: existing
+    publishMode: String(publishMode || 'direct'),
+    imageSlot: slot,
+    imageSource: String(imageSource || 'upload'),
+    categoryConfidence: categoryConfidence != null ? Number(categoryConfidence) : null,
+    oldValues: existing
       ? {
         title: existing.title,
         price: existing.price,
@@ -128,7 +130,8 @@ export default async function handler(req, res) {
         [imageField]: existing[imageField],
       }
       : null,
-    new_values: {
+    newValues: {
+      outcome: 'published',
       title: patch.title,
       price: patch.price,
       category: patch.category,
@@ -137,10 +140,10 @@ export default async function handler(req, res) {
       imageSlot: slot,
       imageSource,
       publishMode,
+      filename: String(filename || '').trim() || null,
     },
-    published_by: String(publishedBy || '').trim() || null,
-    published_at: now,
-  }).catch((err) => console.error('product_publish_audit insert failed:', err?.message));
+    publishedBy: String(publishedBy || '').trim() || null,
+  });
 
   return res.status(200).json({ ok: true, action, sku });
 }

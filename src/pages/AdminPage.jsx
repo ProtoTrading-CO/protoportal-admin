@@ -2742,6 +2742,13 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                 onShowToast={showToast}
                 initialCode={productLoaderCode}
                 onInitialCodeConsumed={() => setProductLoaderCode('')}
+                onGoToApollo={(sku) => {
+                  setImageFixRequest({
+                    id: Date.now(),
+                    products: [{ id: sku, sku, name: sku, title: sku }],
+                  });
+                  setActiveSection('apollo');
+                }}
               />
             )}
 

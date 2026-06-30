@@ -1,7 +1,12 @@
 import { createClient } from '@supabase/supabase-js';
 import { requireAdminKey } from './_admin-auth.js';
 import { isSqlConfigured } from './_sql-provider.js';
-import { resolveProductLoaderMatch, SLOT_FIELDS, parseLoaderFilename } from './_product-loader-lookup.js';
+import {
+  classifyBatchItem,
+  fetchDormantSkuSet,
+  parseLoaderFilename,
+  resolveProductLoaderMatch,
+} from './_product-loader-lookup.js';
 
 function getStockClient() {
   return createClient(
@@ -22,27 +27,55 @@ export default async function handler(req, res) {
   }
 
   const sb = getStockClient();
+  const dormantSkus = await fetchDormantSkuSet(sb).catch(() => new Set());
   const items = [];
   let matched = 0;
+  const groups = { ready: 0, needs_review: 0, not_found: 0 };
 
   for (const filename of filenames) {
-    const { code, displayCode, imageSlot } = parseLoaderFilename(filename);
-    if (!code) {
-      items.push({ filename, code: '', title: '', price: 0, imageSlot: 1, warnings: ['invalid_filename'] });
+    const parsed = parseLoaderFilename(filename);
+    if (parsed.parseError || !parsed.code) {
+      items.push({
+        filename,
+        code: '',
+        title: '',
+        price: 0,
+        imageSlot: parsed.imageSlot || 1,
+        warnings: ['invalid_filename'],
+        parseError: parsed.parseError,
+        websiteStatus: 'not_found',
+        group: 'not_found',
+      });
+      groups.not_found += 1;
       continue;
     }
 
-    const match = await resolveProductLoaderMatch(sb, { code, displayCode, imageSlot });
+    const match = await resolveProductLoaderMatch(sb, {
+      code: parsed.code,
+      displayCode: parsed.displayCode,
+      imageSlot: parsed.imageSlot,
+      dormantSkus,
+    });
     if (match.canPublish) matched += 1;
+    const group = classifyBatchItem(match);
+    groups[group] += 1;
 
     items.push({
       filename,
       ...match,
+      group,
     });
   }
 
   return res.status(200).json({
     items,
-    summary: { total: items.length, matched },
+    summary: {
+      total: items.length,
+      matched,
+      ready: groups.ready,
+      needsReview: groups.needs_review,
+      notFound: groups.not_found,
+      sqlConfigured: isSqlConfigured(),
+    },
   });
 }

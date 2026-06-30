@@ -15,6 +15,19 @@ import {
 import categories from '../data/categories.json';
 import { isImageFile } from '../lib/parseIntakeFilename.js';
 import { readApiJson } from '../lib/apiError.js';
+import ProductLoaderSingleImage from './productLoader/ProductLoaderSingleImage';
+import ProductLoaderFolder from './productLoader/ProductLoaderFolder';
+import ProductLoaderDormantQueue from './productLoader/ProductLoaderDormantQueue';
+import ProductLoaderPublishHistory from './productLoader/ProductLoaderPublishHistory';
+import ProductLoaderPublishSuccess from './productLoader/ProductLoaderPublishSuccess';
+
+const LOADER_TABS = [
+  { id: 'single', label: 'Single Image' },
+  { id: 'folder', label: 'Image Folder' },
+  { id: 'advanced', label: 'Advanced Editor' },
+  { id: 'dormant', label: 'Dormant Queue' },
+  { id: 'history', label: 'Publish History' },
+];
 
 function displayTitle(...candidates) {
   for (const candidate of candidates) {
@@ -154,7 +167,11 @@ export default function ProductLoaderPanel({
   onShowToast,
   initialCode = '',
   onInitialCodeConsumed,
+  onGoToApollo,
+  mainSiteUrl = 'https://site.proto.co.za',
 }) {
+  const [activeTab, setActiveTab] = useState('single');
+  const [publishSuccess, setPublishSuccess] = useState(null);
   const fileRef = useRef(null);
   const folderRef = useRef(null);
   const singleImageRef = useRef(null);
@@ -706,6 +723,7 @@ export default function ProductLoaderPanel({
   useEffect(() => {
     const c = String(initialCode || '').trim();
     if (!c) return;
+    setActiveTab('advanced');
     void handleLookup(c).finally(() => onInitialCodeConsumed?.());
   }, [initialCode]);
 
@@ -873,7 +891,7 @@ export default function ProductLoaderPanel({
         }),
       });
       const json = await readApiJson(res, { fallback: 'Publish failed' });
-      setPublishResult(json);
+      setPublishSuccess({ sku: json.sku, action: json.action });
       if (dormantRows.some((r) => r.sku === json.sku)) {
         await dormantApi({ action: 'remove', code: json.sku }).catch(() => {});
         setDormantRows((prev) => prev.filter((r) => r.sku !== json.sku));
@@ -904,24 +922,44 @@ export default function ProductLoaderPanel({
   const batchReadyCount = batchItems.filter((i) => i.status === 'ready').length;
   const batchUnmatchedCount = batchItems.filter((i) => i.status === 'unmatched').length;
 
-  if (publishResult) {
-    return (
-      <div className="adm-panel" style={{ maxWidth: 640 }}>
-        <div style={{ textAlign: 'center', padding: '48px 24px' }}>
-          <CheckCircle size={52} color="#16a34a" style={{ marginBottom: 16 }} />
-          <h2 style={{ fontSize: 22, fontWeight: 700, marginBottom: 8, color: '#111827' }}>
-            {publishResult.action === 'create' ? 'Product Published' : 'Product Updated'}
-          </h2>
-          <p style={{ color: '#6b7280', marginBottom: 28, fontSize: 15 }}>
-            <strong style={{ color: '#111827' }}>{publishResult.sku}</strong> is now live on the website.
-          </p>
-          <button type="button" className="adm-btn-red" onClick={resetAll}>
-            <PackagePlus size={15} /> Load Another Product
-          </button>
-        </div>
-      </div>
-    );
-  }
+  const addItemToDormant = async (item) => {
+    if (!item?.code) return;
+    if (!batchDefaultCategoryId || !batchDefaultSub1Id) {
+      onShowToast?.('Pick default category and subcategory first (folder tab or below)', 'warning');
+      setActiveTab('dormant');
+      return;
+    }
+    const labels = categoryLabelsFromIds(taxonomyTree, batchDefaultCategoryId, batchDefaultSub1Id, '');
+    try {
+      await dormantApi({
+        action: 'save',
+        code: item.code,
+        title: item.title || item.sqlRow?.title || item.code,
+        price: item.price ?? item.sqlRow?.price ?? 0,
+        description: item.websiteRow?.original_description || item.sqlRow?.title || '',
+        category: item.websiteRow?.category || labels.category,
+        subcategoryOne: item.websiteRow?.subcategory_one || labels.subcategoryOne,
+        subcategoryTwo: item.websiteRow?.subcategory_two || null,
+        filename: item.filename,
+      });
+      await loadDormant();
+      onShowToast?.(`Added ${item.code} to dormant queue`, 'success');
+    } catch (err) {
+      onShowToast?.(err.message, 'error');
+    }
+  };
+
+  const addBatchToDormant = async (items) => {
+    for (const item of items) {
+      await addItemToDormant(item);
+    }
+  };
+
+  const openAdvanced = (code) => {
+    setActiveTab('advanced');
+    void handleLookup(code);
+    singleProductRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
 
   return (
     <div className="adm-panel" style={{ maxWidth: 920 }}>
@@ -929,7 +967,7 @@ export default function ProductLoaderPanel({
       <div className="adm-section-head" style={{ marginBottom: 24 }}>
         <div>
           <h2 className="adm-section-title">Product Loader</h2>
-          <p className="adm-section-note">Publish products from Positill — upload one image, a whole folder, or look up a code manually.</p>
+          <p className="adm-section-note">Publish supplier images to the live catalogue — Apollo generates images separately.</p>
           {sqlLiveStatus?.bridgeConfigured && (
             <p style={{ fontSize: 12, marginTop: 6, fontWeight: 700, color: sqlLiveStatus.sqlConnectionTest ? '#15803d' : '#c2410c' }}>
               {sqlLiveStatus.sqlConnectionTest
@@ -940,514 +978,78 @@ export default function ProductLoaderPanel({
         </div>
       </div>
 
-      {/* Single image */}
-      <section style={{ marginBottom: 28, paddingBottom: 24, borderBottom: '2px solid #e5e7eb' }}>
-        <SectionHead title="Single image" />
-        <p style={{ fontSize: 13, color: '#64748b', margin: '0 0 12px', lineHeight: 1.5 }}>
-          Upload one image named with the product code — e.g. <code>8626100145.jpg</code> or <code>ME039-2-1.jpg</code>.
-          We look up title, price and stock automatically from the filename.
-        </p>
+      <nav className="pl-tabs" aria-label="Product Loader sections">
+        {LOADER_TABS.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            className={`pl-tab${activeTab === tab.id ? ' pl-tab--on' : ''}`}
+            onClick={() => setActiveTab(tab.id)}
+          >
+            {tab.label}
+            {tab.id === 'dormant' && dormantRows.length > 0 ? ` (${dormantRows.length})` : ''}
+          </button>
+        ))}
+      </nav>
 
-        <div
-          role="button"
-          tabIndex={0}
-          style={{
-            border: '2px dashed #cbd5e1', borderRadius: 10, padding: '18px 16px', textAlign: 'center',
-            cursor: singleImageScanning || singleImageProcessing ? 'wait' : 'pointer', background: '#f8fafc', marginBottom: 12,
-          }}
-          onClick={() => !singleImageScanning && !singleImageProcessing && singleImageRef.current?.click()}
-          onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && singleImageRef.current?.click()}
-        >
-          <input
-            ref={singleImageRef}
-            type="file"
-            accept="image/*"
-            hidden
-            onChange={(e) => {
-              void handleSingleImageSelect(e.target.files);
-              e.target.value = '';
-            }}
-          />
-          {singleImageScanning ? (
-            <span style={{ fontSize: 13, color: '#64748b' }}><Loader2 size={16} className="spin" style={{ verticalAlign: 'middle', marginRight: 6 }} />Looking up product…</span>
-          ) : (
-            <span style={{ fontSize: 13, color: '#475569' }}><ImagePlus size={16} style={{ verticalAlign: 'middle', marginRight: 6 }} />Choose image</span>
-          )}
-        </div>
-
-        {singleImageError && <div style={{ color: '#dc2626', fontSize: 13, marginBottom: 10 }}>{singleImageError}</div>}
-
-        {singleImageItem && (
-          <div style={{ border: '1px solid #e2e8f0', borderRadius: 10, padding: 14, marginBottom: 12, background: '#fff' }}>
-            <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start', flexWrap: 'wrap' }}>
-              {singleImagePreview && (
-                <div style={{ width: 88, height: 88, borderRadius: 8, overflow: 'hidden', background: '#f8fafc', flexShrink: 0 }}>
-                  <img
-                    src={singleImagePreview}
-                    alt=""
-                    style={{ width: '100%', height: '100%', objectFit: 'contain' }}
-                  />
-                </div>
-              )}
-              <div style={{ flex: 1, minWidth: 200 }}>
-                <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 4 }}>
-                  {singleImageItem.filename} · slot {singleImageItem.imageSlot}
-                </div>
-                <div style={{ fontSize: 15, fontWeight: 700, color: '#111827', marginBottom: 6 }}>
-                  {displayTitle(singleImageItem.title, singleImageItem.sqlRow?.title) || '—'}
-                </div>
-                <div style={{ fontSize: 13, color: '#475569', display: 'flex', gap: 14, flexWrap: 'wrap' }}>
-                  <span>Code: <strong>{singleImageItem.code || '—'}</strong></span>
-                  <span>Price: <strong>R{Number(singleImageItem.price ?? singleImageItem.sqlRow?.price ?? 0).toFixed(2)}</strong></span>
-                  <span>SOH: <strong>{singleImageItem.sqlRow?.available ?? singleImageItem.websiteRow?.available_stock ?? singleImageItem.websiteRow?.stock_qty ?? '—'}</strong></span>
-                </div>
-                {singleImageItem.status === 'unmatched' && (
-                  <p style={{ fontSize: 12, color: '#dc2626', margin: '8px 0 0' }}>Not found in catalogue — check the filename or use manual lookup below.</p>
-                )}
-                {singleImageItem.processError && (
-                  <p style={{ fontSize: 12, color: '#dc2626', margin: '8px 0 0' }}>{singleImageItem.processError}</p>
-                )}
-              </div>
-            </div>
-
-            {singleImageItem.status === 'ready' && (
-              <>
-                {(!singleImageItem.websiteRow?.category) && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 12 }}>
-                    <div>
-                      <label style={{ fontSize: 12, color: '#64748b', display: 'block', marginBottom: 4 }}>Category (required for new products)</label>
-                      <select
-                        className="adm-select adm-select--enhanced"
-                        style={{ width: '100%' }}
-                        value={batchDefaultCategoryId}
-                        onChange={(e) => { setBatchDefaultCategoryId(e.target.value); setBatchDefaultSub1Id(''); }}
-                      >
-                        <option value="">— Select category —</option>
-                        {taxonomyTree.map((cat) => (
-                          <option key={cat.id} value={cat.id}>{cat.label}</option>
-                        ))}
-                      </select>
-                    </div>
-                    {batchSub1Options.length > 0 && (
-                      <div>
-                        <label style={{ fontSize: 12, color: '#64748b', display: 'block', marginBottom: 4 }}>Subcategory</label>
-                        <select
-                          className="adm-select adm-select--enhanced"
-                          style={{ width: '100%' }}
-                          value={batchDefaultSub1Id}
-                          onChange={(e) => setBatchDefaultSub1Id(e.target.value)}
-                        >
-                          <option value="">— Optional —</option>
-                          {batchSub1Options.map((opt) => (
-                            <option key={opt.id} value={opt.id}>{opt.label}</option>
-                          ))}
-                        </select>
-                      </div>
-                    )}
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer', userSelect: 'none' }}>
-                      <input type="checkbox" checked={batchOverwrite} onChange={(e) => setBatchOverwrite(e.target.checked)} />
-                      Replace image if slot already filled
-                    </label>
-                  </div>
-                )}
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 14 }}>
-                <button
-                  type="button"
-                  className="adm-btn-red"
-                  onClick={() => void handleSingleImagePublish()}
-                  disabled={singleImageProcessing || singleImageScanning}
-                >
-                  {singleImageProcessing ? <Loader2 size={15} className="spin" /> : <Upload size={15} />}
-                  {singleImageProcessing ? 'Publishing…' : 'Upload & publish'}
-                </button>
-                <button
-                  type="button"
-                  className="adm-btn-ghost"
-                  onClick={() => void handleSingleImageDormant()}
-                  disabled={singleImageProcessing || singleImageScanning}
-                >
-                  <PackagePlus size={15} /> Add to dormant
-                </button>
-                <button
-                  type="button"
-                  className="adm-btn-ghost"
-                  onClick={() => {
-                    void handleLookup(singleImageItem.code);
-                    singleProductRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                  }}
-                  disabled={singleImageProcessing || !singleImageItem.code}
-                >
-                  Open manual flow
-                </button>
-                <button type="button" className="adm-btn-ghost" onClick={clearSingleImage} disabled={singleImageProcessing}>
-                  <X size={14} /> Clear
-                </button>
-              </div>
-              </>
-            )}
-
-            {singleImageItem.status !== 'ready' && (
-              <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
-                <button type="button" className="adm-btn-ghost" onClick={clearSingleImage}>
-                  <X size={14} /> Clear
-                </button>
-              </div>
-            )}
-          </div>
-        )}
-
-        {!singleImageItem && (
-          <p style={{ fontSize: 12, color: '#94a3b8', margin: 0 }}>
-            New products need a default category below (folder section) before publishing.
-          </p>
-        )}
-      </section>
-
-      {/* Folder batch */}
-      <section style={{ marginBottom: 28, paddingBottom: 24, borderBottom: '2px solid #e5e7eb' }}>
-        <SectionHead title="Image folder" />
-        <p style={{ fontSize: 13, color: '#64748b', margin: '0 0 12px', lineHeight: 1.5 }}>
-          Name each file with the product code — e.g. <code>8626100145.jpg</code> or <code>ME039-2-1.jpg</code> (code + image slot).
-          Lookups use {sqlLiveStatus?.bridgeConfigured ? 'live Positill SQL' : 'the master catalogue (~39k items)'} for title, price and stock.
-        </p>
-
-        <div
-          role="button"
-          tabIndex={0}
-          style={{
-            border: '2px dashed #cbd5e1', borderRadius: 10, padding: '18px 16px', textAlign: 'center',
-            cursor: batchScanning || batchProcessing ? 'wait' : 'pointer', background: '#f8fafc', marginBottom: 12,
-          }}
-          onClick={() => !batchScanning && !batchProcessing && folderRef.current?.click()}
-          onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && folderRef.current?.click()}
-        >
-          <input
-            ref={folderRef}
-            type="file"
-            accept="image/*"
-            multiple
-            webkitdirectory=""
-            directory=""
-            hidden
-            onChange={(e) => {
-              void handleFolderSelect(e.target.files);
-              e.target.value = '';
-            }}
-          />
-          {batchScanning ? (
-            <span style={{ fontSize: 13, color: '#64748b' }}><Loader2 size={16} className="spin" style={{ verticalAlign: 'middle', marginRight: 6 }} />Scanning folder…</span>
-          ) : (
-            <span style={{ fontSize: 13, color: '#475569' }}><FolderOpen size={16} style={{ verticalAlign: 'middle', marginRight: 6 }} />Choose image folder</span>
-          )}
-        </div>
-
-        {batchError && <div style={{ color: '#dc2626', fontSize: 13, marginBottom: 10 }}>{batchError}</div>}
-
-        {batchItems.length > 0 && (
-          <>
-            <div style={{ fontSize: 13, color: '#475569', marginBottom: 10 }}>
-              <strong>{batchReadyCount}</strong> ready
-              {batchUnmatchedCount > 0 && <> · <span style={{ color: '#dc2626' }}>{batchUnmatchedCount} not in catalogue</span></>}
-            </div>
-
-            <div style={{ maxHeight: 220, overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: 8, marginBottom: 12 }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                <thead>
-                  <tr style={{ background: '#f8fafc', textAlign: 'left' }}>
-                    <th style={{ padding: '8px 10px' }}>File</th>
-                    <th style={{ padding: '8px 10px' }}>Code</th>
-                    <th style={{ padding: '8px 10px' }}>Product</th>
-                    <th style={{ padding: '8px 10px' }}>Slot</th>
-                    <th style={{ padding: '8px 10px' }}>Status</th>
-                    <th style={{ padding: '8px 10px', width: 40 }} />
-                  </tr>
-                </thead>
-                <tbody>
-                  {batchItems.map((row) => (
-                    <tr key={row.filename} style={{ borderTop: '1px solid #f1f5f9' }}>
-                      <td style={{ padding: '7px 10px', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.filename}</td>
-                      <td style={{ padding: '7px 10px', fontWeight: 700 }}>{row.code || '—'}</td>
-                      <td style={{ padding: '7px 10px', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={displayTitle(row.title, row.sqlRow?.title)}>{displayTitle(row.title, row.sqlRow?.title) || '—'}</td>
-                      <td style={{ padding: '7px 10px' }}>{row.imageSlot}</td>
-                      <td style={{ padding: '7px 10px', color: row.status === 'done' ? '#16a34a' : row.status === 'error' || row.status === 'unmatched' ? '#dc2626' : '#64748b' }}>
-                        {row.status === 'processing' ? '…' : row.status}
-                        {row.processError && ` — ${row.processError}`}
-                      </td>
-                      <td style={{ padding: '7px 6px' }}>
-                        <button
-                          type="button"
-                          className="adm-icon-btn"
-                          title="Remove from list"
-                          disabled={batchProcessing}
-                          onClick={() => removeBatchItem(row.filename)}
-                        >
-                          <X size={14} />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
-              <div>
-                <label style={{ fontSize: 12, color: '#64748b', display: 'block', marginBottom: 4 }}>Default category (for new products)</label>
-                <select
-                  className="adm-select adm-select--enhanced"
-                  style={{ width: '100%' }}
-                  value={batchDefaultCategoryId}
-                  onChange={(e) => { setBatchDefaultCategoryId(e.target.value); setBatchDefaultSub1Id(''); }}
-                >
-                  <option value="">— Select if needed —</option>
-                  {taxonomyTree.map((cat) => (
-                    <option key={cat.id} value={cat.id}>{cat.label}</option>
-                  ))}
-                </select>
-              </div>
-              {batchSub1Options.length > 0 && (
-                <div>
-                  <label style={{ fontSize: 12, color: '#64748b', display: 'block', marginBottom: 4 }}>Default subcategory (required for dormant)</label>
-                  <select
-                    className="adm-select adm-select--enhanced"
-                    style={{ width: '100%' }}
-                    value={batchDefaultSub1Id}
-                    onChange={(e) => setBatchDefaultSub1Id(e.target.value)}
-                  >
-                    <option value="">— Optional —</option>
-                    {batchSub1Options.map((opt) => (
-                      <option key={opt.id} value={opt.id}>{opt.label}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer', userSelect: 'none' }}>
-                <input type="checkbox" checked={batchOverwrite} onChange={(e) => setBatchOverwrite(e.target.checked)} />
-                Replace images if slot already filled
-              </label>
-            </div>
-
-            {batchProcessing && (
-              <p style={{ fontSize: 12, color: '#64748b', marginBottom: 10 }}>
-                Processing {batchProgress.done + 1}/{batchProgress.total}
-                {batchProgress.current ? ` — ${batchProgress.current}` : ''}
-              </p>
-            )}
-
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-              <button
-                type="button"
-                className="adm-btn-red"
-                onClick={() => void handleBatchPublish()}
-                disabled={batchProcessing || batchScanning || batchReadyCount === 0}
-              >
-                {batchProcessing ? <Loader2 size={15} className="spin" /> : <Upload size={15} />}
-                {batchProcessing ? 'Publishing folder…' : `Upload & publish ${batchReadyCount} image${batchReadyCount === 1 ? '' : 's'}`}
-              </button>
-              <button
-                type="button"
-                className="adm-btn-ghost"
-                onClick={() => void saveBatchToDormant()}
-                disabled={batchProcessing || batchScanning || batchReadyCount === 0 || dormantSaving === 'batch'}
-              >
-                {dormantSaving === 'batch' ? <Loader2 size={15} className="spin" /> : <PackagePlus size={15} />}
-                Add {batchReadyCount} to dormant
-              </button>
-              <button
-                type="button"
-                className="adm-btn-ghost"
-                onClick={clearBatchList}
-                disabled={batchProcessing || batchScanning}
-              >
-                Clear list
-              </button>
-            </div>
-          </>
-        )}
-      </section>
-
-      {/* Dormant queue */}
-      <section style={{ marginBottom: 28, paddingBottom: 24, borderBottom: '2px solid #e5e7eb' }}>
-        <SectionHead
-          title={`Dormant products (${dormantRows.length})`}
-          action={(
-            <button type="button" className="adm-btn-ghost adm-btn-sm" onClick={() => void loadDormant()} disabled={dormantLoading}>
-              {dormantLoading ? <Loader2 size={13} className="spin" /> : <RefreshCw size={13} />}
-              Refresh
-            </button>
-          )}
+      {activeTab === 'single' && (
+        <ProductLoaderSingleImage
+          taxonomyTree={taxonomyTree}
+          batchDefaultCategoryId={batchDefaultCategoryId}
+          setBatchDefaultCategoryId={setBatchDefaultCategoryId}
+          batchDefaultSub1Id={batchDefaultSub1Id}
+          setBatchDefaultSub1Id={setBatchDefaultSub1Id}
+          batchOverwrite={batchOverwrite}
+          setBatchOverwrite={setBatchOverwrite}
+          onShowToast={onShowToast}
+          onOpenAdvanced={openAdvanced}
+          onPublished={(result) => setPublishSuccess(result)}
+          onAddDormant={addItemToDormant}
+          mainSiteUrl={mainSiteUrl}
         />
-        <p style={{ fontSize: 13, color: '#64748b', margin: '0 0 12px', lineHeight: 1.5 }}>
-          Products waiting for images — assign categories here, then send to image generation when ready.
-        </p>
+      )}
 
-        {dormantLoading && !dormantRows.length && (
-          <p style={{ fontSize: 13, color: '#94a3b8' }}><Loader2 size={14} className="spin" style={{ verticalAlign: 'middle', marginRight: 6 }} />Loading…</p>
-        )}
+      {activeTab === 'folder' && (
+        <ProductLoaderFolder
+          taxonomyTree={taxonomyTree}
+          batchDefaultCategoryId={batchDefaultCategoryId}
+          setBatchDefaultCategoryId={setBatchDefaultCategoryId}
+          batchDefaultSub1Id={batchDefaultSub1Id}
+          setBatchDefaultSub1Id={setBatchDefaultSub1Id}
+          batchOverwrite={batchOverwrite}
+          setBatchOverwrite={setBatchOverwrite}
+          onShowToast={onShowToast}
+          onAddDormantBatch={addBatchToDormant}
+        />
+      )}
 
-        {!dormantLoading && dormantRows.length === 0 && (
-          <p style={{ fontSize: 13, color: '#94a3b8', margin: 0 }}>No dormant products yet. Look up a code and use “Save to dormant” or add from a folder batch.</p>
-        )}
+      {activeTab === 'dormant' && (
+        <ProductLoaderDormantQueue
+          taxonomyTree={taxonomyTree}
+          rows={dormantRows}
+          edits={dormantEdits}
+          setEdits={setDormantEdits}
+          loading={dormantLoading}
+          saving={dormantSaving}
+          onRefresh={() => void loadDormant()}
+          onSaveCategories={saveDormantCategories}
+          onRemove={removeDormantRow}
+          onOpen={(row) => sendDormantToImageGen(row)}
+          onPublish={(row) => sendDormantToImageGen(row)}
+        />
+      )}
 
-        {dormantRows.length > 0 && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {dormantRows.map((row) => {
-              const edit = dormantEdits[row.sku] || { categoryId: '', sub1Id: '', sub2Id: '', sub3Id: '', sub4Id: '' };
-              const rowSub1Options = edit.categoryId ? childrenOf(taxonomyTree, edit.categoryId) : [];
-              const rowSub2Options = edit.sub1Id ? childrenOf(taxonomyTree, edit.sub1Id) : [];
-              const rowSub3Options = edit.sub2Id ? childrenOf(taxonomyTree, edit.sub2Id) : [];
-              const rowSub4Options = edit.sub3Id ? childrenOf(taxonomyTree, edit.sub3Id) : [];
-              const busy = dormantSaving === `rm-${row.sku}` || dormantSaving === `cat-${row.sku}`;
+      {activeTab === 'history' && (
+        <ProductLoaderPublishHistory
+          onShowToast={onShowToast}
+          onRerun={(sku) => openAdvanced(sku)}
+        />
+      )}
 
-              return (
-                <div
-                  key={row.sku}
-                  style={{
-                    border: '1px solid #e2e8f0', borderRadius: 10, padding: '12px 14px',
-                    background: '#fafafa', display: 'grid', gap: 10,
-                    gridTemplateColumns: '1fr auto',
-                    alignItems: 'start',
-                  }}
-                >
-                  <div>
-                    <div style={{ fontWeight: 800, fontSize: 14, color: '#111827', marginBottom: 2 }}>{displayTitle(row.title, row.sqlRow?.title) || row.sku}</div>
-                    <div style={{ fontSize: 12, color: '#64748b', marginBottom: 10 }}>
-                      <strong>{row.sku}</strong>
-                      {row.price > 0 && <> · R{Number(row.price).toFixed(2)}</>}
-                    </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8 }}>
-                      <select
-                        className="adm-select adm-select--enhanced"
-                        value={edit.categoryId}
-                        disabled={busy}
-                        onChange={(e) => {
-                          const categoryId = e.target.value;
-                          setDormantEdits((prev) => ({
-                            ...prev,
-                            [row.sku]: { categoryId, sub1Id: '', sub2Id: '', sub3Id: '', sub4Id: '' },
-                          }));
-                        }}
-                      >
-                        <option value="">Category</option>
-                        {taxonomyTree.map((cat) => (
-                          <option key={cat.id} value={cat.id}>{cat.label}</option>
-                        ))}
-                      </select>
-                      {rowSub1Options.length > 0 && (
-                        <select
-                          className="adm-select adm-select--enhanced"
-                          value={edit.sub1Id}
-                          disabled={busy}
-                          onChange={(e) => {
-                            const sub1Id = e.target.value;
-                            setDormantEdits((prev) => ({
-                              ...prev,
-                              [row.sku]: { ...prev[row.sku], sub1Id, sub2Id: '', sub3Id: '', sub4Id: '' },
-                            }));
-                          }}
-                        >
-                          <option value="">Subcategory</option>
-                          {rowSub1Options.map((opt) => (
-                            <option key={opt.id} value={opt.id}>{opt.label}</option>
-                          ))}
-                        </select>
-                      )}
-                      {rowSub2Options.length > 0 && (
-                        <select
-                          className="adm-select adm-select--enhanced"
-                          value={edit.sub2Id}
-                          disabled={busy}
-                          onChange={(e) => {
-                            const sub2Id = e.target.value;
-                            setDormantEdits((prev) => ({
-                              ...prev,
-                              [row.sku]: { ...prev[row.sku], sub2Id, sub3Id: '', sub4Id: '' },
-                            }));
-                          }}
-                        >
-                          <option value="">Subcategory 2</option>
-                          {rowSub2Options.map((opt) => (
-                            <option key={opt.id} value={opt.id}>{opt.label}</option>
-                          ))}
-                        </select>
-                      )}
-                      {rowSub3Options.length > 0 && (
-                        <select
-                          className="adm-select adm-select--enhanced"
-                          value={edit.sub3Id}
-                          disabled={busy}
-                          onChange={(e) => {
-                            const sub3Id = e.target.value;
-                            setDormantEdits((prev) => ({
-                              ...prev,
-                              [row.sku]: { ...prev[row.sku], sub3Id, sub4Id: '' },
-                            }));
-                          }}
-                        >
-                          <option value="">Subcategory 3</option>
-                          {rowSub3Options.map((opt) => (
-                            <option key={opt.id} value={opt.id}>{opt.label}</option>
-                          ))}
-                        </select>
-                      )}
-                      {rowSub4Options.length > 0 && (
-                        <select
-                          className="adm-select adm-select--enhanced"
-                          value={edit.sub4Id}
-                          disabled={busy}
-                          onChange={(e) => {
-                            const sub4Id = e.target.value;
-                            setDormantEdits((prev) => ({
-                              ...prev,
-                              [row.sku]: { ...prev[row.sku], sub4Id },
-                            }));
-                          }}
-                        >
-                          <option value="">Subcategory 4</option>
-                          {rowSub4Options.map((opt) => (
-                            <option key={opt.id} value={opt.id}>{opt.label}</option>
-                          ))}
-                        </select>
-                      )}
-                    </div>
-                    <button
-                      type="button"
-                      className="adm-btn-ghost adm-btn-sm"
-                      style={{ marginTop: 8 }}
-                      disabled={busy}
-                      onClick={() => void saveDormantCategories(row.sku)}
-                    >
-                      Save categories
-                    </button>
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-end' }}>
-                    <button
-                      type="button"
-                      className="adm-btn-red adm-btn-sm"
-                      disabled={busy}
-                      onClick={() => void sendDormantToImageGen(row)}
-                    >
-                      <ImagePlus size={14} /> Image gen
-                    </button>
-                    <button
-                      type="button"
-                      className="adm-btn-ghost adm-btn-sm"
-                      disabled={busy}
-                      onClick={() => void removeDormantRow(row.sku)}
-                      style={{ color: '#dc2626' }}
-                    >
-                      <Trash2 size={14} /> Remove
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </section>
-
+      {activeTab === 'advanced' && (
       <div ref={singleProductRef}>
-      <SectionHead title="Single product" />
+      <SectionHead title="Advanced Product Editor" />
+      <p className="pl-section-note">Background removal, Gemini category suggestions, slot selection, overwrite confirmation, and manual product creation.</p>
 
       {/* Code lookup */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
@@ -1811,6 +1413,17 @@ export default function ProductLoaderPanel({
         </div>
       )}
       </div>
+      )}
+
+      {publishSuccess && (
+        <ProductLoaderPublishSuccess
+          result={publishSuccess}
+          mainSiteUrl={mainSiteUrl}
+          onGenerateApollo={(sku) => onGoToApollo?.(sku)}
+          onUploadNext={() => { setPublishSuccess(null); setActiveTab("single"); }}
+          onDone={() => setPublishSuccess(null)}
+        />
+      )}
     </div>
   );
 }

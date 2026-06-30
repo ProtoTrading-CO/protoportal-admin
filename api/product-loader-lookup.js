@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { requireAdminKey } from './_admin-auth.js';
 import { isSqlConfigured } from './_sql-provider.js';
-import { resolveProductLoaderMatch, SLOT_FIELDS } from './_product-loader-lookup.js';
+import { fetchDormantSkuSet, resolveProductLoaderMatch, SLOT_FIELDS } from './_product-loader-lookup.js';
 
 function getStockClient() {
   return createClient(
@@ -24,7 +24,13 @@ export default async function handler(req, res) {
   const sqlAvailable = isSqlConfigured();
   const sb = getStockClient();
 
-  const match = await resolveProductLoaderMatch(sb, { code, displayCode, imageSlot: Number(req.query.imageSlot) || 1 });
+  const dormantSkus = await fetchDormantSkuSet(sb).catch(() => new Set());
+  const match = await resolveProductLoaderMatch(sb, {
+    code,
+    displayCode,
+    imageSlot: Number(req.query.imageSlot) || 1,
+    dormantSkus,
+  });
 
   const existingImages = SLOT_FIELDS.map((f) => match.websiteRow?.[f]).filter(Boolean);
   const warnings = [...(match.warnings || [])];
@@ -39,5 +45,10 @@ export default async function handler(req, res) {
     warnings,
     resolvedCode: match.code,
     canPublish: match.canPublish,
+    websiteStatus: match.websiteStatus,
+    department: match.department,
+    category: match.category,
+    stockOnHand: match.stockOnHand,
+    needsReview: match.needsReview,
   });
 }

@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { requireAdminKey } from './_admin-auth.js';
+import { logProductLoaderAudit } from './_product-loader-audit.js';
 
 const PAGE_SIZE = 1000;
 const DORMANT_BY = 'new-products';
@@ -103,6 +104,21 @@ async function handleSave(sb, body) {
     const { error } = await sb.from('archived_products').insert(payload);
     if (error) return { status: 400, json: { error: error.message } };
   }
+
+  await logProductLoaderAudit(sb, {
+    sku,
+    action: 'update',
+    source: 'manual_product_loader',
+    publishMode: 'dormant',
+    newValues: {
+      outcome: 'dormant',
+      title,
+      category,
+      subcategoryOne,
+      filename: String(body.filename || '').trim() || null,
+    },
+    publishedBy: String(body.publishedBy || '').trim() || null,
+  });
 
   return { status: 200, json: { ok: true, sku } };
 }

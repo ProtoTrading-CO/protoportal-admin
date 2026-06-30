@@ -1,29 +1,14 @@
 import { getProductByCode } from './_sql-provider.js';
 import { toSqlPreview } from './_sql-stmast.js';
+import { parseLoaderFilename } from './_product-loader-filename.js';
+
+export { parseLoaderFilename } from './_product-loader-filename.js';
 
 export const SLOT_FIELDS = ['image_url_one', 'image_url_two', 'image_url_three', 'image_url_four'];
 export const WEBSITE_STOCK_COLS =
   'sku, title, price, original_description, category, subcategory_one, subcategory_two, '
   + 'subcategory_three, subcategory_four, '
   + 'image_url_one, image_url_two, image_url_three, image_url_four, barcode, updated_at, stock_qty, available_stock';
-
-export function parseLoaderFilename(filename) {
-  const dot = String(filename || '').lastIndexOf('.');
-  const stem = dot > 0 ? filename.slice(0, dot) : String(filename || '');
-  const normalizedStem = stem.trim();
-  if (!normalizedStem) return { code: '', displayCode: '', imageSlot: 1 };
-
-  const match = normalizedStem.match(/^(?<sku>.+)-(?<imageNumber>\d+)$/);
-  if (!match?.groups?.sku) {
-    return { code: normalizedStem.toUpperCase(), displayCode: normalizedStem, imageSlot: 1 };
-  }
-
-  const displayCode = String(match.groups.sku || '').trim();
-  const code = displayCode.toUpperCase();
-  const imageNumber = Number.parseInt(match.groups.imageNumber || '1', 10);
-  const imageSlot = Number.isFinite(imageNumber) ? Math.min(4, Math.max(1, imageNumber)) : 1;
-  return { code, displayCode, imageSlot };
-}
 
 function slugPattern(term) {
   return String(term || '').trim().replace(/[-_]+/g, '%');
@@ -41,13 +26,13 @@ async function lookupWebsiteStock(sb, code, displayCode) {
 
   const slug = slugPattern(displayCode || code);
   if (slug.length >= 2) {
-    const byTitle = await sb
+    const { data } = await sb
       .from('website_stock')
       .select(WEBSITE_STOCK_COLS)
       .ilike('title', `%${slug}%`)
       .limit(1)
       .maybeSingle();
-    if (byTitle.data) return { row: byTitle.data, matchedBy: 'title' };
+    if (data) return { row: data, matchedBy: 'title' };
   }
 
   return { row: null, matchedBy: null };
@@ -88,7 +73,41 @@ async function lookupPositill(sb, code, displayCode) {
   return { sqlRow: null, matchedBy: null };
 }
 
-export async function resolveProductLoaderMatch(sb, { code, displayCode, imageSlot = 1 }) {
+export function resolveWebsiteStatus({ websiteRow, sqlRow, dormantSkus, code }) {
+  const sku = String(websiteRow?.sku || code || '').trim().toUpperCase();
+  if (websiteRow?.sku) return 'live';
+  if (sku && dormantSkus?.has(sku)) return 'dormant';
+  if (sqlRow) return 'new';
+  return 'not_found';
+}
+
+export async function resolveProductLoaderMatch(sb, {
+  code,
+  displayCode,
+  imageSlot = 1,
+  dormantSkus = null,
+  parseError = null,
+}) {
+  if (parseError) {
+    return {
+      code: '',
+      displayCode: displayCode || '',
+      title: '',
+      price: 0,
+      imageSlot: Math.min(4, Math.max(1, Number(imageSlot) || 1)),
+      sqlRow: null,
+      websiteRow: null,
+      warnings: ['invalid_filename'],
+      matchedBy: null,
+      canPublish: false,
+      websiteStatus: 'not_found',
+      department: '',
+      category: '',
+      stockOnHand: null,
+      parseError,
+    };
+  }
+
   const [{ row: websiteRow, matchedBy: webMatch }, positill] = await Promise.all([
     lookupWebsiteStock(sb, code, displayCode),
     lookupPositill(sb, code, displayCode),
@@ -100,12 +119,21 @@ export async function resolveProductLoaderMatch(sb, { code, displayCode, imageSl
   const price = Number(sqlRow?.price ?? websiteRow?.price ?? 0);
   const slot = Math.min(4, Math.max(1, Number(imageSlot) || 1));
   const warnings = [];
+  const websiteStatus = resolveWebsiteStatus({
+    websiteRow,
+    sqlRow,
+    dormantSkus,
+    code: effectiveCode,
+  });
 
   if (!websiteRow && !sqlRow) warnings.push('not_in_catalog');
   if (websiteRow?.[SLOT_FIELDS[slot - 1]]) warnings.push('image_exists');
   if (!price) warnings.push('price_zero');
   const available = sqlRow?.available ?? websiteRow?.available_stock ?? websiteRow?.stock_qty;
   if (available != null && Number(available) <= 0) warnings.push('low_stock');
+  if (!websiteRow?.category && !sqlRow) warnings.push('needs_category');
+
+  const needsReview = warnings.some((w) => ['price_zero', 'image_exists', 'low_stock', 'needs_category'].includes(w));
 
   return {
     code: effectiveCode,
@@ -117,6 +145,36 @@ export async function resolveProductLoaderMatch(sb, { code, displayCode, imageSl
     websiteRow,
     warnings,
     matchedBy: webMatch || positill.matchedBy || null,
-    canPublish: Boolean(websiteRow || sqlRow),
+    canPublish: Boolean(websiteRow || sqlRow) && !parseError,
+    websiteStatus,
+    department: String(sqlRow?.dept || '').trim(),
+    category: String(websiteRow?.category || '').trim(),
+    stockOnHand: available,
+    needsReview,
+    parseError: null,
   };
+}
+
+export async function fetchDormantSkuSet(sb) {
+  const skus = new Set();
+  const PAGE = 1000;
+  let from = 0;
+  while (true) {
+    const { data, error } = await sb
+      .from('archived_products')
+      .select('sku')
+      .eq('archived_by', 'new-products')
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+    for (const row of data || []) skus.add(row.sku);
+    if ((data || []).length < PAGE) break;
+    from += PAGE;
+  }
+  return skus;
+}
+
+export function classifyBatchItem(item) {
+  if (!item.canPublish || item.parseError) return 'not_found';
+  if (item.needsReview || item.warnings?.length) return 'needs_review';
+  return 'ready';
 }
