@@ -364,6 +364,8 @@ function StackNavigation({
   displayTree,
   browsePath,
   setBrowsePath,
+  onReorderSiblings,
+  canDrag = false,
 }) {
   const levelNodes = filterQuery ? displayTree : getCategoriesAtPath(tree, browsePath);
   const breadcrumbLabels = resolvePathLabels(tree, browsePath);
@@ -378,6 +380,51 @@ function StackNavigation({
   const handleDrillIn = (pathHere) => {
     setBrowsePath(pathHere);
   };
+
+  const renderStackRow = (node, pathHere, hasChildren, nodeType, showDragHandle = false) => (
+    <div key={node.id} className="cat-sidebar-root">
+      <CategoryRow
+        node={node}
+        depth={0}
+        selectedPath={selectedPath}
+        pathHere={pathHere}
+        hasChildren={hasChildren}
+        open={false}
+        onToggle={() => {}}
+        onSelect={() => (
+          hasChildren
+            ? handleDrillIn(pathHere)
+            : onSelectPath(pathHere)
+        )}
+        onDrillIn={hasChildren ? () => handleDrillIn(pathHere) : undefined}
+        nodeType={nodeType}
+        onEditNode={onEditNode}
+        onDeleteNode={onDeleteNode}
+        onAddChild={onAddChild}
+        stackMode
+        showDragHandle={showDragHandle}
+      />
+    </div>
+  );
+
+  const stackParentId = browsePath.length ? browsePath[browsePath.length - 1] : null;
+  const stackSiblings = filterQuery
+    ? displayTree
+    : (browsePath.length === 0 ? tree : levelNodes);
+
+  const stackList = canDrag && onReorderSiblings && !filterQuery ? (
+    <DraggableSiblingList
+      nodes={stackSiblings}
+      parentId={stackParentId}
+      onReorderSiblings={onReorderSiblings}
+      renderItem={(node, showHandle) => {
+        const pathHere = browsePath.length === 0 ? [node.id] : [...browsePath, node.id];
+        const hasChildren = !!node.children?.length;
+        const nodeType = browsePath.length === 0 ? 'category' : 'subcategory';
+        return renderStackRow(node, pathHere, hasChildren, nodeType, showHandle);
+      }}
+    />
+  ) : null;
 
   return (
     <>
@@ -427,61 +474,21 @@ function StackNavigation({
             />
           </div>
         ))
-      ) : browsePath.length === 0 ? (
-        tree.map((node) => (
-          <div key={node.id} className="cat-sidebar-root">
-            <CategoryRow
-              node={node}
-              depth={0}
-              selectedPath={selectedPath}
-              pathHere={[node.id]}
-              hasChildren={!!node.children?.length}
-              open={false}
-              onToggle={() => {}}
-              onSelect={() => (
-                node.children?.length
-                  ? handleDrillIn([node.id])
-                  : handleSelectRoot(node.id)
-              )}
-              onDrillIn={node.children?.length ? () => handleDrillIn([node.id]) : undefined}
-              nodeType="category"
-              onEditNode={onEditNode}
-              onDeleteNode={onDeleteNode}
-              onAddChild={onAddChild}
-              stackMode
-            />
-          </div>
+      ) : stackList || (browsePath.length === 0 ? (
+        tree.map((node) => renderStackRow(
+          node,
+          [node.id],
+          !!node.children?.length,
+          'category',
         ))
       ) : (
-        levelNodes.map((node) => {
-          const pathHere = [...browsePath, node.id];
-          const hasChildren = !!node.children?.length;
-          return (
-            <div key={node.id} className="cat-sidebar-root">
-              <CategoryRow
-                node={node}
-                depth={0}
-                selectedPath={selectedPath}
-                pathHere={pathHere}
-                hasChildren={hasChildren}
-                open={false}
-                onToggle={() => {}}
-                onSelect={() => (
-                  hasChildren
-                    ? handleDrillIn(pathHere)
-                    : onSelectPath(pathHere)
-                )}
-                onDrillIn={hasChildren ? () => handleDrillIn(pathHere) : undefined}
-                nodeType="subcategory"
-                onEditNode={onEditNode}
-                onDeleteNode={onDeleteNode}
-                onAddChild={onAddChild}
-                stackMode
-              />
-            </div>
-          );
-        })
-      )}
+        levelNodes.map((node) => renderStackRow(
+          node,
+          [...browsePath, node.id],
+          !!node.children?.length,
+          'subcategory',
+        ))
+      ))}
     </>
   );
 }
@@ -503,7 +510,6 @@ export default function CategorySidebar({
   onStackNavChange,
   onReorder,
   productCounts = {},
-  reorderMainCategoriesOnly = false,
 }) {
   const [expanded, setExpanded] = useState(() => new Set());
   const [collapsed, setCollapsed] = useState(() => new Set());
@@ -602,15 +608,13 @@ export default function CategorySidebar({
   // Called from DraggableSiblingList at any level. parentId=null means root.
   const handleReorderSiblings = (parentId, newSiblings) => {
     if (!onReorder) return;
-    if (reorderMainCategoriesOnly && parentId != null) return;
     const newTree = parentId == null
       ? newSiblings
       : reorderChildrenInTree(tree, parentId, newSiblings);
     onReorder(newTree);
   };
 
-  const canDragMain = !!onReorder && !filterQuery;
-  const childReorder = canDragMain && !reorderMainCategoriesOnly;
+  const canDrag = !!onReorder && !filterQuery;
 
   return (
     <div className={`cat-sidebar-wrap${stackMode ? ' cat-sidebar-wrap--stack' : ''}${className ? ` ${className}` : ''}`}>
@@ -672,8 +676,10 @@ export default function CategorySidebar({
             displayTree={displayTree}
             browsePath={browsePath}
             setBrowsePath={setBrowsePath}
+            onReorderSiblings={canDrag ? handleReorderSiblings : null}
+            canDrag={canDrag}
           />
-        ) : canDragMain ? (
+        ) : canDrag ? (
           <DraggableSiblingList
             nodes={displayTree}
             parentId={null}
@@ -697,7 +703,6 @@ export default function CategorySidebar({
                   productCount={productCounts[node.id]}
                 />
                 {node.children?.length && isOpen(node.id) && (
-                  childReorder ? (
                   <DraggableSiblingList
                     nodes={node.children}
                     parentId={node.id}
@@ -722,25 +727,6 @@ export default function CategorySidebar({
                       />
                     )}
                   />
-                  ) : (
-                    node.children.map((child) => (
-                      <TreeBranch
-                        key={child.id}
-                        node={child}
-                        depth={1}
-                        selectedPath={selectedPath}
-                        onSelectPath={onSelectPath}
-                        isOpen={isOpen}
-                        onToggle={toggle}
-                        ancestors={[node.id]}
-                        onEditNode={onEditNode}
-                        onDeleteNode={onDeleteNode}
-                        onAddChild={onAddChild}
-                        forceOpen={false}
-                        productCounts={productCounts}
-                      />
-                    ))
-                  )
                 )}
               </div>
             )}

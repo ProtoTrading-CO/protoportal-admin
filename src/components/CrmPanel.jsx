@@ -45,7 +45,7 @@ export default function CrmPanel({ onShowToast }) {
     setSyncing(true);
     try {
       const json = await syncFromBrevo();
-      onShowToast?.(`Synced ${json.upserted || 0} contacts from Brevo`, 'success');
+      onShowToast?.(`Synced ${json.upserted ?? json.succeeded ?? 0} contacts from Brevo`, 'success');
       await refetch();
     } catch (err) {
       onShowToast?.(err.message || 'Brevo sync failed', 'error');

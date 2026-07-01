@@ -123,6 +123,7 @@ import OrderWhatsappNotify from '../components/OrderWhatsappNotify';
 import AnalyticsHub from '../components/AnalyticsHub';
 import ProductManagerEngine from '../components/ProductManagerEngine';
 import GroupedSidebar from '../components/GroupedSidebar';
+import CrmPanel from '../components/CrmPanel';
 import { useDashboardStats } from '../hooks/useDashboardStats';
 import { queryClient } from '../lib/queryClient';
 import { queryKeys } from '../lib/queryKeys';
@@ -1013,16 +1014,19 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   const handleCategoryReorder = async (newTree) => {
     setTaxonomyTree(newTree);
     setLiveTaxonomyTree(newTree);
+    setTaxonomySaving(true);
     try {
       await replaceFullTaxonomy(newTree);
       invalidateAdminCache();
       queryClient.invalidateQueries({ queryKey: ['catalog'] });
+      showToast('Category order saved — live site updates within ~30 seconds', 'success');
     } catch (err) {
       showToast(err.message || 'Failed to save category order', 'error');
-      // Revert on failure
       const reverted = await fetchTaxonomy();
       setTaxonomyTree(reverted);
       setLiveTaxonomyTree(reverted);
+    } finally {
+      setTaxonomySaving(false);
     }
   };
 
@@ -3588,13 +3592,15 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                         <Plus size={16} strokeWidth={2.5} />
                       </button>
                     </div>
+                    <p className="adm-section-note" style={{ margin: '0 0 10px', fontSize: 12 }}>
+                      Drag categories and subcategories by the grip handle. Order saves to the live trade portal automatically.
+                    </p>
                     <CategorySidebar
                       tree={taxonomyTree}
                       selectedPath={reorderCategoryPath}
                       onSelectPath={(path) => { setReorderCategoryPath(path); setSelectedIds(new Set()); setReorderSearch(''); }}
                       onAddChild={(parentId) => setNewSubModal({ parentId, label: '' })}
                       onReorder={handleCategoryReorder}
-                      reorderMainCategoriesOnly
                       productCounts={categoryProductCounts}
                     />
                   </aside>
@@ -4242,6 +4248,13 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                 </div>
                 </>
                 )}
+              </div>
+            )}
+
+            {/* BREVO CRM */}
+            {activeSection === 'brevo' && (
+              <div className="adm-panel">
+                <CrmPanel onShowToast={showToast} />
               </div>
             )}
 
