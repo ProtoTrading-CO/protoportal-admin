@@ -1,6 +1,12 @@
 import { requireAdminKey } from './_admin-auth.js';
 import { createClient } from '@supabase/supabase-js';
-import { fetchCustomerAudience, sendBroadcastBatch, wrapBroadcastHtml, sendBrevoTransactional } from './_brevo-email.js';
+import {
+  fetchCustomerAudience,
+  sendBroadcastBatch,
+  buildComposedEmail,
+  TEST_MERGE_VARS,
+  sendBrevoTransactional,
+} from './_brevo-email.js';
 
 function getAdminClient() {
   return createClient(
@@ -25,6 +31,8 @@ export default async function handler(req, res) {
   const {
     audience,
     subject,
+    introText,
+    htmlBlock,
     htmlContent,
     textContent,
     testEmail,
@@ -36,19 +44,27 @@ export default async function handler(req, res) {
   }
   const subj = String(subject || '').trim();
   if (!subj) return res.status(400).json({ error: 'Subject is required' });
-  const bodyHtml = String(htmlContent || '').trim();
-  if (!bodyHtml && !textContent) return res.status(400).json({ error: 'Email body is required' });
+
+  const intro = String(introText ?? '').trim();
+  const html = String(htmlBlock ?? htmlContent ?? '').trim();
+  if (!intro && !html && !textContent) {
+    return res.status(400).json({ error: 'Write a message body and/or HTML block.' });
+  }
 
   try {
     const sb = getAdminClient();
 
     if (testEmail) {
       const to = { email: String(testEmail).trim().toLowerCase(), name: 'Test' };
+      const composed = buildComposedEmail(
+        { subject: subj, introText: intro, htmlBlock: html },
+        TEST_MERGE_VARS,
+      );
       await sendBrevoTransactional({
         to,
-        subject: `[TEST] ${subj}`,
-        htmlContent: wrapBroadcastHtml({ subject: subj, bodyHtml, previewName: 'Test' }),
-        textContent,
+        subject: `[TEST] ${composed.subject}`,
+        htmlContent: composed.htmlContent,
+        textContent: composed.textContent || textContent,
       });
       return res.status(200).json({ ok: true, test: true, sent: 1 });
     }
@@ -60,8 +76,8 @@ export default async function handler(req, res) {
 
     const { sent, failed, errors } = await sendBroadcastBatch(recipients, {
       subject: subj,
-      htmlContent: bodyHtml,
-      textContent,
+      introText: intro,
+      htmlBlock: html,
     });
 
     return res.status(failed ? 207 : 200).json({

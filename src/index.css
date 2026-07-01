@@ -8082,6 +8082,51 @@ html, body { background: #f5f5f5; color: #111827; }
   }
 }
 
+.adm-email-merge-bar {
+  display: grid;
+  gap: 8px;
+}
+
+.adm-email-merge-bar__label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #9ca3af;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.adm-email-merge-bar__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.adm-email-merge-chip {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 999px;
+  background: #fff;
+  color: #374151;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+
+.adm-email-merge-chip:hover {
+  border-color: #c40000;
+  background: #fef2f2;
+  color: #c40000;
+}
+
+.adm-email-field--intro {
+  padding: 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #fafafa;
+}
+
 /* Customer email broadcast modal */
 .adm-email-modal {
   width: min(640px, 100%);

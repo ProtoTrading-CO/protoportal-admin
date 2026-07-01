@@ -3,6 +3,7 @@
  * Defaults apply on first deploy; edit limits in Admin → Cost Tracking.
  */
 
+import { PROTO_URLS } from './_proto-urls.js';
 import { readSiteConfigJson, writeSiteConfigJson } from './_site-config.js';
 import { isMissingTableError } from './_image-gen-db-locks.js';
 
@@ -326,7 +327,7 @@ async function maybeAlertPeriod(sb, { period, periodKeyVal, spent, limitUsd, con
     ${level === 'exceeded' && config.blockAtLimit
     ? '<p style="color:#991b1b"><strong>New image generation is blocked</strong> until the next period or you raise the limits in Admin → Cost Tracking.</p>'
     : '<p>Consider pausing large Apollo batches until the period resets.</p>'}
-    <p><a href="https://protoportal-admin.vercel.app">Open Cost Tracking in admin</a></p>
+    <p><a href="${PROTO_URLS.admin}">Open Cost Tracking in admin</a></p>
   `;
 
   const sent = await sendBudgetEmail({ to: config.alertEmail, subject, html });
