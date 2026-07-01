@@ -888,7 +888,6 @@ export default function ProductManagerEngine({
               onDeleteNode={onDeleteNode}
               onAddChild={onAddSubcategory}
               onReorder={onCategoryReorder}
-              reorderMainCategoriesOnly
               productCounts={categoryProductCounts}
             />
           </aside>
@@ -1409,6 +1408,7 @@ export default function ProductManagerEngine({
               onEditNode={onEditCategory}
               onDeleteNode={onDeleteNode}
               onAddChild={onAddSubcategory}
+              onReorder={onCategoryReorder}
               variant="stack"
               className="pm-cat-drawer-sidebar"
               isActive={categoryDrawerOpen}
