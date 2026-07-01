@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { exportBatchReportCsv, isImageFile } from '../../lib/parseIntakeFilename';
 import { lookupFilenames, logPublishFailure, publishLoaderImageItem } from '../../lib/productLoaderApi';
+import ProductLoaderApolloSend from './ProductLoaderApolloSend';
 
 function displayTitle(...candidates) {
   for (const c of candidates) {
@@ -47,7 +48,7 @@ export default function ProductLoaderFolder({
   batchOverwrite,
   setBatchOverwrite,
   onShowToast,
-  onAddDormantBatch,
+  onSendToApollo,
 }) {
   const folderRef = useRef(null);
   const [items, setItems] = useState([]);
@@ -235,6 +236,8 @@ export default function ProductLoaderFolder({
           {renderGroup('needs_review')}
           {renderGroup('not_found')}
 
+          <ProductLoaderApolloSend items={items} onSendToApollo={onSendToApollo} onShowToast={onShowToast} />
+
           <div className="pl-inline-fields">
             <label>
               Default category (new products)
@@ -262,9 +265,6 @@ export default function ProductLoaderFolder({
             <button type="button" className="adm-btn-red" disabled={processing || scanning || !grouped.ready.length} onClick={() => void publishItems(grouped.ready)}>
               {processing ? <Loader2 size={14} className="spin" /> : <Upload size={14} />}
               Publish All Ready ({grouped.ready.length})
-            </button>
-            <button type="button" className="adm-btn-ghost" disabled={processing} onClick={() => onAddDormantBatch?.(grouped.ready.filter((i) => i.code))}>
-              <PackagePlus size={14} /> Add Ready To Dormant
             </button>
             <button type="button" className="adm-btn-ghost" disabled={processing || !items.some((i) => i.status === 'error')} onClick={() => void retryFailed()}>
               <RefreshCw size={14} /> Retry Failed

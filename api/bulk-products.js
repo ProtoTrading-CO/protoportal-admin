@@ -53,10 +53,13 @@ async function unarchiveProduct(supabase, sku) {
  * may bulk-delete from either Product Manager or the Archive view.
  */
 async function permanentlyDeleteProduct(supabase, sku) {
+  const errors = [];
   const { error: liveError } = await supabase.from('website_stock').delete().eq('sku', sku);
-  if (liveError) return { sku, ok: false, error: liveError.message };
+  if (liveError) errors.push(liveError.message);
   const { error: archError } = await supabase.from('archived_products').delete().eq('sku', sku);
-  if (archError) return { sku, ok: false, error: archError.message };
+  if (archError) errors.push(archError.message);
+  await supabase.from('staged_product_previews').delete().eq('sku', sku).catch(() => {});
+  if (errors.length) return { sku, ok: false, error: errors.join('; ') };
   return { sku, ok: true };
 }
 

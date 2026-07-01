@@ -5,7 +5,7 @@ import { LEGACY_NAV_ALIASES } from '../lib/taxonomy';
 import { subcategoryOptionsFromTree } from '../lib/taxonomyAdmin';
 
 const GROUP_HEADER_HEIGHT = 36;
-const CARD_ROW_HEIGHT = 200;
+const CARD_ROW_HEIGHT = 268;
 const GRID_GAP = 8;
 
 function deepestGroupKey(product, mainCategoryId, selectedPath = []) {

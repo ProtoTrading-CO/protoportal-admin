@@ -41,9 +41,8 @@ export default function ProductLoaderSingleImage({
   batchOverwrite,
   setBatchOverwrite,
   onShowToast,
-  onOpenAdvanced,
   onPublished,
-  onAddDormant,
+  onSendToApollo,
   mainSiteUrl = 'https://site.proto.co.za',
 }) {
   const inputRef = useRef(null);
@@ -198,19 +197,33 @@ export default function ProductLoaderSingleImage({
 
           <div className="pl-action-row">
             {item.group !== 'not_found' && (
-              <>
-                <button type="button" className="adm-btn-red" disabled={processing} onClick={() => void handlePublish()}>
-                  {processing ? <Loader2 size={14} className="spin" /> : <Upload size={14} />}
-                  Publish Live
-                </button>
-                <button type="button" className="adm-btn-ghost" disabled={processing} onClick={() => onAddDormant?.(item)}>
-                  <PackagePlus size={14} /> Add To Dormant
-                </button>
-              </>
+              <button type="button" className="adm-btn-red" disabled={processing} onClick={() => void handlePublish()}>
+                {processing ? <Loader2 size={14} className="spin" /> : <Upload size={14} />}
+                Publish Live
+              </button>
             )}
-            <button type="button" className="adm-btn-ghost" disabled={!item.code} onClick={() => onOpenAdvanced?.(item.code)}>
-              Open Advanced Editor
-            </button>
+            {item.group !== 'not_found' && item.sqlRow && (
+              <button
+                type="button"
+                className="adm-btn-ghost"
+                disabled={!item.code}
+                onClick={() => onSendToApollo?.([{
+                  id: item.code,
+                  sku: item.code,
+                  name: displayTitle(item.title, item.sqlRow?.title) || item.code,
+                  title: displayTitle(item.title, item.sqlRow?.title) || item.code,
+                  image: item.websiteRow?.image_url_one || preview,
+                  images: [
+                    item.websiteRow?.image_url_one,
+                    item.websiteRow?.image_url_two,
+                    item.websiteRow?.image_url_three,
+                    item.websiteRow?.image_url_four,
+                  ].filter(Boolean),
+                }])}
+              >
+                <PackagePlus size={14} /> Send to Apollo Image Gen
+              </button>
+            )}
             {isLive && (
               <a className="adm-btn-ghost" href={`${mainSiteUrl.replace(/\/$/, '')}/products?search=${encodeURIComponent(item.code)}`} target="_blank" rel="noopener noreferrer">
                 <ExternalLink size={14} /> View Website

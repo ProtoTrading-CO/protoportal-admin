@@ -118,13 +118,20 @@ export default async function handler(req, res) {
   // are intentionally untouched here; deleting orders is a separate action.
   if (req.method === 'DELETE') {
     const supabase = getAdminClient();
-    const { error } = await supabase
+    const errors = [];
+    const { error: eventsErr } = await supabase
       .from('analytics_events')
       .delete()
       .gte('created_at', '1970-01-01');
-    if (error && !/does not exist/i.test(error.message)) {
-      return res.status(400).json({ error: error.message });
-    }
+    if (eventsErr && !/does not exist/i.test(eventsErr.message)) errors.push(eventsErr.message);
+
+    const { error: searchErr } = await supabase
+      .from('search_analytics')
+      .delete()
+      .gte('created_at', '1970-01-01');
+    if (searchErr && !/does not exist/i.test(searchErr.message)) errors.push(searchErr.message);
+
+    if (errors.length) return res.status(400).json({ error: errors.join('; ') });
     return res.status(200).json({ ok: true });
   }
 

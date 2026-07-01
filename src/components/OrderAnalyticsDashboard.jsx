@@ -243,9 +243,14 @@ export default function OrderAnalyticsDashboard() {
                   onClick={async () => {
                     setClearing(true);
                     try {
-                      const res = await fetch('/api/order-analytics', { method: 'DELETE' });
-                      const json = await res.json().catch(() => ({}));
-                      if (!res.ok) throw new Error(json.error || 'Failed to clear analytics');
+                      const [orderRes, searchRes] = await Promise.all([
+                        fetch('/api/order-analytics', { method: 'DELETE' }),
+                        fetch('/api/search-analytics-dashboard', { method: 'DELETE' }),
+                      ]);
+                      const orderJson = await orderRes.json().catch(() => ({}));
+                      const searchJson = await searchRes.json().catch(() => ({}));
+                      if (!orderRes.ok) throw new Error(orderJson.error || 'Failed to clear order analytics');
+                      if (!searchRes.ok) throw new Error(searchJson.error || 'Failed to clear search analytics');
                       setClearConfirmOpen(false);
                       await load();
                     } catch (e) {
