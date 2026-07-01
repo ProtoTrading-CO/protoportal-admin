@@ -85,11 +85,11 @@ export async function pushPortalCustomersToBrevo() {
   return json;
 }
 
-export async function sendCustomerEmailBroadcast({ audience, subject, htmlContent, textContent, testEmail }) {
+export async function sendCustomerEmailBroadcast({ audience, subject, introText, htmlBlock, testEmail }) {
   const res = await fetch('/api/customer-email-broadcast', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ audience, subject, htmlContent, textContent, testEmail }),
+    body: JSON.stringify({ audience, subject, introText, htmlBlock, testEmail }),
   });
   const json = await res.json();
   if (!res.ok && res.status !== 207) throw new Error(json.error || 'Email send failed');

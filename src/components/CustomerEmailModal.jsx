@@ -1,5 +1,13 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Code2, Loader2, Mail, Send, Type } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Code2, Loader2, Mail, Send } from 'lucide-react';
+import { PROTO_URLS } from '../lib/protoUrls';
+import {
+  MERGE_TAGS,
+  PREVIEW_MERGE_VARS,
+  applyMergeTags,
+  buildEmailBodyHtml,
+  wrapBroadcastHtml,
+} from '../lib/emailMergeTags';
 
 const AUDIENCE_OPTIONS = [
   {
@@ -30,69 +38,37 @@ function defaultAudienceForTab(customerTab) {
   return 'all-approved';
 }
 
-function escapeHtml(value) {
-  return String(value ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
+function insertAtCursor(textarea, insertValue) {
+  if (!textarea) return insertValue;
+  const start = textarea.selectionStart ?? textarea.value.length;
+  const end = textarea.selectionEnd ?? start;
+  const next = `${textarea.value.slice(0, start)}${insertValue}${textarea.value.slice(end)}`;
+  const pos = start + insertValue.length;
+  textarea.value = next;
+  textarea.focus();
+  textarea.setSelectionRange(pos, pos);
+  return next;
 }
 
-function stripDangerousHtml(html) {
-  return String(html || '')
-    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-    .replace(/\bon\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '');
-}
-
-function looksLikeHtml(text) {
-  const t = String(text || '').trim();
-  return /<\s*\w+[^>]*>/i.test(t) || /<\s*\/\s*\w+\s*>/i.test(t);
-}
-
-function plainToHtml(text) {
-  return text
-    .trim()
-    .split(/\n{2,}/)
-    .map((block) => {
-      const lines = block.split('\n').map((line) => line.trim()).filter(Boolean);
-      if (!lines.length) return '';
-      return `<p style="margin:0 0 14px;line-height:1.55;">${lines.map((line) => escapeHtml(line)).join('<br />')}</p>`;
-    })
-    .filter(Boolean)
-    .join('');
-}
-
-function htmlToText(html) {
-  return String(html || '')
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/p>/gi, '\n\n')
-    .replace(/<[^>]+>/g, '')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-}
-
-function wrapBroadcastHtml({ subject, bodyHtml, previewName = 'Customer' }) {
-  const safeBody = bodyHtml || '<p style="color:#9ca3af;">Your message will appear here.</p>';
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escapeHtml(subject || 'Email preview')}</title></head><body style="font-family:Arial,sans-serif;line-height:1.5;color:#111827;max-width:640px;margin:0 auto;padding:24px;">
-  ${previewName ? `<p style="margin:0 0 16px;">Hi ${escapeHtml(previewName)},</p>` : ''}
-  ${safeBody}
-  <hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0;" />
-  <p style="font-size:12px;color:#6b7280;margin:0;">Proto Trading · <a href="https://site.proto.co.za">site.proto.co.za</a></p>
-</body></html>`;
-}
-
-function buildPayload({ body, contentMode }) {
-  const trimmed = body.trim();
-  const htmlContent = contentMode === 'html'
-    ? stripDangerousHtml(trimmed)
-    : plainToHtml(trimmed);
-  const textContent = contentMode === 'html' ? htmlToText(trimmed) : trimmed;
-  return { htmlContent, textContent };
+function MergeTagBar({ onInsert }) {
+  return (
+    <div className="adm-email-merge-bar">
+      <span className="adm-email-merge-bar__label">Insert field</span>
+      <div className="adm-email-merge-bar__chips">
+        {MERGE_TAGS.map(({ key, label }) => (
+          <button
+            key={key}
+            type="button"
+            className="adm-email-merge-chip"
+            onClick={() => onInsert(`{{${key}}}`)}
+            title={`Insert {{${key}}}`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 export default function CustomerEmailModal({
@@ -104,12 +80,17 @@ export default function CustomerEmailModal({
   adminEmail = '',
 }) {
   const [subject, setSubject] = useState('');
-  const [body, setBody] = useState('');
-  const [contentMode, setContentMode] = useState('plain');
+  const [introBody, setIntroBody] = useState('');
+  const [htmlBody, setHtmlBody] = useState('');
   const [htmlPane, setHtmlPane] = useState('split');
   const [audience, setAudience] = useState('all-approved');
   const [sending, setSending] = useState(false);
   const [testSending, setTestSending] = useState(false);
+
+  const subjectRef = useRef(null);
+  const introRef = useRef(null);
+  const htmlRef = useRef(null);
+  const activeFieldRef = useRef('intro');
 
   useEffect(() => {
     if (!open) return;
@@ -122,35 +103,52 @@ export default function CustomerEmailModal({
     [audience],
   );
 
-  const bodyHtml = useMemo(() => {
-    if (!body.trim()) return '<p style="color:#9ca3af;margin:0;">Start typing or paste HTML to see a live preview.</p>';
-    return buildPayload({ body, contentMode }).htmlContent || '<p style="color:#9ca3af;margin:0;">Empty message</p>';
-  }, [body, contentMode]);
+  const previewSubject = useMemo(
+    () => applyMergeTags(subject.trim() || 'Subject line', PREVIEW_MERGE_VARS),
+    [subject],
+  );
+
+  const previewBodyHtml = useMemo(
+    () => buildEmailBodyHtml({ introText: introBody, htmlBlock: htmlBody }, PREVIEW_MERGE_VARS)
+      || '<p style="color:#9ca3af;margin:0;">Write a message body and/or HTML block to preview.</p>',
+    [introBody, htmlBody],
+  );
 
   const fullPreviewDoc = useMemo(
     () => wrapBroadcastHtml({
-      subject: subject.trim() || 'Subject line',
-      bodyHtml,
-      previewName: 'Customer',
+      subject: previewSubject,
+      bodyHtml: previewBodyHtml,
+      siteUrl: PROTO_URLS.site,
+      registerUrl: PROTO_URLS.register,
     }),
-    [subject, bodyHtml],
+    [previewSubject, previewBodyHtml],
   );
 
   if (!open) return null;
+
+  const insertMergeTag = (token) => {
+    const field = activeFieldRef.current;
+    if (field === 'subject' && subjectRef.current) {
+      setSubject(insertAtCursor(subjectRef.current, token));
+      return;
+    }
+    if (field === 'html' && htmlRef.current) {
+      setHtmlBody(insertAtCursor(htmlRef.current, token));
+      return;
+    }
+    if (introRef.current) {
+      activeFieldRef.current = 'intro';
+      setIntroBody(insertAtCursor(introRef.current, token));
+    }
+  };
 
   const handleSend = async (test = false) => {
     if (!subject.trim()) {
       onShowToast?.('Subject is required', 'error');
       return;
     }
-    if (!body.trim()) {
-      onShowToast?.('Email body is required', 'error');
-      return;
-    }
-
-    const { htmlContent, textContent } = buildPayload({ body, contentMode });
-    if (!htmlContent && !textContent) {
-      onShowToast?.('Email body is required', 'error');
+    if (!introBody.trim() && !htmlBody.trim()) {
+      onShowToast?.('Write a message body and/or HTML block', 'error');
       return;
     }
 
@@ -164,8 +162,8 @@ export default function CustomerEmailModal({
         await onSend({
           audience,
           subject: subject.trim(),
-          htmlContent,
-          textContent,
+          introText: introBody.trim(),
+          htmlBlock: htmlBody.trim(),
           testEmail: testEmail.trim(),
         });
         onShowToast?.(`Test email sent to ${testEmail.trim()}`, 'success');
@@ -182,8 +180,8 @@ export default function CustomerEmailModal({
       const result = await onSend({
         audience,
         subject: subject.trim(),
-        htmlContent,
-        textContent,
+        introText: introBody.trim(),
+        htmlBlock: htmlBody.trim(),
       });
       onShowToast?.(
         `Sent to ${result.sent} customer(s)${result.failed ? ` — ${result.failed} failed` : ''}`,
@@ -197,30 +195,13 @@ export default function CustomerEmailModal({
     }
   };
 
-  const switchContentMode = (mode) => {
-    if (mode === contentMode) return;
-    if (mode === 'html' && contentMode === 'plain' && body.trim() && !looksLikeHtml(body)) {
-      setBody(plainToHtml(body));
-    }
-    setContentMode(mode);
-    if (mode === 'html') setHtmlPane('split');
-  };
-
-  const handleBodyChange = (value) => {
-    setBody(value);
-    if (contentMode === 'plain' && looksLikeHtml(value)) {
-      setContentMode('html');
-      setHtmlPane('split');
-    }
-  };
-
-  const showHtmlEditor = contentMode === 'html' && htmlPane !== 'preview';
-  const showHtmlPreview = contentMode === 'html' && htmlPane !== 'code';
+  const showHtmlEditor = htmlPane !== 'preview';
+  const showHtmlPreview = htmlPane !== 'code';
 
   return (
     <div className="adm-modal-backdrop" onClick={onClose}>
       <div
-        className={`adm-modal adm-modal--form adm-email-modal${contentMode === 'html' ? ' adm-email-modal--html' : ''}`}
+        className="adm-modal adm-modal--form adm-email-modal adm-email-modal--html"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-labelledby="customer-email-title"
@@ -231,7 +212,7 @@ export default function CustomerEmailModal({
               <Mail size={18} /> Send email via Brevo
             </h3>
             <p className="adm-email-modal__lead">
-              Compose plain text or paste HTML. In HTML mode the preview updates live — exactly how customers receive it.
+              Write your message above, add optional HTML below, and use fields like {'{{name}}'} or {'{{business_name}}'} — replaced per customer on send.
             </p>
           </div>
           <button type="button" className="adm-modal-close" onClick={onClose} aria-label="Close">×</button>
@@ -252,42 +233,41 @@ export default function CustomerEmailModal({
             <span className="adm-email-field__hint">{selectedAudience.hint}</span>
           </label>
 
-          <label className="adm-email-field">
+          <div className="adm-email-field">
             <span className="adm-email-field__label">Subject</span>
             <input
+              ref={subjectRef}
               className="adm-field-input"
               value={subject}
               onChange={(e) => setSubject(e.target.value)}
-              placeholder="Proto Trading update"
+              onFocus={() => { activeFieldRef.current = 'subject'; }}
+              placeholder="Proto Trading update for {{business_name}}"
             />
-          </label>
+            <MergeTagBar onInsert={insertMergeTag} />
+          </div>
+
+          <div className="adm-email-field adm-email-field--intro">
+            <span className="adm-email-field__label">Message body</span>
+            <textarea
+              ref={introRef}
+              className="adm-field-input adm-email-modal__textarea"
+              rows={6}
+              value={introBody}
+              onChange={(e) => setIntroBody(e.target.value)}
+              onFocus={() => { activeFieldRef.current = 'intro'; }}
+              placeholder={'Hi {{first_name}},\n\nWe have an update for {{business_name}}…'}
+              spellCheck
+            />
+            <span className="adm-email-field__hint">Plain text intro shown above any HTML. Blank lines start new paragraphs.</span>
+            <MergeTagBar onInsert={insertMergeTag} />
+          </div>
 
           <div className="adm-email-field">
             <div className="adm-email-field__row">
-              <span className="adm-email-field__label">Message</span>
-              <div className="adm-email-mode-toggle" role="tablist" aria-label="Message format">
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={contentMode === 'plain'}
-                  className={`adm-email-mode-toggle__btn${contentMode === 'plain' ? ' adm-email-mode-toggle__btn--active' : ''}`}
-                  onClick={() => switchContentMode('plain')}
-                >
-                  <Type size={14} /> Plain text
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={contentMode === 'html'}
-                  className={`adm-email-mode-toggle__btn${contentMode === 'html' ? ' adm-email-mode-toggle__btn--active' : ''}`}
-                  onClick={() => switchContentMode('html')}
-                >
-                  <Code2 size={14} /> HTML
-                </button>
-              </div>
-            </div>
-
-            {contentMode === 'html' && (
+              <span className="adm-email-field__label">
+                <Code2 size={14} style={{ verticalAlign: -2, marginRight: 4 }} />
+                HTML block (optional)
+              </span>
               <div className="adm-email-pane-toggle" role="tablist" aria-label="HTML editor view">
                 <button
                   type="button"
@@ -311,64 +291,50 @@ export default function CustomerEmailModal({
                   Preview only
                 </button>
               </div>
-            )}
+            </div>
 
-            {contentMode === 'plain' ? (
-              <textarea
-                className="adm-field-input adm-email-modal__textarea"
-                rows={8}
-                value={body}
-                onChange={(e) => handleBodyChange(e.target.value)}
-                placeholder="Write your message. Blank lines start new paragraphs."
-                spellCheck
-              />
-            ) : (
-              <div className={`adm-email-split${htmlPane === 'split' ? ' adm-email-split--split' : ''}`}>
-                {showHtmlEditor && (
-                  <div className="adm-email-split__editor">
-                    <div className="adm-email-split__pane-label">HTML source</div>
-                    <textarea
-                      className="adm-field-input adm-email-modal__textarea adm-email-modal__textarea--html"
-                      rows={14}
-                      value={body}
-                      onChange={(e) => handleBodyChange(e.target.value)}
-                      placeholder={'<h2>Hello</h2>\n<p>Paste HTML from Brevo, Mailchimp, or your email template…</p>'}
-                      spellCheck={false}
+            <div className={`adm-email-split${htmlPane === 'split' ? ' adm-email-split--split' : ''}`}>
+              {showHtmlEditor && (
+                <div className="adm-email-split__editor">
+                  <textarea
+                    ref={htmlRef}
+                    className="adm-field-input adm-email-modal__textarea adm-email-modal__textarea--html"
+                    rows={12}
+                    value={htmlBody}
+                    onChange={(e) => setHtmlBody(e.target.value)}
+                    onFocus={() => { activeFieldRef.current = 'html'; }}
+                    placeholder={'<table>...</table>\n<p>Optional rich HTML banner or template below your message body.</p>'}
+                    spellCheck={false}
+                  />
+                  <MergeTagBar onInsert={insertMergeTag} />
+                </div>
+              )}
+              {showHtmlPreview && (
+                <div className="adm-email-split__preview">
+                  <div className="adm-email-preview adm-email-preview--full">
+                    <div className="adm-email-preview__chrome">
+                      <div className="adm-email-preview__chrome-row">
+                        <span className="adm-email-preview__chrome-label">To</span>
+                        <span className="adm-email-preview__chrome-value">{PREVIEW_MERGE_VARS.email}</span>
+                      </div>
+                      <div className="adm-email-preview__chrome-row">
+                        <span className="adm-email-preview__chrome-label">Subject</span>
+                        <span className="adm-email-preview__chrome-value adm-email-preview__chrome-value--subject">
+                          {previewSubject}
+                        </span>
+                      </div>
+                    </div>
+                    <iframe
+                      title="HTML email preview"
+                      className="adm-email-preview__iframe"
+                      srcDoc={fullPreviewDoc}
+                      sandbox="allow-same-origin"
                     />
                   </div>
-                )}
-                {showHtmlPreview && (
-                  <div className="adm-email-split__preview">
-                    <div className="adm-email-preview adm-email-preview--full">
-                      <div className="adm-email-preview__chrome">
-                        <div className="adm-email-preview__chrome-row">
-                          <span className="adm-email-preview__chrome-label">To</span>
-                          <span className="adm-email-preview__chrome-value">customer@example.com</span>
-                        </div>
-                        <div className="adm-email-preview__chrome-row">
-                          <span className="adm-email-preview__chrome-label">Subject</span>
-                          <span className="adm-email-preview__chrome-value adm-email-preview__chrome-value--subject">
-                            {subject.trim() || 'Subject line'}
-                          </span>
-                        </div>
-                      </div>
-                      <iframe
-                        title="HTML email preview"
-                        className="adm-email-preview__iframe"
-                        srcDoc={fullPreviewDoc}
-                        sandbox="allow-same-origin"
-                      />
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {contentMode === 'html' && (
-              <span className="adm-email-field__hint">
-                Preview shows the full email with greeting and Proto Trading footer — same as what Brevo sends.
-              </span>
-            )}
+                  <span className="adm-email-field__hint">Preview uses sample data for merge fields. Each customer gets their own values on send.</span>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
