@@ -59,7 +59,7 @@ async function callGemini(apiKey, base64, contentType) {
     headers: {
       'Authorization': `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
-      'HTTP-Referer': 'https://protoportal-admin.vercel.app',
+      'HTTP-Referer': 'https://admin.proto.co.za',
       'X-Title': 'ProtoPortal Admin',
     },
     body: JSON.stringify({

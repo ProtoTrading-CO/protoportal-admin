@@ -1,6 +1,7 @@
 import { timingSafeEqual } from 'crypto';
 import { createClient } from '@supabase/supabase-js';
 import { isAdminEmail } from './_admin-auth.js';
+import { PROTO_URLS } from './_proto-urls.js';
 
 function getAdminClient() {
   return createClient(
@@ -78,7 +79,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, action: 'password-updated', email, userId: existing.id });
     }
 
-    const redirectTo = (process.env.ADMIN_PORTAL_URL || 'https://protoportal-admin.vercel.app').replace(/\/$/, '/');
+    const redirectTo = `${PROTO_URLS.admin}/`;
     const { data, error } = await supabase.auth.admin.generateLink({
       type: 'recovery',
       email,

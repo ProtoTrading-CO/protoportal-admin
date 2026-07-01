@@ -132,7 +132,7 @@ async function fallbackAnswer(userQuery, data, apiKey) {
     headers: {
       Authorization: `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
-      'HTTP-Referer': 'https://protoportal-admin.vercel.app',
+      'HTTP-Referer': 'https://admin.proto.co.za',
       'X-Title': 'Proto Apollo',
     },
     body: JSON.stringify({
