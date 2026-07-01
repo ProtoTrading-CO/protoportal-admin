@@ -64,7 +64,7 @@ export default function CrmPanel({ onShowToast }) {
             {data?.lastSyncedAt && ` Last sync: ${new Date(data.lastSyncedAt).toLocaleString('en-ZA')}.`}
           </p>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div className="crm-panel-actions">
           <button type="button" className="adm-btn-red adm-btn--sm" onClick={() => void handleSync()} disabled={syncing}>
             {syncing ? <Loader2 size={14} className="spin" /> : <CloudDownload size={14} />} Sync from Brevo
           </button>

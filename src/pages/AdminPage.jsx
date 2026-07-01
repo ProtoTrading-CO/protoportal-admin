@@ -122,7 +122,7 @@ import FulfillmentSettingsModal from '../components/FulfillmentSettingsModal';
 import OrderWhatsappNotify from '../components/OrderWhatsappNotify';
 import AnalyticsHub from '../components/AnalyticsHub';
 import ProductManagerEngine from '../components/ProductManagerEngine';
-import GroupedSidebar from '../components/GroupedSidebar';
+import GroupedSidebar, { NAV_GROUPS } from '../components/GroupedSidebar';
 import CrmPanel from '../components/CrmPanel';
 import { useDashboardStats } from '../hooks/useDashboardStats';
 import { queryClient } from '../lib/queryClient';
@@ -1516,6 +1516,11 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     orders: dashStats?.orders ?? statsOrderTotal,
   }), [dashStats, catalogTotal, archiveCatalogTotal, statsCustomerTotal, statsOrderTotal]);
 
+  const activeSectionLabel = useMemo(
+    () => NAV_GROUPS.find((item) => item.id === activeSection)?.label || 'Admin',
+    [activeSection],
+  );
+
   const orderRows = useMemo(() => {
     const q = orderSearch.trim().toLowerCase();
     const filtered = orders.filter((order) => !q || [order.order_number, order.customers?.name, order.customers?.email, compactItems(order.original_items || order.items || [])].join(' ').toLowerCase().includes(q));
@@ -2690,6 +2695,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
             </button>
             <div className="adm-brand">
               <strong>PROTO <span style={{ color: '#dc2626' }}>ADMIN</span></strong>
+              <span className="adm-mobile-section-label">{activeSectionLabel}</span>
             </div>
           </div>
           <div className="adm-header-actions">
@@ -3194,7 +3200,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                   </div>
                   <button type="button" onClick={() => void loadCheckoutPromoEditor()} className="adm-btn-ghost"><RefreshCw size={15} /></button>
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, maxWidth: 720, marginBottom: 8 }}>
+                <div className="adm-responsive-2col" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, maxWidth: 720, marginBottom: 8 }}>
                   <label style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 14, fontWeight: 600 }}>
                     <input type="checkbox" checked={checkoutPromo.active} onChange={(e) => setCheckoutPromo((p) => ({ ...p, active: e.target.checked }))} style={{ accentColor: '#dc2626' }} />
                     Active at checkout
@@ -3224,7 +3230,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                   </div>
                   <button type="button" onClick={() => void loadPopupEditor()} className="adm-btn-ghost"><RefreshCw size={15} /><span className="adm-btn-text">Refresh</span></button>
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, alignItems: 'start' }}>
+                <div className="adm-responsive-2col" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, alignItems: 'start' }}>
                   <div style={{ display: 'grid', gap: 12 }}>
                     <label style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 14, fontWeight: 600 }}>
                       <input type="checkbox" checked={popupForm.active} onChange={(e) => setPopupForm((p) => ({ ...p, active: e.target.checked }))} style={{ accentColor: '#dc2626' }} />
@@ -4310,7 +4316,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                   </div>
                   <button type="button" onClick={() => void loadBannerEditor()} className="adm-btn-ghost"><RefreshCw size={15} /><span className="adm-btn-text">Refresh</span></button>
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, alignItems: 'start' }}>
+                <div className="adm-responsive-2col" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, alignItems: 'start' }}>
                   <div style={{ display: 'grid', gap: 12 }}>
                     <div>
                       <label className="adm-muted" style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Banner image — {BANNER_LABEL}</label>
