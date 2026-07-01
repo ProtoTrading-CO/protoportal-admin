@@ -3966,7 +3966,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                       {brevoLastSync && ` Brevo last synced: ${new Date(brevoLastSync).toLocaleString('en-ZA')}.`}
                     </p>
                   </div>
-                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <div className="adm-customer-actions">
                     <button type="button" className="adm-btn-red" onClick={() => setCustomerEmailOpen(true)}>
                       <Mail size={14} /> Send email
                     </button>
@@ -4644,7 +4644,6 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
       )}
 
       <CustomerEmailModal
-        key={customerTab}
         open={customerEmailOpen}
         onClose={() => setCustomerEmailOpen(false)}
         customerTab={customerTab}
