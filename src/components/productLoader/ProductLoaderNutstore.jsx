@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Archive,
   ArrowLeft,
@@ -53,64 +53,10 @@ const GROUP_LABELS = {
 
 const STEPS = [
   'Open a subfolder on the left (PTR Photos categories).',
-  'Tick product images on the right — filename = product code (no preview needed).',
+  'Tick product images on the right — Positill code is the filename before the first hyphen.',
   'Click Look up selected — Positill fills price, description and stock.',
-  'Publish to website or send to archive.',
+  'Publish to website or archive (tagged Nutstore in Product Manager → Archive).',
 ];
-
-/** Max concurrent Nutstore image downloads (rate limit protection). */
-let thumbInFlight = 0;
-const THUMB_QUEUE = [];
-const THUMB_MAX = 2;
-
-function drainThumbQueue() {
-  while (thumbInFlight < THUMB_MAX && THUMB_QUEUE.length) {
-    const job = THUMB_QUEUE.shift();
-    thumbInFlight += 1;
-    job().finally(() => {
-      thumbInFlight -= 1;
-      drainThumbQueue();
-    });
-  }
-}
-
-function queueThumbLoad(run) {
-  return new Promise((resolve, reject) => {
-    THUMB_QUEUE.push(() => run().then(resolve, reject));
-    drainThumbQueue();
-  });
-}
-
-function LazyNutstoreThumb({ path, className = 'pl-nutstore-thumb' }) {
-  const [src, setSrc] = useState('');
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    let revoked = '';
-    let cancelled = false;
-    (async () => {
-      try {
-        await queueThumbLoad(async () => {
-          const res = await fetch(`/api/nutstore-thumbnail?path=${encodeURIComponent(path)}`);
-          if (!res.ok || cancelled) return;
-          const blob = await res.blob();
-          revoked = URL.createObjectURL(blob);
-          if (!cancelled) setSrc(revoked);
-        });
-      } catch {
-        if (!cancelled) setFailed(true);
-      }
-    })();
-    return () => {
-      cancelled = true;
-      if (revoked) URL.revokeObjectURL(revoked);
-    };
-  }, [path]);
-
-  if (failed) return <span className={`${className} pl-nutstore-thumb--loading`} title="Preview unavailable" />;
-  if (!src) return <span className={`${className} pl-nutstore-thumb--loading`} />;
-  return <img src={src} alt="" className={className} loading="lazy" />;
-}
 
 function relativeCrumbs(currentPath, libraryRoot, libraryLabel) {
   const root = libraryRoot || '/PTR-photos';
@@ -150,6 +96,9 @@ export default function ProductLoaderNutstore({
   onShowToast,
   onPublished,
 }) {
+  const onShowToastRef = useRef(onShowToast);
+  onShowToastRef.current = onShowToast;
+
   const [status, setStatus] = useState({ loading: true, ok: false, error: '' });
   const [libraryRoot, setLibraryRoot] = useState('/PTR-photos');
   const [libraryLabel, setLibraryLabel] = useState('PTR Photos');
@@ -160,10 +109,12 @@ export default function ProductLoaderNutstore({
   const [selected, setSelected] = useState(() => new Set());
   const [items, setItems] = useState([]);
   const [scanning, setScanning] = useState(false);
+  const [lookupStale, setLookupStale] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [processAction, setProcessAction] = useState('');
   const [error, setError] = useState('');
   const [progress, setProgress] = useState({ done: 0, total: 0 });
+  const resultsRef = useRef(null);
 
   const batchSub1Options = batchDefaultCategoryId ? childrenOf(taxonomyTree, batchDefaultCategoryId) : [];
 
@@ -183,6 +134,7 @@ export default function ProductLoaderNutstore({
   }), [items]);
 
   const selectedPaths = useMemo(() => [...selected], [selected]);
+  const hasResults = items.length > 0 || scanning;
 
   const loadStatus = useCallback(async () => {
     const res = await fetch('/api/nutstore-browse?action=status');
@@ -207,7 +159,7 @@ export default function ProductLoaderNutstore({
       setCurrentPath(json.path || path);
       if (json.libraryRoot) setLibraryRoot(json.libraryRoot);
       if (json.truncated) {
-        onShowToast?.('Stopped after 80 subfolders to protect Nutstore rate limits. Select images per folder instead.', 'warning');
+        onShowToastRef.current?.('Stopped after 80 subfolders to protect Nutstore rate limits. Select images per folder instead.', 'warning');
       }
       return true;
     } catch (err) {
@@ -217,7 +169,7 @@ export default function ProductLoaderNutstore({
     } finally {
       setBrowseLoading(false);
     }
-  }, [onShowToast]);
+  }, []);
 
   const boot = useCallback(async () => {
     setStatus({ loading: true, ok: false, error: '' });
@@ -257,6 +209,7 @@ export default function ProductLoaderNutstore({
       else next.add(path);
       return next;
     });
+    setLookupStale(true);
   };
 
   const selectAllImagesInView = () => {
@@ -265,10 +218,14 @@ export default function ProductLoaderNutstore({
       for (const img of images) next.add(img.path);
       return next;
     });
-    onShowToast?.(`Selected ${images.length} image(s) in this folder`, 'success');
+    setLookupStale(true);
+    onShowToastRef.current?.(`Selected ${images.length} image(s) in this folder`, 'success');
   };
 
-  const clearSelection = () => setSelected(new Set());
+  const clearSelection = () => {
+    setSelected(new Set());
+    setLookupStale(true);
+  };
 
   const selectEntireFolder = async () => {
     setBrowseLoading(true);
@@ -278,7 +235,8 @@ export default function ProductLoaderNutstore({
       const json = await readApiJson(res, { fallback: 'Recursive list failed' });
       const paths = (json.entries || []).map((e) => e.path);
       setSelected(new Set(paths));
-      onShowToast?.(`Selected ${paths.length} image(s) under this folder`, 'success');
+      setLookupStale(true);
+      onShowToastRef.current?.(`Selected ${paths.length} image(s) under this folder`, 'success');
     } catch (err) {
       setError(err.message || 'Failed to select folder');
     } finally {
@@ -292,8 +250,8 @@ export default function ProductLoaderNutstore({
       return;
     }
     setScanning(true);
+    setLookupStale(false);
     setError('');
-    setItems([]);
     try {
       const res = await fetch('/api/nutstore-batch-lookup', {
         method: 'POST',
@@ -303,7 +261,10 @@ export default function ProductLoaderNutstore({
       const json = await readApiJson(res, { fallback: 'Lookup failed' });
       setItems(json.items || []);
       const ready = (json.items || []).filter((i) => i.group === 'ready').length;
-      onShowToast?.(`Looked up ${json.items?.length || 0} — ${ready} ready`, 'success');
+      onShowToastRef.current?.(`Looked up ${json.items?.length || 0} — ${ready} ready`, 'success');
+      requestAnimationFrame(() => {
+        resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      });
     } catch (err) {
       setError(err.message || 'Lookup failed');
     } finally {
@@ -352,6 +313,7 @@ export default function ProductLoaderNutstore({
     const BATCH = 5;
     let succeeded = 0;
     let failed = 0;
+    const failedSkus = [];
 
     for (let i = 0; i < payload.length; i += BATCH) {
       const chunk = payload.slice(i, i + BATCH);
@@ -366,6 +328,9 @@ export default function ProductLoaderNutstore({
         succeeded += json.succeeded || 0;
         failed += json.failed || 0;
         if (json.results) {
+          for (const hit of json.results) {
+            if (!hit.ok) failedSkus.push(`${hit.sku}: ${hit.error || 'failed'}`);
+          }
           setItems((prev) => prev.map((row) => {
             const hit = json.results.find((r) => r.sku === row.code);
             if (!hit) return row;
@@ -381,10 +346,20 @@ export default function ProductLoaderNutstore({
     setProgress({ done: payload.length, total: payload.length });
     setProcessing(false);
     setProcessAction('');
-    const label = action === 'publish' ? 'Published' : 'Archived';
-    onShowToast?.(`${label} ${succeeded}${failed ? `, ${failed} failed` : ''}`, failed ? 'warning' : 'success');
-    if (action === 'publish' && succeeded === 1 && payload[0]) {
-      onPublished?.({ sku: payload[0].code, action: 'create' });
+    if (action === 'publish') {
+      onShowToastRef.current?.(
+        `Published ${succeeded}${failed ? `, ${failed} failed` : ''}`,
+        failed ? 'warning' : 'success',
+      );
+      if (succeeded === 1 && payload[0]) {
+        onPublished?.({ sku: payload[0].code, action: 'create' });
+      }
+    } else {
+      const detail = failedSkus.length ? ` — ${failedSkus.slice(0, 3).join('; ')}` : '';
+      onShowToastRef.current?.(
+        `Archived ${succeeded} to Product Manager → Archive (Nutstore tag)${failed ? `, ${failed} failed${detail}` : ''}`,
+        failed ? 'warning' : 'success',
+      );
     }
   };
 
@@ -398,7 +373,7 @@ export default function ProductLoaderNutstore({
           <table className="pl-folder-table">
             <thead>
               <tr>
-                <th>Preview</th>
+                <th>File</th>
                 <th>Code</th>
                 <th>Description</th>
                 <th>Price</th>
@@ -409,8 +384,8 @@ export default function ProductLoaderNutstore({
             <tbody>
               {rows.map((row) => (
                 <tr key={row.path}>
-                  <td>
-                    <LazyNutstoreThumb path={row.path} className="pl-folder-thumb" />
+                  <td className="adm-muted" style={{ fontSize: 12, maxWidth: 160 }} title={row.filename}>
+                    {row.filename}
                   </td>
                   <td><strong>{row.code || '—'}</strong></td>
                   <td>{displayTitle(row.title, row.sqlRow?.title) || '—'}</td>
@@ -591,16 +566,27 @@ export default function ProductLoaderNutstore({
           {scanning ? <Loader2 size={14} className="spin" /> : <Search size={14} />}
           Step 3 — Look up {selected.size} selected in Positill
         </button>
+        {lookupStale && hasResults && !scanning && (
+          <span className="adm-muted" style={{ fontSize: 12 }}>Selection changed — run lookup again to refresh results.</span>
+        )}
       </div>
 
-      {items.length > 0 && (
-        <div className="pl-nutstore-results">
-          <div className="pl-summary-dashboard">
-            <div><strong>{items.length}</strong><span>Looked up</span></div>
-            <div><strong>{grouped.ready.length}</strong><span>Ready</span></div>
-            <div><strong>{grouped.needs_review.length}</strong><span>Needs review</span></div>
-            <div><strong>{grouped.not_found.length}</strong><span>Not found</span></div>
-          </div>
+      {scanning && (
+        <p className="adm-muted pl-nutstore-loading" style={{ marginTop: 12 }}>
+          <Loader2 size={14} className="spin" /> Looking up {selected.size} product(s) in Positill…
+        </p>
+      )}
+
+      {hasResults && (
+        <div className="pl-nutstore-results" ref={resultsRef}>
+          {!scanning && items.length > 0 && (
+            <div className="pl-summary-dashboard">
+              <div><strong>{items.length}</strong><span>Looked up</span></div>
+              <div><strong>{grouped.ready.length}</strong><span>Ready</span></div>
+              <div><strong>{grouped.needs_review.length}</strong><span>Needs review</span></div>
+              <div><strong>{grouped.not_found.length}</strong><span>Not found</span></div>
+            </div>
+          )}
 
           {processing && (
             <div className="pl-progress">
@@ -609,53 +595,57 @@ export default function ProductLoaderNutstore({
             </div>
           )}
 
-          {renderGroup('ready')}
-          {renderGroup('needs_review')}
-          {renderGroup('not_found')}
+          {!scanning && renderGroup('ready')}
+          {!scanning && renderGroup('needs_review')}
+          {!scanning && renderGroup('not_found')}
 
-          <div className="pl-inline-fields">
-            <label>
-              Default category (new products)
-              <select className="adm-select adm-select--enhanced" value={batchDefaultCategoryId} onChange={(e) => { setBatchDefaultCategoryId(e.target.value); setBatchDefaultSub1Id(''); }}>
-                <option value="">— Select if needed —</option>
-                {taxonomyTree.map((cat) => <option key={cat.id} value={cat.id}>{cat.label}</option>)}
-              </select>
-            </label>
-            {batchSub1Options.length > 0 && (
-              <label>
-                Default subcategory
-                <select className="adm-select adm-select--enhanced" value={batchDefaultSub1Id} onChange={(e) => setBatchDefaultSub1Id(e.target.value)}>
-                  <option value="">— Optional —</option>
-                  {batchSub1Options.map((opt) => <option key={opt.id} value={opt.id}>{opt.label}</option>)}
-                </select>
-              </label>
-            )}
-            <label className="pl-check">
-              <input type="checkbox" checked={batchOverwrite} onChange={(e) => setBatchOverwrite(e.target.checked)} />
-              Replace image if slot already filled
-            </label>
-          </div>
+          {!scanning && items.length > 0 && (
+            <>
+              <div className="pl-inline-fields">
+                <label>
+                  Default category (new products)
+                  <select className="adm-select adm-select--enhanced" value={batchDefaultCategoryId} onChange={(e) => { setBatchDefaultCategoryId(e.target.value); setBatchDefaultSub1Id(''); }}>
+                    <option value="">— Select if needed —</option>
+                    {taxonomyTree.map((cat) => <option key={cat.id} value={cat.id}>{cat.label}</option>)}
+                  </select>
+                </label>
+                {batchSub1Options.length > 0 && (
+                  <label>
+                    Default subcategory
+                    <select className="adm-select adm-select--enhanced" value={batchDefaultSub1Id} onChange={(e) => setBatchDefaultSub1Id(e.target.value)}>
+                      <option value="">— Optional —</option>
+                      {batchSub1Options.map((opt) => <option key={opt.id} value={opt.id}>{opt.label}</option>)}
+                    </select>
+                  </label>
+                )}
+                <label className="pl-check">
+                  <input type="checkbox" checked={batchOverwrite} onChange={(e) => setBatchOverwrite(e.target.checked)} />
+                  Replace image if slot already filled
+                </label>
+              </div>
 
-          <div className="pl-action-row">
-            <button
-              type="button"
-              className="adm-btn-red"
-              disabled={processing || !processable.length}
-              onClick={() => void runProcess('publish', processable)}
-            >
-              {processing && processAction === 'publish' ? <Loader2 size={14} className="spin" /> : <Upload size={14} />}
-              Publish to website ({processable.length})
-            </button>
-            <button
-              type="button"
-              className="adm-btn-ghost"
-              disabled={processing || !processable.length}
-              onClick={() => void runProcess('archive', processable)}
-            >
-              {processing && processAction === 'archive' ? <Loader2 size={14} className="spin" /> : <Archive size={14} />}
-              Send to archive ({processable.length})
-            </button>
-          </div>
+              <div className="pl-action-row">
+                <button
+                  type="button"
+                  className="adm-btn-red"
+                  disabled={processing || !processable.length}
+                  onClick={() => void runProcess('publish', processable)}
+                >
+                  {processing && processAction === 'publish' ? <Loader2 size={14} className="spin" /> : <Upload size={14} />}
+                  Publish to website ({processable.length})
+                </button>
+                <button
+                  type="button"
+                  className="adm-btn-ghost"
+                  disabled={processing || !processable.length}
+                  onClick={() => void runProcess('archive', processable)}
+                >
+                  {processing && processAction === 'archive' ? <Loader2 size={14} className="spin" /> : <Archive size={14} />}
+                  Archive ({processable.length})
+                </button>
+              </div>
+            </>
+          )}
         </div>
       )}
     </div>

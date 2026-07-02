@@ -96,6 +96,26 @@ function formatStockUnits(qty) {
   return `${Number.isFinite(n) ? n : 0} units`;
 }
 
+function NutstoreArchiveBadge({ archivedBy }) {
+  if (archivedBy !== 'nutstore') return null;
+  return (
+    <span
+      title="Archived from Nutstore Product Loader"
+      style={{
+        fontSize: 10,
+        fontWeight: 700,
+        color: '#5b21b6',
+        background: '#ede9fe',
+        borderRadius: 4,
+        padding: '1px 6px',
+        whiteSpace: 'nowrap',
+      }}
+    >
+      Nutstore
+    </span>
+  );
+}
+
 function CatalogSkeleton() {
   return (
     <div className="pm-skeleton">
@@ -149,6 +169,7 @@ function PmMobileProductCard({
           {item.isNew && (
             <span className="pm-mobile-card-badge" style={{ background: '#0f766e', color: '#fff' }}>New arrival</span>
           )}
+          <NutstoreArchiveBadge archivedBy={item.archivedBy} />
           <MultiCategoryBadge item={item} tree={tree} />
           <div className="adm-muted pm-mobile-card-meta">
             <span>BC: {item.barcode || item.code || '—'}</span>
@@ -278,6 +299,7 @@ export default function ProductManagerEngine({
 }) {
   const [status, setStatus] = useState(initialStatus);
   const [archiveStockView, setArchiveStockView] = useState('archived');
+  const [archiveSourceFilter, setArchiveSourceFilter] = useState('all');
   const [reorderMode, setReorderMode] = useState(false);
 
   useEffect(() => {
@@ -353,7 +375,7 @@ export default function ProductManagerEngine({
     selectedRowsRef.current = new Map();
     lastSelectIdxRef.current = null;
     setSelectAllView(false);
-  }, [status, debouncedSearch, categoryPath.join('/'), archiveStockView]);
+  }, [status, debouncedSearch, categoryPath.join('/'), archiveStockView, archiveSourceFilter]);
 
   const handlePageChange = useCallback((nextPage) => {
     setPage(nextPage);
@@ -368,7 +390,8 @@ export default function ProductManagerEngine({
     search: debouncedSearch,
     categoryPath,
     stockFilter: status === 'archived' ? archiveStockView : undefined,
-  }), [status, page, pageSize, debouncedSearch, categoryPath, archiveStockView]);
+    archivedSource: status === 'archived' && archiveStockView === 'archived' ? archiveSourceFilter : undefined,
+  }), [status, page, pageSize, debouncedSearch, categoryPath, archiveStockView, archiveSourceFilter]);
 
   const catalogQueryEnabled = status !== 'approval';
 
@@ -670,6 +693,7 @@ export default function ProductManagerEngine({
         search: debouncedSearch,
         categoryPath,
         stockFilter: status === 'archived' ? archiveStockView : undefined,
+        archivedSource: status === 'archived' && archiveStockView === 'archived' ? archiveSourceFilter : undefined,
       });
       selectedRowsRef.current = new Map(allRows.map((r) => [r.id, r]));
       setSelected(new Set(allRows.map((r) => r.id)));
@@ -1005,6 +1029,31 @@ export default function ProductManagerEngine({
                     >
                       Negative stock
                     </button>
+                    {archiveStockView === 'archived' && (
+                      <>
+                        <button
+                          type="button"
+                          className={`adm-btn-ghost adm-btn--sm${archiveSourceFilter === 'all' ? ' adm-tab--active' : ''}`}
+                          onClick={() => setArchiveSourceFilter('all')}
+                        >
+                          All archived
+                        </button>
+                        <button
+                          type="button"
+                          className={`adm-btn-ghost adm-btn--sm${archiveSourceFilter === 'nutstore' ? ' adm-tab--active' : ''}`}
+                          onClick={() => setArchiveSourceFilter('nutstore')}
+                        >
+                          Nutstore
+                        </button>
+                        <button
+                          type="button"
+                          className={`adm-btn-ghost adm-btn--sm${archiveSourceFilter === 'other' ? ' adm-tab--active' : ''}`}
+                          onClick={() => setArchiveSourceFilter('other')}
+                        >
+                          Other
+                        </button>
+                      </>
+                    )}
                     {!isLoading && (
                       <span className="adm-pill" style={{ marginLeft: 'auto', fontSize: 12 }}>
                         {total} product{total === 1 ? '' : 's'}
@@ -1304,6 +1353,7 @@ export default function ProductManagerEngine({
                           {item.isNew && (
                             <span style={{ fontSize: 10, fontWeight: 700, color: '#fff', background: '#0f766e', borderRadius: 4, padding: '1px 5px' }}>New arrival</span>
                           )}
+                          <NutstoreArchiveBadge archivedBy={item.archivedBy} />
                           <MultiCategoryBadge item={item} tree={tree} />
                         </div>
                         <div className="adm-muted" style={{ fontSize: 11 }}>
