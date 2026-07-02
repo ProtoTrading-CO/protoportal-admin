@@ -61,6 +61,49 @@ export async function updateProtoActiveCustomer(id, fields) {
   return json.row;
 }
 
+export async function deleteProtoActiveCustomer(id) {
+  const res = await fetch('/api/proto-active-customers', {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id }),
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || 'Failed to delete proto active customer');
+}
+
+export async function syncBrevoContacts() {
+  const res = await fetch('/api/brevo-sync', { method: 'POST' });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || 'Brevo sync failed');
+  return json;
+}
+
+export async function pushPortalCustomersToBrevo() {
+  const res = await fetch('/api/customer-brevo-sync-portal', { method: 'POST' });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || 'Push to Brevo failed');
+  return json;
+}
+
+export async function sendCustomerEmailBroadcast({ audience, subject, introText, htmlBlock, testEmail }) {
+  const res = await fetch('/api/customer-email-broadcast', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ audience, subject, introText, htmlBlock, testEmail }),
+  });
+  const json = await res.json();
+  if (!res.ok && res.status !== 207) throw new Error(json.error || 'Email send failed');
+  return json;
+}
+
+export async function fetchCrmContactsPage({ page = 1, pageSize = 1 } = {}) {
+  const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+  const res = await fetch(`/api/crm-contacts?${params}`);
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || 'CRM load failed');
+  return json;
+}
+
 export async function seedProtoActiveCustomers() {
   const res = await fetch('/api/seed-proto-active-customers', { method: 'POST' });
   const json = await res.json();

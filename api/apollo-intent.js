@@ -60,7 +60,7 @@ export async function classifyIntent(query, apiKey, { rejectIntent = '', regexHi
     headers: {
       Authorization: `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
-      'HTTP-Referer': 'https://protoportal-admin.vercel.app',
+      'HTTP-Referer': 'https://admin.proto.co.za',
       'X-Title': 'Proto Apollo Intent',
     },
     body: JSON.stringify({

@@ -14,13 +14,22 @@ export default async function handler(req, res) {
   if (!(await requireAdminKey(req, res))) return;
 
   if (req.method === 'PATCH') {
-    const { id, contact_name, first_name, name } = req.body || {};
+    const { id, contact_name, first_name, name, email, account_code, sales_last_12_months, invoice_count, last_purchase_date } = req.body || {};
     if (!id) return res.status(400).json({ error: 'id required' });
 
     const patch = {};
     if (contact_name !== undefined) patch.contact_name = String(contact_name).trim() || null;
     if (first_name !== undefined) patch.first_name = String(first_name).trim() || null;
     if (name !== undefined) patch.name = String(name).trim() || null;
+    if (email !== undefined) {
+      const e = String(email).trim().toLowerCase();
+      if (!e || !e.includes('@')) return res.status(400).json({ error: 'Valid email required' });
+      patch.email = e;
+    }
+    if (account_code !== undefined) patch.account_code = String(account_code).trim().toUpperCase() || null;
+    if (sales_last_12_months !== undefined) patch.sales_last_12_months = Number(sales_last_12_months) || 0;
+    if (invoice_count !== undefined) patch.invoice_count = Math.max(0, parseInt(invoice_count, 10) || 0);
+    if (last_purchase_date !== undefined) patch.last_purchase_date = last_purchase_date || null;
     if (!Object.keys(patch).length) return res.status(400).json({ error: 'No fields to update' });
 
     try {
@@ -36,6 +45,20 @@ export default async function handler(req, res) {
     } catch (err) {
       console.error('proto-active-customers PATCH:', err?.message || err);
       return res.status(500).json({ error: err.message || 'Update failed' });
+    }
+  }
+
+  if (req.method === 'DELETE') {
+    const { id } = req.body || {};
+    if (!id) return res.status(400).json({ error: 'id required' });
+    try {
+      const sb = getAdminClient();
+      const { error } = await sb.from('proto_active_customers').delete().eq('id', id);
+      if (error) throw error;
+      return res.status(200).json({ ok: true });
+    } catch (err) {
+      console.error('proto-active-customers DELETE:', err?.message || err);
+      return res.status(500).json({ error: err.message || 'Delete failed' });
     }
   }
 

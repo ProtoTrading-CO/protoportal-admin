@@ -1,4 +1,5 @@
 import { isAdminEmail } from './_admin-auth.js';
+import { PROTO_URLS } from './_proto-urls.js';
 import {
   ensureAdminAuthUser,
   getAdminAuthClient,
@@ -27,7 +28,7 @@ export default async function handler(req, res) {
     await ensureAdminAuthUser(supabase, email);
 
     const token = makeResetToken(email, secret);
-    const adminUrl = (process.env.ADMIN_PORTAL_URL || 'https://protoportal-admin.vercel.app').replace(/\/$/, '');
+    const adminUrl = PROTO_URLS.admin;
     const resetLink = `${adminUrl}/reset-password?token=${encodeURIComponent(token)}`;
 
     await sendAdminResetEmail(email, resetLink);

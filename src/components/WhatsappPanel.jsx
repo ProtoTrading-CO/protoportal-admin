@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Check, Eye, Loader2, Megaphone, RefreshCw, Search, Send } from 'lucide-react';
+import { Check, Copy, Eye, Loader2, Megaphone, RefreshCw, Search, Send } from 'lucide-react';
 import { fetchBroadcastSchedule } from '../lib/broadcastSchedule';
+import { PROTO_URLS } from '../lib/protoUrls';
 
 function Chip({ active, onClick, children }) {
   return (
@@ -40,6 +41,32 @@ export default function WhatsappPanel({
 }) {
   const [scheduled, setScheduled] = useState([]);
   const [schedLoading, setSchedLoading] = useState(true);
+  const [watiStatus, setWatiStatus] = useState(null);
+  const [watiStatusLoading, setWatiStatusLoading] = useState(true);
+  const [copiedWebhook, setCopiedWebhook] = useState(false);
+
+  const webhookUrl = watiStatus?.webhookUrl || `${PROTO_URLS.admin}/api/wati-intercom`;
+
+  useEffect(() => {
+    let cancelled = false;
+    setWatiStatusLoading(true);
+    fetch('/api/wati-status')
+      .then((res) => res.json())
+      .then((data) => { if (!cancelled) setWatiStatus(data); })
+      .catch(() => { if (!cancelled) setWatiStatus(null); })
+      .finally(() => { if (!cancelled) setWatiStatusLoading(false); });
+    return () => { cancelled = true; };
+  }, [sentCount, templates.length]);
+
+  const copyWebhookUrl = async () => {
+    try {
+      await navigator.clipboard.writeText(webhookUrl);
+      setCopiedWebhook(true);
+      window.setTimeout(() => setCopiedWebhook(false), 2000);
+    } catch {
+      window.prompt('Copy this WATI webhook URL:', webhookUrl);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -89,6 +116,38 @@ export default function WhatsappPanel({
 
   return (
     <div className="wa-panel">
+      <div className="wa-webhook-setup">
+        <div className="wa-webhook-setup__head">
+          <strong>WATI webhook URL</strong>
+          {watiStatusLoading ? (
+            <span className="adm-muted">Checking connection…</span>
+          ) : watiStatus?.webhookProbe?.ok ? (
+            <span className="wa-webhook-setup__ok">Endpoint reachable</span>
+          ) : (
+            <span className="wa-webhook-setup__warn">Endpoint check failed</span>
+          )}
+        </div>
+        <p className="wa-webhook-setup__note">
+          In WATI → Webhooks, set the URL below (not the old <code>protoportal-admin.vercel.app</code> link). WATI must get HTTP 200 or it disables the webhook.
+        </p>
+        <div className="wa-webhook-setup__row">
+          <code className="wa-webhook-setup__url">{webhookUrl}</code>
+          <button type="button" className="adm-btn-ghost adm-btn-sm" onClick={() => void copyWebhookUrl()}>
+            <Copy size={13} /> {copiedWebhook ? 'Copied' : 'Copy'}
+          </button>
+        </div>
+        {!watiStatusLoading && watiStatus && (
+          <div className="wa-webhook-setup__meta adm-muted">
+            WATI API: {watiStatus.watiApiConfigured ? 'configured' : 'missing token'}
+            {' · '}
+            Templates: {watiStatus.approvedTemplateCount ?? 0} approved
+            {watiStatus.templateError ? ` (${watiStatus.templateError})` : ''}
+            {' · '}
+            Contacts: {watiStatus.contactCount ?? 0}
+          </div>
+        )}
+      </div>
+
       {summary && (
         <div className="wa-stats">
           <div className="wa-stat">

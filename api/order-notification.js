@@ -1,4 +1,5 @@
 import { requireAdminKey } from './_admin-auth.js';
+import { PROTO_URLS } from './_proto-urls.js';
 
 /** Trigger team WhatsApp for an order via the main portal notification API. */
 export default async function handler(req, res) {
@@ -9,7 +10,7 @@ export default async function handler(req, res) {
   const orderId = String(req.body?.orderId || '').trim();
   if (!orderId) return res.status(400).json({ error: 'orderId is required' });
 
-  const mainUrl = (process.env.MAIN_PORTAL_URL || 'https://protoportal-main.vercel.app').replace(/\/$/, '');
+  const mainUrl = PROTO_URLS.site;
   const secret = process.env.ORDER_NOTIFY_SECRET;
 
   if (!secret) {

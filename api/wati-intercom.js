@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { fetchAllWatiContacts, fetchCustomerPhoneMap, mapCustomParams, normalizePhone, watiRequest } from './_wati.js';
+import { PROTO_URLS } from './_proto-urls.js';
 
 const INTERCOM_API = 'https://api.intercom.io';
 
@@ -7,8 +8,23 @@ function getAdminClient() {
   return createClient(
     process.env.VITE_SUPABASE_URL,
     process.env.SUPABASE_SERVICE_ROLE_KEY,
-    { auth: { autoRefreshToken: false, persistSession: false } }
+    { auth: { autoRefreshToken: false, persistSession: false } },
   );
+}
+
+function verifyWebhookAuth(req) {
+  const webhookSecret = process.env.WEBHOOK_SECRET;
+  if (webhookSecret && String(req.query?.secret || '') !== webhookSecret) {
+    return false;
+  }
+
+  const watiWebhookToken = process.env.WATI_WEBHOOK_TOKEN;
+  if (watiWebhookToken) {
+    const auth = String(req.headers.authorization || '');
+    if (auth !== `Bearer ${watiWebhookToken}`) return false;
+  }
+
+  return true;
 }
 
 async function intercomReq(path, method = 'GET', body = null) {
@@ -38,7 +54,7 @@ async function findOrCreateIntercomContact(phone, name) {
 }
 
 async function sendWatiMessage(phone, text) {
-  const base = (process.env.WATI_API_URL || '').replace(/\/$/, '');
+  const base = (process.env.WATI_API_URL || 'https://live-mt-server.wati.io/10138950').replace(/\/$/, '');
   const res = await fetch(`${base}/api/v1/sendSessionMessage/${phone}`, {
     method: 'POST',
     headers: {
@@ -84,20 +100,9 @@ async function updateJoinStatus(phone, status) {
   });
 }
 
-export default async function handler(req, res) {
-  res.setHeader('Cache-Control', 'no-store');
-  if (req.method !== 'POST') return res.status(405).end();
-
-  // When WEBHOOK_SECRET is set, require ?secret=... on the webhook URL
-  // (configure the same value in the WATI dashboard webhook URL).
-  const webhookSecret = process.env.WEBHOOK_SECRET;
-  if (webhookSecret && String(req.query?.secret || '') !== webhookSecret) {
-    return res.status(401).json({ error: 'Unauthorised' });
-  }
-
+async function handleWatiEvent(req) {
   const p = req.body || {};
 
-  // Normalise across WATI payload shapes
   const phone =
     p.waId ||
     p.from ||
@@ -122,18 +127,18 @@ export default async function handler(req, res) {
     p.contacts?.[0]?.profile?.name ||
     'WhatsApp Customer';
 
-  console.log('Parsed — phone:', phone, '| text:', text);
+  console.log('WATI webhook — phone:', phone, '| text:', text?.slice?.(0, 80));
 
-  if (!phone || !text) return res.status(200).json({ ok: true, debug: 'missing phone or text', phone, text });
+  if (!phone || !text) return { ok: true, debug: 'missing phone or text', phone, text };
 
   const normalizedText = String(text || '').trim().toLowerCase();
   if (['join us', 'join us.', 'join'].includes(normalizedText)) {
     await updateJoinStatus(phone, 'joined');
-    return res.status(200).json({ ok: true, joinStatus: 'joined' });
+    return { ok: true, joinStatus: 'joined' };
   }
   if (['no thanks', 'no thanks.', 'not interested'].includes(normalizedText)) {
     await updateJoinStatus(phone, 'no thanks');
-    return res.status(200).json({ ok: true, joinStatus: 'no thanks' });
+    return { ok: true, joinStatus: 'no thanks' };
   }
 
   const supabase = getAdminClient();
@@ -146,12 +151,10 @@ export default async function handler(req, res) {
     .maybeSingle();
 
   if (!isTrigger && !session) {
-    // Not triggered and no active session — ignore
-    return res.status(200).json({ ok: true });
+    return { ok: true, ignored: true };
   }
 
   if (session) {
-    // Try to forward to existing Intercom conversation
     const replyRes = await intercomReq(`/conversations/${session.intercom_conversation_id}/reply`, 'POST', {
       message_type: 'comment',
       type: 'user',
@@ -161,16 +164,14 @@ export default async function handler(req, res) {
     console.log('Intercom reply result:', JSON.stringify(replyRes));
 
     if (replyRes?.type === 'error.list') {
-      // Stale session — delete it and fall through to create a new one
       console.log('Stale session detected, clearing and recreating');
       await supabase.from('whatsapp_sessions').delete().eq('phone', phone);
     } else {
       await supabase.from('whatsapp_sessions').update({ last_message_at: new Date().toISOString() }).eq('phone', phone);
-      return res.status(200).json({ ok: true });
+      return { ok: true };
     }
   }
 
-  // New session (or stale session just cleared above)
   const e164 = phone.startsWith('+') ? phone : `+${phone}`;
   const contact = await findOrCreateIntercomContact(e164, name);
   console.log('Intercom contact:', JSON.stringify(contact));
@@ -178,7 +179,7 @@ export default async function handler(req, res) {
 
   if (!contactId) {
     console.log('Failed to get Intercom contact ID');
-    return res.status(200).json({ ok: true, error: 'intercom_contact_failed' });
+    return { ok: true, error: 'intercom_contact_failed' };
   }
 
   const conversation = await intercomReq('/conversations', 'POST', {
@@ -190,7 +191,7 @@ export default async function handler(req, res) {
 
   if (!conversationId) {
     console.log('Failed to get Intercom conversation ID');
-    return res.status(200).json({ ok: true, error: 'intercom_conversation_failed' });
+    return { ok: true, error: 'intercom_conversation_failed' };
   }
 
   const { error: dbErr } = await supabase.from('whatsapp_sessions').upsert({
@@ -203,9 +204,37 @@ export default async function handler(req, res) {
 
   const watiRes = await sendWatiMessage(
     phone,
-    "Hi! You're now connected with our customer service team. Our AI assistant will reply here on WhatsApp shortly. 🤝"
+    "Hi! You're now connected with our customer service team. Our AI assistant will reply here on WhatsApp shortly. 🤝",
   );
   console.log('WATI send result:', JSON.stringify(watiRes));
 
-  return res.status(200).json({ ok: true });
+  return { ok: true };
+}
+
+export default async function handler(req, res) {
+  res.setHeader('Cache-Control', 'no-store');
+
+  if (req.method === 'GET' || req.method === 'HEAD') {
+    return res.status(200).json({
+      ok: true,
+      service: 'wati-intercom',
+      webhookUrl: `${PROTO_URLS.admin}/api/wati-intercom`,
+      note: 'Configure this URL in WATI → Webhooks. WATI must receive HTTP 200 on POST.',
+    });
+  }
+
+  if (req.method !== 'POST') return res.status(405).end();
+
+  if (!verifyWebhookAuth(req)) {
+    return res.status(401).json({ error: 'Unauthorised' });
+  }
+
+  try {
+    const result = await handleWatiEvent(req);
+    return res.status(200).json(result);
+  } catch (err) {
+    console.error('wati-intercom error:', err?.message || err);
+    // WATI retries on non-200 — acknowledge receipt even if downstream processing failed.
+    return res.status(200).json({ ok: true, error: 'handler_exception', message: err?.message || 'Unknown error' });
+  }
 }

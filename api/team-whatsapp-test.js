@@ -1,4 +1,5 @@
 import { requireAdminKey } from './_admin-auth.js';
+import { PROTO_URLS } from './_proto-urls.js';
 import { readSiteConfigJson } from './_site-config.js';
 import {
   normalizeWhatsapp,
@@ -39,7 +40,7 @@ export default async function handler(req, res) {
 
   const templateName = process.env.WATI_ORDER_TEMPLATE || 'proto_order_notis';
   const now = new Date().toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
-  const adminUrl = (process.env.ADMIN_PORTAL_URL || 'https://protoportal-admin.vercel.app').replace(/\/$/, '');
+  const adminUrl = PROTO_URLS.admin;
 
   const results = [];
   for (const r of recipients) {

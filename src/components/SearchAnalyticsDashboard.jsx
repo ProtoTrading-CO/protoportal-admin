@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Download, Loader2, RefreshCw } from 'lucide-react';
 import { downloadCsv } from '../lib/exportReport';
+import { PROTO_URLS } from '../lib/protoUrls';
 
 const PERIODS = [
   { days: 7, label: '7D' },
@@ -157,7 +158,7 @@ export default function SearchAnalyticsDashboard() {
           <strong>No search data yet for this period.</strong>
           <p>
             Searches are logged from the trade portal (3+ characters, after typing stops) on{' '}
-            <a href="https://protoportal-main.vercel.app" target="_blank" rel="noopener noreferrer">protoportal-main.vercel.app</a>.
+            <a href={PROTO_URLS.site} target="_blank" rel="noopener noreferrer">{PROTO_URLS.site.replace('https://', '')}</a>.
           </p>
         </div>
       )}
