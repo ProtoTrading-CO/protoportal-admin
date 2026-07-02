@@ -20,6 +20,20 @@ function getAdminClient() {
 
 const ORDER_SELECT = '*, customers(name, contact_name, email, phone, business_name, business_type, city, province, country, company_address, delivery_address, vat_number, customer_code, tier)';
 const LEGACY_CONFIRMATION_SCAN_LIMIT = 2000;
+const LEGACY_ORDER_SEARCH_SCAN_LIMIT = 500;
+
+let _hasItemsSearchColumn = null;
+
+async function ordersHasItemsSearchColumn(supabase) {
+  if (_hasItemsSearchColumn != null) return _hasItemsSearchColumn;
+  const { error } = await supabase.from('orders').select('items_search').limit(1);
+  if (error) {
+    _hasItemsSearchColumn = false;
+    return false;
+  }
+  _hasItemsSearchColumn = true;
+  return true;
+}
 
 function assertOrderScope(auth, orderId, res) {
   if (auth.type === 'admin') return true;
@@ -76,16 +90,22 @@ async function resolveCustomerIdsForSearch(supabase, term) {
   return (data || []).map((r) => r.id).filter(Boolean);
 }
 
-function applyOrderSearch(query, term, customerIds) {
+function applyOrderSearch(query, term, customerIds, { useItemsSearch = false } = {}) {
   const safe = safeSearchTerm(term);
   if (!safe) return query;
-  const parts = [
-    `order_number.ilike.%${safe}%`,
-    `items.ilike.%${safe}%`,
-    `original_items.ilike.%${safe}%`,
-  ];
+  const parts = [`order_number.ilike.%${safe}%`];
+  if (useItemsSearch) parts.push(`items_search.ilike.%${safe}%`);
   for (const id of customerIds) parts.push(`customer_id.eq.${id}`);
   return query.or(parts.join(','));
+}
+
+function orderMatchesSearch(order, term, customerIds) {
+  const safe = safeSearchTerm(term).toLowerCase();
+  if (!safe) return true;
+  if (customerIds.includes(order.customer_id)) return true;
+  if (String(order.order_number || '').toLowerCase().includes(safe)) return true;
+  const itemsHay = JSON.stringify(order.items || order.original_items || []).toLowerCase();
+  return itemsHay.includes(safe);
 }
 
 function applySentTabFilter(q) {
@@ -136,16 +156,33 @@ async function computeTabCounts(supabase, useDbColumn, legacyIds) {
 }
 
 async function fetchAdminOrdersPage(supabase, {
-  page, pageSize, search, tab, useDbColumn, legacyIds,
+  page, pageSize, search, tab, useDbColumn, legacyIds, useItemsSearch,
 }) {
   const term = safeSearchTerm(search);
   const customerIds = term ? await resolveCustomerIdsForSearch(supabase, term) : [];
   const from = (page - 1) * pageSize;
   const to = from + pageSize - 1;
 
+  if (term && !useItemsSearch) {
+    let q = supabase.from('orders').select(ORDER_SELECT).order('created_at', { ascending: false }).limit(LEGACY_ORDER_SEARCH_SCAN_LIMIT);
+    if (tab === 'new') q = q.eq('status', 'pending');
+    else if (tab === 'handed') q = q.eq('status', 'handed over');
+    else if (tab === 'progress') q = q.eq('status', 'order in progress');
+    const { data, error } = await q;
+    if (error) throw error;
+    const filtered = (data || []).filter((o) => orderMatchesTab(o, tab, legacyIds) && orderMatchesSearch(o, term, customerIds));
+    return {
+      rows: filtered.slice(from, from + pageSize),
+      total: filtered.length,
+      page,
+      pageSize,
+      truncated: (data || []).length >= LEGACY_ORDER_SEARCH_SCAN_LIMIT,
+    };
+  }
+
   if (useDbColumn && (tab === 'sent' || tab === 'paid')) {
     let q = supabase.from('orders').select(ORDER_SELECT, { count: 'exact' }).order('created_at', { ascending: false });
-    q = applyOrderSearch(q, term, customerIds);
+    q = applyOrderSearch(q, term, customerIds, { useItemsSearch });
     q = tab === 'sent' ? applySentTabFilter(q) : applyPaidTabFilter(q);
     q = q.range(from, to);
     const { data, error, count } = await q;
@@ -155,7 +192,7 @@ async function fetchAdminOrdersPage(supabase, {
 
   if (!useDbColumn && (tab === 'sent' || tab === 'paid')) {
     let q = supabase.from('orders').select(ORDER_SELECT).order('created_at', { ascending: false }).limit(LEGACY_CONFIRMATION_SCAN_LIMIT);
-    q = applyOrderSearch(q, term, customerIds);
+    q = applyOrderSearch(q, term, customerIds, { useItemsSearch });
     const { data, error } = await q;
     if (error) throw error;
     const filtered = (data || []).filter((o) => orderMatchesTab(o, tab, legacyIds));
@@ -169,7 +206,7 @@ async function fetchAdminOrdersPage(supabase, {
   }
 
   let q = supabase.from('orders').select(ORDER_SELECT, { count: 'exact' }).order('created_at', { ascending: false });
-  q = applyOrderSearch(q, term, customerIds);
+  q = applyOrderSearch(q, term, customerIds, { useItemsSearch });
   if (tab === 'new') q = q.eq('status', 'pending');
   else if (tab === 'handed') q = q.eq('status', 'handed over');
   else if (tab === 'progress') q = q.eq('status', 'order in progress');
@@ -240,6 +277,7 @@ export default async function handler(req, res) {
     }
 
     const useDbColumn = await ordersHasConfirmationSentAt(supabase);
+    const useItemsSearch = await ordersHasItemsSearchColumn(supabase);
     const legacyIds = useDbColumn ? null : await listLegacyConfirmationSentIds();
 
     try {
@@ -269,6 +307,7 @@ export default async function handler(req, res) {
         tab: tabKey,
         useDbColumn,
         legacyIds,
+        useItemsSearch,
       });
       return res.status(200).json({ ...result, tabCounts });
     } catch (err) {
