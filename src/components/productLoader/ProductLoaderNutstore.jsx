@@ -3,6 +3,7 @@ import {
   Archive,
   ArrowLeft,
   ChevronRight,
+  FileImage,
   Folder,
   FolderOpen,
   Home,
@@ -51,26 +52,54 @@ const GROUP_LABELS = {
 };
 
 const STEPS = [
-  'Open a subfolder inside PTR Photos (or stay here).',
-  'Tick the product images you want — filename = product code.',
+  'Open a subfolder on the left (PTR Photos categories).',
+  'Tick product images on the right — filename = product code (no preview needed).',
   'Click Look up selected — Positill fills price, description and stock.',
   'Publish to website or send to archive.',
 ];
 
-function NutstoreThumb({ path, className = 'pl-nutstore-thumb' }) {
+/** Max concurrent Nutstore image downloads (rate limit protection). */
+let thumbInFlight = 0;
+const THUMB_QUEUE = [];
+const THUMB_MAX = 2;
+
+function drainThumbQueue() {
+  while (thumbInFlight < THUMB_MAX && THUMB_QUEUE.length) {
+    const job = THUMB_QUEUE.shift();
+    thumbInFlight += 1;
+    job().finally(() => {
+      thumbInFlight -= 1;
+      drainThumbQueue();
+    });
+  }
+}
+
+function queueThumbLoad(run) {
+  return new Promise((resolve, reject) => {
+    THUMB_QUEUE.push(() => run().then(resolve, reject));
+    drainThumbQueue();
+  });
+}
+
+function LazyNutstoreThumb({ path, className = 'pl-nutstore-thumb' }) {
   const [src, setSrc] = useState('');
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     let revoked = '';
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(`/api/nutstore-thumbnail?path=${encodeURIComponent(path)}`);
-        if (!res.ok || cancelled) return;
-        const blob = await res.blob();
-        revoked = URL.createObjectURL(blob);
-        if (!cancelled) setSrc(revoked);
-      } catch { /* ignore */ }
+        await queueThumbLoad(async () => {
+          const res = await fetch(`/api/nutstore-thumbnail?path=${encodeURIComponent(path)}`);
+          if (!res.ok || cancelled) return;
+          const blob = await res.blob();
+          revoked = URL.createObjectURL(blob);
+          if (!cancelled) setSrc(revoked);
+        });
+      } catch {
+        if (!cancelled) setFailed(true);
+      }
     })();
     return () => {
       cancelled = true;
@@ -78,8 +107,9 @@ function NutstoreThumb({ path, className = 'pl-nutstore-thumb' }) {
     };
   }, [path]);
 
+  if (failed) return <span className={`${className} pl-nutstore-thumb--loading`} title="Preview unavailable" />;
   if (!src) return <span className={`${className} pl-nutstore-thumb--loading`} />;
-  return <img src={src} alt="" className={className} />;
+  return <img src={src} alt="" className={className} loading="lazy" />;
 }
 
 function relativeCrumbs(currentPath, libraryRoot, libraryLabel) {
@@ -155,18 +185,13 @@ export default function ProductLoaderNutstore({
   const selectedPaths = useMemo(() => [...selected], [selected]);
 
   const loadStatus = useCallback(async () => {
-    setStatus((s) => ({ ...s, loading: true }));
-    try {
-      const res = await fetch('/api/nutstore-browse?action=status');
-      const json = await readApiJson(res, { fallback: 'Nutstore status failed' });
-      const root = json.libraryRoot || json.rootPath || '/PTR-photos';
-      setLibraryRoot(root);
-      setLibraryLabel(json.libraryLabel || 'PTR Photos');
-      setCurrentPath(root);
-      setStatus({ loading: false, ok: Boolean(json.ok), error: json.error || '' });
-    } catch (err) {
-      setStatus({ loading: false, ok: false, error: err.message || 'Nutstore unavailable' });
-    }
+    const res = await fetch('/api/nutstore-browse?action=status');
+    const json = await readApiJson(res, { fallback: 'Nutstore status failed' });
+    const root = json.libraryRoot || json.rootPath || '/PTR-photos';
+    setLibraryRoot(root);
+    setLibraryLabel(json.libraryLabel || 'PTR Photos');
+    setCurrentPath(root);
+    return root;
   }, []);
 
   const loadDirectory = useCallback(async (path, q = '') => {
@@ -180,19 +205,36 @@ export default function ProductLoaderNutstore({
       setEntries(json.entries || []);
       setCurrentPath(json.path || path);
       if (json.libraryRoot) setLibraryRoot(json.libraryRoot);
+      if (json.truncated) {
+        onShowToast?.('Stopped after 80 subfolders to protect Nutstore rate limits. Select images per folder instead.', 'warning');
+      }
+      return true;
     } catch (err) {
       setError(err.message || 'Failed to load folder');
       setEntries([]);
+      return false;
     } finally {
       setBrowseLoading(false);
     }
-  }, []);
+  }, [onShowToast]);
 
-  useEffect(() => { void loadStatus(); }, [loadStatus]);
+  const boot = useCallback(async () => {
+    setStatus({ loading: true, ok: false, error: '' });
+    setError('');
+    try {
+      const root = await loadStatus();
+      const ok = await loadDirectory(root, '');
+      setStatus({
+        loading: false,
+        ok,
+        error: ok ? '' : 'Could not load PTR Photos from Nutstore. If you see a rate-limit message below, wait a few minutes and retry.',
+      });
+    } catch (err) {
+      setStatus({ loading: false, ok: false, error: err.message || 'Nutstore unavailable' });
+    }
+  }, [loadStatus, loadDirectory]);
 
-  useEffect(() => {
-    if (status.ok && currentPath) void loadDirectory(currentPath, search);
-  }, [status.ok]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { void boot(); }, [boot]);
 
   const goTo = (path) => {
     void loadDirectory(path, search);
@@ -367,7 +409,7 @@ export default function ProductLoaderNutstore({
               {rows.map((row) => (
                 <tr key={row.path}>
                   <td>
-                    <NutstoreThumb path={row.path} className="pl-folder-thumb" />
+                    <LazyNutstoreThumb path={row.path} className="pl-folder-thumb" />
                   </td>
                   <td><strong>{row.code || '—'}</strong></td>
                   <td>{displayTitle(row.title, row.sqlRow?.title) || '—'}</td>
@@ -402,7 +444,7 @@ export default function ProductLoaderNutstore({
           <p className="pl-error">{status.error || 'Nutstore is not configured or unreachable.'}</p>
           <p className="adm-muted">Expected folder: <strong>/PTR-photos</strong> on your Nutstore account.</p>
         </div>
-        <button type="button" className="adm-btn-ghost" onClick={() => void loadStatus()}>
+        <button type="button" className="adm-btn-ghost" onClick={() => void boot()}>
           <RefreshCw size={14} /> Retry connection
         </button>
       </div>
@@ -519,16 +561,16 @@ export default function ProductLoaderNutstore({
             {browseLoading ? (
               <p className="adm-muted pl-nutstore-loading"><Loader2 size={14} className="spin" /> Loading…</p>
             ) : images.length ? (
-              <ul className="pl-nutstore-image-grid">
+              <ul className="pl-nutstore-image-list">
                 {images.map((entry) => (
                   <li key={entry.path}>
-                    <label className={`pl-nutstore-image-card${selected.has(entry.path) ? ' pl-nutstore-image-card--on' : ''}`}>
+                    <label className={`pl-nutstore-image-row${selected.has(entry.path) ? ' pl-nutstore-image-row--on' : ''}`}>
                       <input
                         type="checkbox"
                         checked={selected.has(entry.path)}
                         onChange={() => toggleSelect(entry.path)}
                       />
-                      <NutstoreThumb path={entry.path} className="pl-nutstore-image-card-thumb" />
+                      <FileImage size={18} className="pl-nutstore-image-row-icon" />
                       <span className="pl-nutstore-image-card-name">{entry.name}</span>
                     </label>
                   </li>

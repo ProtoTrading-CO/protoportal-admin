@@ -1,4 +1,11 @@
 import { isNutstoreImageName } from './_nutstore-filename.js';
+import {
+  formatNutstoreError,
+  getCachedDirectory,
+  isNutstoreRateLimitError,
+  pacedNutstoreFetch,
+  setCachedDirectory,
+} from './_nutstore-rate-limit.js';
 
 const DEFAULT_WEBDAV_URL = 'https://dav.jianguoyun.com/dav/';
 /** Only this Nutstore folder is exposed in Product Loader. */
@@ -154,7 +161,7 @@ function extractNextLink(linkHeader) {
 }
 
 async function propfindOnce(url) {
-  const res = await fetch(url, {
+  const res = await pacedNutstoreFetch(url, {
     method: 'PROPFIND',
     headers: {
       Authorization: authHeader(),
@@ -176,13 +183,20 @@ async function propfindOnce(url) {
 
   const text = await res.text();
   if (!res.ok) {
-    throw new Error(`Nutstore PROPFIND failed (${res.status}): ${text.slice(0, 200)}`);
+    const err = new Error(`Nutstore PROPFIND failed (${res.status}): ${text.slice(0, 200)}`);
+    if (res.status === 503) err.code = 'NUTSTORE_RATE_LIMIT';
+    throw err;
   }
   return { entries: parsePropfindResponse(text), nextUrl: extractNextLink(res.headers.get('link') || res.headers.get('Link')) };
 }
 
-export async function listNutstoreDirectory(requestPath = '/') {
+export async function listNutstoreDirectory(requestPath = '/', { useCache = true } = {}) {
   const path = clampToLibrary(requestPath);
+  if (useCache) {
+    const cached = getCachedDirectory(path);
+    if (cached) return { path, entries: cached, cached: true };
+  }
+
   const url = davUrlForPath(path, { directory: true });
   const all = [];
   let currentUrl = url;
@@ -201,7 +215,8 @@ export async function listNutstoreDirectory(requestPath = '/') {
     return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
   });
 
-  return { path, entries: all };
+  setCachedDirectory(path, all);
+  return { path, entries: all, cached: false };
 }
 
 export async function listNutstoreImagesRecursive(requestPath = '/') {
@@ -209,8 +224,9 @@ export async function listNutstoreImagesRecursive(requestPath = '/') {
   const images = [];
   const queue = [path];
   const seen = new Set();
+  const MAX_DIRS = 80;
 
-  while (queue.length) {
+  while (queue.length && seen.size < MAX_DIRS) {
     const dir = queue.shift();
     if (seen.has(dir)) continue;
     seen.add(dir);
@@ -219,18 +235,19 @@ export async function listNutstoreImagesRecursive(requestPath = '/') {
       const { entries } = await listNutstoreDirectory(dir);
       for (const entry of entries) {
         if (entry.type === 'dir') {
-          queue.push(entry.path);
+          if (seen.size + queue.length < MAX_DIRS) queue.push(entry.path);
         } else if (entry.isImage) {
           images.push(entry);
         }
       }
-    } catch {
+    } catch (err) {
+      if (isNutstoreRateLimitError(err)) throw err;
       // skip unreadable folders
     }
   }
 
   images.sort((a, b) => a.path.localeCompare(b.path, undefined, { sensitivity: 'base' }));
-  return { path, images, count: images.length };
+  return { path, images, count: images.length, truncated: queue.length > 0 || seen.size >= MAX_DIRS };
 }
 
 export async function downloadNutstoreFile(path) {
@@ -239,7 +256,7 @@ export async function downloadNutstoreFile(path) {
     throw new Error('Path is outside the PTR Photos library');
   }
   const url = davUrlForPath(normalized);
-  const res = await fetch(url, {
+  const res = await pacedNutstoreFetch(url, {
     method: 'GET',
     headers: { Authorization: authHeader() },
     signal: AbortSignal.timeout(120000),
@@ -262,8 +279,12 @@ function guessContentType(path) {
 
 export async function testNutstoreConnection() {
   const rootPath = libraryRoot();
-  await listNutstoreDirectory(rootPath);
-  return { ok: true, rootPath, libraryRoot: rootPath, libraryLabel: 'PTR Photos' };
+  const cached = getCachedDirectory(rootPath);
+  if (cached) {
+    return { ok: true, rootPath, libraryRoot: rootPath, libraryLabel: 'PTR Photos', cached: true };
+  }
+  await listNutstoreDirectory(rootPath, { useCache: true });
+  return { ok: true, rootPath, libraryRoot: rootPath, libraryLabel: 'PTR Photos', cached: false };
 }
 
-export { joinDavPath, nutstoreConfig, libraryRoot as nutstoreLibraryRoot };
+export { joinDavPath, nutstoreConfig, libraryRoot as nutstoreLibraryRoot, formatNutstoreError, isNutstoreRateLimitError };
