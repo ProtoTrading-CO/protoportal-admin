@@ -50,7 +50,7 @@ async function fetchAllLiveRows(sb, { search, categoryPath, tree, sort }) {
     let q = sb.from('website_stock').select('*');
     const term = safeSearchTerm(search);
     if (term) {
-      q = q.or(`title.ilike.%${term}%,sku.ilike.%${term}%,barcode.ilike.%${term}%`);
+      q = applyCatalogSearchFilter(q, term);
     }
     q = applyCategoryFiltersToQuery(q, resolveCategoryFilters(tree, categoryPath));
     if (sort === 'updated') q = q.order('updated_at', { ascending: false });
@@ -221,18 +221,27 @@ export default async function handler(req, res) {
     let result;
     let stockAlreadyEnriched = false;
     if (status === 'live') {
-      let rows;
-      if (isMotarroBrowsePath(categoryPath)) {
-        rows = await fetchAllMotarroRows(sb, { search, categoryPath, tree, sort });
+      const term = safeSearchTerm(search);
+      if (isMotarroBrowsePath(categoryPath) || term) {
+        let rows;
+        if (isMotarroBrowsePath(categoryPath)) {
+          rows = await fetchAllMotarroRows(sb, { search, categoryPath, tree, sort });
+        } else {
+          rows = await fetchAllLiveRows(sb, { search, categoryPath, tree, sort });
+        }
+        rows = await enrichRowsWithProductStock(sb, rows);
+        rows = rows.filter(isPublishableOnWebsite);
+        rows = applySearchFilter(rows, search);
+        const pageSlice = paginateRows(rows, page, pageSize);
+        result = { ...pageSlice, archived: false };
+        stockAlreadyEnriched = true;
       } else {
-        rows = await fetchAllLiveRows(sb, { search, categoryPath, tree, sort });
+        result = await queryLivePaginated(sb, { search, categoryPath, tree, page, pageSize, sort });
+        let rows = await enrichRowsWithProductStock(sb, result.rows);
+        rows = rows.filter(isPublishableOnWebsite);
+        result = { ...result, rows };
+        stockAlreadyEnriched = true;
       }
-      rows = await enrichRowsWithProductStock(sb, rows);
-      rows = rows.filter(isPublishableOnWebsite);
-      rows = applySearchFilter(rows, search);
-      const pageSlice = paginateRows(rows, page, pageSize);
-      result = { ...pageSlice, archived: false };
-      stockAlreadyEnriched = true;
     } else if (status === 'recycle') {
       result = await queryArchivedPaginated(sb, {
         search, categoryPath, tree, page, pageSize, sort, archivedBy: 'recycle-bin',

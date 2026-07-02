@@ -31,6 +31,7 @@ import { queryClient } from '../lib/queryClient';
 import { queryKeys } from '../lib/queryKeys';
 import { getActiveImageBatch, subscribeImageBatch } from '../lib/imageBatchTracker';
 import { sortOrderCategoryKey, lookupSortOrder, applySkuOrder, sortOrderLookupKeys } from '../lib/taxonomy';
+import { persistSortOrder, fetchSortOrderStore, sortMetaForPath, formatSortSavedAt, fetchSortMetaForCategory } from '../lib/sortOrderStore';
 import { exportProductsCatalogXlsx, exportAllProductsCatalogXlsx, exportSelectedProductsXlsx } from '../lib/exportLiveProducts';
 import { bulkMoveProducts, invalidateAdminCache } from '../lib/products';
 import { formatWebsitePrice } from '../lib/pricing';
@@ -289,8 +290,13 @@ export default function ProductManagerEngine({
   const [categoryPath, setCategoryPath] = useState([]);
   const [selected, setSelected] = useState(new Set());
   const [reorderProducts, setReorderProducts] = useState([]);
-  const [sortOrderMeta, setSortOrderMeta] = useState({ updatedAt: null });
+  const [reorderExpectedTotal, setReorderExpectedTotal] = useState(null);
+  const [reorderLoading, setReorderLoading] = useState(false);
+  const [sortOrderMeta, setSortOrderMeta] = useState({ updatedAt: null, storeUpdatedAt: null });
+  const storeUpdatedAtRef = useRef(null);
   const [reorderDirty, setReorderDirty] = useState(false);
+  const [catalogChangedWhileDirty, setCatalogChangedWhileDirty] = useState(false);
+  const [reorderResyncNonce, setReorderResyncNonce] = useState(0);
   const [reorderSaving, setReorderSaving] = useState(false);
   const [exportingXlsx, setExportingXlsx] = useState(false);
   const [exportingSelected, setExportingSelected] = useState(false);
@@ -308,6 +314,8 @@ export default function ProductManagerEngine({
   const panelTopRef = useRef(null);
   const reorderSaveTimerRef = useRef(null);
   const pendingReorderSaveRef = useRef(null);
+  const reorderSyncKeyRef = useRef('');
+  const catalogTotalWhileDirtyRef = useRef(null);
   const isMobile = useMediaQuery('(max-width: 900px)');
 
   const mutations = useCatalogMutations();
@@ -356,14 +364,16 @@ export default function ProductManagerEngine({
   const catalogParams = useMemo(() => buildCatalogParams({
     status,
     page,
-    pageSize: reorderMode && status === 'live' ? 500 : pageSize,
+    pageSize,
     search: debouncedSearch,
     categoryPath,
     stockFilter: status === 'archived' ? archiveStockView : undefined,
-  }), [status, page, pageSize, debouncedSearch, categoryPath, reorderMode, archiveStockView]);
+  }), [status, page, pageSize, debouncedSearch, categoryPath, archiveStockView]);
+
+  const catalogQueryEnabled = status !== 'approval';
 
   const { data, isLoading, isFetching, isPlaceholderData } = useCatalogQuery(catalogParams, {
-    enabled: status !== 'approval',
+    enabled: catalogQueryEnabled,
   });
   const rowsStale = Boolean(data && data.page !== page);
   const rows = rowsStale ? [] : (data?.rows || []);
@@ -387,26 +397,73 @@ export default function ProductManagerEngine({
   const loadSortOrder = useCallback(async (baseRows) => {
     if (!categoryPath.length || categoryKey === '__all__') return;
     try {
-      const res = await fetch(`/api/category-sort-order?_=${Date.now()}`);
-      const store = await res.json();
-      if (!res.ok) return;
+      const store = await fetchSortOrderStore({ force: true });
+      const meta = sortMetaForPath(store, categoryPath, tree);
+      setSortOrderMeta({ updatedAt: meta.updatedAt, storeUpdatedAt: store.updatedAt || null });
+      storeUpdatedAtRef.current = store.updatedAt || null;
       const skuOrder = lookupSortOrder(store.orders || {}, categoryPath, tree);
-      const keys = sortOrderLookupKeys(categoryPath, tree);
-      const matchedKey = keys.find((k) => store.orders?.[k]?.skuOrder?.length);
-      setSortOrderMeta({ updatedAt: store.orders?.[matchedKey || categoryKey]?.updatedAt || null });
       if (skuOrder?.length && baseRows?.length) {
         setReorderProducts(applySkuOrder(baseRows, skuOrder));
       }
     } catch { /* ignore */ }
   }, [categoryPath, categoryKey, tree]);
 
+  const reorderSyncKey = `${reorderMode}|${status}|${categoryKey}`;
+
   useEffect(() => {
-    if (reorderMode && status === 'live' && rows.length && categoryKey !== '__all__') {
-      setReorderProducts(rows);
-      setReorderDirty(false);
-      void loadSortOrder(rows);
+    if (!reorderMode || status !== 'live' || !categoryPath.length || categoryKey === '__all__') {
+      reorderSyncKeyRef.current = '';
+      setReorderExpectedTotal(null);
+      setCatalogChangedWhileDirty(false);
+      catalogTotalWhileDirtyRef.current = null;
+      return undefined;
     }
-  }, [reorderMode, categoryKey, rows, status, loadSortOrder]);
+
+    const syncKeyChanged = reorderSyncKeyRef.current !== reorderSyncKey;
+    if (!syncKeyChanged && reorderDirty) return undefined;
+    reorderSyncKeyRef.current = reorderSyncKey;
+
+    let cancelled = false;
+    setReorderLoading(true);
+    setCatalogChangedWhileDirty(false);
+    catalogTotalWhileDirtyRef.current = data?.total ?? null;
+    fetchAllCatalogRows({ status: 'live', categoryPath, search: '' })
+      .then((allRows) => {
+        if (cancelled) return;
+        setReorderExpectedTotal(allRows.length);
+        setReorderProducts(allRows);
+        setReorderDirty(false);
+        void loadSortOrder(allRows);
+      })
+      .catch(() => {
+        if (!cancelled) onShowToast?.('Failed to load full category for reorder', 'error');
+      })
+      .finally(() => {
+        if (!cancelled) setReorderLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [reorderSyncKey, reorderResyncNonce, reorderDirty, categoryPath, categoryKey, status, loadSortOrder, onShowToast, data?.total]);
+
+  useEffect(() => {
+    if (!reorderMode || status !== 'live' || !reorderDirty) return;
+    const t = data?.total;
+    if (t == null) return;
+    if (catalogTotalWhileDirtyRef.current != null && catalogTotalWhileDirtyRef.current !== t) {
+      setCatalogChangedWhileDirty(true);
+    }
+    catalogTotalWhileDirtyRef.current = t;
+  }, [data?.total, reorderMode, status, reorderDirty]);
+
+  const discardDirtyReorderSync = useCallback(() => {
+    setCatalogChangedWhileDirty(false);
+    setReorderDirty(false);
+    reorderSyncKeyRef.current = '';
+    catalogTotalWhileDirtyRef.current = null;
+    setReorderResyncNonce((n) => n + 1);
+  }, []);
+
+  const reorderIncomplete = reorderExpectedTotal != null
+    && reorderProducts.length !== reorderExpectedTotal;
 
   const handleReorderProductsChange = useCallback((nextOrFn) => {
     setReorderProducts((prev) => (typeof nextOrFn === 'function' ? nextOrFn(prev) : nextOrFn));
@@ -416,6 +473,10 @@ export default function ProductManagerEngine({
   const saveReorderOrder = async () => {
     if (debouncedSearch) {
       onShowToast?.('Clear search before saving sort order', 'error');
+      return;
+    }
+    if (reorderIncomplete) {
+      onShowToast?.('Category incomplete — reload before saving', 'error');
       return;
     }
     setReorderSaving(true);
@@ -432,28 +493,35 @@ export default function ProductManagerEngine({
       onShowToast?.('Select a category before saving sort order', 'error');
       return;
     }
+    if (reorderExpectedTotal != null && next.length !== reorderExpectedTotal) {
+      onShowToast?.('Category incomplete — reload before saving', 'error');
+      return;
+    }
     const skuOrder = next.map((p) => p.id);
     try {
-      const res = await fetch('/api/category-sort-order', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          categoryKey,
-          skuOrder,
-          legacyKeys: sortOrderLookupKeys(categoryPath, tree).filter((k) => k !== categoryKey),
-        }),
+      const json = await persistSortOrder({
+        categoryKey,
+        skuOrder,
+        legacyKeys: sortOrderLookupKeys(categoryPath, tree).filter((k) => k !== categoryKey),
+        expectedStoreUpdatedAt: storeUpdatedAtRef.current,
       });
-      const json = await res.json().catch(() => ({}));
-      if (res.status === 409) {
-        onShowToast?.(json.error || 'Reorder conflict — reload', 'error');
-        void loadSortOrder();
-        return;
-      }
-      if (!res.ok) throw new Error(json.error || 'Failed to save sort order');
-      setSortOrderMeta({ updatedAt: json.updatedAt });
+      setSortOrderMeta({ updatedAt: json.updatedAt, storeUpdatedAt: json.storeUpdatedAt || null });
+      storeUpdatedAtRef.current = json.storeUpdatedAt || null;
+      setTimeout(() => {
+        void fetchSortMetaForCategory(categoryKey).then((meta) => {
+          if (!meta?.updatedAt) return;
+          setSortOrderMeta({ updatedAt: meta.updatedAt, storeUpdatedAt: meta.storeUpdatedAt || null });
+          storeUpdatedAtRef.current = meta.storeUpdatedAt || null;
+        });
+      }, 5000);
       setReorderDirty(false);
       onShowToast?.('Sort order saved — live site updates within ~30s', 'success');
     } catch (err) {
+      if (err.status === 409) {
+        onShowToast?.(err.message || 'Reorder conflict — reload', 'error');
+        void loadSortOrder(rowsRef.current);
+        return;
+      }
       onShowToast?.(err.message || 'Failed to save sort order', 'error');
       setReorderDirty(true);
     }
@@ -466,8 +534,8 @@ export default function ProductManagerEngine({
       const pending = pendingReorderSaveRef.current;
       pendingReorderSaveRef.current = null;
       if (pending) void persistOrder(pending);
-    }, 450);
-  }, [categoryKey, categoryPath, tree, onShowToast]);
+    }, 600);
+  }, [categoryKey, categoryPath, tree, onShowToast, loadSortOrder]);
 
   useEffect(() => () => {
     if (reorderSaveTimerRef.current) clearTimeout(reorderSaveTimerRef.current);
@@ -1097,13 +1165,33 @@ export default function ProductManagerEngine({
               <>
                 <div className="adm-reorder-toolbar" style={{ marginBottom: 12 }}>
                   <span className="adm-reorder-count">{reorderProducts.length} products in this view</span>
+                  {sortOrderMeta.updatedAt && formatSortSavedAt(sortOrderMeta.updatedAt) && (
+                    <span className="adm-pill adm-pill--ok">
+                      Order saved · {formatSortSavedAt(sortOrderMeta.updatedAt)}
+                    </span>
+                  )}
                   {reorderDirty && <span className="adm-pill adm-pill--warn">Unsaved order</span>}
                   {debouncedSearch && <span className="adm-muted" style={{ fontSize: 12 }}>Clear search to save</span>}
+                  {catalogChangedWhileDirty && (
+                    <span className="adm-pill adm-pill--warn" style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                      Catalogue changed — reload to sync
+                      <button
+                        type="button"
+                        className="adm-btn-ghost adm-btn--sm"
+                        onClick={() => discardDirtyReorderSync()}
+                      >
+                        Reload
+                      </button>
+                    </span>
+                  )}
+                  {reorderIncomplete && (
+                    <span className="adm-pill adm-pill--warn">Category incomplete — reload before saving</span>
+                  )}
                   <button
                     type="button"
                     className="adm-btn-red adm-btn--sm"
                     style={{ marginLeft: 'auto' }}
-                    disabled={!reorderDirty || reorderSaving || !!debouncedSearch}
+                    disabled={!reorderDirty || reorderSaving || !!debouncedSearch || reorderIncomplete}
                     onClick={() => void saveReorderOrder()}
                   >
                     {reorderSaving ? 'Saving…' : 'Save order'}
@@ -1117,7 +1205,7 @@ export default function ProductManagerEngine({
                 mainCategoryId={categoryPath[0] || tree[0]?.id}
                 selectedPath={categoryPath}
                 taxonomyTree={tree}
-                loading={isLoading}
+                loading={reorderLoading}
                 dragDisabled={!!debouncedSearch}
                 savingOrder={reorderSaving}
                 onEditProduct={onEditProduct}

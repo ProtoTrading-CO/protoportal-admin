@@ -15,7 +15,7 @@ export default async function handler(req, res) {
 
   // GET — list customers by tab
   if (req.method === 'GET') {
-    const { tab = 'requests', page = '1', pageSize = '50', search = '' } = req.query;
+    const { tab = 'requests', page = '1', pageSize = '50', search = '', business_type: businessType = '' } = req.query;
     const pageNum = Math.max(1, parseInt(page, 10) || 1);
     const size = Math.min(200, Math.max(1, parseInt(pageSize, 10) || 50));
     const from = (pageNum - 1) * size;
@@ -33,6 +33,13 @@ export default async function handler(req, res) {
       query = query.eq('is_approved', false);
     } else if (tab === 'regular') {
       query = query.eq('is_approved', true);
+    }
+
+    const bt = String(businessType || '').trim();
+    if (bt === '__unspecified__') {
+      query = query.or('business_type.is.null,business_type.eq.');
+    } else if (bt) {
+      query = query.eq('business_type', bt);
     }
 
     const q = (search || '').trim();
@@ -113,12 +120,14 @@ export default async function handler(req, res) {
     if (error) return res.status(400).json({ error: error.message });
 
     // Send WhatsApp welcome via WATI on approval — skip only if customer explicitly opted out
+    let watiWelcome = 'skipped';
     if (patch.is_approved === true && data?.accept_whatsapp !== false && data?.phone) {
       const rawPhone = data.phone.replace(/\D/g, '');
       // WATI expects numbers without + in international format: 27821234567
       const watiPhone = rawPhone.startsWith('0') ? `27${rawPhone.slice(1)}` : rawPhone;
       const watiBase = process.env.WATI_API_URL || 'https://live-mt-server.wati.io/10138950';
       const watiToken = process.env.WATI_API_TOKEN;
+      const welcomeTemplate = process.env.WATI_WELCOME_TEMPLATE || 'proto_welcome_';
       if (watiToken) {
         try {
           // Step 1: Add/update contact in WATI so the number is registered
@@ -138,8 +147,8 @@ export default async function handler(req, res) {
               method: 'POST',
               headers: { 'Authorization': `Bearer ${watiToken}`, 'Content-Type': 'application/json' },
               body: JSON.stringify({
-                template_name: 'proto_welcome_',
-                broadcast_name: 'proto_welcome_',
+                template_name: welcomeTemplate,
+                broadcast_name: welcomeTemplate,
                 parameters: [],
               }),
             }
@@ -147,14 +156,18 @@ export default async function handler(req, res) {
           if (!waRes.ok) {
             const waBody = await waRes.json().catch(() => ({}));
             console.error('WATI send error:', waRes.status, JSON.stringify(waBody));
+            watiWelcome = 'failed';
+          } else {
+            watiWelcome = 'sent';
           }
         } catch (waErr) {
           console.error('WATI broadcast error:', waErr.message);
+          watiWelcome = 'failed';
         }
       }
     }
 
-    return res.status(200).json({ row: data });
+    return res.status(200).json({ row: data, watiWelcome });
   }
 
   // DELETE — remove customer
@@ -162,16 +175,27 @@ export default async function handler(req, res) {
     const { id } = req.body || {};
     if (!id) return res.status(400).json({ error: 'id required' });
 
-    // Delete from customers table first
+    const { count: orderCount, error: countError } = await supabase
+      .from('orders')
+      .select('id', { count: 'exact', head: true })
+      .eq('customer_id', id);
+    if (countError) return res.status(400).json({ error: countError.message });
+    if ((orderCount || 0) > 0) {
+      return res.status(400).json({
+        error: 'Cannot delete a customer with existing orders. Deactivate them instead (set is_approved to false via PATCH).',
+      });
+    }
+
+    const { error: authError } = await supabase.auth.admin.deleteUser(id);
+    if (authError) {
+      return res.status(400).json({ error: authError.message || 'Failed to delete auth user' });
+    }
+
     const { error: custError } = await supabase
       .from('customers')
       .delete()
       .eq('id', id);
     if (custError) return res.status(400).json({ error: custError.message });
-
-    // Also delete the auth user
-    const { error: authError } = await supabase.auth.admin.deleteUser(id);
-    if (authError) console.error('auth.admin.deleteUser error:', authError.message);
 
     return res.status(200).json({ ok: true });
   }

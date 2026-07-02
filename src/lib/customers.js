@@ -1,5 +1,6 @@
-export async function fetchCustomersPage({ page = 1, pageSize = 50, tab = 'regular', searchQuery = '' } = {}) {
+export async function fetchCustomersPage({ page = 1, pageSize = 50, tab = 'regular', searchQuery = '', businessType = '' } = {}) {
   const params = new URLSearchParams({ tab, page: String(page), pageSize: String(pageSize), search: searchQuery });
+  if (businessType) params.set('business_type', businessType);
   const res = await fetch(`/api/admin-customers?${params}`);
   const json = await res.json();
   if (!res.ok) throw new Error(json.error || 'Failed to fetch customers');
@@ -23,8 +24,12 @@ export async function deleteCustomer(id) {
 }
 
 export async function approveCustomer(id, approved = true, { customerCode } = {}) {
+  const code = customerCode ? String(customerCode).trim().toUpperCase() : '';
+  if (approved && code && !/^[A-Z0-9]{6}$/.test(code)) {
+    throw new Error('Customer code must be exactly 6 letters or numbers');
+  }
   const body = { id, is_approved: approved };
-  if (customerCode) body.customer_code = String(customerCode).trim().toUpperCase();
+  if (customerCode) body.customer_code = code;
   const res = await fetch('/api/admin-customers', {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
@@ -32,6 +37,7 @@ export async function approveCustomer(id, approved = true, { customerCode } = {}
   });
   const json = await res.json();
   if (!res.ok) throw new Error(json.error || 'Failed to approve customer');
+  return json;
 }
 
 export async function fetchProtoActiveCustomersPage({ page = 1, pageSize = 50, searchQuery = '' } = {}) {
