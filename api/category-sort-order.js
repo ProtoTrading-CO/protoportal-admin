@@ -28,15 +28,23 @@ export default async function handler(req, res) {
 
   if (req.method === 'POST') {
     if (!(await requireAdminKey(req, res))) return;
-    const { categoryKey, skuOrder, legacyKeys = [] } = req.body || {};
+    const { categoryKey, skuOrder, legacyKeys = [], expectedStoreUpdatedAt } = req.body || {};
     const key = String(categoryKey || '').trim();
     if (!key || !Array.isArray(skuOrder)) {
       return res.status(400).json({ error: 'categoryKey and skuOrder[] required' });
     }
     try {
       const store = await readStore();
+      const expected = expectedStoreUpdatedAt != null ? String(expectedStoreUpdatedAt) : '';
+      if (expected && store.updatedAt && expected !== store.updatedAt) {
+        return res.status(409).json({ error: 'Sort order changed elsewhere — refresh and retry' });
+      }
+      const fresh = await readStore();
+      if (expected && fresh.updatedAt && expected !== fresh.updatedAt) {
+        return res.status(409).json({ error: 'Sort order changed elsewhere — refresh and retry' });
+      }
       const now = new Date().toISOString();
-      const nextOrders = { ...(store.orders || {}) };
+      const nextOrders = { ...(fresh.orders || {}) };
       for (const legacy of legacyKeys) {
         const lk = String(legacy || '').trim();
         if (lk && lk !== key) delete nextOrders[lk];
@@ -44,7 +52,7 @@ export default async function handler(req, res) {
       nextOrders[key] = { skuOrder: skuOrder.map(String), updatedAt: now };
       const next = { orders: nextOrders, updatedAt: now };
       await writeSiteConfigJson(SORT_FILE, next);
-      return res.status(200).json({ ok: true, categoryKey: key, updatedAt: now });
+      return res.status(200).json({ ok: true, categoryKey: key, updatedAt: now, storeUpdatedAt: now });
     } catch (err) {
       return res.status(500).json({ error: err.message });
     }

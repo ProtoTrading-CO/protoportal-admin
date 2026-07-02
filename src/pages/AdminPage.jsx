@@ -522,7 +522,8 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   const [reorderProducts, setReorderProducts] = useState([]);
   const [reorderDirty, setReorderDirty] = useState(false);
   const [reorderSaving, setReorderSaving] = useState(false);
-  const [reorderSortMeta, setReorderSortMeta] = useState({ updatedAt: null });
+  const [reorderSortMeta, setReorderSortMeta] = useState({ updatedAt: null, storeUpdatedAt: null });
+  const reorderStoreUpdatedAtRef = useRef(null);
   const reorderCacheByMainRef = useRef({});
   const reorderSaveTimerRef = useRef(null);
   const pendingReorderSaveRef = useRef(null);

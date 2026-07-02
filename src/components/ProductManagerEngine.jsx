@@ -292,7 +292,8 @@ export default function ProductManagerEngine({
   const [reorderProducts, setReorderProducts] = useState([]);
   const [reorderExpectedTotal, setReorderExpectedTotal] = useState(null);
   const [reorderLoading, setReorderLoading] = useState(false);
-  const [sortOrderMeta, setSortOrderMeta] = useState({ updatedAt: null });
+  const [sortOrderMeta, setSortOrderMeta] = useState({ updatedAt: null, storeUpdatedAt: null });
+  const storeUpdatedAtRef = useRef(null);
   const [reorderDirty, setReorderDirty] = useState(false);
   const [catalogChangedWhileDirty, setCatalogChangedWhileDirty] = useState(false);
   const [reorderResyncNonce, setReorderResyncNonce] = useState(0);

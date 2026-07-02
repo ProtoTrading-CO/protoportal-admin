@@ -84,12 +84,12 @@ export function sortMetaForPath(store, navPath, tree) {
   return { updatedAt: store?.orders?.[key]?.updatedAt || null, matchedKey: key };
 }
 
-export async function persistSortOrder({ categoryKey, skuOrder, legacyKeys = [] }) {
+export async function persistSortOrder({ categoryKey, skuOrder, legacyKeys = [], expectedStoreUpdatedAt } = {}) {
   const res = await fetch('/api/category-sort-order', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'same-origin',
-    body: JSON.stringify({ categoryKey, skuOrder, legacyKeys }),
+    body: JSON.stringify({ categoryKey, skuOrder, legacyKeys, expectedStoreUpdatedAt }),
   });
   const json = await res.json();
   if (!res.ok) {
