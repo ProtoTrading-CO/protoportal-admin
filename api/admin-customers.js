@@ -1,5 +1,6 @@
 import { requireAdminKey } from './_admin-auth.js';
 import { createClient } from '@supabase/supabase-js';
+import { parseCustomerTab, parsePositiveInt, parseBusinessTypeFilter } from './_admin-query-params.js';
 
 function getAdminClient() {
   return createClient(
@@ -16,8 +17,18 @@ export default async function handler(req, res) {
   // GET — list customers by tab
   if (req.method === 'GET') {
     const { tab = 'requests', page = '1', pageSize = '50', search = '', business_type: businessType = '' } = req.query;
-    const pageNum = Math.max(1, parseInt(page, 10) || 1);
-    const size = Math.min(200, Math.max(1, parseInt(pageSize, 10) || 50));
+    let pageNum;
+    let size;
+    let tabKey;
+    let bt;
+    try {
+      pageNum = parsePositiveInt(page, { name: 'page', min: 1, max: 10_000, fallback: 1 });
+      size = parsePositiveInt(pageSize, { name: 'pageSize', min: 1, max: 200, fallback: 50 });
+      tabKey = parseCustomerTab(tab);
+      bt = parseBusinessTypeFilter(businessType);
+    } catch (err) {
+      return res.status(400).json({ error: err.message });
+    }
     const from = (pageNum - 1) * size;
     const to = from + size - 1;
 
@@ -27,15 +38,14 @@ export default async function handler(req, res) {
       .order('created_at', { ascending: false })
       .range(from, to);
 
-    if (tab === 'premium') {
+    if (tabKey === 'premium') {
       query = query.eq('tier', 'premium').eq('is_approved', true);
-    } else if (tab === 'requests') {
+    } else if (tabKey === 'requests') {
       query = query.eq('is_approved', false);
-    } else if (tab === 'regular') {
+    } else if (tabKey === 'regular') {
       query = query.eq('is_approved', true);
     }
 
-    const bt = String(businessType || '').trim();
     if (bt === '__unspecified__') {
       query = query.or('business_type.is.null,business_type.eq.');
     } else if (bt) {

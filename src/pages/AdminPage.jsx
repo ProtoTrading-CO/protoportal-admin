@@ -100,7 +100,7 @@ import { displayOrderNumber, buildFulfillmentUrl } from '../lib/orderNumber';
 import { fetchPresaleInvoices, uploadPresaleInvoice } from '../lib/presaleInvoice';
 import { fetchConfirmationSent, markConfirmationSent, fetchPaymentRecords, uploadPop, setPaymentStatus } from '../lib/orderPayment';
 import { deleteOrderAdmin, fetchOrdersPage, updateOrderAdmin, advanceOrderWorkflow } from '../lib/orders';
-import { orderMatchesTab, normalizeOrderStatus, getWorkflowAdvanceOptions } from '../lib/orderStatus';
+import { orderMatchesTab, normalizeOrderStatus, getWorkflowAdvanceOptions, isOrderConfirmationSent } from '../lib/orderStatus';
 import OrderWorkflowBadge from '../components/OrderWorkflowBadge';
 import { fetchFulfillmentUsers, loadActiveUserId } from '../lib/fulfillmentUsers';
 import { isVictorSender, CUSTOMER_SEND_FORBIDDEN, PAYMENT_RECEIVED_FORBIDDEN } from '../lib/fulfillmentAuth';
@@ -1090,14 +1090,17 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     ? '1.4fr 1.2fr 1fr 2fr 120px 56px'
     : '1.6fr 1.4fr 1.2fr 1fr 160px 80px';
 
-  const confirmationSentIds = useMemo(
-    () => new Set(Object.keys(confirmationSent).filter((id) => confirmationSent[id]?.sentAt)),
-    [confirmationSent],
-  );
+  const confirmationSentIds = useMemo(() => {
+    const ids = new Set(Object.keys(confirmationSent).filter((id) => confirmationSent[id]?.sentAt));
+    for (const order of orders) {
+      if (order.confirmation_sent_at) ids.add(String(order.id));
+    }
+    return ids;
+  }, [confirmationSent, orders]);
 
   const renderOrderConfirmationActions = (order) => {
     if (normalizeOrderStatus(order.status) !== 'order sent') return null;
-    if (confirmationSentIds.has(order.id)) return null;
+    if (isOrderConfirmationSent(order, confirmationSentIds)) return null;
     const invoice = presaleInvoices[order.id];
     const uploading = presaleUploading === order.id;
     const sending = saving === `send-${order.id}`;
@@ -1148,7 +1151,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
         </div>
       );
     }
-    if (key !== 'order sent' || !confirmationSentIds.has(order.id)) return null;
+    if (key !== 'order sent' || !isOrderConfirmationSent(order, confirmationSentIds)) return null;
 
     const pop = paymentRecords[order.id];
     const uploading = popUploading === order.id;
@@ -1327,6 +1330,11 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
       }
       const sentMeta = await markConfirmationSent(order.id);
       setConfirmationSent((prev) => ({ ...prev, [order.id]: sentMeta }));
+      setOrders((prev) => prev.map((item) => (
+        item.id === order.id
+          ? { ...item, confirmation_sent_at: sentMeta.sentAt || sentMeta.updatedAt }
+          : item
+      )));
       setOrderTab('paid');
       showToast(`Confirmation sent to ${email}${emailData.presaleIncluded ? ' with presale invoice' : ''} — moved to Payment`);
     } catch (err) {
@@ -1415,7 +1423,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     if (!ids.length) return;
     fetchConfirmationSent(ids)
       .then((rows) => setConfirmationSent((prev) => ({ ...prev, ...rows })))
-      .catch(() => {});
+      .catch((err) => showToast(err.message || 'Failed to load confirmation status', 'error'));
   }, [activeSection, orders]);
 
   useEffect(() => {
@@ -1423,10 +1431,10 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     if (!ids.length) return;
     fetchPresaleInvoices(ids)
       .then((invoices) => setPresaleInvoices((prev) => ({ ...prev, ...invoices })))
-      .catch(() => {});
+      .catch((err) => showToast(err.message || 'Failed to load presale invoices', 'error'));
     fetchConfirmationSent(ids)
       .then((rows) => setConfirmationSent((prev) => ({ ...prev, ...rows })))
-      .catch(() => {});
+      .catch((err) => showToast(err.message || 'Failed to load confirmation status', 'error'));
   }, [activeSection, orderTab, orders]);
 
   useEffect(() => {
@@ -1437,10 +1445,10 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     if (!ids.length) return;
     fetchPaymentRecords(ids)
       .then((rows) => setPaymentRecords((prev) => ({ ...prev, ...rows })))
-      .catch(() => {});
+      .catch((err) => showToast(err.message || 'Failed to load payment records', 'error'));
     fetchConfirmationSent(ids)
       .then((rows) => setConfirmationSent((prev) => ({ ...prev, ...rows })))
-      .catch(() => {});
+      .catch((err) => showToast(err.message || 'Failed to load confirmation status', 'error'));
   }, [activeSection, orderTab, orders, confirmationSentIds]);
 
   useEffect(() => {

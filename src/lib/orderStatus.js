@@ -68,9 +68,14 @@ export function isNewOrderStatus(status) {
   return workflowStageIndex(status) === 0;
 }
 
+export function isOrderConfirmationSent(order, confirmationSentIds = null) {
+  if (order?.confirmation_sent_at) return true;
+  return confirmationSentIds?.has?.(String(order?.id)) ?? false;
+}
+
 export function orderMatchesTab(order, tab, { confirmationSentIds = null } = {}) {
   const key = normalizeOrderStatus(order?.status);
-  const sent = confirmationSentIds?.has?.(order?.id);
+  const sent = isOrderConfirmationSent(order, confirmationSentIds);
   if (tab === 'new') return key === 'pending';
   if (tab === 'handed') return key === 'handed over';
   if (tab === 'progress') return key === 'order in progress';
