@@ -972,7 +972,7 @@ export default function ProductLoaderPanel({
       <div className="adm-section-head" style={{ marginBottom: 24 }}>
         <div>
           <h2 className="adm-section-title">Product Loader</h2>
-          <p className="adm-section-note">Publish supplier images to the live catalogue — Apollo generates images separately.</p>
+          <p className="adm-section-note">Browse Nutstore or upload images — Positill fills price, description and stock. Apollo generates images separately.</p>
           {sqlLiveStatus?.bridgeConfigured && (
             <p style={{ fontSize: 12, marginTop: 6, fontWeight: 700, color: sqlLiveStatus.sqlConnectionTest ? '#15803d' : '#c2410c' }}>
               {sqlLiveStatus.sqlConnectionTest
