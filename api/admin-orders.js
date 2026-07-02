@@ -143,8 +143,12 @@ async function computeTabCounts(supabase, useDbColumn, legacyIds) {
     };
   }
 
-  const { data, error } = await supabase.from('orders').select('id, status');
+  const { data, error } = await supabase
+    .from('orders')
+    .select('id, status')
+    .limit(LEGACY_CONFIRMATION_SCAN_LIMIT);
   if (error) throw error;
+  const truncated = (data || []).length >= LEGACY_CONFIRMATION_SCAN_LIMIT;
   const counts = { all: 0, new: 0, handed: 0, progress: 0, sent: 0, paid: 0 };
   for (const order of data || []) {
     counts.all += 1;
@@ -152,6 +156,7 @@ async function computeTabCounts(supabase, useDbColumn, legacyIds) {
       if (orderMatchesTab(order, tab, legacyIds)) counts[tab] += 1;
     }
   }
+  if (truncated) counts._truncated = true;
   return counts;
 }
 
@@ -162,6 +167,16 @@ async function fetchAdminOrdersPage(supabase, {
   const customerIds = term ? await resolveCustomerIdsForSearch(supabase, term) : [];
   const from = (page - 1) * pageSize;
   const to = from + pageSize - 1;
+
+  if (useDbColumn && (tab === 'sent' || tab === 'paid')) {
+    let q = supabase.from('orders').select(ORDER_SELECT, { count: 'exact' }).order('created_at', { ascending: false });
+    q = applyOrderSearch(q, term, customerIds, { useItemsSearch });
+    q = tab === 'sent' ? applySentTabFilter(q) : applyPaidTabFilter(q);
+    q = q.range(from, to);
+    const { data, error, count } = await q;
+    if (error && !isRangeNotSatisfiable(error)) throw error;
+    return { rows: error ? [] : (data || []), total: count || 0, page, pageSize };
+  }
 
   if (term && !useItemsSearch) {
     let q = supabase.from('orders').select(ORDER_SELECT).order('created_at', { ascending: false }).limit(LEGACY_ORDER_SEARCH_SCAN_LIMIT);
@@ -178,16 +193,6 @@ async function fetchAdminOrdersPage(supabase, {
       pageSize,
       truncated: (data || []).length >= LEGACY_ORDER_SEARCH_SCAN_LIMIT,
     };
-  }
-
-  if (useDbColumn && (tab === 'sent' || tab === 'paid')) {
-    let q = supabase.from('orders').select(ORDER_SELECT, { count: 'exact' }).order('created_at', { ascending: false });
-    q = applyOrderSearch(q, term, customerIds, { useItemsSearch });
-    q = tab === 'sent' ? applySentTabFilter(q) : applyPaidTabFilter(q);
-    q = q.range(from, to);
-    const { data, error, count } = await q;
-    if (error && !isRangeNotSatisfiable(error)) throw error;
-    return { rows: error ? [] : (data || []), total: count || 0, page, pageSize };
   }
 
   if (!useDbColumn && (tab === 'sent' || tab === 'paid')) {

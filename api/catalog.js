@@ -19,16 +19,24 @@ const VALID_STATUS = new Set(['live', 'archived', 'new-items', 'approval', 'recy
 const EXCLUDE_ARCHIVED = ['new-products', 'recycle-bin'];
 const PAGE_CHUNK = 1000;
 
-async function fetchAllMotarroRows(sb, { search, categoryPath, tree, sort }) {
+/** Title-match Mottaro browse across live or archived tables. */
+async function fetchAllMotarroRowsFromTable(sb, tableName, { search, categoryPath, tree, sort, archivedBy, excludeBy }) {
   const rows = [];
   let from = 0;
   while (true) {
-    let q = sb.from('website_stock').select('*');
+    let q = sb.from(tableName).select('*');
     const term = safeSearchTerm(search);
     if (term) {
       q = q.or(`title.ilike.%${term}%,sku.ilike.%${term}%,barcode.ilike.%${term}%`);
     } else {
       q = q.or('title.ilike.%motarro%,title.ilike.%mottaro%,title.ilike.%monttaro%');
+    }
+    if (tableName === 'archived_products') {
+      if (archivedBy) q = q.eq('archived_by', archivedBy);
+      if (excludeBy?.length) {
+        const quoted = excludeBy.map((v) => `"${v}"`).join(',');
+        q = q.or(`archived_by.is.null,archived_by.not.in.(${quoted})`);
+      }
     }
     if (sort === 'updated') q = q.order('updated_at', { ascending: false });
     else q = q.order('title', { ascending: true });
@@ -41,6 +49,10 @@ async function fetchAllMotarroRows(sb, { search, categoryPath, tree, sort }) {
     from += PAGE_CHUNK;
   }
   return filterByCategoryPath(rows, categoryPath, tree);
+}
+
+async function fetchAllMotarroRows(sb, opts) {
+  return fetchAllMotarroRowsFromTable(sb, 'website_stock', opts);
 }
 
 async function fetchAllLiveRows(sb, { search, categoryPath, tree, sort }) {
@@ -139,6 +151,14 @@ async function queryLivePaginated(sb, { search, categoryPath, tree, page, pageSi
 }
 
 async function queryArchivedPaginated(sb, { search, categoryPath, tree, page, pageSize, sort, archivedBy, excludeBy }) {
+  if (isMotarroBrowsePath(categoryPath)) {
+    let rows = await fetchAllMotarroRowsFromTable(sb, 'archived_products', {
+      search, categoryPath, tree, sort, archivedBy, excludeBy,
+    });
+    rows = applySearchFilter(rows, search);
+    const pageSlice = paginateRows(rows, page, pageSize);
+    return { ...pageSlice, archived: true };
+  }
   const from = (page - 1) * pageSize;
   const to = from + pageSize - 1;
   let q = sb.from('archived_products').select('*', { count: 'exact' });
@@ -263,7 +283,16 @@ export default async function handler(req, res) {
           : archivedSource === 'other'
             ? { excludeBy: [...EXCLUDE_ARCHIVED, 'nutstore'], sort }
             : { excludeBy: EXCLUDE_ARCHIVED, sort };
-        let rows = await fetchAllArchivedRows(sb, { search, categoryPath, tree, ...archiveFetch });
+        let rows;
+        if (isMotarroBrowsePath(categoryPath)) {
+          rows = await fetchAllMotarroRowsFromTable(sb, 'archived_products', {
+            search, categoryPath, tree, ...archiveFetch,
+          });
+        } else {
+          rows = await fetchAllArchivedRows(sb, { ...archiveFetch, sort });
+          rows = filterByCategoryPath(rows, categoryPath, tree);
+          rows = applySearchFilter(rows, search);
+        }
         rows = await enrichRowsWithProductStock(sb, rows);
         rows = rows.filter((r) => !isExactlyZeroStock(r));
         const pageSlice = paginateRows(rows, page, pageSize);

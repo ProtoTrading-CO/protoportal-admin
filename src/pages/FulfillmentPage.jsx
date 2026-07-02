@@ -399,6 +399,12 @@ export default function FulfillmentPage() {
                 />
               </div>
             ) : <span className="ff-oos">Out of stock</span>}
+            {hasPrices && !item.removed && (
+              <div className="ff-item-price">
+                R {Number(item.unitPrice || item.price || 0).toFixed(2)}
+                {item.finalQty > 1 ? ` × ${item.finalQty}` : ''}
+              </div>
+            )}
           </div>
           {editable && (
             <div className="ff-item-actions">

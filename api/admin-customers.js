@@ -190,16 +190,6 @@ export default async function handler(req, res) {
       .select('id', { count: 'exact', head: true })
       .eq('customer_id', id);
     if (countError) return res.status(400).json({ error: countError.message });
-    if ((orderCount || 0) > 0) {
-      return res.status(400).json({
-        error: 'Cannot delete a customer with existing orders. Deactivate them instead (set is_approved to false via PATCH).',
-      });
-    }
-
-    const { error: authError } = await supabase.auth.admin.deleteUser(id);
-    if (authError) {
-      return res.status(400).json({ error: authError.message || 'Failed to delete auth user' });
-    }
 
     const { error: custError } = await supabase
       .from('customers')
@@ -207,7 +197,12 @@ export default async function handler(req, res) {
       .eq('id', id);
     if (custError) return res.status(400).json({ error: custError.message });
 
-    return res.status(200).json({ ok: true });
+    const { error: authError } = await supabase.auth.admin.deleteUser(id);
+    if (authError) {
+      return res.status(400).json({ error: authError.message || 'Failed to delete auth user' });
+    }
+
+    return res.status(200).json({ ok: true, orderCount: orderCount || 0 });
   }
 
   return res.status(405).end();

@@ -1092,6 +1092,17 @@ input, select, textarea { font-family: inherit; outline: none; }
   margin-bottom: 22px;
 }
 
+.adm-sync-badge {
+  grid-column: 1 / -1;
+  font-size: 12px;
+  font-weight: 600;
+  color: #6b7280;
+  padding: 8px 12px;
+  background: #f9fafb;
+  border: 1px solid #e8eaed;
+  border-radius: 10px;
+}
+
 .adm-stat {
   background: #fff;
   border: 1px solid #e8eaed;
@@ -4354,8 +4365,8 @@ html, body { background: #f5f5f5; color: #111827; }
 .ff-item-row--removed { background: #fff5f5; }
 .ff-item-row--readonly { background: #fafafa; }
 .ff-item-img {
-  width: 62px;
-  height: 62px;
+  width: 88px;
+  height: 88px;
   border-radius: 10px;
   background: #ffffff;
   border: 1px solid #e5e5e5;
@@ -4377,6 +4388,12 @@ html, body { background: #f5f5f5; color: #111827; }
   cursor: zoom-in;
 }
 .ff-item-img img { width: 100%; height: 100%; object-fit: contain; }
+.ff-item-price {
+  font-size: 12px;
+  font-weight: 700;
+  color: #374151;
+  margin-top: 4px;
+}
 .ff-item-body { flex: 1; min-width: 0; }
 .ff-item-code {
   font-size: 11px;
@@ -4713,7 +4730,7 @@ html, body { background: #f5f5f5; color: #111827; }
   .ff-hero, .ff-user-card, .ff-section, .ff-total { border-radius: 12px; }
   .ff-section-head { padding: 12px 12px; }
   .ff-item-row { padding: 12px 12px; gap: 10px; }
-  .ff-item-img { width: 50px; height: 50px; }
+  .ff-item-img { width: 68px; height: 68px; }
   .ff-item-name { font-size: 13.5px; }
   .ff-swap-panel { margin: 0 12px 12px; }
   .ff-action-bar { padding-left: 10px; padding-right: 10px; }
