@@ -137,6 +137,8 @@ import {
   invalidateSortOrderStore,
   persistSortOrder,
   sortMetaForPath,
+  formatSortSavedAt,
+  fetchSortMetaForCategory,
 } from '../lib/sortOrderStore';
 import categories from '../data/categories.json';
 
@@ -895,7 +897,9 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     const filtered = applyPathFilter(allRows, reorderNavPath);
     const ordered = applySortOrdersToProducts(filtered, reorderNavPath, taxonomyTree, store);
     if (reorderNavPath.length) {
-      setReorderSortMeta(sortMetaForPath(store, reorderNavPath, taxonomyTree));
+      const meta = sortMetaForPath(store, reorderNavPath, taxonomyTree);
+      setReorderSortMeta({ updatedAt: meta.updatedAt, storeUpdatedAt: store.updatedAt || null });
+      reorderStoreUpdatedAtRef.current = store.updatedAt || null;
     }
     setReorderProducts((prev) => {
       if (prev.length === ordered.length && prev.every((p, i) => p.id === ordered[i]?.id)) return prev;
@@ -955,8 +959,17 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
         categoryKey,
         skuOrder,
         legacyKeys: sortOrderLookupKeys(navPath, taxonomyTree).filter((k) => k !== categoryKey),
+        expectedStoreUpdatedAt: reorderStoreUpdatedAtRef.current,
       });
-      setReorderSortMeta({ updatedAt: json.updatedAt });
+      setReorderSortMeta({ updatedAt: json.updatedAt, storeUpdatedAt: json.storeUpdatedAt || null });
+      reorderStoreUpdatedAtRef.current = json.storeUpdatedAt || null;
+      setTimeout(() => {
+        void fetchSortMetaForCategory(categoryKey).then((meta) => {
+          if (!meta?.updatedAt) return;
+          setReorderSortMeta({ updatedAt: meta.updatedAt, storeUpdatedAt: meta.storeUpdatedAt || null });
+          reorderStoreUpdatedAtRef.current = meta.storeUpdatedAt || null;
+        });
+      }, 5000);
       setReorderDirty(false);
       if (reorderMainId && reorderCacheByMainRef.current[reorderCacheKey]) {
         const cachePath = reorderCategoryPath.length ? reorderCategoryPath : [reorderMainId];

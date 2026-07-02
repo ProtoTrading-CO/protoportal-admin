@@ -31,7 +31,7 @@ import { queryClient } from '../lib/queryClient';
 import { queryKeys } from '../lib/queryKeys';
 import { getActiveImageBatch, subscribeImageBatch } from '../lib/imageBatchTracker';
 import { sortOrderCategoryKey, lookupSortOrder, applySkuOrder, sortOrderLookupKeys } from '../lib/taxonomy';
-import { persistSortOrder, fetchSortOrderStore, sortMetaForPath } from '../lib/sortOrderStore';
+import { persistSortOrder, fetchSortOrderStore, sortMetaForPath, formatSortSavedAt, fetchSortMetaForCategory } from '../lib/sortOrderStore';
 import { exportProductsCatalogXlsx, exportAllProductsCatalogXlsx, exportSelectedProductsXlsx } from '../lib/exportLiveProducts';
 import { bulkMoveProducts, invalidateAdminCache } from '../lib/products';
 import { formatWebsitePrice } from '../lib/pricing';
@@ -399,7 +399,8 @@ export default function ProductManagerEngine({
     try {
       const store = await fetchSortOrderStore({ force: true });
       const meta = sortMetaForPath(store, categoryPath, tree);
-      setSortOrderMeta({ updatedAt: meta.updatedAt });
+      setSortOrderMeta({ updatedAt: meta.updatedAt, storeUpdatedAt: store.updatedAt || null });
+      storeUpdatedAtRef.current = store.updatedAt || null;
       const skuOrder = lookupSortOrder(store.orders || {}, categoryPath, tree);
       if (skuOrder?.length && baseRows?.length) {
         setReorderProducts(applySkuOrder(baseRows, skuOrder));
@@ -502,8 +503,17 @@ export default function ProductManagerEngine({
         categoryKey,
         skuOrder,
         legacyKeys: sortOrderLookupKeys(categoryPath, tree).filter((k) => k !== categoryKey),
+        expectedStoreUpdatedAt: storeUpdatedAtRef.current,
       });
-      setSortOrderMeta({ updatedAt: json.updatedAt });
+      setSortOrderMeta({ updatedAt: json.updatedAt, storeUpdatedAt: json.storeUpdatedAt || null });
+      storeUpdatedAtRef.current = json.storeUpdatedAt || null;
+      setTimeout(() => {
+        void fetchSortMetaForCategory(categoryKey).then((meta) => {
+          if (!meta?.updatedAt) return;
+          setSortOrderMeta({ updatedAt: meta.updatedAt, storeUpdatedAt: meta.storeUpdatedAt || null });
+          storeUpdatedAtRef.current = meta.storeUpdatedAt || null;
+        });
+      }, 5000);
       setReorderDirty(false);
       onShowToast?.('Sort order saved — live site updates within ~30s', 'success');
     } catch (err) {

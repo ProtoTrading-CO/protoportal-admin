@@ -84,6 +84,24 @@ export function sortMetaForPath(store, navPath, tree) {
   return { updatedAt: store?.orders?.[key]?.updatedAt || null, matchedKey: key };
 }
 
+export function formatSortSavedAt(iso) {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit', hour12: false });
+}
+
+export async function fetchSortMetaForCategory(categoryKey) {
+  const key = String(categoryKey || '').trim();
+  if (!key) return null;
+  const res = await fetch(`/api/category-sort-order?categoryKey=${encodeURIComponent(key)}`, {
+    credentials: 'same-origin',
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) return null;
+  return { updatedAt: json.updatedAt || null, storeUpdatedAt: json.storeUpdatedAt || null };
+}
+
 export async function persistSortOrder({ categoryKey, skuOrder, legacyKeys = [], expectedStoreUpdatedAt } = {}) {
   const res = await fetch('/api/category-sort-order', {
     method: 'POST',
