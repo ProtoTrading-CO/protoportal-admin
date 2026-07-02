@@ -93,18 +93,7 @@ import {
   replaceFullTaxonomy,
   subcategoryOptionsFromTree,
 } from '../lib/taxonomyAdmin';
-import { approveCustomer, deleteCustomer, fetchCustomersPage, fetchProtoActiveCustomersPage, seedProtoActiveCustomers, updateProtoActiveCustomer, updateCustomerAdmin, deleteProtoActiveCustomer, syncBrevoContacts, pushPortalCustomersToBrevo, sendCustomerEmailBroadcast, fetchCrmContactsPage } from '../lib/customers';
-import { BUSINESS_TYPES } from '../lib/businessTypes';
 import { supabase } from '../lib/supabase';
-import { buildOrderNoteSections, createEmailOrderItems, generateOrderPdfBase64, buildEmailItemsFromOrder, base64ToBlob, resolveCustomerOrderPricing, deriveAutoNotesFromItems } from '../lib/orderDocuments';
-import { displayOrderNumber, buildFulfillmentUrl } from '../lib/orderNumber';
-import { fetchPresaleInvoices, uploadPresaleInvoice } from '../lib/presaleInvoice';
-import { fetchConfirmationSent, markConfirmationSent, fetchPaymentRecords, uploadPop, setPaymentStatus } from '../lib/orderPayment';
-import { deleteOrderAdmin, fetchOrdersPage, updateOrderAdmin, advanceOrderWorkflow } from '../lib/orders';
-import { orderMatchesTab, normalizeOrderStatus, getWorkflowAdvanceOptions, isOrderConfirmationSent } from '../lib/orderStatus';
-import OrderWorkflowBadge from '../components/OrderWorkflowBadge';
-import { fetchFulfillmentUsers, loadActiveUserId } from '../lib/fulfillmentUsers';
-import { isVictorSender, CUSTOMER_SEND_FORBIDDEN, PAYMENT_RECEIVED_FORBIDDEN } from '../lib/fulfillmentAuth';
 import { errorFromJson } from '../lib/apiError';
 import { formatWebsitePrice } from '../lib/pricing';
 import { fetchSpecials, saveSpecials } from '../lib/specials';
@@ -118,15 +107,16 @@ import { fuzzyFilter } from '../lib/fuzzySearch';
 import ReorderGrid from '../components/ReorderGrid';
 import CategorySidebar, { resolvePathLabels } from '../components/CategorySidebar';
 import SectionErrorBoundary from '../components/SectionErrorBoundary';
+import OrdersTab from './admin/OrdersTab';
+import CustomersTab from './admin/CustomersTab';
+import SyncStatusBadge from '../components/SyncStatusBadge';
 import ComingSoonPanel from '../components/ComingSoonPanel';
 import ApprovalPanel from '../components/ApprovalPanel';
 import FulfillmentSettingsModal from '../components/FulfillmentSettingsModal';
-import OrderWhatsappNotify from '../components/OrderWhatsappNotify';
 import AnalyticsHub from '../components/AnalyticsHub';
 import ProductManagerEngine from '../components/ProductManagerEngine';
 import GroupedSidebar, { NAV_GROUPS } from '../components/GroupedSidebar';
 import CrmPanel from '../components/CrmPanel';
-import CustomerEmailModal from '../components/CustomerEmailModal';
 import { useDashboardStats } from '../hooks/useDashboardStats';
 import { queryClient } from '../lib/queryClient';
 import { queryKeys } from '../lib/queryKeys';
@@ -203,83 +193,7 @@ function formatJoinStatus(value) {
   return raw.replace(/(^|\s)\w/g, (m) => m.toUpperCase());
 }
 
-function renderNoteSections(noteSections) {
-  if (!noteSections.length) return <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>No notes yet</span>;
-  return (
-    <div style={{ display: 'grid', gap: 10 }}>
-      {noteSections.map((section) => (
-        <div key={section.title} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10, padding: '10px 12px' }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>{section.title}</div>
-          <div style={{ display: 'grid', gap: 6 }}>
-            {section.lines.map((line, index) => (
-              <div key={`${section.title}-${index}`} style={{ fontSize: 13, color: '#374151', lineHeight: 1.55, display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-                <span style={{ color: '#16a34a', fontWeight: 700 }}>•</span>
-                <span>{line}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
 
-function generateOrderChecklistHtml(order) {
-  const items = order.original_items || order.items || [];
-  const rows = items.map((item, i) => `
-    <tr>
-      <td style="padding:8px 6px;border:1px solid #ccc;text-align:center">
-        <span style="display:inline-block;width:14px;height:14px;border:1.5px solid #555;vertical-align:middle">&nbsp;</span>
-      </td>
-      <td style="padding:8px 6px;border:1px solid #ccc;color:#666;font-size:12px">${i + 1}</td>
-      <td style="padding:8px 6px;border:1px solid #ccc;font-weight:700;font-size:12px">${item.code || ''}</td>
-      <td style="padding:8px 6px;border:1px solid #ccc;font-size:13px">${item.name || ''}</td>
-      <td style="padding:8px 6px;border:1px solid #ccc;text-align:center;font-weight:700">${item.qty}</td>
-      <td style="padding:8px 6px;border:1px solid #ccc;font-size:12px">
-        In Stock: <span style="display:inline-block;border-bottom:1px solid #000;width:60px;">&nbsp;</span>
-        &nbsp;&nbsp;Qty: <span style="display:inline-block;border-bottom:1px solid #000;width:50px;">&nbsp;</span>
-      </td>
-    </tr>`).join('');
-
-  return `<!DOCTYPE html><html><head><meta charset="UTF-8">
-<title>Order ${order.order_number || order.id}</title>
-<style>
-  body{font-family:Arial,sans-serif;padding:24px;color:#111;max-width:900px;margin:0 auto}
-  h1{font-size:20px;margin-bottom:4px}
-  .meta{color:#555;font-size:13px;margin-bottom:20px}
-  table{width:100%;border-collapse:collapse;font-family:Arial,sans-serif}
-  th{background:#f0f0f0;padding:8px 6px;border:1px solid #ccc;font-size:12px;text-align:left}
-  @media print{.no-print{display:none!important}}
-</style></head><body>
-<h1>Proto Trading — Order Checklist</h1>
-<div class="meta">
-  <strong>Order:</strong> ${order.order_number || order.id} &nbsp;|&nbsp;
-  <strong>Customer:</strong> ${order.customers?.name || 'Unknown'} (${order.customers?.email || ''}) &nbsp;|&nbsp;
-  <strong>Date:</strong> ${new Date(order.created_at || Date.now()).toLocaleDateString('en-ZA', { day: 'numeric', month: 'long', year: 'numeric' })}
-</div>
-<table>
-  <thead><tr>
-    <th style="width:32px">✓</th>
-    <th style="width:28px">#</th>
-    <th style="width:120px">Code</th>
-    <th>Product</th>
-    <th style="width:48px">Qty</th>
-    <th style="width:220px">Stock Status</th>
-  </tr></thead>
-  <tbody>${rows}</tbody>
-</table>
-<div style="margin-top:24px;font-size:13px">
-  <strong>Notes:</strong><br>
-  <span style="display:inline-block;border-bottom:1px solid #aaa;width:100%;margin-top:6px">&nbsp;</span>
-  <span style="display:inline-block;border-bottom:1px solid #aaa;width:100%;margin-top:14px">&nbsp;</span>
-</div>
-<div class="no-print" style="margin-top:20px">
-  <div style="padding:9px 20px;background:#f8fafc;color:#334155;border:1px solid #cbd5e1;border-radius:6px;font-size:14px;font-family:Arial;display:inline-block">
-    Downloaded order file for reference
-  </div>
-</div>
-</body></html>`;
-}
 const PRODUCT_IMAGE_SLOTS = [
   { key: 'image', label: 'Image 1 (primary)' },
   { key: 'secondaryImage', label: 'Image 2' },
@@ -389,9 +303,6 @@ function typePatch(type, product = {}) {
   return { badges: cleanBadges, isNew: false, isSpecial: false };
 }
 
-function compactItems(items = []) {
-  return items.map((item) => `${item.code}${item.name ? ` ${item.name}` : ''} × ${item.qty}`).join(', ');
-}
 
 function csvDownload(rows, filename) {
   if (!rows.length) return;
@@ -428,12 +339,6 @@ function productToForm(product, tree = categories) {
   };
 }
 
-function WhatsappOptIn({ value }) {
-  if (value == null) return <span className="adm-muted">—</span>;
-  return value
-    ? <Check size={16} color="#15803d" strokeWidth={3} aria-label="WhatsApp yes" />
-    : <X size={16} color="#dc2626" strokeWidth={3} aria-label="WhatsApp no" />;
-}
 
 export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   const [activeSection, setActiveSection] = useState('catalogue');
@@ -453,13 +358,6 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   const [editorImageUploading, setEditorImageUploading] = useState(false);
   const [editorImageDragOver, setEditorImageDragOver] = useState('');
   const editorImageFileInputRefs = useRef({});
-  const [profileCustomer, setProfileCustomer] = useState(null);
-  const [profileOrders, setProfileOrders] = useState([]);
-  const [profileOrdersLoading, setProfileOrdersLoading] = useState(false);
-  const [profileEditing, setProfileEditing] = useState(false);
-  const [profileForm, setProfileForm] = useState({});
-  const [savingProfile, setSavingProfile] = useState(false);
-
   const [contentEditProduct, setContentEditProduct] = useState(null);
   const [contentEditForm, setContentEditForm] = useState({ image: '', description: '', packDescription: '', code: '' });
   const [contentEditSaving, setContentEditSaving] = useState(false);
@@ -477,9 +375,6 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   const singleImageRef = useRef(null);
   const folderImageRef = useRef(null);
   const reprocessAbortRef = useRef(null);
-  const [customerApproveBusy, setCustomerApproveBusy] = useState(false);
-  const customerExcelRef = useRef(null);
-
   const [productSearchInput, setProductSearchInput] = useState('');
   const [productSearchDebounced, setProductSearchDebounced] = useState('');
   const [productCategoryPath, setProductCategoryPath] = useState([]);
@@ -505,22 +400,6 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   const [recycleRows, setRecycleRows] = useState([]);
   const [recycleTotal, setRecycleTotal] = useState(0);
   const [recycleCatalogTotal, setRecycleCatalogTotal] = useState(0);
-
-  const [customerTab, setCustomerTab] = useState('regular');
-  const [customerSearch, setCustomerSearch] = useState('');
-  const [customerSearchDebounced, setCustomerSearchDebounced] = useState('');
-  const [customerBusinessType, setCustomerBusinessType] = useState('');
-  const [customerPage, setCustomerPage] = useState(1);
-  const [customerRows, setCustomerRows] = useState([]);
-  const [customerTotal, setCustomerTotal] = useState(0);
-  const [customerEmailOpen, setCustomerEmailOpen] = useState(false);
-  const [brevoSyncBusy, setBrevoSyncBusy] = useState(false);
-  const [brevoPushBusy, setBrevoPushBusy] = useState(false);
-  const [brevoLastSync, setBrevoLastSync] = useState(null);
-  const [profileSource, setProfileSource] = useState('portal');
-  const [approvalCodes, setApprovalCodes] = useState({});
-  const [protoSeedBusy, setProtoSeedBusy] = useState(false);
-  const [protoNameSaving, setProtoNameSaving] = useState(null);
 
   const [pricingCategory, setPricingCategory] = useState(categories[0]?.id || '');
   const [pricingSubcategory, setPricingSubcategory] = useState('all');
@@ -565,36 +444,9 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
-  const [expandedOrderId, setExpandedOrderId] = useState(null);
-
-  const [fulfillmentOrder, setFulfillmentOrder] = useState(null);
-  const [fulfillmentItems, setFulfillmentItems] = useState([]);
-  const [fulfillmentNotes, setFulfillmentNotes] = useState('');
-  const [fulfillmentSaving, setFulfillmentSaving] = useState(false);
-  const [editingItemIdx, setEditingItemIdx] = useState(null);
-  const [productSwapSearch, setProductSwapSearch] = useState('');
-  const [productSwapResults, setProductSwapResults] = useState([]);
-  const [productSwapLoading, setProductSwapLoading] = useState(false);
-  const swapSearchTimerRef = useRef(null);
-
-  const [orders, setOrders] = useState([]);
-  const [orderTab, setOrderTab] = useState('new');
-  const [orderPage, setOrderPage] = useState(1);
-  const [orderTotal, setOrderTotal] = useState(0);
-  const [orderTabCounts, setOrderTabCounts] = useState(null);
-  const [orderSearchDebounced, setOrderSearchDebounced] = useState('');
-  const [focusOrderId, setFocusOrderId] = useState('');
-  const [orderSubView, setOrderSubView] = useState('list');
-  const [orderSearch, setOrderSearch] = useState('');
   const [fulfillmentSettingsOpen, setFulfillmentSettingsOpen] = useState(false);
-  const [fulfillmentUsers, setFulfillmentUsers] = useState([]);
-  const [activeFulfillmentUserId, setActiveFulfillmentUserId] = useState(loadActiveUserId);
-  const [presaleInvoices, setPresaleInvoices] = useState({});
-  const [presaleUploading, setPresaleUploading] = useState('');
-  const [confirmationSent, setConfirmationSent] = useState({});
-  const [paymentRecords, setPaymentRecords] = useState({});
-  const [popUploading, setPopUploading] = useState('');
-
+  const [ordersUrlState, setOrdersUrlState] = useState({ tab: null, focus: null });
+  const [sectionRefreshNonce, setSectionRefreshNonce] = useState(0);
   const [specials, setSpecials] = useState([]); // [{productId, productName, productCode, productImage, deal, discountPct, bogoX, bogoY}]
   const [specialsSaving, setSpecialsSaving] = useState(false);
 
@@ -655,16 +507,6 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   useEffect(() => { setProductPage(1); }, [productSearchDebounced, productCategoryPath.join('|'), productPageSize]);
   useEffect(() => { setArchivePage(1); }, [archiveSearch, archiveCategoryPath.join('|')]);
   useEffect(() => { setRecyclePage(1); }, [recycleSearch]);
-  useEffect(() => {
-    const timer = setTimeout(() => setCustomerSearchDebounced(customerSearch.trim()), 300);
-    return () => clearTimeout(timer);
-  }, [customerSearch]);
-  useEffect(() => { setCustomerPage(1); }, [customerTab, customerSearchDebounced, customerBusinessType]);
-  useEffect(() => {
-    const timer = setTimeout(() => setOrderSearchDebounced(orderSearch.trim()), 300);
-    return () => clearTimeout(timer);
-  }, [orderSearch]);
-  useEffect(() => { setOrderPage(1); }, [orderTab, orderSearchDebounced]);
   useEffect(() => { if (activeSection === 'crm') void loadCrmCustomers(1); }, [crmFilters.businessTypes.join('|'), crmFilters.joinedStatuses.join('|'), crmSearch]);
   useEffect(() => { if (activeSection === 'crm' && !crmTemplates.length && !crmTemplatesLoading) void loadCrmTemplates(); }, [activeSection, crmTemplates.length, crmTemplatesLoading]);
   useEffect(() => { if (activeSection === 'banner') void loadBannerEditor(); }, [activeSection]);
@@ -815,101 +657,6 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     } catch {}
   };
 
-  const loadCustomers = async () => {
-    setLoading(true);
-    try {
-      const data = customerTab === 'proto-active'
-        ? await fetchProtoActiveCustomersPage({ page: customerPage, pageSize: ADMIN_PAGE_SIZE, searchQuery: customerSearchDebounced })
-        : await fetchCustomersPage({
-          page: customerPage,
-          pageSize: ADMIN_PAGE_SIZE,
-          tab: customerTab,
-          searchQuery: customerSearchDebounced,
-          businessType: customerBusinessType,
-        });
-      setCustomerRows(data.rows);
-      setCustomerTotal(data.total);
-      if (data.migrationRequired && data.message) showToast(data.message, 'warning');
-    } catch (err) {
-      showToast(err.message || 'Failed to load customers', 'error');
-      setCustomerRows([]);
-      setCustomerTotal(0);
-    } finally { setLoading(false); }
-  };
-
-  const importProtoActiveList = async () => {
-    setProtoSeedBusy(true);
-    try {
-      const json = await seedProtoActiveCustomers();
-      const dupNote = json.skippedDuplicates ? ` (${json.skippedDuplicates} duplicate emails merged)` : '';
-      const nameNote = json.missingNames ? ` · ${json.withNames} with names, ${json.missingNames} still blank (edit inline)` : '';
-      showToast(`Imported ${json.upserted} proto active customers${dupNote}${nameNote}`, 'success');
-      setCustomerTab('proto-active');
-      setCustomerPage(1);
-      await loadCustomers();
-    } catch (err) {
-      showToast(err.message || 'Import failed — check console', 'error');
-      console.error('proto active import:', err);
-    } finally { setProtoSeedBusy(false); }
-  };
-
-  const saveProtoActiveName = async (row, field, value) => {
-    const trimmed = String(value || '').trim();
-    const current = String(row[field] || '').trim();
-    if (trimmed === current) return;
-    setProtoNameSaving(`${row.id}-${field}`);
-    try {
-      const updated = await updateProtoActiveCustomer(row.id, { [field]: trimmed || null });
-      setCustomerRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, ...updated } : r)));
-      if (profileCustomer?.id === row.id) setProfileCustomer((p) => ({ ...p, ...updated }));
-      showToast('Saved', 'success');
-    } catch (err) {
-      showToast(err.message || 'Save failed', 'error');
-    } finally {
-      setProtoNameSaving(null);
-    }
-  };
-
-  const handleBrevoSync = async () => {
-    setBrevoSyncBusy(true);
-    try {
-      const json = await syncBrevoContacts();
-      setBrevoLastSync(json.syncedAt || new Date().toISOString());
-      showToast(`Synced ${json.upserted ?? json.succeeded ?? 0} contacts from Brevo`, 'success');
-    } catch (err) {
-      showToast(err.message || 'Brevo sync failed', 'error');
-    } finally {
-      setBrevoSyncBusy(false);
-    }
-  };
-
-  const handlePushPortalToBrevo = async () => {
-    if (!window.confirm('Push all approved + Proto Active customer emails to Brevo contacts?')) return;
-    setBrevoPushBusy(true);
-    try {
-      const json = await pushPortalCustomersToBrevo();
-      showToast(`Pushed ${json.pushed} portal emails to Brevo`, 'success');
-    } catch (err) {
-      showToast(err.message || 'Push to Brevo failed', 'error');
-    } finally {
-      setBrevoPushBusy(false);
-    }
-  };
-
-  const removeProtoActiveCustomer = async (row) => {
-    if (!window.confirm(`Remove ${row.name || row.email} from Proto Active list?`)) return;
-    setSaving(`del-proto-${row.id}`);
-    try {
-      await deleteProtoActiveCustomer(row.id);
-      await loadCustomers();
-      if (profileCustomer?.id === row.id) closeCustomerProfile();
-      showToast('Proto Active customer removed');
-    } catch (err) {
-      showToast(err.message || 'Delete failed', 'error');
-    } finally {
-      setSaving('');
-    }
-  };
 
   const loadCategoryWorkingSet = async (categoryId, target) => {
     setLoading(true);
@@ -1110,288 +857,6 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     }
   };
 
-  const loadOrders = async () => {
-    setLoading(true);
-    try {
-      const data = await fetchOrdersPage({
-        page: orderPage,
-        pageSize: ADMIN_PAGE_SIZE,
-        search: orderSearchDebounced,
-        tab: orderTab,
-      });
-      setOrders(data.rows);
-      setOrderTotal(data.total);
-      if (data.tabCounts) setOrderTabCounts(data.tabCounts);
-    } catch (err) {
-      showToast(err.message || 'Failed to load orders', 'error');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const activeFulfillmentUser = useMemo(
-    () => fulfillmentUsers.find((u) => u.id === activeFulfillmentUserId) || null,
-    [fulfillmentUsers, activeFulfillmentUserId],
-  );
-  const victorCanSend = isVictorSender(activeFulfillmentUser);
-
-  const orderListGridCols = orderTab === 'sent' || orderTab === 'paid'
-    ? '1.4fr 1.2fr 1fr 2fr 120px 56px'
-    : '1.6fr 1.4fr 1.2fr 1fr 160px 80px';
-
-  const confirmationSentIds = useMemo(() => {
-    const ids = new Set(Object.keys(confirmationSent).filter((id) => confirmationSent[id]?.sentAt));
-    for (const order of orders) {
-      if (order.confirmation_sent_at) ids.add(String(order.id));
-    }
-    return ids;
-  }, [confirmationSent, orders]);
-
-  const renderOrderConfirmationActions = (order) => {
-    if (normalizeOrderStatus(order.status) !== 'order sent') return null;
-    if (isOrderConfirmationSent(order, confirmationSentIds)) return null;
-    const invoice = presaleInvoices[order.id];
-    const uploading = presaleUploading === order.id;
-    const sending = saving === `send-${order.id}`;
-    return (
-      <div className="adm-oc-col">
-        <span className="adm-oc-label">Order Confirmation</span>
-        <label className="adm-oc-upload-btn">
-          {uploading ? <Loader2 size={13} className="spin" /> : <Upload size={13} />}
-          {invoice ? 'Replace invoice' : 'Upload invoice'}
-          <input
-            type="file"
-            accept=".pdf,application/pdf,image/*"
-            hidden
-            disabled={uploading}
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              e.target.value = '';
-              if (file) void handlePresaleUpload(order, file);
-            }}
-          />
-        </label>
-        {invoice && <span className="adm-oc-uploaded">✓ {invoice.filename || 'Invoice uploaded'}</span>}
-        {victorCanSend ? (
-          <button
-            type="button"
-            className="adm-oc-send-btn"
-            disabled={sending}
-            onClick={() => void sendOrderConfirmation(order)}
-          >
-            {sending ? <Loader2 size={13} className="spin" /> : <Send size={13} />}
-            {sending ? 'Sending…' : 'Send'}
-          </button>
-        ) : (
-          <span className="adm-oc-victor-gate" title={CUSTOMER_SEND_FORBIDDEN}>Victor only</span>
-        )}
-      </div>
-    );
-  };
-
-  const renderPaymentActions = (order) => {
-    const key = normalizeOrderStatus(order.status);
-    if (key === 'payment received') {
-      const pop = paymentRecords[order.id];
-      return (
-        <div className="adm-oc-col">
-          <span className="adm-oc-label adm-oc-label--paid">Paid</span>
-          {pop?.filename && <span className="adm-oc-uploaded">✓ {pop.filename}</span>}
-        </div>
-      );
-    }
-    if (key !== 'order sent' || !isOrderConfirmationSent(order, confirmationSentIds)) return null;
-
-    const pop = paymentRecords[order.id];
-    const uploading = popUploading === order.id;
-    const isPaid = pop?.paid === true;
-
-    return (
-      <div className="adm-oc-col">
-        <span className="adm-oc-label">Awaiting payment</span>
-        <div className="adm-pay-toggle">
-          <button
-            type="button"
-            className={`adm-pay-toggle__btn${!isPaid ? ' adm-pay-toggle__btn--on' : ''}`}
-            onClick={() => void handlePaymentStatus(order, false)}
-          >
-            Not paid
-          </button>
-          <button
-            type="button"
-            className={`adm-pay-toggle__btn${isPaid ? ' adm-pay-toggle__btn--on' : ''}`}
-            onClick={() => void handlePaymentStatus(order, true)}
-          >
-            Paid
-          </button>
-        </div>
-        <label className="adm-oc-upload-btn">
-          {uploading ? <Loader2 size={13} className="spin" /> : <Upload size={13} />}
-          {pop?.filename ? 'Replace POP' : 'Upload POP'}
-          <input
-            type="file"
-            accept=".pdf,application/pdf,image/*"
-            hidden
-            disabled={uploading}
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              e.target.value = '';
-              if (file) void handlePopUpload(order, file);
-            }}
-          />
-        </label>
-        {pop?.filename && <span className="adm-oc-uploaded">✓ {pop.filename}</span>}
-        {isPaid && (
-          victorCanSend ? (
-            <button
-              type="button"
-              className="adm-presale-pay-btn"
-              disabled={saving === `advance-${order.id}`}
-              onClick={() => void advanceOrderStatus(order, 'payment received')}
-            >
-              <Check size={14} strokeWidth={2.5} />
-              {saving === `advance-${order.id}` ? 'Updating…' : 'Confirm payment'}
-            </button>
-          ) : (
-            <span className="adm-oc-victor-gate" title={PAYMENT_RECEIVED_FORBIDDEN}>Victor only</span>
-          )
-        )}
-      </div>
-    );
-  };
-
-  const handlePresaleUpload = async (order, file) => {
-    setPresaleUploading(order.id);
-    try {
-      const meta = await uploadPresaleInvoice(order.id, file);
-      setPresaleInvoices((prev) => ({ ...prev, [order.id]: meta }));
-      showToast(`Presale invoice uploaded for ${order.order_number || order.id.slice(0, 8)}`);
-    } catch (err) {
-      showToast(err.message || 'Upload failed', 'error');
-    } finally {
-      setPresaleUploading('');
-    }
-  };
-
-  const handlePopUpload = async (order, file) => {
-    setPopUploading(order.id);
-    try {
-      const meta = await uploadPop(order.id, file, { paid: paymentRecords[order.id]?.paid !== false });
-      setPaymentRecords((prev) => ({ ...prev, [order.id]: meta }));
-      showToast(`Proof of payment uploaded for ${order.order_number || order.id.slice(0, 8)}`);
-    } catch (err) {
-      showToast(err.message || 'Upload failed', 'error');
-    } finally {
-      setPopUploading('');
-    }
-  };
-
-  const handlePaymentStatus = async (order, paid) => {
-    setSaving(`pay-${order.id}`);
-    try {
-      const meta = await setPaymentStatus(order.id, paid);
-      setPaymentRecords((prev) => ({ ...prev, [order.id]: { ...prev[order.id], ...meta } }));
-    } catch (err) {
-      showToast(err.message || 'Failed to update payment status', 'error');
-    } finally {
-      setSaving('');
-    }
-  };
-
-  const sendOrderConfirmation = async (order) => {
-    const email = order.customers?.email;
-    if (!email) {
-      showToast('This customer has no email address on file.', 'error');
-      return;
-    }
-    if (!victorCanSend) {
-      showToast(CUSTOMER_SEND_FORBIDDEN, 'error');
-      return;
-    }
-    const invoiceAttached = Boolean(presaleInvoices[order.id]);
-    const confirmMsg = invoiceAttached
-      ? `Send order confirmation + presale invoice to ${email}?`
-      : `Send order confirmation to ${email}? (No presale invoice uploaded yet)`;
-    if (!window.confirm(confirmMsg)) return;
-
-    setSaving(`send-${order.id}`);
-    try {
-      const emailItems = buildEmailItemsFromOrder(order);
-      const autoNotes = deriveAutoNotesFromItems(emailItems).join('\n');
-      const { hasPrices, total, items: customerItems } = resolveCustomerOrderPricing(emailItems);
-      const pdfBase64 = await generateOrderPdfBase64({
-        order,
-        items: customerItems,
-        autoNotes,
-        userNotes: order.order_change_notes || '',
-        assignedTo: activeFulfillmentUser?.name || '',
-        total,
-        hasPrices,
-      });
-      // Upload the PDF straight to storage via a signed URL so we never hit
-      // Vercel's 4.5 MB request-body limit (large PDFs used to 413 on send).
-      const urlRes = await fetch('/api/order-confirmation-upload-url', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orderId: order.id }),
-      });
-      const urlData = await urlRes.json();
-      if (!urlRes.ok) throw new Error(urlData.error || 'Could not prepare PDF upload');
-      const putRes = await fetch(urlData.signedUrl, {
-        method: 'PUT',
-        headers: { 'content-type': 'application/pdf', 'x-upsert': 'true' },
-        body: base64ToBlob(pdfBase64, 'application/pdf'),
-      });
-      if (!putRes.ok) throw new Error('Could not upload order confirmation PDF');
-      const emailRes = await fetch('/api/send-order-email', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          orderId: order.id,
-          to: email,
-          customerName: order.customers?.name,
-          orderNumber: displayOrderNumber(order),
-          orderDate: order.created_at,
-          items: customerItems,
-          autoNotes,
-          userNotes: order.order_change_notes || '',
-          assignedTo: activeFulfillmentUser?.name || '',
-          total,
-          hasPrices,
-          senderUserId: activeFulfillmentUser?.id || '',
-          senderName: activeFulfillmentUser?.name || '',
-          confirmationStoragePath: urlData.path,
-          pdfFilename: `proto-order-confirmation-${displayOrderNumber(order)}.pdf`,
-          deliveryMethod: order.delivery_method || '',
-          customerNotes: order.customer_notes || '',
-        }),
-      });
-      const emailData = await emailRes.json();
-      if (!emailRes.ok) throw new Error(emailData.error || 'Email send failed');
-      if (normalizeOrderStatus(order.status) !== 'order sent') {
-        await advanceOrderWorkflow(order.id, 'order sent', {
-          senderUserId: activeFulfillmentUser?.id,
-          senderName: activeFulfillmentUser?.name,
-        });
-        setOrders((prev) => prev.map((item) => (
-          item.id === order.id ? { ...item, status: 'order sent' } : item
-        )));
-      }
-      const sentMeta = await markConfirmationSent(order.id);
-      setConfirmationSent((prev) => ({ ...prev, [order.id]: sentMeta }));
-      setOrders((prev) => prev.map((item) => (
-        item.id === order.id
-          ? { ...item, confirmation_sent_at: sentMeta.sentAt || sentMeta.updatedAt }
-          : item
-      )));
-      setOrderTab('paid');
-      showToast(`Confirmation sent to ${email}${emailData.presaleIncluded ? ' with presale invoice' : ''} — moved to Payment`);
-    } catch (err) {
-      showToast(err.message || 'Could not send order confirmation', 'error');
-    } finally {
-      setSaving('');
-    }
-  };
 
   useEffect(() => { if (activeSection === 'new-items') void loadDormant(); }, [activeSection, dormantSearch]);
   useEffect(() => { if (activeSection === 'products') void loadProducts(); }, [activeSection, productPage, productSearchDebounced, productCategoryPath.join('|'), productPageSize]);
@@ -1407,13 +872,6 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
       window.scrollTo({ top: 0, behavior: 'auto' });
     }
   }, [productPage, archivePage, recyclePage, activeSection]);
-  useEffect(() => { if (activeSection === 'customers') void loadCustomers(); }, [activeSection, customerPage, customerTab, customerSearchDebounced, customerBusinessType]);
-  useEffect(() => {
-    if (activeSection !== 'customers') return;
-    void fetchCrmContactsPage({ page: 1, pageSize: 1 })
-      .then((data) => { if (data?.lastSyncedAt) setBrevoLastSync(data.lastSyncedAt); })
-      .catch(() => {});
-  }, [activeSection]);
   useEffect(() => { if (activeSection === 'pricing') void loadCategoryWorkingSet(pricingCategory, 'pricing'); }, [activeSection, pricingCategory]);
   useEffect(() => { void reloadTaxonomy(); }, []);
 
@@ -1423,23 +881,12 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     const tab = params.get('orderTab');
     const focus = params.get('focusOrder');
     if (section) setActiveSection(section);
-    if (tab) setOrderTab(tab);
-    if (focus) setFocusOrderId(focus);
+    if (tab || focus) setOrdersUrlState({ tab: tab || null, focus: focus || null });
     if (section || tab || focus) {
       window.history.replaceState({}, '', window.location.pathname);
     }
   }, []);
 
-  useEffect(() => {
-    if (!focusOrderId || activeSection !== 'orders' || !orders.length) return;
-    setExpandedOrderId(focusOrderId);
-    const timer = setTimeout(() => {
-      const el = document.querySelector(`[data-order-id="${focusOrderId}"]`);
-      el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      setFocusOrderId('');
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [focusOrderId, activeSection, orders]);
   const reorderPathKey = reorderCategoryPath.join('/');
 
   useEffect(() => {
@@ -1457,65 +904,6 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     }
     void loadReorderProducts();
   }, [activeSection, reorderCacheKey, reorderPathKey, firstMainCategoryId]);
-  useEffect(() => { if (activeSection === 'orders') void loadOrders(); }, [activeSection, orderPage, orderTab, orderSearchDebounced]);
-  useEffect(() => {
-    if (activeSection !== 'orders') return undefined;
-    fetchFulfillmentUsers()
-      .then((rows) => setFulfillmentUsers(rows))
-      .catch(() => {});
-    const syncUser = () => setActiveFulfillmentUserId(loadActiveUserId());
-    window.addEventListener('storage', syncUser);
-    window.addEventListener('focus', syncUser);
-    return () => {
-      window.removeEventListener('storage', syncUser);
-      window.removeEventListener('focus', syncUser);
-    };
-  }, [activeSection]);
-
-  useEffect(() => {
-    if (activeSection !== 'orders') return;
-    const ids = orders.filter((o) => normalizeOrderStatus(o.status) === 'order sent').map((o) => o.id);
-    if (!ids.length) return;
-    fetchConfirmationSent(ids)
-      .then((rows) => setConfirmationSent((prev) => ({ ...prev, ...rows })))
-      .catch((err) => showToast(err.message || 'Failed to load confirmation status', 'error'));
-  }, [activeSection, orders]);
-
-  useEffect(() => {
-    const ids = orders.filter((o) => normalizeOrderStatus(o.status) === 'order sent').map((o) => o.id);
-    if (!ids.length) return;
-    fetchPresaleInvoices(ids)
-      .then((invoices) => setPresaleInvoices((prev) => ({ ...prev, ...invoices })))
-      .catch((err) => showToast(err.message || 'Failed to load presale invoices', 'error'));
-    fetchConfirmationSent(ids)
-      .then((rows) => setConfirmationSent((prev) => ({ ...prev, ...rows })))
-      .catch((err) => showToast(err.message || 'Failed to load confirmation status', 'error'));
-  }, [activeSection, orderTab, orders]);
-
-  useEffect(() => {
-    if (activeSection !== 'orders' || orderTab !== 'paid') return;
-    const ids = orders
-      .filter((o) => orderMatchesTab(o, 'paid', { confirmationSentIds }))
-      .map((o) => o.id);
-    if (!ids.length) return;
-    fetchPaymentRecords(ids)
-      .then((rows) => setPaymentRecords((prev) => ({ ...prev, ...rows })))
-      .catch((err) => showToast(err.message || 'Failed to load payment records', 'error'));
-    fetchConfirmationSent(ids)
-      .then((rows) => setConfirmationSent((prev) => ({ ...prev, ...rows })))
-      .catch((err) => showToast(err.message || 'Failed to load confirmation status', 'error'));
-  }, [activeSection, orderTab, orders, confirmationSentIds]);
-
-  useEffect(() => {
-    if (activeSection !== 'orders') return undefined;
-    const refresh = () => { if (document.visibilityState === 'visible') void loadOrders(); };
-    const timer = setInterval(refresh, 30000);
-    window.addEventListener('focus', refresh);
-    return () => {
-      clearInterval(timer);
-      window.removeEventListener('focus', refresh);
-    };
-  }, [activeSection]);
   useEffect(() => { if (activeSection === 'crm' && !crmAllCustomers.length && !crmLoading) void loadCrmCustomers(1); }, [activeSection]);
 
   // Load specials on mount
@@ -1523,18 +911,6 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     fetchSpecials().then((data) => setSpecials(data?.items || [])).catch(() => {});
   }, []);
 
-  // Poll pending trade request count for nav badge
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const data = await fetchCustomersPage({ tab: 'requests', pageSize: 1, searchQuery: '' });
-        setPendingCount(data.total || 0);
-      } catch {}
-    };
-    load();
-    const iv = setInterval(load, 60000);
-    return () => clearInterval(iv);
-  }, []);
 
   const specialsSet = new Set(specials.map((s) => s.productId));
 
@@ -1623,7 +999,6 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     [activeSection],
   );
 
-  const orderRows = orders;
 
   const openNewProduct = () => {
     const firstCategory = taxonomyTree[0]?.id || categories[0]?.id || '';
@@ -1726,11 +1101,13 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     if (activeSection === 'products') return loadProducts();
     if (activeSection === 'archive') return loadArchive();
     if (activeSection === 'recycle') return loadRecycle();
-    if (activeSection === 'customers') return loadCustomers();
+    if (activeSection === 'customers' || activeSection === 'orders') {
+      setSectionRefreshNonce((n) => n + 1);
+      return;
+    }
     if (activeSection === 'pricing') return loadCategoryWorkingSet(pricingCategory, 'pricing');
     if (activeSection === 'reorder') return loadReorderProducts();
     if (activeSection === 'new-items') return loadDormant();
-    if (activeSection === 'orders') return loadOrders();
   };
 
   const saveProduct = async () => {
@@ -2447,35 +1824,6 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     } finally { setSaving(''); }
   };
 
-  const handleCustomerExcelApprove = async (file) => {
-    if (!file) return;
-    setCustomerApproveBusy(true);
-    try {
-      const XLSX = await import('xlsx');
-      const buf = await file.arrayBuffer();
-      const wb = XLSX.read(buf, { type: 'array' });
-      const sheet = wb.Sheets[wb.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
-      const emails = rows.flatMap((row) => {
-        const val = row.email || row.Email || row.EMAIL || Object.values(row)[0];
-        return val ? [String(val).trim().toLowerCase()] : [];
-      }).filter(Boolean);
-      const res = await fetch('/api/approve-customers-bulk', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ emails }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || 'Bulk approve failed');
-      await refreshPendingCount();
-      await loadCustomers();
-      showToast(`Approved ${json.approved || 0}${json.notFound?.length ? `, ${json.notFound.length} not found` : ''}`);
-    } catch (err) {
-      showToast(err.message || 'Excel approve failed', 'error');
-    } finally {
-      setCustomerApproveBusy(false);
-    }
-  };
 
   const goHome = () => setActiveSection('orders');
 
@@ -2563,271 +1911,9 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     } finally { setSaving(''); }
   };
 
-  const openCustomerProfile = async (person, source = 'portal') => {
-    setProfileCustomer(person);
-    setProfileSource(source);
-    setProfileEditing(false);
-    setProfileOrders([]);
-    if (source === 'proto-active') return;
-    setProfileOrdersLoading(true);
-    try {
-      const res = await fetch(`/api/admin-orders?customerId=${person.id}&limit=20`);
-      const json = await res.json();
-      setProfileOrders(json.rows || []);
-    } catch { /* silent */ }
-    finally { setProfileOrdersLoading(false); }
-  };
 
-  const closeCustomerProfile = () => { setProfileCustomer(null); setProfileOrders([]); setProfileEditing(false); setProfileSource('portal'); };
-
-  const SPEND_BANDS = ['R0 – R5,000', 'R5,000 – R10,000', 'R10,000 – R25,000', 'R25,000 – R50,000', 'R50,000+'];
-  const startEditProfile = () => {
-    setProfileForm({
-      name: profileCustomer.name || '',
-      email: profileCustomer.email || '',
-      phone: profileCustomer.phone || '',
-      business_name: profileCustomer.business_name || profileCustomer.name || '',
-      business_type: profileCustomer.business_type || '',
-      monthly_spend: profileCustomer.monthly_spend || '',
-      website: profileCustomer.website || '',
-      vat_number: profileCustomer.vat_number || '',
-      company_address: profileCustomer.company_address || '',
-      delivery_address: profileCustomer.delivery_address || '',
-      contact_name: profileCustomer.contact_name || '',
-      first_name: profileCustomer.first_name || '',
-      account_code: profileCustomer.account_code || profileCustomer.customer_code || '',
-    });
-    setProfileEditing(true);
-  };
-  const saveProfileEdit = async () => {
-    setSavingProfile(true);
-    try {
-      if (profileSource === 'proto-active') {
-        const row = await updateProtoActiveCustomer(profileCustomer.id, {
-          name: profileForm.business_name || profileForm.name,
-          email: profileForm.email,
-          contact_name: profileForm.contact_name,
-          first_name: profileForm.first_name,
-          account_code: profileForm.account_code,
-        });
-        setProfileCustomer(row);
-        setProfileEditing(false);
-        await loadCustomers();
-        showToast('Proto Active customer updated');
-      } else {
-        const row = await updateCustomerAdmin(profileCustomer.id, profileForm);
-        setProfileCustomer(row);
-        setProfileEditing(false);
-        await loadCustomers();
-        showToast('Customer profile updated');
-      }
-    } catch (err) {
-      showToast(err.message || 'Update failed', 'error');
-    } finally { setSavingProfile(false); }
-  };
-  const setPf = (key) => (e) => setProfileForm((f) => ({ ...f, [key]: e.target.value }));
-
-  const refreshPendingCount = async () => {
-    try {
-      const data = await fetchCustomersPage({ tab: 'requests', pageSize: 1, searchQuery: '' });
-      setPendingCount(data.total || 0);
-    } catch {}
-  };
-
-  const approveRequest = async (person) => {
-    const customerCode = String(approvalCodes[person.id] || '').trim().toUpperCase();
-    if (!/^[A-Z0-9]{6}$/.test(customerCode)) {
-      showToast('Enter a 6-character customer code before approving', 'error');
-      return;
-    }
-    setSaving(person.id);
-    try {
-      const result = await approveCustomer(person.id, true, { customerCode });
-      if (result.watiWelcome === 'failed') {
-        showToast('Approved, but WhatsApp welcome message failed to send', 'error');
-      }
-      setApprovalCodes((prev) => {
-        const next = { ...prev };
-        delete next[person.id];
-        return next;
-      });
-      await refreshPendingCount();
-      await refreshDashboardStats();
-      setCustomerTab('regular');
-      setCustomerPage(1);
-      await loadCustomers();
-      closeCustomerProfile();
-      showToast(`${person.business_name || person.name || 'Customer'} approved`);
-    } catch (err) {
-      showToast(err.message || 'Approval failed', 'error');
-    } finally { setSaving(''); }
-  };
-
-  const removeCustomer = async (person, source = profileSource) => {
-    if (!window.confirm(`Delete ${person.name || person.email}? This cannot be undone.`)) return;
-    const savingKey = source === 'proto-active' ? `del-proto-${person.id}` : `del-${person.id}`;
-    setSaving(savingKey);
-    try {
-      if (source === 'proto-active') {
-        await deleteProtoActiveCustomer(person.id);
-      } else {
-        await deleteCustomer(person.id);
-      }
-      await loadCustomers();
-      closeCustomerProfile();
-      showToast('Customer removed');
-    } catch (err) {
-      showToast(err.message || 'Delete failed', 'error');
-    } finally { setSaving(''); }
-  };
-
-  const deactivateCustomer = async (person) => {
-    if (!window.confirm(`Deactivate ${person.name || person.email}? They will lose portal access.`)) return;
-    setSaving(`deact-${person.id}`);
-    try {
-      await updateCustomerAdmin(person.id, { is_approved: false });
-      await loadCustomers();
-      closeCustomerProfile();
-      showToast('Customer deactivated');
-    } catch (err) {
-      showToast(err.message || 'Deactivate failed', 'error');
-    } finally { setSaving(''); }
-  };
-
-  const downloadOrderHtml = (order) => {
-    const html = generateOrderChecklistHtml(order);
-    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `order-${order.order_number || order.id}.html`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 10000);
-  };
-
-  const deleteOrder = async (order) => {
-    if (!window.confirm(`Delete order ${order.order_number || order.id}? This cannot be undone.`)) return;
-    setSaving(`del-order-${order.id}`);
-    try {
-      await deleteOrderAdmin(order.id);
-      setOrders((prev) => prev.filter((o) => o.id !== order.id));
-      // Keep the top stats bar in sync — drop the count immediately, then
-      // reconcile with the server in the background.
-      setStatsOrderTotal((n) => Math.max(0, n - 1));
-      void refreshDashboardStats();
-    } finally { setSaving(''); }
-  };
-
-  const updateOrder = async (order, patch) => {
-    setSaving(order.id);
-    try {
-      const updated = await updateOrderAdmin(order.id, patch);
-      setOrders((prev) => prev.map((item) => item.id === order.id ? updated : item));
-      return updated;
-    } catch (err) {
-      showToast(err.message || 'Failed to update order', 'error');
-      throw err;
-    } finally { setSaving(''); }
-  };
-
-  const advanceOrderStatus = async (order, targetStatus) => {
-    if ((targetStatus === 'payment received' || targetStatus === 'order sent') && !victorCanSend) {
-      showToast(
-        targetStatus === 'payment received' ? PAYMENT_RECEIVED_FORBIDDEN : CUSTOMER_SEND_FORBIDDEN,
-        'error',
-      );
-      return;
-    }
-    setSaving(`advance-${order.id}`);
-    try {
-      const updated = await advanceOrderWorkflow(order.id, targetStatus, {
-        senderUserId: activeFulfillmentUser?.id,
-        senderName: activeFulfillmentUser?.name,
-      });
-      setOrders((prev) => prev.map((item) => item.id === order.id ? updated : item));
-    } catch (err) {
-      showToast(err.message || 'Could not update order status', 'error');
-    } finally { setSaving(''); }
-  };
-
-  const openFulfillment = (order) => {
-    const items = (order.original_items || order.items || []).map((item) => ({
-      ...item,
-      checked: false,
-      finalQty: item.qty,
-    }));
-    setFulfillmentOrder(order);
-    setFulfillmentItems(items);
-    setFulfillmentNotes(order.order_change_notes || '');
-    setEditingItemIdx(null);
-    setProductSwapSearch('');
-    setProductSwapResults([]);
-  };
-
-  const closeFulfillment = () => {
-    setFulfillmentOrder(null);
-    setFulfillmentItems([]);
-    setFulfillmentNotes('');
-    setEditingItemIdx(null);
-    setProductSwapSearch('');
-    setProductSwapResults([]);
-  };
-
-  const handleSwapSearchChange = (q) => {
-    setProductSwapSearch(q);
-    clearTimeout(swapSearchTimerRef.current);
-    if (!q.trim()) { setProductSwapResults([]); return; }
-    swapSearchTimerRef.current = setTimeout(async () => {
-      setProductSwapLoading(true);
-      try {
-        const data = await fetchAdminProductsPage({ page: 1, pageSize: 8, searchQuery: q });
-        setProductSwapResults(data.rows);
-      } finally { setProductSwapLoading(false); }
-    }, 350);
-  };
-
-  const swapFulfillmentItem = (idx, product) => {
-    setFulfillmentItems((prev) => prev.map((item, i) => i !== idx ? item : {
-      ...item,
-      productId: product.id,
-      code: product.code,
-      name: product.name,
-      image: product.image || '',
-      unitPrice: product.price,
-    }));
-    setEditingItemIdx(null);
-    setProductSwapSearch('');
-    setProductSwapResults([]);
-  };
-
-  const saveFulfillment = async () => {
-    if (!fulfillmentOrder) return;
-    setFulfillmentSaving(true);
-    try {
-      const finalItems = fulfillmentItems.map(({ checked, finalQty, ...rest }) => ({ ...rest, qty: finalQty }));
-      await updateOrderAdmin(fulfillmentOrder.id, {
-        final_items: finalItems,
-        order_change_notes: fulfillmentNotes,
-      });
-      await advanceOrderWorkflow(fulfillmentOrder.id, 'order sent', {
-        senderUserId: activeFulfillmentUser?.id,
-        senderName: activeFulfillmentUser?.name,
-      });
-      await loadOrders();
-      closeFulfillment();
-      showToast('Order saved and moved to Order Confirmation');
-    } catch (err) {
-      showToast(err.message || 'Failed to save fulfillment', 'error');
-    } finally { setFulfillmentSaving(false); }
-  };
-
-  const orderPages = Math.max(1, Math.ceil(orderTotal / ADMIN_PAGE_SIZE));
 
   const productPages = Math.max(1, Math.ceil(productTotal / productPageSize));
-  const customerPages = Math.max(1, Math.ceil(customerTotal / ADMIN_PAGE_SIZE));
-  const fulfillmentNoteSections = buildOrderNoteSections({ userNotes: fulfillmentNotes });
 
   return (
     <div className="adm-shell">
@@ -2867,6 +1953,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
           <AdminStat label="Archived" value={stats.archived} />
           <AdminStat label="Customers" value={stats.customers} />
           <AdminStat label="Orders" value={stats.orders} />
+          <SyncStatusBadge />
         </div>
 
         <div className="adm-layout">
@@ -2898,6 +1985,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
               </div>
             )}
 
+            <SectionErrorBoundary name="catalogue" title="Product Manager crashed" resetKey={activeSection}>
             <div style={{ display: activeSection === 'catalogue' ? 'block' : 'none' }}>
               <ProductManagerEngine
                 taxonomyTree={taxonomyTree}
@@ -2920,12 +2008,16 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                 }}
               />
             </div>
+            </SectionErrorBoundary>
 
             {activeSection === 'analytics' && (
-              <AnalyticsHub />
+              <SectionErrorBoundary name="analytics" title="Analytics crashed" resetKey={activeSection}>
+                <AnalyticsHub />
+              </SectionErrorBoundary>
             )}
 
             {/* Apollo — keep mounted so chat survives tab switches */}
+            <SectionErrorBoundary name="apollo" title="Apollo crashed" resetKey={activeSection}>
             <div style={{ display: activeSection === 'apollo' ? 'block' : 'none' }}>
               <ApolloPanel
                 isActive={activeSection === 'apollo'}
@@ -2945,12 +2037,16 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                 onImageFixRequestHandled={() => setImageFixRequest(null)}
               />
             </div>
+            </SectionErrorBoundary>
 
             {activeSection === 'cost-tracking' && (
-              <CostTrackingPanel onShowToast={showToast} />
+              <SectionErrorBoundary name="cost-tracking" title="Cost Tracking crashed" resetKey={activeSection}>
+                <CostTrackingPanel onShowToast={showToast} />
+              </SectionErrorBoundary>
             )}
 
             {activeSection === 'product-loader' && (
+              <SectionErrorBoundary name="product-loader" title="Product Loader crashed" resetKey={activeSection}>
               <ProductLoaderPanel
                 taxonomyTree={taxonomyTree}
                 onShowToast={showToast}
@@ -2970,6 +2066,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                   setActiveSection('apollo');
                 }}
               />
+              </SectionErrorBoundary>
             )}
 
             {false && activeSection === 'approval' && (
@@ -3221,6 +2318,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
 
             {/* SPECIALS */}
             {activeSection === 'specials' && (
+              <SectionErrorBoundary name="specials" title="Specials crashed" resetKey={activeSection}>
               <div className="adm-panel">
                 <div className="adm-section-head">
                   <div>
@@ -3406,6 +2504,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                   </div>
                 </div>
               </div>
+              </SectionErrorBoundary>
             )}
 
             {/* ARCHIVE */}
@@ -4026,206 +3125,20 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
 
             {/* CUSTOMERS */}
             {activeSection === 'customers' && (
-              <div className="adm-panel">
-                <div className="adm-section-head">
-                  <div>
-                    <h2 className="adm-section-title">Customer Management</h2>
-                    <p className="adm-section-note">
-                      Manage trade requests, approved customers, and Proto Active accounts. Sync with Brevo CRM, push portal emails to Brevo, and send email campaigns to any list.
-                      {brevoLastSync && ` Brevo last synced: ${new Date(brevoLastSync).toLocaleString('en-ZA')}.`}
-                    </p>
-                  </div>
-                  <div className="adm-customer-actions">
-                    <button type="button" className="adm-btn-red" onClick={() => setCustomerEmailOpen(true)}>
-                      <Mail size={14} /> Send email
-                    </button>
-                    <button type="button" className="adm-btn-ghost" disabled={brevoSyncBusy} onClick={() => void handleBrevoSync()}>
-                      {brevoSyncBusy ? <><Loader2 size={14} className="spin" /> Syncing…</> : <><CloudDownload size={14} /> Sync from Brevo</>}
-                    </button>
-                    <button type="button" className="adm-btn-ghost" disabled={brevoPushBusy} onClick={() => void handlePushPortalToBrevo()}>
-                      {brevoPushBusy ? 'Pushing…' : <><Upload size={14} /> Push portal → Brevo</>}
-                    </button>
-                    <button type="button" className="adm-btn-ghost" disabled={protoSeedBusy} onClick={() => void importProtoActiveList()}>
-                      {protoSeedBusy ? 'Importing…' : <><Upload size={14} /> Sync proto active list</>}
-                    </button>
-                    <input ref={customerExcelRef} type="file" accept=".xlsx,.xls,.csv" style={{ display: 'none' }} onChange={(e) => { if (e.target.files?.[0]) void handleCustomerExcelApprove(e.target.files[0]); e.target.value = ''; }} />
-                    <button type="button" className="adm-btn-ghost" disabled={customerApproveBusy} onClick={() => customerExcelRef.current?.click()}>
-                      {customerApproveBusy ? 'Importing…' : <><Upload size={14} /> Approve from Excel</>}
-                    </button>
-                  </div>
-                </div>
-
-                <div className="adm-customer-tabs">
-                  <button onClick={() => setCustomerTab('requests')} className={`adm-tab${customerTab === 'requests' ? ' adm-tab--active' : ''}`}>Trade Requests</button>
-                  <button onClick={() => setCustomerTab('regular')} className={`adm-tab${customerTab === 'regular' ? ' adm-tab--active' : ''}`}>Approved</button>
-                  <button onClick={() => setCustomerTab('proto-active')} className={`adm-tab${customerTab === 'proto-active' ? ' adm-tab--active' : ''}`}>Proto Active</button>
-                  <label className="adm-search adm-search--inline"><Search size={14} /><input value={customerSearch} onChange={(e) => setCustomerSearch(e.target.value)} placeholder="Search…" className="adm-search-input" /></label>
-                  {customerTab !== 'proto-active' && (
-                    <select
-                      className="adm-select"
-                      value={customerBusinessType}
-                      onChange={(e) => setCustomerBusinessType(e.target.value)}
-                      aria-label="Filter by business type"
-                    >
-                      <option value="">All business types</option>
-                      <option value="__unspecified__">Unspecified</option>
-                      {BUSINESS_TYPES.map((type) => (
-                        <option key={type} value={type}>{type}</option>
-                      ))}
-                    </select>
-                  )}
-                </div>
-
-                {customerTab === 'proto-active' ? (
-                  <div className="adm-list">
-                    <div className="adm-list-head" style={{ gridTemplateColumns: '80px 1.2fr 110px 90px 1.1fr 100px 80px 100px 120px' }}>
-                      <span>Code</span><span>Business</span><span>Contact</span><span>First name</span><span>Email</span><span>12mo Sales</span><span>Invoices</span><span>Last purchase</span><span>Actions</span>
-                    </div>
-                    {customerRows.length === 0 && !loading && (
-                      <div className="adm-empty" style={{ padding: '24px 0' }}>
-                        No proto active customers loaded. Click <strong>Sync proto active list</strong> to import from the master file.
-                      </div>
-                    )}
-                    {customerRows.map((row) => (
-                      <div key={row.id || row.email} className="adm-list-row" style={{ gridTemplateColumns: '80px 1.2fr 110px 90px 1.1fr 100px 80px 100px 120px', alignItems: 'center' }}>
-                        <span style={{ fontWeight: 800, fontFamily: 'monospace' }}>{row.account_code}</span>
-                        <span style={{ fontWeight: 600, fontSize: 13 }}>{row.name}</span>
-                        <input
-                          type="text"
-                          className="adm-tiny-input"
-                          defaultValue={row.contact_name || ''}
-                          placeholder="Contact name"
-                          disabled={protoNameSaving === `${row.id}-contact_name`}
-                          onBlur={(e) => void saveProtoActiveName(row, 'contact_name', e.target.value)}
-                          onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }}
-                          style={{ width: '100%', fontSize: 12, borderColor: row.contact_name ? undefined : '#fca5a5' }}
-                          aria-label={`Contact name for ${row.email}`}
-                        />
-                        <input
-                          type="text"
-                          className="adm-tiny-input"
-                          defaultValue={row.first_name || ''}
-                          placeholder="First name"
-                          disabled={protoNameSaving === `${row.id}-first_name`}
-                          onBlur={(e) => void saveProtoActiveName(row, 'first_name', e.target.value)}
-                          onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }}
-                          style={{ width: '100%', fontSize: 12, fontWeight: 600, borderColor: row.first_name ? undefined : '#fca5a5' }}
-                          aria-label={`First name for ${row.email}`}
-                        />
-                        <span style={{ fontSize: 12 }}>{row.email}</span>
-                        <span style={{ fontSize: 12 }}>R{Number(row.sales_last_12_months || 0).toLocaleString('en-ZA', { minimumFractionDigits: 2 })}</span>
-                        <span style={{ fontSize: 12 }}>{row.invoice_count ?? '—'}</span>
-                        <span style={{ fontSize: 11, color: '#6b7280' }}>{row.last_purchase_date ? new Date(row.last_purchase_date).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}</span>
-                        <div style={{ display: 'flex', gap: 5 }}>
-                          <button type="button" className="adm-btn-ghost adm-btn-sm" style={{ padding: '4px 9px', fontSize: 11 }} onClick={() => openCustomerProfile(row, 'proto-active')}>Edit</button>
-                          <button type="button" className="adm-btn-ghost adm-btn-sm" style={{ padding: '4px 7px', color: '#c40000' }} disabled={saving === `del-proto-${row.id}`} onClick={() => void removeProtoActiveCustomer(row)}>
-                            <X size={13} />
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : customerTab === 'requests' ? (
-                  <div className="adm-list">
-                    <div className="adm-list-head" style={{ gridTemplateColumns: '1.4fr 1fr 0.9fr 1.3fr 0.8fr 90px 200px' }}>
-                      <span>Business Name</span><span>Location</span><span>Date Applied</span><span>Email / Phone</span><span>Whatsapp</span><span>Code</span><span>Actions</span>
-                    </div>
-                    {customerRows.length === 0 && !loading && (
-                      <div className="adm-empty" style={{ padding: '24px 0' }}>No pending trade requests.</div>
-                    )}
-                    {customerRows.map((person) => (
-                      <div key={person.id} className="adm-list-row" style={{ gridTemplateColumns: '1.4fr 1fr 0.9fr 1.3fr 0.8fr 90px 200px', alignItems: 'center' }}>
-                        <div>
-                          <div style={{ fontWeight: 700, fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                            {person.business_name || person.name || 'Unknown'}
-                            {person.accept_whatsapp === true && (
-                              <Check size={14} color="#15803d" strokeWidth={3} aria-label="WhatsApp opted in" />
-                            )}
-                          </div>
-                          <div className="adm-muted" style={{ fontSize: 11 }}>{person.name}{person.business_type ? ` · ${person.business_type}` : ''}</div>
-                        </div>
-                        <div style={{ fontSize: 12 }}>{[person.city, person.province, person.country].filter(Boolean).join(', ') || '—'}</div>
-                        <div style={{ fontSize: 11, color: '#6b7280' }}>{new Date(person.created_at).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' })}</div>
-                        <div>
-                          <div style={{ fontSize: 12 }}>{person.email}</div>
-                          <div className="adm-muted" style={{ fontSize: 11 }}>{person.phone || '—'}</div>
-                        </div>
-                        <div><WhatsappOptIn value={person.accept_whatsapp} /></div>
-                        <div>
-                          <input
-                            type="text"
-                            className="adm-tiny-input"
-                            placeholder="6-digit"
-                            maxLength={6}
-                            value={approvalCodes[person.id] || ''}
-                            onChange={(e) => setApprovalCodes((prev) => ({
-                              ...prev,
-                              [person.id]: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6),
-                            }))}
-                            style={{ width: '72px', fontFamily: 'monospace', fontWeight: 700 }}
-                            aria-label={`Customer code for ${person.email}`}
-                          />
-                        </div>
-                        <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
-                          <button onClick={() => void openCustomerProfile(person)} className="adm-btn-ghost adm-btn-sm" style={{ padding: '4px 9px', fontSize: 11 }}>Edit</button>
-                          <button
-                            onClick={() => void approveRequest(person)}
-                            className="adm-btn-green adm-btn-sm"
-                            disabled={saving === person.id || !/^[A-Z0-9]{6}$/.test(approvalCodes[person.id] || '')}
-                          >
-                            {saving === person.id ? '…' : <><Check size={12} /> Approve</>}
-                          </button>
-                          <button onClick={() => void removeCustomer(person)} className="adm-btn-ghost adm-btn-sm" style={{ padding: '4px 7px', color: '#c40000' }} disabled={saving === `del-${person.id}`}>
-                            <X size={13} />
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="adm-list">
-                    <div className="adm-list-head" style={{ gridTemplateColumns: '80px 1.1fr 1.1fr 1fr 80px 70px 90px' }}>
-                      <span>Code</span><span>Name</span><span>Email</span><span>Phone</span><span>WhatsApp</span><span>Orders</span><span></span>
-                    </div>
-                    {customerRows.length === 0 && !loading && (
-                      <div className="adm-empty" style={{ padding: '24px 0' }}>No approved customers yet.</div>
-                    )}
-                    {customerRows.map((person) => (
-                      <div key={person.id} className="adm-list-row" style={{ gridTemplateColumns: '80px 1.1fr 1.1fr 1fr 80px 70px 90px' }}>
-                        <span style={{ fontWeight: 800, fontFamily: 'monospace', fontSize: 12 }}>{person.customer_code || '—'}</span>
-                        <div>
-                          <span style={{ fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                            {person.name || person.business_name || 'Unnamed'}
-                            {person.accept_whatsapp === true && (
-                              <Check size={14} color="#15803d" strokeWidth={3} aria-label="WhatsApp opted in" />
-                            )}
-                          </span>
-                          {(person.first_name || person.contact_name) && (
-                            <div className="adm-muted" style={{ fontSize: 11 }}>
-                              {[person.first_name, person.contact_name && person.contact_name !== person.name ? person.contact_name : null].filter(Boolean).join(' · ')}
-                            </div>
-                          )}
-                        </div>
-                        <span style={{ fontSize: 13 }}>{person.email}</span>
-                        <span style={{ fontSize: 13 }}>{person.phone || '—'}</span>
-                        <span><WhatsappOptIn value={person.accept_whatsapp} /></span>
-                        <span>{person.orderCount}</span>
-                        <div style={{ display: 'flex', gap: 5 }}>
-                          <button onClick={() => void openCustomerProfile(person)} className="adm-btn-ghost adm-btn-sm" style={{ padding: '4px 9px', fontSize: 11 }}>Edit</button>
-                          <button onClick={() => void removeCustomer(person)} className="adm-btn-ghost adm-btn-sm" disabled={saving === `del-${person.id}`} style={{ color: '#c40000', padding: '4px 8px' }}>
-                            {saving === `del-${person.id}` ? '…' : <X size={14} />}
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                <Pager page={customerPage} totalPages={customerPages} onChange={setCustomerPage} />
-              </div>
+              <SectionErrorBoundary name="customers" title="Customer Management crashed" resetKey={activeSection}>
+                <CustomersTab
+                  showToast={showToast}
+                  refreshDashboardStats={refreshDashboardStats}
+                  onPendingCountChange={setPendingCount}
+                  customer={customer}
+                  refreshNonce={sectionRefreshNonce}
+                />
+              </SectionErrorBoundary>
             )}
 
             {/* PRICING */}
             {activeSection === 'pricing' && (
+              <SectionErrorBoundary name="pricing" title="Pricing crashed" resetKey={activeSection}>
               <div className="adm-panel">
                 <div className="adm-section-head">
                   <div>
@@ -4257,209 +3170,37 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                   ))}
                 </div>
               </div>
+              </SectionErrorBoundary>
             )}
 
             {/* ORDERS */}
             {activeSection === 'orders' && (
-              <div className="adm-panel">
-                <div className="adm-section-head">
-                  <div>
-                    <h2 className="adm-section-title">Order Requests</h2>
-                    <p className="adm-section-note">
-                      {orderSubView === 'analytics'
-                        ? 'Sales and engagement metrics for the selected time period.'
-                        : 'Paginated order list with server-side search and tab filters. Click a row to expand details.'}
-                    </p>
-                  </div>
-                  {orderSubView === 'list' && (
-                    <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-                      <button
-                        type="button"
-                        className="adm-btn-ghost"
-                        onClick={() => setFulfillmentSettingsOpen(true)}
-                        title="Fulfillment team settings"
-                        style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px' }}
-                      >
-                        <User size={16} /> Team
-                      </button>
-                      <button
-                        type="button"
-                        className="adm-btn-ghost"
-                        onClick={() => void loadOrders()}
-                        disabled={loading}
-                        style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px' }}
-                        title="Refresh orders"
-                      >
-                        {loading ? <Loader2 size={15} className="spin" /> : <RefreshCw size={15} />}
-                        Refresh
-                      </button>
-                      <label className="adm-search"><Search size={15} /><input value={orderSearch} onChange={(e) => setOrderSearch(e.target.value)} placeholder="Search orders" className="adm-search-input" /></label>
-                    </div>
-                  )}
-                </div>
-
-                <div className="adm-customer-tabs" style={{ marginBottom: 16 }}>
-                  <button type="button" onClick={() => setOrderSubView('list')} className={`adm-tab${orderSubView === 'list' ? ' adm-tab--active' : ''}`}>Orders</button>
-                  <button type="button" onClick={() => setOrderSubView('analytics')} className={`adm-tab${orderSubView === 'analytics' ? ' adm-tab--active' : ''}`}>
-                    <BarChart2 size={14} style={{ marginRight: 6, verticalAlign: -2 }} />
-                    Analytics
-                  </button>
-                </div>
-
-                {orderSubView === 'analytics' ? (
-                  <AnalyticsHub />
-                ) : (
-                <>
-                <div style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
-                  {[
-                    { key: 'all', label: 'All' },
-                    { key: 'new', label: 'New' },
-                    { key: 'handed', label: 'Handed Over' },
-                    { key: 'progress', label: 'In Progress' },
-                    { key: 'sent', label: 'Order Confirmation' },
-                    { key: 'paid', label: 'Payment' },
-                  ].map(({ key, label }) => {
-                    const count = orderTabCounts?.[key] ?? (key === 'all'
-                      ? orderTabCounts?.all ?? orderTotal
-                      : 0);
-                    return (
-                      <button
-                        key={key}
-                        onClick={() => { setOrderTab(key); setOrderPage(1); }}
-                        style={{
-                          padding: '7px 14px',
-                          borderRadius: 8,
-                          border: 'none',
-                          cursor: 'pointer',
-                          fontSize: 13,
-                          fontWeight: 700,
-                          fontFamily: 'inherit',
-                          background: orderTab === key ? '#0f172a' : '#f1f5f9',
-                          color: orderTab === key ? '#fff' : '#374151',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 6,
-                        }}
-                      >
-                        {label}
-                        {count > 0 && (
-                          <span style={{ fontSize: 11, fontWeight: 700, background: orderTab === key ? 'rgba(255,255,255,0.2)' : '#e2e8f0', color: orderTab === key ? '#fff' : '#64748b', padding: '1px 6px', borderRadius: 999 }}>
-                            {count}
-                          </span>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-                {orderTab === 'paid' && (
-                  <p className="adm-muted" style={{ fontSize: 12, margin: '0 0 12px' }}>
-                    Payment tab includes sent confirmations awaiting payment.
-                  </p>
-                )}
-                <div className="adm-list">
-                  <div className="adm-list-head" style={{ gridTemplateColumns: orderListGridCols }}>
-                    <span>Order</span><span>Customer</span><span>Date & Time</span><span>{orderTab === 'sent' ? 'Order Confirmation' : orderTab === 'paid' ? 'Payment' : 'Status'}</span><span>Actions</span><span></span>
-                  </div>
-                  {orderRows.map((order) => {
-                    const isExpanded = expandedOrderId === order.id;
-                    const dt = new Date(order.created_at);
-                    const dateStr = dt.toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' });
-                    const timeStr = dt.toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' });
-                    const isPreSale = normalizeOrderStatus(order.status) === 'order sent';
-                    return (
-                      <div key={order.id}>
-                        <div
-                          className={`adm-list-row adm-order-row${focusOrderId === order.id ? ' adm-order-row--focus' : ''}`}
-                          style={{ gridTemplateColumns: orderListGridCols, cursor: 'pointer' }}
-                          data-order-id={order.id}
-                          onClick={() => setExpandedOrderId(isExpanded ? null : order.id)}
-                        >
-                          <div>
-                            <div style={{ fontWeight: 800, fontSize: 13 }}>{displayOrderNumber(order)}</div>
-                          </div>
-                          <div>
-                            <div style={{ fontWeight: 600, fontSize: 13 }}>{order.customers?.name || 'Unknown'}</div>
-                            <div className="adm-muted" style={{ fontSize: 11 }}>{order.customers?.email || ''}</div>
-                          </div>
-                          <div>
-                            <div style={{ fontSize: 13, fontWeight: 600 }}>{dateStr}</div>
-                            <div className="adm-muted" style={{ fontSize: 11 }}>{timeStr}</div>
-                          </div>
-                          <div onClick={(e) => e.stopPropagation()} className="adm-presale-col">
-                            {orderTab === 'sent' && isPreSale ? (
-                              renderOrderConfirmationActions(order)
-                            ) : orderTab === 'paid' ? (
-                              renderPaymentActions(order) || <OrderWorkflowBadge order={order} />
-                            ) : (
-                              <OrderWorkflowBadge order={order} />
-                            )}
-                          </div>
-                          <div style={{ display: 'flex', gap: 6 }} onClick={(e) => e.stopPropagation()}>
-                            <button onClick={() => window.open(`/fulfillment?id=${order.id}`, '_blank', 'noopener,noreferrer')} className="adm-icon-btn" title="Fulfil order (opens in new tab)" style={{ color: '#15803d' }}><ClipboardList size={14} /></button>
-                            <button onClick={() => downloadOrderHtml(order)} className="adm-icon-btn" title="Download order file"><FileDown size={14} /></button>
-                            <button onClick={() => void deleteOrder(order)} className="adm-icon-btn" style={{ color: '#c40000' }} disabled={saving === `del-order-${order.id}`} title="Delete order">
-                              {saving === `del-order-${order.id}` ? '…' : <Trash2 size={14} />}
-                            </button>
-                          </div>
-                          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                            <span className="adm-muted" style={{ fontSize: 18, lineHeight: 1 }}>{isExpanded ? '↑' : '↓'}</span>
-                          </div>
-                        </div>
-                        {isExpanded && (
-                          <div style={{ background: '#f8fafc', borderTop: '1px solid #f1f5f9', padding: '14px 16px' }}>
-                            <div style={{ marginBottom: 14, display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-                              <OrderWorkflowBadge order={order} />
-                              {getWorkflowAdvanceOptions(order.status).map(({ label, target }) => (
-                                <button
-                                  key={target}
-                                  type="button"
-                                  className="adm-btn-ghost"
-                                  style={{ fontSize: 12, padding: '4px 10px' }}
-                                  disabled={saving === `advance-${order.id}`}
-                                  onClick={() => void advanceOrderStatus(order, target)}
-                                >
-                                  {saving === `advance-${order.id}` ? 'Updating…' : label}
-                                </button>
-                              ))}
-                            </div>
-                            <OrderWhatsappNotify orderId={order.id} />
-                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
-                              <OrderItemsList label="Order placed" items={order.original_items || order.items || []} />
-                              <OrderItemsList label="Order final" items={order.final_items || order.items || []} />
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                  {loading && orders.length === 0 && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '20px 16px', color: '#6b7280', fontSize: 13 }}>
-                      <Loader2 size={16} className="spin" /> Loading orders…
-                    </div>
-                  )}
-                  {!loading && orderRows.length === 0 && (
-                    <div style={{ padding: '20px 16px', color: '#6b7280', fontSize: 13 }}>
-                      {orderSearch ? 'No orders match your search.' : orderTab === 'all' ? 'No orders yet.' : `No orders in the "${orderTab}" tab.`}
-                    </div>
-                  )}
-                </div>
-                {orderSubView === 'list' && orderPages > 1 && (
-                  <Pager page={orderPage} totalPages={orderPages} onChange={setOrderPage} />
-                )}
-                </>
-                )}
-              </div>
+              <SectionErrorBoundary name="orders" title="Order Requests crashed" resetKey={activeSection}>
+                <OrdersTab
+                  showToast={showToast}
+                  refreshDashboardStats={refreshDashboardStats}
+                  onStatsOrderChange={setStatsOrderTotal}
+                  customer={customer}
+                  onOpenFulfillmentSettings={() => setFulfillmentSettingsOpen(true)}
+                  initialOrderTab={ordersUrlState.tab}
+                  initialFocusOrderId={ordersUrlState.focus}
+                  refreshNonce={sectionRefreshNonce}
+                />
+              </SectionErrorBoundary>
             )}
 
             {/* BREVO CRM */}
             {activeSection === 'brevo' && (
+              <SectionErrorBoundary name="brevo" title="Brevo CRM crashed" resetKey={activeSection}>
               <div className="adm-panel">
                 <CrmPanel onShowToast={showToast} />
               </div>
+              </SectionErrorBoundary>
             )}
 
             {/* WHATSAPP */}
             {activeSection === 'crm' && (
+              <SectionErrorBoundary name="crm" title="WhatsApp crashed" resetKey={activeSection}>
               <div className="adm-panel">
                 <div className="adm-section-head">
                   <div>
@@ -4495,10 +3236,12 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                   onRefresh={() => { void loadCrmCustomers(crmMeta.page || 1); void loadCrmTemplates(); }}
                 />
               </div>
+              </SectionErrorBoundary>
             )}
 
             {/* BANNER EDITOR */}
             {activeSection === 'banner' && (
+              <SectionErrorBoundary name="banner" title="Banner Editor crashed" resetKey={activeSection}>
               <div className="adm-panel">
                 <div className="adm-section-head">
                   <div>
@@ -4553,6 +3296,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                   </div>
                 </div>
               </div>
+              </SectionErrorBoundary>
             )}
 
             {/* POPUP SPECIALS — merged into Specials tab */}
@@ -4565,188 +3309,6 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
         </div>
       </div>
 
-      {/* Customer profile drawer */}
-      {profileCustomer && (
-        <div className="adm-drawer-backdrop" onClick={closeCustomerProfile}>
-          <div className="adm-drawer" onClick={(e) => e.stopPropagation()}>
-            <div className="adm-drawer-head">
-              <h3>Customer Profile</h3>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                {!profileEditing && (
-                  <button onClick={startEditProfile} className="adm-btn-ghost adm-btn-sm">Edit</button>
-                )}
-                <button onClick={closeCustomerProfile} className="adm-icon-btn"><X size={16} /></button>
-              </div>
-            </div>
-            <div className="adm-drawer-body">
-              <div className="adm-drawer-avatar">{(profileCustomer.business_name || profileCustomer.name || '?')[0].toUpperCase()}</div>
-              <h2 className="adm-drawer-biz">{profileCustomer.business_name || profileCustomer.name}</h2>
-
-              {profileEditing ? (
-                <div style={{ display: 'grid', gap: 12, marginTop: 4 }}>
-                  {profileSource === 'proto-active' ? (
-                    <>
-                      {[
-                        ['Account code', 'account_code', 'text'],
-                        ['Business name', 'business_name', 'text'],
-                        ['Email', 'email', 'email'],
-                        ['Contact name', 'contact_name', 'text'],
-                        ['First name', 'first_name', 'text'],
-                      ].map(([label, key, type]) => (
-                        <div key={key}>
-                          <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 5 }}>{label}</label>
-                          <input className="adm-field-input" type={type} value={profileForm[key] || ''} onChange={setPf(key)} style={{ width: '100%' }} />
-                        </div>
-                      ))}
-                    </>
-                  ) : (
-                    <>
-                      {[
-                        ['Contact person', 'name', 'text'],
-                        ['Email', 'email', 'email'],
-                        ['Phone', 'phone', 'tel'],
-                        ['Business name', 'business_name', 'text'],
-                        ['Business type', 'business_type', 'text'],
-                        ['VAT number', 'vat_number', 'text'],
-                        ['Website / social', 'website', 'text'],
-                      ].map(([label, key, type]) => (
-                        <div key={key}>
-                          <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 5 }}>{label}</label>
-                          <input className="adm-field-input" type={type} value={profileForm[key] || ''} onChange={setPf(key)} style={{ width: '100%' }} />
-                        </div>
-                      ))}
-                      <div>
-                        <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 5 }}>Monthly spend</label>
-                        <select className="adm-field-input" value={profileForm.monthly_spend || ''} onChange={setPf('monthly_spend')} style={{ width: '100%' }}>
-                          <option value="">—</option>
-                          {SPEND_BANDS.map((b) => <option key={b} value={b}>{b}</option>)}
-                        </select>
-                      </div>
-                      {[['Company address', 'company_address'], ['Delivery address', 'delivery_address']].map(([label, key]) => (
-                        <div key={key}>
-                          <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 5 }}>{label}</label>
-                          <textarea className="adm-field-input" rows={2} value={profileForm[key] || ''} onChange={setPf(key)} style={{ width: '100%', resize: 'vertical' }} />
-                        </div>
-                      ))}
-                    </>
-                  )}
-                  <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
-                    <button className="adm-btn-green" onClick={() => void saveProfileEdit()} disabled={savingProfile}>{savingProfile ? 'Saving…' : 'Save changes'}</button>
-                    <button className="adm-btn-ghost" onClick={() => setProfileEditing(false)} disabled={savingProfile}>Cancel</button>
-                  </div>
-                </div>
-              ) : (
-                <div className="adm-drawer-fields">
-                  <DrawerField icon={User} label="Contact person" value={profileCustomer.contact_name || profileCustomer.name} />
-                  <DrawerField icon={Mail} label="Email" value={profileCustomer.email} />
-                  {profileSource !== 'proto-active' && <DrawerField icon={Phone} label="Phone" value={profileCustomer.phone} />}
-                  {profileSource !== 'proto-active' && <DrawerField icon={Store} label="Business type" value={profileCustomer.business_type} />}
-                  {profileSource !== 'proto-active' && <DrawerField icon={Store} label="Monthly spend" value={profileCustomer.monthly_spend} />}
-                  {profileSource !== 'proto-active' && <DrawerField icon={Globe} label="Website / social" value={profileCustomer.website} />}
-                  {profileSource !== 'proto-active' && (
-                    <DrawerField icon={Shield} label="Accept WhatsApp" value={profileCustomer.accept_whatsapp == null ? null : profileCustomer.accept_whatsapp ? 'Yes' : 'No'} />
-                  )}
-                  <DrawerField icon={Building2} label="Customer code" value={profileCustomer.customer_code || profileCustomer.account_code} />
-                  {profileCustomer.first_name && <DrawerField icon={User} label="First name" value={profileCustomer.first_name} />}
-                  {profileCustomer.vat_number && <DrawerField icon={Shield} label="VAT number" value={profileCustomer.vat_number} />}
-                  {profileCustomer.company_address && <DrawerField icon={MapPin} label="Company address" value={profileCustomer.company_address} />}
-                  {profileCustomer.delivery_address && <DrawerField icon={MapPin} label="Delivery address" value={profileCustomer.delivery_address} />}
-                  {profileCustomer.sales_last_12_months != null && (
-                    <DrawerField icon={Store} label="12mo sales" value={`R${Number(profileCustomer.sales_last_12_months).toLocaleString('en-ZA', { minimumFractionDigits: 2 })}`} />
-                  )}
-                  {profileCustomer.invoice_count != null && (
-                    <DrawerField icon={Store} label="Invoices (12mo)" value={String(profileCustomer.invoice_count)} />
-                  )}
-                  {profileCustomer.last_purchase_date && (
-                    <DrawerField icon={Building2} label="Last purchase" value={new Date(profileCustomer.last_purchase_date).toLocaleDateString('en-ZA')} />
-                  )}
-                  {profileSource !== 'proto-active' && profileCustomer.created_at && (
-                    <DrawerField icon={Building2} label="Applied" value={new Date(profileCustomer.created_at).toLocaleString('en-ZA')} />
-                  )}
-                </div>
-              )}
-
-              {profileSource !== 'proto-active' && (
-              <div style={{ marginTop: 24 }}>
-                <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 10, fontFamily: 'Outfit, sans-serif' }}>Order History</div>
-                {profileOrdersLoading && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#6b7280', fontSize: 13 }}>
-                    <Loader2 size={14} className="spin" /> Loading orders…
-                  </div>
-                )}
-                {!profileOrdersLoading && profileOrders.length === 0 && (
-                  <div className="adm-muted" style={{ fontSize: 13 }}>No orders found.</div>
-                )}
-                {!profileOrdersLoading && profileOrders.length > 0 && (
-                  <div className="adm-profile-orders">
-                    {profileOrders.map((order) => (
-                      <div key={order.id} className="adm-profile-order">
-                        <div className="adm-profile-order-head">
-                          <span>{order.order_number || order.id.slice(0, 8)}</span>
-                          <span className="adm-pill" style={{ fontSize: 10, padding: '2px 8px' }}>{order.status || 'pending'}</span>
-                          <span className="adm-muted">{new Date(order.created_at).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
-                        </div>
-                        <div className="adm-muted" style={{ fontSize: 11, marginTop: 4 }}>
-                          {compactItems(order.original_items || order.items || [])}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-              )}
-            </div>
-            <div className="adm-drawer-footer">
-              <button onClick={closeCustomerProfile} className="adm-btn-ghost">Close</button>
-              {profileSource !== 'proto-active' && !profileCustomer.is_approved && (
-                <>
-                  <input
-                    type="text"
-                    className="adm-tiny-input"
-                    placeholder="6-digit code"
-                    maxLength={6}
-                    value={approvalCodes[profileCustomer.id] || ''}
-                    onChange={(e) => setApprovalCodes((prev) => ({
-                      ...prev,
-                      [profileCustomer.id]: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6),
-                    }))}
-                    style={{ width: 88, fontFamily: 'monospace', fontWeight: 700 }}
-                  />
-                  <button
-                    onClick={() => void approveRequest(profileCustomer)}
-                    className="adm-btn-green"
-                    disabled={saving === profileCustomer.id || !/^[A-Z0-9]{6}$/.test(approvalCodes[profileCustomer.id] || '')}
-                  >
-                    {saving === profileCustomer.id ? 'Approving…' : <><Check size={15} /> Approve</>}
-                  </button>
-                </>
-              )}
-              {profileSource !== 'proto-active' && (
-                <button onClick={() => void deactivateCustomer(profileCustomer)} className="adm-btn-ghost" disabled={saving === `deact-${profileCustomer.id}`}>
-                  {saving === `deact-${profileCustomer.id}` ? '…' : 'Deactivate'}
-                </button>
-              )}
-              <button
-                onClick={() => void removeCustomer(profileCustomer, profileSource)}
-                className="adm-btn-ghost"
-                style={{ color: '#c40000' }}
-                disabled={saving === (profileSource === 'proto-active' ? `del-proto-${profileCustomer.id}` : `del-${profileCustomer.id}`)}
-              >
-                {saving === (profileSource === 'proto-active' ? `del-proto-${profileCustomer.id}` : `del-${profileCustomer.id}`) ? '…' : <><Trash2 size={14} /> Delete</>}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <CustomerEmailModal
-        open={customerEmailOpen}
-        onClose={() => setCustomerEmailOpen(false)}
-        customerTab={customerTab}
-        onSend={sendCustomerEmailBroadcast}
-        onShowToast={showToast}
-        adminEmail={customer?.email || ''}
-      />
 
       {/* Taxonomy modals — used by Product Manager reorder + category sidebar */}
       {editTaxonomyModal && (
@@ -5048,144 +3610,6 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
         </div>
       )}
 
-      {/* Fulfillment modal */}
-      {fulfillmentOrder && (
-        <div className="adm-modal-backdrop">
-          <div className="adm-modal" style={{ maxWidth: 740, maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
-            {/* Header */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16, flexShrink: 0 }}>
-              <div>
-                <h3 style={{ margin: 0, fontSize: 20, fontFamily: 'Outfit, sans-serif', display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <ClipboardList size={20} style={{ color: '#15803d' }} /> Order Fulfillment
-                </h3>
-                <p className="adm-muted" style={{ marginTop: 4, fontSize: 13 }}>
-                  {fulfillmentOrder.order_number || fulfillmentOrder.id.slice(0, 8)} &nbsp;·&nbsp; {new Date(fulfillmentOrder.created_at).toLocaleDateString('en-ZA', { day: 'numeric', month: 'long', year: 'numeric' })}
-                </p>
-              </div>
-              <button onClick={closeFulfillment} className="adm-icon-btn"><X size={16} /></button>
-            </div>
-
-            {/* Customer details */}
-            <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: '10px 14px', marginBottom: 14, fontSize: 13, flexShrink: 0 }}>
-              <div style={{ fontWeight: 700, fontSize: 14 }}>{fulfillmentOrder.customers?.name || 'Unknown customer'}</div>
-              <div className="adm-muted" style={{ marginTop: 2 }}>{fulfillmentOrder.customers?.email || '—'}</div>
-            </div>
-
-            {/* Items table */}
-            <div style={{ overflowY: 'auto', flex: 1, marginBottom: 14 }}>
-              {/* Table header */}
-              <div style={{ display: 'grid', gridTemplateColumns: '28px 24px 52px 90px 1fr 64px 72px 32px', gap: '0 8px', padding: '6px 8px', background: '#f1f5f9', borderRadius: 6, marginBottom: 4, fontSize: 11, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', alignItems: 'center' }}>
-                <span>✓</span><span>#</span><span>Img</span><span>Code</span><span>Product</span><span>Ordered</span><span>Final qty</span><span></span>
-              </div>
-              {fulfillmentItems.map((item, idx) => (
-                <div key={idx}>
-                  <div style={{ display: 'grid', gridTemplateColumns: '28px 24px 52px 90px 1fr 64px 72px 32px', gap: '0 8px', padding: '8px', borderBottom: '1px solid #f1f5f9', alignItems: 'center', background: item.checked ? '#f0fdf4' : 'white' }}>
-                    <input
-                      type="checkbox"
-                      checked={item.checked}
-                      onChange={() => setFulfillmentItems((prev) => prev.map((it, i) => i === idx ? { ...it, checked: !it.checked } : it))}
-                      style={{ width: 16, height: 16, accentColor: '#15803d', cursor: 'pointer' }}
-                    />
-                    <span style={{ fontSize: 12, color: '#94a3b8', fontWeight: 700 }}>{idx + 1}</span>
-                    <div style={{ width: 48, height: 48, borderRadius: 6, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-                      {item.image
-                        ? <img src={item.image} alt="" style={{ width: 48, height: 48, objectFit: 'contain', mixBlendMode: 'multiply' }} />
-                        : <span style={{ fontSize: 9, color: '#9ca3af' }}>IMG</span>}
-                    </div>
-                    <span style={{ fontWeight: 700, fontSize: 12, wordBreak: 'break-all' }}>{item.code || '—'}</span>
-                    <span style={{ fontSize: 13 }}>{item.name || '—'}</span>
-                    <span style={{ fontSize: 13, color: '#6b7280', textAlign: 'center' }}>× {item.qty}</span>
-                    <input
-                      type="number"
-                      min="0"
-                      value={item.finalQty}
-                      onChange={(e) => setFulfillmentItems((prev) => prev.map((it, i) => i === idx ? { ...it, finalQty: Math.max(0, Number(e.target.value)) } : it))}
-                      className="adm-tiny-input"
-                      style={{ width: 64, textAlign: 'center' }}
-                    />
-                    <button
-                      onClick={() => { setEditingItemIdx(editingItemIdx === idx ? null : idx); setProductSwapSearch(''); setProductSwapResults([]); }}
-                      className="adm-icon-btn"
-                      title="Swap product"
-                      style={{ color: editingItemIdx === idx ? '#8B1A1A' : undefined }}
-                    >
-                      <Pencil size={13} />
-                    </button>
-                  </div>
-
-                  {/* Inline product swap */}
-                  {editingItemIdx === idx && (
-                    <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, padding: 12, margin: '4px 0 8px', display: 'grid', gap: 8 }}>
-                      <div style={{ fontWeight: 700, fontSize: 12, color: '#92400e' }}>Swap product — search by code or name</div>
-                      <label className="adm-search" style={{ background: 'white' }}>
-                        <Search size={13} />
-                        <input
-                          value={productSwapSearch}
-                          onChange={(e) => handleSwapSearchChange(e.target.value)}
-                          placeholder="Type code or product name…"
-                          className="adm-search-input"
-                          autoFocus
-                        />
-                        {productSwapLoading && <Loader2 size={13} className="spin" />}
-                      </label>
-                      {productSwapResults.length > 0 && (
-                        <div style={{ display: 'grid', gap: 4, maxHeight: 200, overflowY: 'auto' }}>
-                          {productSwapResults.map((p) => (
-                            <button
-                              key={p.id}
-                              onClick={() => swapFulfillmentItem(idx, p)}
-                              style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 10px', background: 'white', border: '1px solid #e5e7eb', borderRadius: 6, cursor: 'pointer', textAlign: 'left', fontSize: 13 }}
-                            >
-                              {p.image
-                                ? <img src={p.image} alt="" style={{ width: 36, height: 36, objectFit: 'contain', borderRadius: 4, flexShrink: 0 }} />
-                                : <div style={{ width: 36, height: 36, background: '#f3f4f6', borderRadius: 4, flexShrink: 0 }} />}
-                              <div>
-                                <div style={{ fontWeight: 700, fontSize: 12 }}>{p.code}</div>
-                                <div style={{ color: '#374151' }}>{p.name}</div>
-                              </div>
-                              <span style={{ marginLeft: 'auto', color: '#6b7280', fontSize: 12 }}>R{p.price}</span>
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                      {productSwapSearch && !productSwapLoading && productSwapResults.length === 0 && (
-                        <div className="adm-muted" style={{ fontSize: 12 }}>No products found.</div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-
-            {/* Notes */}
-            <div style={{ flexShrink: 0, marginBottom: 16 }}>
-              <label style={{ display: 'grid', gap: 8 }}>
-                <span style={{ fontWeight: 700, fontSize: 13 }}>Notes</span>
-                <textarea
-                  value={fulfillmentNotes}
-                  onChange={(e) => setFulfillmentNotes(e.target.value)}
-                  className="adm-field-input"
-                  rows={4}
-                  placeholder={'Add clear notes, one point per line…\nExample:\nCustomer approved substitution\nDeliver with next stock run'}
-                  style={{ resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.6 }}
-                />
-              </label>
-              <div style={{ marginTop: 10, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: '12px 14px' }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>Notes preview</div>
-                {renderNoteSections(fulfillmentNoteSections)}
-              </div>
-            </div>
-
-            {/* Footer */}
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, flexShrink: 0, flexWrap: 'wrap' }}>
-              <button onClick={closeFulfillment} className="adm-btn-ghost"><ChevronLeft size={15} /> Cancel</button>
-              <button onClick={() => void saveFulfillment()} className="adm-btn-red" disabled={fulfillmentSaving}>
-                {fulfillmentSaving ? 'Saving…' : <><Check size={15} /> Save order</>}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Image lightbox */}
       {imageViewUrl && (
@@ -5507,7 +3931,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
         taxonomyTree={taxonomyTree}
         onClose={(saved) => {
           setFulfillmentSettingsOpen(false);
-          if (saved) void fetchFulfillmentUsers().then(setFulfillmentUsers);
+          if (saved) window.dispatchEvent(new CustomEvent('proto-fulfillment-users-changed'));
         }}
       />
 
@@ -5518,30 +3942,6 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   );
 }
 
-function OrderItemsList({ label, items }) {
-  return (
-    <div className="adm-subtle-box">
-      <strong style={{ fontSize: 12 }}>{label}</strong>
-      <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
-        {items.length === 0 && <span className="adm-muted" style={{ fontSize: 12 }}>—</span>}
-        {items.map((item, i) => (
-          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <div style={{ width: 40, height: 40, borderRadius: 5, background: '#f3f4f6', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-              {item.image
-                ? <img src={item.image} alt="" style={{ width: 40, height: 40, objectFit: 'contain', mixBlendMode: 'multiply' }} />
-                : <span style={{ fontSize: 8, color: '#9ca3af' }}>IMG</span>}
-            </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontWeight: 700, fontSize: 11, color: '#374151' }}>{item.code}</div>
-              <div style={{ fontSize: 12, color: '#6b7280', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{item.name}</div>
-            </div>
-            <span style={{ fontWeight: 700, fontSize: 13, flexShrink: 0 }}>× {item.qty}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
 
 function AdminField({ label, children, full = false }) {
   return (
@@ -5552,18 +3952,6 @@ function AdminField({ label, children, full = false }) {
   );
 }
 
-function DrawerField({ icon: Icon, label, value }) {
-  if (!value) return null;
-  return (
-    <div className="adm-drawer-field">
-      <Icon size={14} className="adm-drawer-field-icon" />
-      <div>
-        <div className="adm-drawer-field-label">{label}</div>
-        <div className="adm-drawer-field-value">{value}</div>
-      </div>
-    </div>
-  );
-}
 
 function AdminStat({ label, value, accent }) {
   const display = typeof value === 'object' ? '—' : value;
