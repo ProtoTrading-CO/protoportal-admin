@@ -1,7 +1,8 @@
 import { requireAdminOrOrderToken } from './_admin-auth.js';
 import { createClient } from '@supabase/supabase-js';
-import { getPortalAdminClient, SITE_CONFIG_BUCKET, writeSiteConfigJson } from './_site-config.js';
+import { getPortalAdminClient, SITE_CONFIG_BUCKET } from './_site-config.js';
 import { CUSTOMER_SEND_FORBIDDEN, isVictorSender } from './_fulfillment-auth.js';
+import { markOrderConfirmationSent } from './_order-confirmation-sent.js';
 import {
   buildOrderNoteSections,
   customerDetailRows,
@@ -11,9 +12,7 @@ import {
 } from './_order-format.js';
 
 async function markConfirmationSent(orderId) {
-  const meta = { orderId, sentAt: new Date().toISOString() };
-  await writeSiteConfigJson(`orders/confirmation/${orderId}.json`, meta);
-  return meta;
+  return markOrderConfirmationSent(orderId);
 }
 
 function getAdminClient() {

@@ -1,15 +1,7 @@
 import { requireAdminKey } from './_admin-auth.js';
-import { readSiteConfigJson } from './_site-config.js';
-import { mutateSiteConfigJson } from './_site-config-mutate.js';
+import { readOrderConfirmationSent, markOrderConfirmationSent } from './_order-confirmation-sent.js';
 
-function metaPath(orderId) {
-  return `orders/confirmation/${orderId}.json`;
-}
-
-export async function readConfirmationSent(orderId) {
-  const data = await readSiteConfigJson(metaPath(orderId), null);
-  return data?.orderId === orderId ? data : data?.sentAt ? data : null;
-}
+export { readOrderConfirmationSent as readConfirmationSent } from './_order-confirmation-sent.js';
 
 export default async function handler(req, res) {
   if (!(await requireAdminKey(req, res))) return;
@@ -24,7 +16,7 @@ export default async function handler(req, res) {
 
     const out = {};
     await Promise.all(ids.map(async (orderId) => {
-      const meta = await readConfirmationSent(orderId);
+      const meta = await readOrderConfirmationSent(orderId);
       if (meta) out[orderId] = meta;
     }));
     return res.status(200).json({ confirmations: out });
@@ -33,13 +25,12 @@ export default async function handler(req, res) {
   if (req.method === 'POST') {
     const { orderId } = req.body || {};
     if (!orderId) return res.status(400).json({ error: 'orderId required' });
-    const sentAt = new Date().toISOString();
-    await mutateSiteConfigJson(metaPath(orderId), { orderId }, () => ({
-      orderId,
-      sentAt,
-      updatedAt: sentAt,
-    }));
-    return res.status(200).json({ ok: true, orderId, sentAt });
+    try {
+      const meta = await markOrderConfirmationSent(orderId);
+      return res.status(200).json({ ok: true, orderId, sentAt: meta.sentAt });
+    } catch (err) {
+      return res.status(400).json({ error: err.message });
+    }
   }
 
   return res.status(405).end();
