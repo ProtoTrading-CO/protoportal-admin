@@ -24,15 +24,25 @@ export function parseIntakeFilename(filename) {
     };
   }
 
+  if (dot > 0 && !IMAGE_EXT.test(raw.slice(dot))) {
+    return {
+      sourceSku: '',
+      displayCode: '',
+      imageNumber: 1,
+      imageColumn: IMAGE_COLUMNS[0],
+      parseError: 'unsupported_extension',
+    };
+  }
+
+  for (const pattern of NOISE_PATTERNS) {
+    working = working.replace(pattern, '').trim();
+  }
+
   let imageNumber = 1;
   const slotMatch = working.match(SLOT_SUFFIX);
   if (slotMatch?.groups?.sku) {
     working = String(slotMatch.groups.sku || '').trim();
     imageNumber = Math.min(4, Math.max(1, Number.parseInt(slotMatch.groups.slot || '1', 10) || 1));
-  }
-
-  for (const pattern of NOISE_PATTERNS) {
-    working = working.replace(pattern, '').trim();
   }
 
   const displayCode = working;

@@ -91,6 +91,19 @@ record('Customer Unspecified filter', unspecified.status === 200, `rows=${unspec
 const popup = await get('/api/popup-special');
 record('Popup special GET', popup.status === 200, `active=${popup.json?.active}`);
 
+// Mottaro archived browse (title-match path)
+const mottaroArch = await get('/api/catalog?status=archived&page=1&pageSize=5&categoryPath=%5B%22mottaro%22%5D');
+record('Mottaro archived browse', mottaroArch.status === 200, `total=${mottaroArch.json?.total ?? '?'}`);
+
+// Sync status endpoint (404 on production until this branch + migration 038 deploy)
+const syncStatus = await get('/api/sync-status');
+const syncOk = syncStatus.status === 200 && 'stockSyncedAt' in (syncStatus.json || {});
+record(
+  'Sync status GET',
+  syncOk || syncStatus.status === 404,
+  syncOk ? 'ok' : `status ${syncStatus.status} (404 expected pre-deploy)`,
+);
+
 const failed = results.filter((r) => !r.pass);
 console.log(`\n${results.length - failed.length}/${results.length} passed`);
 if (failed.length) process.exit(1);

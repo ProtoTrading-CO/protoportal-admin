@@ -202,6 +202,8 @@ export default function ProductLoaderNutstore({
   const [processAction, setProcessAction] = useState('');
   const [error, setError] = useState('');
   const [progress, setProgress] = useState({ done: 0, total: 0 });
+  const [notFoundEdits, setNotFoundEdits] = useState({});
+  const [relookupBusy, setRelookupBusy] = useState('');
   const resultsRef = useRef(null);
 
   const batchSub1Options = batchDefaultCategoryId ? childrenOf(taxonomyTree, batchDefaultCategoryId) : [];
@@ -365,6 +367,92 @@ export default function ProductLoaderNutstore({
     }
   };
 
+  const setNotFoundEdit = (path, field, value) => {
+    setNotFoundEdits((prev) => ({
+      ...prev,
+      [path]: { ...prev[path], [field]: value },
+    }));
+  };
+
+  const relookupNotFound = async (row) => {
+    const edits = notFoundEdits[row.path] || {};
+    const code = String(edits.code ?? row.code ?? '').trim();
+    if (!code) {
+      setError('Enter a Positill code before re-lookup.');
+      return;
+    }
+    setRelookupBusy(row.path);
+    setError('');
+    try {
+      const res = await fetch('/api/nutstore-batch-lookup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paths: [row.path], codeOverrides: { [row.path]: code } }),
+      });
+      const json = await readApiJson(res, { fallback: 'Re-lookup failed' });
+      const updated = json.items?.[0];
+      if (!updated) throw new Error('No lookup result');
+      setItems((prev) => prev.map((i) => (i.path === row.path ? updated : i)));
+      if (updated.group !== 'not_found') {
+        onShowToastRef.current?.(`Matched ${code} — moved to ${GROUP_LABELS[updated.group] || updated.group}`, 'success');
+      } else {
+        onShowToastRef.current?.(`No catalogue match for ${code}`, 'warning');
+      }
+    } catch (err) {
+      setError(err.message || 'Re-lookup failed');
+    } finally {
+      setRelookupBusy('');
+    }
+  };
+
+  const manualArchiveNotFound = async (row) => {
+    const edits = notFoundEdits[row.path] || {};
+    const code = String(edits.code ?? row.code ?? '').trim().toUpperCase();
+    const title = String(edits.title ?? row.title ?? code).trim();
+    const price = Number(edits.price ?? row.price ?? 0);
+    if (!code || code.length < 2) {
+      setError('Enter a valid code before archiving.');
+      return;
+    }
+    if (!title) {
+      setError('Enter a title before archiving.');
+      return;
+    }
+    setProcessing(true);
+    setProcessAction('archive');
+    setError('');
+    try {
+      const res = await fetch('/api/nutstore-process', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'archive',
+          items: [{
+            path: row.path,
+            filename: row.filename,
+            code,
+            title,
+            price,
+            description: title,
+            category: '',
+            subcategoryOne: '',
+            overwriteImage: true,
+          }],
+        }),
+      });
+      const json = await readApiJson(res, { fallback: 'Archive failed' });
+      const hit = json.results?.[0];
+      if (!hit?.ok) throw new Error(hit?.error || 'Archive failed');
+      setItems((prev) => prev.filter((i) => i.path !== row.path));
+      onShowToastRef.current?.(`Archived ${code} to Product Manager → Archive`, 'success');
+    } catch (err) {
+      setError(err.message || 'Manual archive failed');
+    } finally {
+      setProcessing(false);
+      setProcessAction('');
+    }
+  };
+
   const buildProcessItems = (targetItems, action) => {
     const labels = categoryLabelsFromIds(taxonomyTree, batchDefaultCategoryId, batchDefaultSub1Id);
     return targetItems
@@ -461,9 +549,15 @@ export default function ProductLoaderNutstore({
   const renderGroup = (key) => {
     const rows = grouped[key];
     if (!rows.length) return null;
+    const isNotFound = key === 'not_found';
     return (
       <section key={key} className="pl-folder-group">
         <h4>{GROUP_LABELS[key]} <span className="adm-muted">({rows.length})</span></h4>
+        {isNotFound && (
+          <p className="adm-section-note" style={{ marginBottom: 8 }}>
+            Correct the code and re-lookup, or enter title + price and archive manually (no Positill match required).
+          </p>
+        )}
         <div className="pl-folder-table-wrap">
           <table className="pl-folder-table">
             <thead>
@@ -475,10 +569,13 @@ export default function ProductLoaderNutstore({
                 <th>Price</th>
                 <th>SOH</th>
                 <th>Status</th>
+                {isNotFound && <th>Fix / Archive</th>}
               </tr>
             </thead>
             <tbody>
-              {rows.map((row) => (
+              {rows.map((row) => {
+                const edits = notFoundEdits[row.path] || {};
+                return (
                 <tr key={row.path}>
                   <td>
                     <FolderNutstoreThumb path={row.path} folderScope={row.path} />
@@ -486,16 +583,81 @@ export default function ProductLoaderNutstore({
                   <td className="adm-muted" style={{ fontSize: 12, maxWidth: 140 }} title={row.filename}>
                     {row.filename}
                   </td>
-                  <td><strong>{row.code || '—'}</strong></td>
-                  <td>{displayTitle(row.title, row.sqlRow?.title) || '—'}</td>
-                  <td>{row.price != null ? `R ${Number(row.price).toFixed(2)}` : '—'}</td>
+                  <td>
+                    {isNotFound ? (
+                      <input
+                        type="text"
+                        className="adm-tiny-input"
+                        value={edits.code ?? row.code ?? ''}
+                        onChange={(e) => setNotFoundEdit(row.path, 'code', e.target.value.toUpperCase())}
+                        placeholder="Code"
+                        style={{ width: 90, fontFamily: 'monospace', fontWeight: 700 }}
+                      />
+                    ) : (
+                      <strong>{row.code || '—'}</strong>
+                    )}
+                  </td>
+                  <td>
+                    {isNotFound ? (
+                      <input
+                        type="text"
+                        className="adm-tiny-input"
+                        value={edits.title ?? row.title ?? ''}
+                        onChange={(e) => setNotFoundEdit(row.path, 'title', e.target.value)}
+                        placeholder="Title for manual archive"
+                        style={{ width: '100%', minWidth: 120 }}
+                      />
+                    ) : (
+                      displayTitle(row.title, row.sqlRow?.title) || '—'
+                    )}
+                  </td>
+                  <td>
+                    {isNotFound ? (
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        className="adm-tiny-input"
+                        value={edits.price ?? row.price ?? ''}
+                        onChange={(e) => setNotFoundEdit(row.path, 'price', e.target.value)}
+                        placeholder="0.00"
+                        style={{ width: 72 }}
+                      />
+                    ) : (
+                      row.price != null ? `R ${Number(row.price).toFixed(2)}` : '—'
+                    )}
+                  </td>
                   <td>{row.stockOnHand ?? row.sqlRow?.available ?? '—'}</td>
                   <td className={row.processStatus === 'error' ? 'pl-error' : ''}>
                     {row.websiteStatus || row.group}
                     {row.processError ? ` — ${row.processError}` : ''}
+                    {row.parseError && !row.processError ? ` — ${row.parseError}` : ''}
                   </td>
+                  {isNotFound && (
+                    <td>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 130 }}>
+                        <button
+                          type="button"
+                          className="adm-btn-ghost adm-btn-sm"
+                          disabled={relookupBusy === row.path || processing}
+                          onClick={() => void relookupNotFound(row)}
+                        >
+                          {relookupBusy === row.path ? '…' : 'Re-lookup'}
+                        </button>
+                        <button
+                          type="button"
+                          className="adm-btn-ghost adm-btn-sm"
+                          disabled={processing}
+                          onClick={() => void manualArchiveNotFound(row)}
+                        >
+                          <Archive size={12} /> Archive
+                        </button>
+                      </div>
+                    </td>
+                  )}
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>

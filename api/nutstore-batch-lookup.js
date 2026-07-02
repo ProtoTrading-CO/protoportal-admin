@@ -35,7 +35,7 @@ async function mapPool(items, concurrency, fn) {
   return results;
 }
 
-async function resolvePath(sb, rawPath, dormantSkus) {
+async function resolvePath(sb, rawPath, dormantSkus, codeOverride = '') {
   const path = String(rawPath || '').trim();
   if (!isPathInLibrary(path)) {
     return {
@@ -53,6 +53,25 @@ async function resolvePath(sb, rawPath, dormantSkus) {
   }
 
   const filename = nutstoreBasename(path);
+  const override = String(codeOverride || '').trim();
+  if (override) {
+    const code = override.toUpperCase();
+    const match = await resolveProductLoaderMatch(sb, {
+      code,
+      displayCode: override,
+      imageSlot: 1,
+      dormantSkus,
+    });
+    const group = classifyBatchItem(match);
+    return {
+      path,
+      filename,
+      ...match,
+      imageSlot: 1,
+      group,
+    };
+  }
+
   const parsed = parseNutstoreFilename(filename);
 
   if (parsed.parseError || !parsed.code) {
@@ -92,7 +111,7 @@ export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   if (req.method !== 'POST') return res.status(405).end();
 
-  const { paths } = req.body || {};
+  const { paths, codeOverrides = {} } = req.body || {};
   if (!Array.isArray(paths) || !paths.length) {
     return res.status(400).json({ error: 'paths[] required (Nutstore file paths)' });
   }
@@ -102,7 +121,12 @@ export default async function handler(req, res) {
 
   const sb = getStockClient();
   const dormantSkus = await fetchDormantSkuSet(sb).catch(() => new Set());
-  const items = await mapPool(paths, LOOKUP_CONCURRENCY, (rawPath) => resolvePath(sb, rawPath, dormantSkus));
+  const overrides = codeOverrides && typeof codeOverrides === 'object' ? codeOverrides : {};
+  const items = await mapPool(
+    paths,
+    LOOKUP_CONCURRENCY,
+    (rawPath) => resolvePath(sb, rawPath, dormantSkus, overrides[rawPath]),
+  );
 
   let matched = 0;
   const groups = { ready: 0, needs_review: 0, not_found: 0 };
