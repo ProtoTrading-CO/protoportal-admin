@@ -93,12 +93,13 @@ import {
   subcategoryOptionsFromTree,
 } from '../lib/taxonomyAdmin';
 import { approveCustomer, deleteCustomer, fetchCustomersPage, fetchProtoActiveCustomersPage, seedProtoActiveCustomers, updateProtoActiveCustomer, updateCustomerAdmin } from '../lib/customers';
+import { BUSINESS_TYPES } from '../lib/businessTypes';
 import { supabase } from '../lib/supabase';
 import { buildOrderNoteSections, createEmailOrderItems, generateOrderPdfBase64, buildEmailItemsFromOrder, base64ToBlob, resolveCustomerOrderPricing, deriveAutoNotesFromItems } from '../lib/orderDocuments';
 import { displayOrderNumber, buildFulfillmentUrl } from '../lib/orderNumber';
 import { fetchPresaleInvoices, uploadPresaleInvoice } from '../lib/presaleInvoice';
 import { fetchConfirmationSent, markConfirmationSent, fetchPaymentRecords, uploadPop, setPaymentStatus } from '../lib/orderPayment';
-import { deleteOrderAdmin, fetchAllOrdersAdmin, updateOrderAdmin, advanceOrderWorkflow } from '../lib/orders';
+import { deleteOrderAdmin, fetchOrdersPage, updateOrderAdmin, advanceOrderWorkflow } from '../lib/orders';
 import { orderMatchesTab, normalizeOrderStatus, getWorkflowAdvanceOptions } from '../lib/orderStatus';
 import OrderWorkflowBadge from '../components/OrderWorkflowBadge';
 import { fetchFulfillmentUsers, loadActiveUserId } from '../lib/fulfillmentUsers';
@@ -387,7 +388,7 @@ function typePatch(type, product = {}) {
 }
 
 function compactItems(items = []) {
-  return items.map((item) => `${item.code} × ${item.qty}`).join(', ');
+  return items.map((item) => `${item.code}${item.name ? ` ${item.name}` : ''} × ${item.qty}`).join(', ');
 }
 
 function csvDownload(rows, filename) {
@@ -506,6 +507,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   const [customerTab, setCustomerTab] = useState('regular');
   const [customerSearch, setCustomerSearch] = useState('');
   const [customerSearchDebounced, setCustomerSearchDebounced] = useState('');
+  const [customerBusinessType, setCustomerBusinessType] = useState('');
   const [customerPage, setCustomerPage] = useState(1);
   const [customerRows, setCustomerRows] = useState([]);
   const [customerTotal, setCustomerTotal] = useState(0);
@@ -570,6 +572,10 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
 
   const [orders, setOrders] = useState([]);
   const [orderTab, setOrderTab] = useState('new');
+  const [orderPage, setOrderPage] = useState(1);
+  const [orderTotal, setOrderTotal] = useState(0);
+  const [orderTabCounts, setOrderTabCounts] = useState(null);
+  const [orderSearchDebounced, setOrderSearchDebounced] = useState('');
   const [focusOrderId, setFocusOrderId] = useState('');
   const [orderSubView, setOrderSubView] = useState('list');
   const [orderSearch, setOrderSearch] = useState('');
@@ -646,7 +652,12 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     const timer = setTimeout(() => setCustomerSearchDebounced(customerSearch.trim()), 300);
     return () => clearTimeout(timer);
   }, [customerSearch]);
-  useEffect(() => { setCustomerPage(1); }, [customerTab, customerSearchDebounced]);
+  useEffect(() => { setCustomerPage(1); }, [customerTab, customerSearchDebounced, customerBusinessType]);
+  useEffect(() => {
+    const timer = setTimeout(() => setOrderSearchDebounced(orderSearch.trim()), 300);
+    return () => clearTimeout(timer);
+  }, [orderSearch]);
+  useEffect(() => { setOrderPage(1); }, [orderTab, orderSearchDebounced]);
   useEffect(() => { if (activeSection === 'crm') void loadCrmCustomers(1); }, [crmFilters.businessTypes.join('|'), crmFilters.joinedStatuses.join('|'), crmSearch]);
   useEffect(() => { if (activeSection === 'crm' && !crmTemplates.length && !crmTemplatesLoading) void loadCrmTemplates(); }, [activeSection, crmTemplates.length, crmTemplatesLoading]);
   useEffect(() => { if (activeSection === 'banner') void loadBannerEditor(); }, [activeSection]);
@@ -802,7 +813,13 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     try {
       const data = customerTab === 'proto-active'
         ? await fetchProtoActiveCustomersPage({ page: customerPage, pageSize: ADMIN_PAGE_SIZE, searchQuery: customerSearchDebounced })
-        : await fetchCustomersPage({ page: customerPage, pageSize: ADMIN_PAGE_SIZE, tab: customerTab, searchQuery: customerSearchDebounced });
+        : await fetchCustomersPage({
+          page: customerPage,
+          pageSize: ADMIN_PAGE_SIZE,
+          tab: customerTab,
+          searchQuery: customerSearchDebounced,
+          businessType: customerBusinessType,
+        });
       setCustomerRows(data.rows);
       setCustomerTotal(data.total);
       if (data.migrationRequired && data.message) showToast(data.message, 'warning');
@@ -1047,7 +1064,15 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   const loadOrders = async () => {
     setLoading(true);
     try {
-      setOrders(await fetchAllOrdersAdmin(150));
+      const data = await fetchOrdersPage({
+        page: orderPage,
+        pageSize: ADMIN_PAGE_SIZE,
+        search: orderSearchDebounced,
+        tab: orderTab,
+      });
+      setOrders(data.rows);
+      setOrderTotal(data.total);
+      if (data.tabCounts) setOrderTabCounts(data.tabCounts);
     } catch (err) {
       showToast(err.message || 'Failed to load orders', 'error');
     } finally {
@@ -1325,7 +1350,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
       window.scrollTo({ top: 0, behavior: 'auto' });
     }
   }, [productPage, archivePage, recyclePage, activeSection]);
-  useEffect(() => { if (activeSection === 'customers') void loadCustomers(); }, [activeSection, customerPage, customerTab, customerSearchDebounced]);
+  useEffect(() => { if (activeSection === 'customers') void loadCustomers(); }, [activeSection, customerPage, customerTab, customerSearchDebounced, customerBusinessType]);
   useEffect(() => { if (activeSection === 'pricing') void loadCategoryWorkingSet(pricingCategory, 'pricing'); }, [activeSection, pricingCategory]);
   useEffect(() => { void reloadTaxonomy(); }, []);
 
@@ -1369,7 +1394,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     }
     void loadReorderProducts();
   }, [activeSection, reorderCacheKey, reorderPathKey, firstMainCategoryId]);
-  useEffect(() => { if (activeSection === 'orders' && orders.length === 0) void loadOrders(); }, [activeSection]);
+  useEffect(() => { if (activeSection === 'orders') void loadOrders(); }, [activeSection, orderPage, orderTab, orderSearchDebounced]);
   useEffect(() => {
     if (activeSection !== 'orders') return undefined;
     fetchFulfillmentUsers()
@@ -1535,12 +1560,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     [activeSection],
   );
 
-  const orderRows = useMemo(() => {
-    const q = orderSearch.trim().toLowerCase();
-    const filtered = orders.filter((order) => !q || [order.order_number, order.customers?.name, order.customers?.email, compactItems(order.original_items || order.items || [])].join(' ').toLowerCase().includes(q));
-    if (orderTab === 'all') return filtered;
-    return filtered.filter((o) => orderMatchesTab(o, orderTab, { confirmationSentIds }));
-  }, [orders, orderSearch, orderTab, confirmationSentIds]);
+  const orderRows = orders;
 
   const openNewProduct = () => {
     const firstCategory = taxonomyTree[0]?.id || categories[0]?.id || '';
@@ -2539,7 +2559,10 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     }
     setSaving(person.id);
     try {
-      await approveCustomer(person.id, true, { customerCode });
+      const result = await approveCustomer(person.id, true, { customerCode });
+      if (result.watiWelcome === 'failed') {
+        showToast('Approved, but WhatsApp welcome message failed to send', 'error');
+      }
       setApprovalCodes((prev) => {
         const next = { ...prev };
         delete next[person.id];
@@ -2560,8 +2583,26 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   const removeCustomer = async (person) => {
     if (!window.confirm(`Delete ${person.name || person.email}? This cannot be undone.`)) return;
     setSaving(`del-${person.id}`);
-    try { await deleteCustomer(person.id); await loadCustomers(); closeCustomerProfile(); }
-    finally { setSaving(''); }
+    try {
+      await deleteCustomer(person.id);
+      await loadCustomers();
+      closeCustomerProfile();
+    } catch (err) {
+      showToast(err.message || 'Delete failed', 'error');
+    } finally { setSaving(''); }
+  };
+
+  const deactivateCustomer = async (person) => {
+    if (!window.confirm(`Deactivate ${person.name || person.email}? They will lose portal access.`)) return;
+    setSaving(`deact-${person.id}`);
+    try {
+      await updateCustomerAdmin(person.id, { is_approved: false });
+      await loadCustomers();
+      closeCustomerProfile();
+      showToast('Customer deactivated');
+    } catch (err) {
+      showToast(err.message || 'Deactivate failed', 'error');
+    } finally { setSaving(''); }
   };
 
   const downloadOrderHtml = (order) => {
@@ -2677,17 +2718,23 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     setFulfillmentSaving(true);
     try {
       const finalItems = fulfillmentItems.map(({ checked, finalQty, ...rest }) => ({ ...rest, qty: finalQty }));
-      await updateOrder(fulfillmentOrder, {
+      await updateOrderAdmin(fulfillmentOrder.id, {
         final_items: finalItems,
         order_change_notes: fulfillmentNotes,
-        advanceWorkflow: 'order sent',
       });
+      await advanceOrderWorkflow(fulfillmentOrder.id, 'order sent', {
+        senderUserId: activeFulfillmentUser?.id,
+        senderName: activeFulfillmentUser?.name,
+      });
+      await loadOrders();
       closeFulfillment();
       showToast('Order saved and moved to Order Confirmation');
-    } catch {
-      // updateOrder already surfaces the error toast
+    } catch (err) {
+      showToast(err.message || 'Failed to save fulfillment', 'error');
     } finally { setFulfillmentSaving(false); }
   };
+
+  const orderPages = Math.max(1, Math.ceil(orderTotal / ADMIN_PAGE_SIZE));
 
   const productPages = Math.max(1, Math.ceil(productTotal / productPageSize));
   const customerPages = Math.max(1, Math.ceil(customerTotal / ADMIN_PAGE_SIZE));
@@ -3503,6 +3550,11 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                     <p className="adm-section-note">Matches the live trade portal order (cached). Pick a category in the sidebar — drag to reorder within that category. Changes save automatically after you drop.</p>
                   </div>
                   <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                    {reorderSortMeta.updatedAt && formatSortSavedAt(reorderSortMeta.updatedAt) && (
+                      <span className="adm-pill adm-pill--ok">
+                        Order saved · {formatSortSavedAt(reorderSortMeta.updatedAt)}
+                      </span>
+                    )}
                     <button
                       type="button"
                       onClick={() => void saveReorderOrder()}
@@ -3907,6 +3959,20 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                   <button onClick={() => setCustomerTab('regular')} className={`adm-tab${customerTab === 'regular' ? ' adm-tab--active' : ''}`}>Approved</button>
                   <button onClick={() => setCustomerTab('proto-active')} className={`adm-tab${customerTab === 'proto-active' ? ' adm-tab--active' : ''}`}>Proto Active</button>
                   <label className="adm-search adm-search--inline"><Search size={14} /><input value={customerSearch} onChange={(e) => setCustomerSearch(e.target.value)} placeholder="Search…" className="adm-search-input" /></label>
+                  {customerTab !== 'proto-active' && (
+                    <select
+                      className="adm-select"
+                      value={customerBusinessType}
+                      onChange={(e) => setCustomerBusinessType(e.target.value)}
+                      aria-label="Filter by business type"
+                    >
+                      <option value="">All business types</option>
+                      <option value="__unspecified__">Unspecified</option>
+                      {BUSINESS_TYPES.map((type) => (
+                        <option key={type} value={type}>{type}</option>
+                      ))}
+                    </select>
+                  )}
                 </div>
 
                 {customerTab === 'proto-active' ? (
@@ -4096,7 +4162,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                     <p className="adm-section-note">
                       {orderSubView === 'analytics'
                         ? 'Sales and engagement metrics for the selected time period.'
-                        : 'Most recent 150 orders. Click a row to expand details.'}
+                        : 'Paginated order list with server-side search and tab filters. Click a row to expand details.'}
                     </p>
                   </div>
                   {orderSubView === 'list' && (
@@ -4147,13 +4213,13 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                     { key: 'sent', label: 'Order Confirmation' },
                     { key: 'paid', label: 'Payment' },
                   ].map(({ key, label }) => {
-                    const count = key === 'all'
-                      ? orders.length
-                      : orders.filter((o) => orderMatchesTab(o, key, { confirmationSentIds })).length;
+                    const count = orderTabCounts?.[key] ?? (key === 'all'
+                      ? orderTabCounts?.all ?? orderTotal
+                      : 0);
                     return (
                       <button
                         key={key}
-                        onClick={() => setOrderTab(key)}
+                        onClick={() => { setOrderTab(key); setOrderPage(1); }}
                         style={{
                           padding: '7px 14px',
                           borderRadius: 8,
@@ -4179,6 +4245,11 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                     );
                   })}
                 </div>
+                {orderTab === 'paid' && (
+                  <p className="adm-muted" style={{ fontSize: 12, margin: '0 0 12px' }}>
+                    Payment tab includes sent confirmations awaiting payment.
+                  </p>
+                )}
                 <div className="adm-list">
                   <div className="adm-list-head" style={{ gridTemplateColumns: orderListGridCols }}>
                     <span>Order</span><span>Customer</span><span>Date & Time</span><span>{orderTab === 'sent' ? 'Order Confirmation' : orderTab === 'paid' ? 'Payment' : 'Status'}</span><span>Actions</span><span></span>
@@ -4266,6 +4337,9 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                     </div>
                   )}
                 </div>
+                {orderSubView === 'list' && orderPages > 1 && (
+                  <Pager page={orderPage} totalPages={orderPages} onChange={setOrderPage} />
+                )}
                 </>
                 )}
               </div>
@@ -4515,6 +4589,9 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                   </button>
                 </>
               )}
+              <button onClick={() => void deactivateCustomer(profileCustomer)} className="adm-btn-ghost" disabled={saving === `deact-${profileCustomer.id}`}>
+                {saving === `deact-${profileCustomer.id}` ? '…' : 'Deactivate'}
+              </button>
               <button onClick={() => void removeCustomer(profileCustomer)} className="adm-btn-ghost" style={{ color: '#c40000' }} disabled={saving === `del-${profileCustomer.id}`}>
                 {saving === `del-${profileCustomer.id}` ? '…' : <><Trash2 size={14} /> Delete</>}
               </button>
