@@ -92,15 +92,12 @@ function applySentTabFilter(q) {
   return q.eq('status', 'order sent').is('confirmation_sent_at', null);
 }
 
-function isRangeNotSatisfiable(error) {
-  return /range not satisfiable|PGRST103/i.test(String(error?.message || ''));
+function applyPaidTabFilter(q) {
+  return q.or('status.eq.payment received,and(status.eq.order sent,confirmation_sent_at.not.is.null)');
 }
 
-async function runPagedQuery(q) {
-  const { data, error, count } = await q;
-  if (!error) return { data: data || [], count: count || 0, error: null };
-  if (isRangeNotSatisfiable(error)) return { data: [], count: count || 0, error: null };
-  return { data: [], count: 0, error };
+function isRangeNotSatisfiable(error) {
+  return /range not satisfiable|PGRST103/i.test(String(error?.message || ''));
 }
 
 async function computeTabCounts(supabase, useDbColumn, legacyIds) {
