@@ -19,9 +19,12 @@ let _hasConfirmationSentAtColumn = null;
 export async function ordersHasConfirmationSentAt(supabase = getAdminClient()) {
   if (_hasConfirmationSentAtColumn != null) return _hasConfirmationSentAtColumn;
   const { error } = await supabase.from('orders').select('confirmation_sent_at').limit(1);
-  const missing = error && /confirmation_sent_at|schema cache/i.test(String(error.message || ''));
-  _hasConfirmationSentAtColumn = !missing;
-  return _hasConfirmationSentAtColumn;
+  if (error) {
+    _hasConfirmationSentAtColumn = false;
+    return false;
+  }
+  _hasConfirmationSentAtColumn = true;
+  return true;
 }
 
 export function resetConfirmationSentAtColumnCache() {

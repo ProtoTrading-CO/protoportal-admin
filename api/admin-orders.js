@@ -123,7 +123,7 @@ async function computeTabCounts(supabase, useDbColumn, legacyIds) {
     };
   }
 
-  const { data, error } = await supabase.from('orders').select('id, status, confirmation_sent_at');
+  const { data, error } = await supabase.from('orders').select('id, status');
   if (error) throw error;
   const counts = { all: 0, new: 0, handed: 0, progress: 0, sent: 0, paid: 0 };
   for (const order of data || []) {
