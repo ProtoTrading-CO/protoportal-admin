@@ -55,8 +55,96 @@ const STEPS = [
   'Open a subfolder on the left (PTR Photos categories).',
   'Tick product images on the right — Positill code is the filename before the first hyphen.',
   'Click Look up selected — Positill fills price, description and stock.',
-  'Publish to website or archive (tagged Nutstore in Product Manager → Archive).',
+  'Publish to website (pick category below) or archive — no category needed for archive.',
 ];
+
+/** Max concurrent Nutstore preview downloads. */
+let thumbInFlight = 0;
+const THUMB_QUEUE = [];
+const THUMB_MAX = 3;
+const thumbBlobCache = new Map();
+
+function drainThumbQueue() {
+  while (thumbInFlight < THUMB_MAX && THUMB_QUEUE.length) {
+    const job = THUMB_QUEUE.shift();
+    thumbInFlight += 1;
+    job().finally(() => {
+      thumbInFlight -= 1;
+      drainThumbQueue();
+    });
+  }
+}
+
+function queueThumbLoad(run) {
+  return new Promise((resolve, reject) => {
+    THUMB_QUEUE.push(() => run().then(resolve, reject));
+    drainThumbQueue();
+  });
+}
+
+function pruneThumbCache(keepPaths) {
+  const keep = keepPaths instanceof Set ? keepPaths : new Set(keepPaths);
+  for (const [path, url] of thumbBlobCache) {
+    if (!keep.has(path)) {
+      URL.revokeObjectURL(url);
+      thumbBlobCache.delete(path);
+    }
+  }
+}
+
+/** Lazy preview — only loads when scrolled into view, scoped to current folder. */
+function FolderNutstoreThumb({ path, folderScope }) {
+  const hostRef = useRef(null);
+  const [src, setSrc] = useState('');
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    setSrc('');
+    setFailed(false);
+    const el = hostRef.current;
+    if (!el || !path) return undefined;
+
+    let cancelled = false;
+    const cached = thumbBlobCache.get(path);
+    if (cached) {
+      setSrc(cached);
+      return undefined;
+    }
+
+    const observer = new IntersectionObserver((entries) => {
+      if (cancelled || !entries.some((e) => e.isIntersecting)) return;
+      observer.disconnect();
+      void queueThumbLoad(async () => {
+        const res = await fetch(`/api/nutstore-thumbnail?path=${encodeURIComponent(path)}`);
+        if (!res.ok || cancelled) return;
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        thumbBlobCache.set(path, url);
+        if (!cancelled) setSrc(url);
+      }).catch(() => {
+        if (!cancelled) setFailed(true);
+      });
+    }, { rootMargin: '100px', threshold: 0.01 });
+
+    observer.observe(el);
+    return () => {
+      cancelled = true;
+      observer.disconnect();
+    };
+  }, [path, folderScope]);
+
+  return (
+    <span ref={hostRef} className="pl-nutstore-thumb-slot" aria-hidden>
+      {failed ? (
+        <FileImage size={16} className="pl-nutstore-image-row-icon" />
+      ) : src ? (
+        <img src={src} alt="" className="pl-nutstore-thumb" loading="lazy" />
+      ) : (
+        <span className="pl-nutstore-thumb pl-nutstore-thumb--loading" />
+      )}
+    </span>
+  );
+}
 
 function relativeCrumbs(currentPath, libraryRoot, libraryLabel) {
   const root = libraryRoot || '/PTR-photos';
@@ -135,6 +223,11 @@ export default function ProductLoaderNutstore({
 
   const selectedPaths = useMemo(() => [...selected], [selected]);
   const hasResults = items.length > 0 || scanning;
+  const imagePathsInFolder = useMemo(() => images.map((e) => e.path), [images]);
+
+  useEffect(() => {
+    pruneThumbCache(new Set(imagePathsInFolder));
+  }, [currentPath, imagePathsInFolder.join('|')]);
 
   const loadStatus = useCallback(async () => {
     const res = await fetch('/api/nutstore-browse?action=status');
@@ -272,7 +365,7 @@ export default function ProductLoaderNutstore({
     }
   };
 
-  const buildProcessItems = (targetItems) => {
+  const buildProcessItems = (targetItems, action) => {
     const labels = categoryLabelsFromIds(taxonomyTree, batchDefaultCategoryId, batchDefaultSub1Id);
     return targetItems
       .filter((i) => i.code && (i.group === 'ready' || i.group === 'needs_review'))
@@ -283,8 +376,8 @@ export default function ProductLoaderNutstore({
         title: item.title || item.sqlRow?.title || item.code,
         price: item.price ?? item.sqlRow?.price ?? 0,
         description: item.websiteRow?.original_description || item.sqlRow?.title || item.title || '',
-        category: item.websiteRow?.category || labels.category,
-        subcategoryOne: item.websiteRow?.subcategory_one || labels.subcategoryOne,
+        category: item.websiteRow?.category || (action === 'publish' ? labels.category : labels.category || ''),
+        subcategoryOne: item.websiteRow?.subcategory_one || (action === 'publish' ? labels.subcategoryOne : labels.subcategoryOne || ''),
         subcategoryTwo: item.websiteRow?.subcategory_two || null,
         sqlRow: item.sqlRow,
         websiteRow: item.websiteRow,
@@ -294,15 +387,17 @@ export default function ProductLoaderNutstore({
   };
 
   const runProcess = async (action, targetItems) => {
-    const payload = buildProcessItems(targetItems);
+    const payload = buildProcessItems(targetItems, action);
     if (!payload.length) {
       setError('No matched products to process.');
       return;
     }
-    const needsCategory = payload.some((i) => !i.category);
-    if (needsCategory) {
-      setError('Pick a default category for products not already on the website.');
-      return;
+    if (action === 'publish') {
+      const needsCategory = payload.some((i) => !i.category);
+      if (needsCategory) {
+        setError('Pick a default category for products not already on the website.');
+        return;
+      }
     }
 
     setProcessing(true);
@@ -373,6 +468,7 @@ export default function ProductLoaderNutstore({
           <table className="pl-folder-table">
             <thead>
               <tr>
+                <th>Preview</th>
                 <th>File</th>
                 <th>Code</th>
                 <th>Description</th>
@@ -384,7 +480,10 @@ export default function ProductLoaderNutstore({
             <tbody>
               {rows.map((row) => (
                 <tr key={row.path}>
-                  <td className="adm-muted" style={{ fontSize: 12, maxWidth: 160 }} title={row.filename}>
+                  <td>
+                    <FolderNutstoreThumb path={row.path} folderScope={row.path} />
+                  </td>
+                  <td className="adm-muted" style={{ fontSize: 12, maxWidth: 140 }} title={row.filename}>
                     {row.filename}
                   </td>
                   <td><strong>{row.code || '—'}</strong></td>
@@ -546,7 +645,7 @@ export default function ProductLoaderNutstore({
                         checked={selected.has(entry.path)}
                         onChange={() => toggleSelect(entry.path)}
                       />
-                      <FileImage size={18} className="pl-nutstore-image-row-icon" />
+                      <FolderNutstoreThumb path={entry.path} folderScope={currentPath} />
                       <span className="pl-nutstore-image-card-name">{entry.name}</span>
                     </label>
                   </li>
@@ -601,6 +700,21 @@ export default function ProductLoaderNutstore({
 
           {!scanning && items.length > 0 && (
             <>
+              <div className="pl-action-row" style={{ marginBottom: 12 }}>
+                <button
+                  type="button"
+                  className="adm-btn-ghost"
+                  disabled={processing || !processable.length}
+                  onClick={() => void runProcess('archive', processable)}
+                >
+                  {processing && processAction === 'archive' ? <Loader2 size={14} className="spin" /> : <Archive size={14} />}
+                  Archive ({processable.length}) — no category needed
+                </button>
+              </div>
+
+              <p className="adm-section-note" style={{ margin: '0 0 10px', fontSize: 12 }}>
+                Publish only: pick a default category for new products. Archive uses Positill data and tags items as Nutstore in Product Manager → Archive.
+              </p>
               <div className="pl-inline-fields">
                 <label>
                   Default category (new products)
@@ -633,15 +747,6 @@ export default function ProductLoaderNutstore({
                 >
                   {processing && processAction === 'publish' ? <Loader2 size={14} className="spin" /> : <Upload size={14} />}
                   Publish to website ({processable.length})
-                </button>
-                <button
-                  type="button"
-                  className="adm-btn-ghost"
-                  disabled={processing || !processable.length}
-                  onClick={() => void runProcess('archive', processable)}
-                >
-                  {processing && processAction === 'archive' ? <Loader2 size={14} className="spin" /> : <Archive size={14} />}
-                  Archive ({processable.length})
                 </button>
               </div>
             </>
