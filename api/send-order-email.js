@@ -168,7 +168,7 @@ function buildEmailHtml({
     <div style="height:4px;background:#c40000"></div>
     <div style="padding:24px 32px 20px;display:flex;align-items:center;justify-content:space-between;gap:16px">
       <div style="display:flex;align-items:center;gap:14px;min-width:0">
-        <img src="https://protoportal-admin.vercel.app/proto-logo.png" width="44" height="44" alt="Proto Trading" style="display:block;border-radius:8px;flex-shrink:0">
+        <img src="https://admin.proto.co.za/proto-logo.png" width="44" height="44" alt="Proto Trading" style="display:block;border-radius:8px;flex-shrink:0">
         <div style="min-width:0">
           <div style="font-size:18px;font-weight:800;line-height:1.2;letter-spacing:0.02em">
             <span style="color:#ffffff">PROTO</span><span style="color:#dc2626"> TRADING</span>

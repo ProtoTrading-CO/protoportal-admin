@@ -13,6 +13,7 @@ import {
   ChevronRight,
   ClipboardList,
   Clock,
+  CloudDownload,
   DollarSign,
   Eye,
   FileDown,
@@ -92,7 +93,7 @@ import {
   replaceFullTaxonomy,
   subcategoryOptionsFromTree,
 } from '../lib/taxonomyAdmin';
-import { approveCustomer, deleteCustomer, fetchCustomersPage, fetchProtoActiveCustomersPage, seedProtoActiveCustomers, updateProtoActiveCustomer, updateCustomerAdmin } from '../lib/customers';
+import { approveCustomer, deleteCustomer, fetchCustomersPage, fetchProtoActiveCustomersPage, seedProtoActiveCustomers, updateProtoActiveCustomer, updateCustomerAdmin, deleteProtoActiveCustomer, syncBrevoContacts, pushPortalCustomersToBrevo, sendCustomerEmailBroadcast, fetchCrmContactsPage } from '../lib/customers';
 import { BUSINESS_TYPES } from '../lib/businessTypes';
 import { supabase } from '../lib/supabase';
 import { buildOrderNoteSections, createEmailOrderItems, generateOrderPdfBase64, buildEmailItemsFromOrder, base64ToBlob, resolveCustomerOrderPricing, deriveAutoNotesFromItems } from '../lib/orderDocuments';
@@ -125,6 +126,7 @@ import AnalyticsHub from '../components/AnalyticsHub';
 import ProductManagerEngine from '../components/ProductManagerEngine';
 import GroupedSidebar, { NAV_GROUPS } from '../components/GroupedSidebar';
 import CrmPanel from '../components/CrmPanel';
+import CustomerEmailModal from '../components/CustomerEmailModal';
 import { useDashboardStats } from '../hooks/useDashboardStats';
 import { queryClient } from '../lib/queryClient';
 import { queryKeys } from '../lib/queryKeys';
@@ -511,6 +513,11 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   const [customerPage, setCustomerPage] = useState(1);
   const [customerRows, setCustomerRows] = useState([]);
   const [customerTotal, setCustomerTotal] = useState(0);
+  const [customerEmailOpen, setCustomerEmailOpen] = useState(false);
+  const [brevoSyncBusy, setBrevoSyncBusy] = useState(false);
+  const [brevoPushBusy, setBrevoPushBusy] = useState(false);
+  const [brevoLastSync, setBrevoLastSync] = useState(null);
+  const [profileSource, setProfileSource] = useState('portal');
   const [approvalCodes, setApprovalCodes] = useState({});
   const [protoSeedBusy, setProtoSeedBusy] = useState(false);
   const [protoNameSaving, setProtoNameSaving] = useState(null);
@@ -854,11 +861,53 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     try {
       const updated = await updateProtoActiveCustomer(row.id, { [field]: trimmed || null });
       setCustomerRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, ...updated } : r)));
-      showToast('Name saved', 'success');
+      if (profileCustomer?.id === row.id) setProfileCustomer((p) => ({ ...p, ...updated }));
+      showToast('Saved', 'success');
     } catch (err) {
       showToast(err.message || 'Save failed', 'error');
     } finally {
       setProtoNameSaving(null);
+    }
+  };
+
+  const handleBrevoSync = async () => {
+    setBrevoSyncBusy(true);
+    try {
+      const json = await syncBrevoContacts();
+      setBrevoLastSync(json.syncedAt || new Date().toISOString());
+      showToast(`Synced ${json.upserted ?? json.succeeded ?? 0} contacts from Brevo`, 'success');
+    } catch (err) {
+      showToast(err.message || 'Brevo sync failed', 'error');
+    } finally {
+      setBrevoSyncBusy(false);
+    }
+  };
+
+  const handlePushPortalToBrevo = async () => {
+    if (!window.confirm('Push all approved + Proto Active customer emails to Brevo contacts?')) return;
+    setBrevoPushBusy(true);
+    try {
+      const json = await pushPortalCustomersToBrevo();
+      showToast(`Pushed ${json.pushed} portal emails to Brevo`, 'success');
+    } catch (err) {
+      showToast(err.message || 'Push to Brevo failed', 'error');
+    } finally {
+      setBrevoPushBusy(false);
+    }
+  };
+
+  const removeProtoActiveCustomer = async (row) => {
+    if (!window.confirm(`Remove ${row.name || row.email} from Proto Active list?`)) return;
+    setSaving(`del-proto-${row.id}`);
+    try {
+      await deleteProtoActiveCustomer(row.id);
+      await loadCustomers();
+      if (profileCustomer?.id === row.id) closeCustomerProfile();
+      showToast('Proto Active customer removed');
+    } catch (err) {
+      showToast(err.message || 'Delete failed', 'error');
+    } finally {
+      setSaving('');
     }
   };
 
@@ -1359,6 +1408,12 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     }
   }, [productPage, archivePage, recyclePage, activeSection]);
   useEffect(() => { if (activeSection === 'customers') void loadCustomers(); }, [activeSection, customerPage, customerTab, customerSearchDebounced, customerBusinessType]);
+  useEffect(() => {
+    if (activeSection !== 'customers') return;
+    void fetchCrmContactsPage({ page: 1, pageSize: 1 })
+      .then((data) => { if (data?.lastSyncedAt) setBrevoLastSync(data.lastSyncedAt); })
+      .catch(() => {});
+  }, [activeSection]);
   useEffect(() => { if (activeSection === 'pricing') void loadCategoryWorkingSet(pricingCategory, 'pricing'); }, [activeSection, pricingCategory]);
   useEffect(() => { void reloadTaxonomy(); }, []);
 
@@ -2508,10 +2563,12 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     } finally { setSaving(''); }
   };
 
-  const openCustomerProfile = async (person) => {
+  const openCustomerProfile = async (person, source = 'portal') => {
     setProfileCustomer(person);
+    setProfileSource(source);
     setProfileEditing(false);
     setProfileOrders([]);
+    if (source === 'proto-active') return;
     setProfileOrdersLoading(true);
     try {
       const res = await fetch(`/api/admin-orders?customerId=${person.id}&limit=20`);
@@ -2521,31 +2578,49 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     finally { setProfileOrdersLoading(false); }
   };
 
-  const closeCustomerProfile = () => { setProfileCustomer(null); setProfileOrders([]); setProfileEditing(false); };
+  const closeCustomerProfile = () => { setProfileCustomer(null); setProfileOrders([]); setProfileEditing(false); setProfileSource('portal'); };
 
   const SPEND_BANDS = ['R0 – R5,000', 'R5,000 – R10,000', 'R10,000 – R25,000', 'R25,000 – R50,000', 'R50,000+'];
   const startEditProfile = () => {
     setProfileForm({
       name: profileCustomer.name || '',
+      email: profileCustomer.email || '',
       phone: profileCustomer.phone || '',
-      business_name: profileCustomer.business_name || '',
+      business_name: profileCustomer.business_name || profileCustomer.name || '',
       business_type: profileCustomer.business_type || '',
       monthly_spend: profileCustomer.monthly_spend || '',
       website: profileCustomer.website || '',
       vat_number: profileCustomer.vat_number || '',
       company_address: profileCustomer.company_address || '',
       delivery_address: profileCustomer.delivery_address || '',
+      contact_name: profileCustomer.contact_name || '',
+      first_name: profileCustomer.first_name || '',
+      account_code: profileCustomer.account_code || profileCustomer.customer_code || '',
     });
     setProfileEditing(true);
   };
   const saveProfileEdit = async () => {
     setSavingProfile(true);
     try {
-      const row = await updateCustomerAdmin(profileCustomer.id, profileForm);
-      setProfileCustomer(row);
-      setProfileEditing(false);
-      await loadCustomers();
-      showToast('Customer profile updated');
+      if (profileSource === 'proto-active') {
+        const row = await updateProtoActiveCustomer(profileCustomer.id, {
+          name: profileForm.business_name || profileForm.name,
+          email: profileForm.email,
+          contact_name: profileForm.contact_name,
+          first_name: profileForm.first_name,
+          account_code: profileForm.account_code,
+        });
+        setProfileCustomer(row);
+        setProfileEditing(false);
+        await loadCustomers();
+        showToast('Proto Active customer updated');
+      } else {
+        const row = await updateCustomerAdmin(profileCustomer.id, profileForm);
+        setProfileCustomer(row);
+        setProfileEditing(false);
+        await loadCustomers();
+        showToast('Customer profile updated');
+      }
     } catch (err) {
       showToast(err.message || 'Update failed', 'error');
     } finally { setSavingProfile(false); }
@@ -2588,13 +2663,19 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     } finally { setSaving(''); }
   };
 
-  const removeCustomer = async (person) => {
+  const removeCustomer = async (person, source = profileSource) => {
     if (!window.confirm(`Delete ${person.name || person.email}? This cannot be undone.`)) return;
-    setSaving(`del-${person.id}`);
+    const savingKey = source === 'proto-active' ? `del-proto-${person.id}` : `del-${person.id}`;
+    setSaving(savingKey);
     try {
-      await deleteCustomer(person.id);
+      if (source === 'proto-active') {
+        await deleteProtoActiveCustomer(person.id);
+      } else {
+        await deleteCustomer(person.id);
+      }
       await loadCustomers();
       closeCustomerProfile();
+      showToast('Customer removed');
     } catch (err) {
       showToast(err.message || 'Delete failed', 'error');
     } finally { setSaving(''); }
@@ -3949,9 +4030,21 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                 <div className="adm-section-head">
                   <div>
                     <h2 className="adm-section-title">Customer Management</h2>
-                    <p className="adm-section-note">Proto active customers get instant portal access on sign-up. Everyone else waits in Trade Requests until you assign a 6-digit code and approve. Contact and first name columns are editable — blank rows (red outline) are not in Customer names 2.</p>
+                    <p className="adm-section-note">
+                      Manage trade requests, approved customers, and Proto Active accounts. Sync with Brevo CRM, push portal emails to Brevo, and send email campaigns to any list.
+                      {brevoLastSync && ` Brevo last synced: ${new Date(brevoLastSync).toLocaleString('en-ZA')}.`}
+                    </p>
                   </div>
-                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <div className="adm-customer-actions">
+                    <button type="button" className="adm-btn-red" onClick={() => setCustomerEmailOpen(true)}>
+                      <Mail size={14} /> Send email
+                    </button>
+                    <button type="button" className="adm-btn-ghost" disabled={brevoSyncBusy} onClick={() => void handleBrevoSync()}>
+                      {brevoSyncBusy ? <><Loader2 size={14} className="spin" /> Syncing…</> : <><CloudDownload size={14} /> Sync from Brevo</>}
+                    </button>
+                    <button type="button" className="adm-btn-ghost" disabled={brevoPushBusy} onClick={() => void handlePushPortalToBrevo()}>
+                      {brevoPushBusy ? 'Pushing…' : <><Upload size={14} /> Push portal → Brevo</>}
+                    </button>
                     <button type="button" className="adm-btn-ghost" disabled={protoSeedBusy} onClick={() => void importProtoActiveList()}>
                       {protoSeedBusy ? 'Importing…' : <><Upload size={14} /> Sync proto active list</>}
                     </button>
@@ -3985,8 +4078,8 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
 
                 {customerTab === 'proto-active' ? (
                   <div className="adm-list">
-                    <div className="adm-list-head" style={{ gridTemplateColumns: '80px 1.2fr 110px 90px 1.1fr 100px 80px 100px 70px' }}>
-                      <span>Code</span><span>Business</span><span>Contact</span><span>First name</span><span>Email</span><span>12mo Sales</span><span>Invoices</span><span>Last purchase</span><span>WhatsApp</span>
+                    <div className="adm-list-head" style={{ gridTemplateColumns: '80px 1.2fr 110px 90px 1.1fr 100px 80px 100px 120px' }}>
+                      <span>Code</span><span>Business</span><span>Contact</span><span>First name</span><span>Email</span><span>12mo Sales</span><span>Invoices</span><span>Last purchase</span><span>Actions</span>
                     </div>
                     {customerRows.length === 0 && !loading && (
                       <div className="adm-empty" style={{ padding: '24px 0' }}>
@@ -3994,7 +4087,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                       </div>
                     )}
                     {customerRows.map((row) => (
-                      <div key={row.id || row.email} className="adm-list-row" style={{ gridTemplateColumns: '80px 1.2fr 110px 90px 1.1fr 100px 80px 100px 70px', alignItems: 'center' }}>
+                      <div key={row.id || row.email} className="adm-list-row" style={{ gridTemplateColumns: '80px 1.2fr 110px 90px 1.1fr 100px 80px 100px 120px', alignItems: 'center' }}>
                         <span style={{ fontWeight: 800, fontFamily: 'monospace' }}>{row.account_code}</span>
                         <span style={{ fontWeight: 600, fontSize: 13 }}>{row.name}</span>
                         <input
@@ -4023,7 +4116,12 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                         <span style={{ fontSize: 12 }}>R{Number(row.sales_last_12_months || 0).toLocaleString('en-ZA', { minimumFractionDigits: 2 })}</span>
                         <span style={{ fontSize: 12 }}>{row.invoice_count ?? '—'}</span>
                         <span style={{ fontSize: 11, color: '#6b7280' }}>{row.last_purchase_date ? new Date(row.last_purchase_date).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}</span>
-                        <span><WhatsappOptIn value={null} /></span>
+                        <div style={{ display: 'flex', gap: 5 }}>
+                          <button type="button" className="adm-btn-ghost adm-btn-sm" style={{ padding: '4px 9px', fontSize: 11 }} onClick={() => openCustomerProfile(row, 'proto-active')}>Edit</button>
+                          <button type="button" className="adm-btn-ghost adm-btn-sm" style={{ padding: '4px 7px', color: '#c40000' }} disabled={saving === `del-proto-${row.id}`} onClick={() => void removeProtoActiveCustomer(row)}>
+                            <X size={13} />
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -4069,7 +4167,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                           />
                         </div>
                         <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
-                          <button onClick={() => void openCustomerProfile(person)} className="adm-btn-ghost adm-btn-sm" style={{ padding: '4px 9px', fontSize: 11 }}>View Profile</button>
+                          <button onClick={() => void openCustomerProfile(person)} className="adm-btn-ghost adm-btn-sm" style={{ padding: '4px 9px', fontSize: 11 }}>Edit</button>
                           <button
                             onClick={() => void approveRequest(person)}
                             className="adm-btn-green adm-btn-sm"
@@ -4113,7 +4211,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                         <span><WhatsappOptIn value={person.accept_whatsapp} /></span>
                         <span>{person.orderCount}</span>
                         <div style={{ display: 'flex', gap: 5 }}>
-                          <button onClick={() => void openCustomerProfile(person)} className="adm-btn-ghost adm-btn-sm" style={{ padding: '4px 9px', fontSize: 11 }}>View Profile</button>
+                          <button onClick={() => void openCustomerProfile(person)} className="adm-btn-ghost adm-btn-sm" style={{ padding: '4px 9px', fontSize: 11 }}>Edit</button>
                           <button onClick={() => void removeCustomer(person)} className="adm-btn-ghost adm-btn-sm" disabled={saving === `del-${person.id}`} style={{ color: '#c40000', padding: '4px 8px' }}>
                             {saving === `del-${person.id}` ? '…' : <X size={14} />}
                           </button>
@@ -4486,32 +4584,52 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
 
               {profileEditing ? (
                 <div style={{ display: 'grid', gap: 12, marginTop: 4 }}>
-                  {[
-                    ['Contact person', 'name', 'text'],
-                    ['Phone', 'phone', 'tel'],
-                    ['Business name', 'business_name', 'text'],
-                    ['Business type', 'business_type', 'text'],
-                    ['VAT number', 'vat_number', 'text'],
-                    ['Website / social', 'website', 'text'],
-                  ].map(([label, key, type]) => (
-                    <div key={key}>
-                      <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 5 }}>{label}</label>
-                      <input className="adm-field-input" type={type} value={profileForm[key] || ''} onChange={setPf(key)} style={{ width: '100%' }} />
-                    </div>
-                  ))}
-                  <div>
-                    <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 5 }}>Monthly spend</label>
-                    <select className="adm-field-input" value={profileForm.monthly_spend || ''} onChange={setPf('monthly_spend')} style={{ width: '100%' }}>
-                      <option value="">—</option>
-                      {SPEND_BANDS.map((b) => <option key={b} value={b}>{b}</option>)}
-                    </select>
-                  </div>
-                  {[['Company address', 'company_address'], ['Delivery address', 'delivery_address']].map(([label, key]) => (
-                    <div key={key}>
-                      <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 5 }}>{label}</label>
-                      <textarea className="adm-field-input" rows={2} value={profileForm[key] || ''} onChange={setPf(key)} style={{ width: '100%', resize: 'vertical' }} />
-                    </div>
-                  ))}
+                  {profileSource === 'proto-active' ? (
+                    <>
+                      {[
+                        ['Account code', 'account_code', 'text'],
+                        ['Business name', 'business_name', 'text'],
+                        ['Email', 'email', 'email'],
+                        ['Contact name', 'contact_name', 'text'],
+                        ['First name', 'first_name', 'text'],
+                      ].map(([label, key, type]) => (
+                        <div key={key}>
+                          <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 5 }}>{label}</label>
+                          <input className="adm-field-input" type={type} value={profileForm[key] || ''} onChange={setPf(key)} style={{ width: '100%' }} />
+                        </div>
+                      ))}
+                    </>
+                  ) : (
+                    <>
+                      {[
+                        ['Contact person', 'name', 'text'],
+                        ['Email', 'email', 'email'],
+                        ['Phone', 'phone', 'tel'],
+                        ['Business name', 'business_name', 'text'],
+                        ['Business type', 'business_type', 'text'],
+                        ['VAT number', 'vat_number', 'text'],
+                        ['Website / social', 'website', 'text'],
+                      ].map(([label, key, type]) => (
+                        <div key={key}>
+                          <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 5 }}>{label}</label>
+                          <input className="adm-field-input" type={type} value={profileForm[key] || ''} onChange={setPf(key)} style={{ width: '100%' }} />
+                        </div>
+                      ))}
+                      <div>
+                        <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 5 }}>Monthly spend</label>
+                        <select className="adm-field-input" value={profileForm.monthly_spend || ''} onChange={setPf('monthly_spend')} style={{ width: '100%' }}>
+                          <option value="">—</option>
+                          {SPEND_BANDS.map((b) => <option key={b} value={b}>{b}</option>)}
+                        </select>
+                      </div>
+                      {[['Company address', 'company_address'], ['Delivery address', 'delivery_address']].map(([label, key]) => (
+                        <div key={key}>
+                          <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 5 }}>{label}</label>
+                          <textarea className="adm-field-input" rows={2} value={profileForm[key] || ''} onChange={setPf(key)} style={{ width: '100%', resize: 'vertical' }} />
+                        </div>
+                      ))}
+                    </>
+                  )}
                   <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
                     <button className="adm-btn-green" onClick={() => void saveProfileEdit()} disabled={savingProfile}>{savingProfile ? 'Saving…' : 'Save changes'}</button>
                     <button className="adm-btn-ghost" onClick={() => setProfileEditing(false)} disabled={savingProfile}>Cancel</button>
@@ -4519,14 +4637,17 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                 </div>
               ) : (
                 <div className="adm-drawer-fields">
-                  <DrawerField icon={User} label="Contact person" value={profileCustomer.name} />
+                  <DrawerField icon={User} label="Contact person" value={profileCustomer.contact_name || profileCustomer.name} />
                   <DrawerField icon={Mail} label="Email" value={profileCustomer.email} />
-                  <DrawerField icon={Phone} label="Phone" value={profileCustomer.phone} />
-                  <DrawerField icon={Store} label="Business type" value={profileCustomer.business_type} />
-                  <DrawerField icon={Store} label="Monthly spend" value={profileCustomer.monthly_spend} />
-                  <DrawerField icon={Globe} label="Website / social" value={profileCustomer.website} />
-                  <DrawerField icon={Shield} label="Accept WhatsApp" value={profileCustomer.accept_whatsapp == null ? null : profileCustomer.accept_whatsapp ? 'Yes' : 'No'} />
-                  <DrawerField icon={Building2} label="Customer code" value={profileCustomer.customer_code} />
+                  {profileSource !== 'proto-active' && <DrawerField icon={Phone} label="Phone" value={profileCustomer.phone} />}
+                  {profileSource !== 'proto-active' && <DrawerField icon={Store} label="Business type" value={profileCustomer.business_type} />}
+                  {profileSource !== 'proto-active' && <DrawerField icon={Store} label="Monthly spend" value={profileCustomer.monthly_spend} />}
+                  {profileSource !== 'proto-active' && <DrawerField icon={Globe} label="Website / social" value={profileCustomer.website} />}
+                  {profileSource !== 'proto-active' && (
+                    <DrawerField icon={Shield} label="Accept WhatsApp" value={profileCustomer.accept_whatsapp == null ? null : profileCustomer.accept_whatsapp ? 'Yes' : 'No'} />
+                  )}
+                  <DrawerField icon={Building2} label="Customer code" value={profileCustomer.customer_code || profileCustomer.account_code} />
+                  {profileCustomer.first_name && <DrawerField icon={User} label="First name" value={profileCustomer.first_name} />}
                   {profileCustomer.vat_number && <DrawerField icon={Shield} label="VAT number" value={profileCustomer.vat_number} />}
                   {profileCustomer.company_address && <DrawerField icon={MapPin} label="Company address" value={profileCustomer.company_address} />}
                   {profileCustomer.delivery_address && <DrawerField icon={MapPin} label="Delivery address" value={profileCustomer.delivery_address} />}
@@ -4539,11 +4660,13 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                   {profileCustomer.last_purchase_date && (
                     <DrawerField icon={Building2} label="Last purchase" value={new Date(profileCustomer.last_purchase_date).toLocaleDateString('en-ZA')} />
                   )}
-                  <DrawerField icon={Building2} label="Applied" value={new Date(profileCustomer.created_at).toLocaleString('en-ZA')} />
+                  {profileSource !== 'proto-active' && profileCustomer.created_at && (
+                    <DrawerField icon={Building2} label="Applied" value={new Date(profileCustomer.created_at).toLocaleString('en-ZA')} />
+                  )}
                 </div>
               )}
 
-              {/* Order history */}
+              {profileSource !== 'proto-active' && (
               <div style={{ marginTop: 24 }}>
                 <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 10, fontFamily: 'Outfit, sans-serif' }}>Order History</div>
                 {profileOrdersLoading && (
@@ -4571,10 +4694,11 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                   </div>
                 )}
               </div>
+              )}
             </div>
             <div className="adm-drawer-footer">
               <button onClick={closeCustomerProfile} className="adm-btn-ghost">Close</button>
-              {!profileCustomer.is_approved && (
+              {profileSource !== 'proto-active' && !profileCustomer.is_approved && (
                 <>
                   <input
                     type="text"
@@ -4597,16 +4721,32 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                   </button>
                 </>
               )}
-              <button onClick={() => void deactivateCustomer(profileCustomer)} className="adm-btn-ghost" disabled={saving === `deact-${profileCustomer.id}`}>
-                {saving === `deact-${profileCustomer.id}` ? '…' : 'Deactivate'}
-              </button>
-              <button onClick={() => void removeCustomer(profileCustomer)} className="adm-btn-ghost" style={{ color: '#c40000' }} disabled={saving === `del-${profileCustomer.id}`}>
-                {saving === `del-${profileCustomer.id}` ? '…' : <><Trash2 size={14} /> Delete</>}
+              {profileSource !== 'proto-active' && (
+                <button onClick={() => void deactivateCustomer(profileCustomer)} className="adm-btn-ghost" disabled={saving === `deact-${profileCustomer.id}`}>
+                  {saving === `deact-${profileCustomer.id}` ? '…' : 'Deactivate'}
+                </button>
+              )}
+              <button
+                onClick={() => void removeCustomer(profileCustomer, profileSource)}
+                className="adm-btn-ghost"
+                style={{ color: '#c40000' }}
+                disabled={saving === (profileSource === 'proto-active' ? `del-proto-${profileCustomer.id}` : `del-${profileCustomer.id}`)}
+              >
+                {saving === (profileSource === 'proto-active' ? `del-proto-${profileCustomer.id}` : `del-${profileCustomer.id}`) ? '…' : <><Trash2 size={14} /> Delete</>}
               </button>
             </div>
           </div>
         </div>
       )}
+
+      <CustomerEmailModal
+        open={customerEmailOpen}
+        onClose={() => setCustomerEmailOpen(false)}
+        customerTab={customerTab}
+        onSend={sendCustomerEmailBroadcast}
+        onShowToast={showToast}
+        adminEmail={customer?.email || ''}
+      />
 
       {/* Taxonomy modals — used by Product Manager reorder + category sidebar */}
       {editTaxonomyModal && (

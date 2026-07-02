@@ -8082,3 +8082,377 @@ html, body { background: #f5f5f5; color: #111827; }
   }
 }
 
+.adm-email-merge-bar {
+  display: grid;
+  gap: 8px;
+}
+
+.adm-email-merge-bar__label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #9ca3af;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.adm-email-merge-bar__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.adm-email-merge-chip {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 999px;
+  background: #fff;
+  color: #374151;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+
+.adm-email-merge-chip:hover {
+  border-color: #c40000;
+  background: #fef2f2;
+  color: #c40000;
+}
+
+.adm-email-field--intro {
+  padding: 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #fafafa;
+}
+
+/* Customer email broadcast modal */
+.adm-email-modal {
+  width: min(640px, 100%);
+  max-height: min(92vh, 900px);
+  display: flex;
+  flex-direction: column;
+}
+
+.adm-email-modal--html {
+  width: min(960px, 100%);
+  max-height: min(94vh, 960px);
+}
+
+.adm-email-modal__lead {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: #6b7280;
+  line-height: 1.45;
+  max-width: 34rem;
+}
+
+.adm-email-modal__body {
+  overflow-y: auto;
+  gap: 16px;
+}
+
+.adm-email-field {
+  display: grid;
+  gap: 8px;
+}
+
+.adm-email-field__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.adm-email-field__label {
+  font-size: 12px;
+  font-weight: 700;
+  color: #374151;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.adm-email-field__hint {
+  font-size: 12px;
+  color: #6b7280;
+  line-height: 1.4;
+}
+
+.adm-email-mode-toggle {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px;
+  background: #f3f4f6;
+  border-radius: 10px;
+}
+
+.adm-email-mode-toggle__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #6b7280;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, box-shadow 0.15s;
+}
+
+.adm-email-mode-toggle__btn:hover {
+  color: #111827;
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.adm-email-mode-toggle__btn--active {
+  background: #fff;
+  color: #111827;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.adm-email-pane-toggle {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 2px;
+}
+
+.adm-email-pane-toggle__btn {
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 999px;
+  background: #fff;
+  color: #6b7280;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.adm-email-pane-toggle__btn:hover {
+  border-color: #d1d5db;
+  color: #111827;
+}
+
+.adm-email-pane-toggle__btn--active {
+  border-color: #c40000;
+  background: #fef2f2;
+  color: #c40000;
+}
+
+.adm-email-split {
+  display: grid;
+  gap: 12px;
+}
+
+.adm-email-split--split {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: stretch;
+}
+
+.adm-email-split__editor,
+.adm-email-split__preview {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.adm-email-split__pane-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #6b7280;
+}
+
+.adm-email-split__editor .adm-email-modal__textarea--html {
+  flex: 1;
+  min-height: 280px;
+}
+
+.adm-email-modal__textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 140px;
+  line-height: 1.5;
+}
+
+.adm-email-modal__textarea--html {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  min-height: 200px;
+}
+
+.adm-email-preview {
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #fafafa;
+  display: flex;
+  flex-direction: column;
+  min-height: 280px;
+}
+
+.adm-email-preview--full {
+  flex: 1;
+  min-height: 320px;
+}
+
+.adm-email-preview__chrome {
+  padding: 12px 14px;
+  background: #f9fafb;
+  border-bottom: 1px solid #e5e7eb;
+  display: grid;
+  gap: 8px;
+}
+
+.adm-email-preview__chrome-row {
+  display: grid;
+  grid-template-columns: 64px 1fr;
+  gap: 10px;
+  align-items: baseline;
+  font-size: 13px;
+}
+
+.adm-email-preview__chrome-label {
+  color: #9ca3af;
+  font-weight: 700;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.adm-email-preview__chrome-value {
+  color: #374151;
+  word-break: break-word;
+}
+
+.adm-email-preview__chrome-value--subject {
+  font-weight: 700;
+  color: #111827;
+}
+
+.adm-email-preview__label {
+  padding: 10px 14px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #6b7280;
+  background: #f3f4f6;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.adm-email-preview__frame {
+  padding: 18px 16px;
+  max-height: 220px;
+  overflow: auto;
+  background: #fff;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.adm-email-preview__iframe {
+  width: 100%;
+  flex: 1;
+  min-height: 280px;
+  border: none;
+  background: #fff;
+  display: block;
+}
+
+.adm-email-modal__footer {
+  flex-wrap: wrap;
+  gap: 12px 16px;
+  border-top: 1px solid #e5e7eb;
+  background: #fafafa;
+}
+
+.adm-email-modal__footer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+}
+
+.adm-customer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 12px;
+}
+
+.adm-customer-actions .adm-btn-red,
+.adm-customer-actions .adm-btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 0 14px;
+  white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+  .adm-email-modal,
+  .adm-email-modal--html {
+    width: 100%;
+    max-height: 100dvh;
+    border-radius: 16px 16px 0 0;
+  }
+
+  .adm-email-split--split {
+    grid-template-columns: 1fr;
+  }
+
+  .adm-email-pane-toggle {
+    width: 100%;
+  }
+
+  .adm-email-pane-toggle__btn {
+    flex: 1 1 auto;
+    text-align: center;
+  }
+
+  .adm-email-preview__iframe {
+    min-height: 240px;
+  }
+
+  .adm-email-modal__footer {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+
+  .adm-email-modal__footer-actions {
+    margin-left: 0;
+    width: 100%;
+  }
+
+  .adm-email-modal__footer-actions .adm-btn-red,
+  .adm-email-modal__footer-actions .adm-btn-ghost,
+  .adm-email-modal__footer > .adm-btn-ghost {
+    flex: 1 1 auto;
+    justify-content: center;
+    min-height: 44px;
+  }
+
+  .adm-customer-actions {
+    width: 100%;
+    gap: 8px;
+  }
+
+  .adm-customer-actions .adm-btn-red,
+  .adm-customer-actions .adm-btn-ghost {
+    flex: 1 1 calc(50% - 4px);
+    justify-content: center;
+    min-height: 44px;
+  }
+}
+

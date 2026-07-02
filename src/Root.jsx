@@ -8,6 +8,7 @@ import {
   verifyAdminSession,
 } from './lib/auth';
 import { setImageGenOperator } from './lib/imageGenSession';
+import { PROTO_URLS } from './lib/protoUrls';
 import QueryProvider from './components/QueryProvider';
 import AdminLoginPage from './components/AdminLoginPage';
 import AdminResetPasswordPage from './components/AdminResetPasswordPage';
@@ -175,7 +176,7 @@ function AdminGate() {
         <AdminPage
           customer={customer}
           onSignOut={() => void signOut().then(() => setSession(null))}
-          onViewPortal={() => { window.location.href = 'https://protoportal-main.vercel.app'; }}
+          onViewPortal={() => { window.location.href = PROTO_URLS.site; }}
         />
       </Suspense>
     </QueryProvider>
