@@ -8,7 +8,19 @@ export const config = { api: { bodyParser: { sizeLimit: '4mb' } } };
 const BUCKET = 'product-images';
 /** Catalogue archive tag — shows in Product Manager → Archived (not dormant queue). */
 export const NUTSTORE_ARCHIVED_BY = 'nutstore';
+const ARCHIVE_DEFAULT_CATEGORY = 'Uncategorised';
+const ARCHIVE_DEFAULT_SUB = 'General';
 const SLOT_FIELDS = ['image_url_one', 'image_url_two', 'image_url_three', 'image_url_four'];
+
+function resolveArchiveCategories(item) {
+  const category = String(
+    item.category || item.websiteRow?.category || item.sqlRow?.dept || ARCHIVE_DEFAULT_CATEGORY,
+  ).trim() || ARCHIVE_DEFAULT_CATEGORY;
+  const subcategoryOne = String(
+    item.subcategoryOne || item.subcategory_one || item.websiteRow?.subcategory_one || category,
+  ).trim() || ARCHIVE_DEFAULT_SUB;
+  return { category, subcategoryOne };
+}
 
 function getStockClient() {
   return createClient(
@@ -124,8 +136,7 @@ async function publishOne(sb, item, { overwriteImage }) {
 }
 
 function buildArchivePayload(item, { sku, imageUrl, filename, now }) {
-  const category = String(item.category || '').trim();
-  const subcategoryOne = String(item.subcategoryOne || item.subcategory_one || category).trim();
+  const { category, subcategoryOne } = resolveArchiveCategories(item);
   const title = String(item.title || item.sqlRow?.title || sku).trim();
   return {
     sku,
@@ -151,10 +162,6 @@ async function archiveOne(sb, item) {
   const sku = String(item.code || '').trim().toUpperCase();
   const path = String(item.path || '').trim();
   if (!sku || !path) throw new Error('code and path required');
-
-  const category = String(item.category || '').trim();
-  const subcategoryOne = String(item.subcategoryOne || item.subcategory_one || category).trim();
-  if (!category || !subcategoryOne) throw new Error('category and subcategoryOne required');
 
   const [{ data: liveRow }, { data: archivedRow }] = await Promise.all([
     sb.from('website_stock').select('*').eq('sku', sku).maybeSingle(),

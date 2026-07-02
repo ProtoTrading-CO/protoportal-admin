@@ -29,14 +29,18 @@ export async function logProductLoaderAudit(sb, {
     published_at: new Date().toISOString(),
   };
 
-  await sb.from('product_publish_audit').insert(payload).catch((err) => {
-    console.error('product_publish_audit insert failed:', err?.message);
-  });
+  try {
+    const { error } = await sb.from('product_publish_audit').insert(payload);
+    if (error) console.error('product_publish_audit insert failed:', error.message);
+  } catch (err) {
+    console.error('product_publish_audit insert failed:', err?.message || err);
+  }
 }
 
 export function auditOutcomeFromRow(row) {
   const outcome = row?.new_values?.outcome;
   if (outcome === 'dormant') return 'dormant';
+  if (outcome === 'archived') return 'archived';
   if (outcome === 'failed') return 'failed';
   if (row?.action === 'create' || row?.action === 'update') return 'published';
   return 'published';
