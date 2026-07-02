@@ -81,8 +81,8 @@ function applyOrderSearch(query, term, customerIds) {
   if (!safe) return query;
   const parts = [
     `order_number.ilike.%${safe}%`,
-    `items::text.ilike.%${safe}%`,
-    `original_items::text.ilike.%${safe}%`,
+    `items.ilike.%${safe}%`,
+    `original_items.ilike.%${safe}%`,
   ];
   for (const id of customerIds) parts.push(`customer_id.eq.${id}`);
   return query.or(parts.join(','));
