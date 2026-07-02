@@ -1,7 +1,7 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { readSiteConfigJson, writeSiteConfigJson } from './_site-config.js';
-import { isMotarroProduct, inferMotarroPathFromRow } from './_mottaro-category.js';
+import { isMotarroProduct, inferMotarroPathFromRow, injectMotarroIntoTree } from './_mottaro-category.js';
 
 const TAXONOMY_FILE = 'taxonomy/categories.json';
 const BUNDLED_PATH = join(process.cwd(), 'src/data/categories.json');
@@ -28,34 +28,39 @@ export function invalidateTaxonomyCache() {
   _taxonomyCachedAt = 0;
 }
 
+function withMotarro(categories) {
+  return injectMotarroIntoTree(Array.isArray(categories) ? categories : []);
+}
+
 export async function loadTaxonomy({ bypassCache = false } = {}) {
   const now = Date.now();
   if (!bypassCache && _taxonomyCache && now - _taxonomyCachedAt < TAXONOMY_TTL_MS) {
-    return _taxonomyCache;
+    return withMotarro(_taxonomyCache);
   }
   try {
     const stored = await readSiteConfigJson(TAXONOMY_FILE, null);
     if (Array.isArray(stored)) {
       _taxonomyCache = stored;
       _taxonomyCachedAt = now;
-      return stored;
+      return withMotarro(stored);
     }
     if (stored?.categories && Array.isArray(stored.categories)) {
       _taxonomyCache = stored.categories;
       _taxonomyCachedAt = now;
-      return stored.categories;
+      return withMotarro(stored.categories);
     }
   } catch { /* fall through */ }
   const bundled = loadBundledTaxonomy();
   _taxonomyCache = bundled;
   _taxonomyCachedAt = now;
-  return bundled;
+  return withMotarro(bundled);
 }
 
 export async function saveTaxonomy(categories) {
-  await writeSiteConfigJson(TAXONOMY_FILE, { categories });
+  const stripped = (Array.isArray(categories) ? categories : []).filter((c) => c.id !== 'mottaro');
+  await writeSiteConfigJson(TAXONOMY_FILE, { categories: stripped });
   invalidateTaxonomyCache();
-  return categories;
+  return withMotarro(stripped);
 }
 
 export function findNodeContext(tree, id, parent = null, depth = 0, ancestors = []) {
