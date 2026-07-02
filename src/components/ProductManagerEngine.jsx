@@ -1165,6 +1165,11 @@ export default function ProductManagerEngine({
               <>
                 <div className="adm-reorder-toolbar" style={{ marginBottom: 12 }}>
                   <span className="adm-reorder-count">{reorderProducts.length} products in this view</span>
+                  {sortOrderMeta.updatedAt && formatSortSavedAt(sortOrderMeta.updatedAt) && (
+                    <span className="adm-pill adm-pill--ok">
+                      Order saved · {formatSortSavedAt(sortOrderMeta.updatedAt)}
+                    </span>
+                  )}
                   {reorderDirty && <span className="adm-pill adm-pill--warn">Unsaved order</span>}
                   {debouncedSearch && <span className="adm-muted" style={{ fontSize: 12 }}>Clear search to save</span>}
                   {catalogChangedWhileDirty && (
