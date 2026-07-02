@@ -15,6 +15,7 @@ import {
 import categories from '../data/categories.json';
 import { isImageFile } from '../lib/parseIntakeFilename.js';
 import { readApiJson } from '../lib/apiError.js';
+import ProductLoaderNutstore from './productLoader/ProductLoaderNutstore';
 import ProductLoaderSingleImage from './productLoader/ProductLoaderSingleImage';
 import ProductLoaderFolder from './productLoader/ProductLoaderFolder';
 import ProductLoaderPublishHistory from './productLoader/ProductLoaderPublishHistory';
@@ -22,8 +23,9 @@ import ProductLoaderPublishSuccess from './productLoader/ProductLoaderPublishSuc
 import ProductLoaderImageReplace from './productLoader/ProductLoaderImageReplace';
 
 const LOADER_TABS = [
+  { id: 'nutstore', label: 'Nutstore' },
   { id: 'single', label: 'Single Image' },
-  { id: 'folder', label: 'Image Folder' },
+  { id: 'folder', label: 'Local Folder' },
   { id: 'history', label: 'Publish History' },
   { id: 'image-replace', label: 'Image Replace' },
 ];
@@ -169,7 +171,7 @@ export default function ProductLoaderPanel({
   onGoToApollo,
   mainSiteUrl = 'https://site.proto.co.za',
 }) {
-  const [activeTab, setActiveTab] = useState('single');
+  const [activeTab, setActiveTab] = useState('nutstore');
   const [publishSuccess, setPublishSuccess] = useState(null);
   const fileRef = useRef(null);
   const folderRef = useRef(null);
@@ -970,7 +972,7 @@ export default function ProductLoaderPanel({
       <div className="adm-section-head" style={{ marginBottom: 24 }}>
         <div>
           <h2 className="adm-section-title">Product Loader</h2>
-          <p className="adm-section-note">Publish supplier images to the live catalogue — Apollo generates images separately.</p>
+          <p className="adm-section-note">Browse Nutstore or upload images — Positill fills price, description and stock. Apollo generates images separately.</p>
           {sqlLiveStatus?.bridgeConfigured && (
             <p style={{ fontSize: 12, marginTop: 6, fontWeight: 700, color: sqlLiveStatus.sqlConnectionTest ? '#15803d' : '#c2410c' }}>
               {sqlLiveStatus.sqlConnectionTest
@@ -993,6 +995,20 @@ export default function ProductLoaderPanel({
           </button>
         ))}
       </nav>
+
+      {activeTab === 'nutstore' && (
+        <ProductLoaderNutstore
+          taxonomyTree={taxonomyTree}
+          batchDefaultCategoryId={batchDefaultCategoryId}
+          setBatchDefaultCategoryId={setBatchDefaultCategoryId}
+          batchDefaultSub1Id={batchDefaultSub1Id}
+          setBatchDefaultSub1Id={setBatchDefaultSub1Id}
+          batchOverwrite={batchOverwrite}
+          setBatchOverwrite={setBatchOverwrite}
+          onShowToast={onShowToast}
+          onPublished={(result) => setPublishSuccess(result)}
+        />
+      )}
 
       {activeTab === 'single' && (
         <ProductLoaderSingleImage

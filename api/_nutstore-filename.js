@@ -1,0 +1,42 @@
+const IMAGE_EXT = /\.(jpe?g|png|webp)$/i;
+
+/** Nutstore: one image per product — full filename stem is the product code, always slot 1. */
+export function parseNutstoreFilename(filename) {
+  const raw = String(filename || '').trim();
+  const slash = raw.lastIndexOf('/');
+  const name = slash >= 0 ? raw.slice(slash + 1) : raw;
+  const dot = name.lastIndexOf('.');
+  const stem = dot > 0 ? name.slice(0, dot).trim() : name.trim();
+
+  if (!stem) {
+    return { code: '', displayCode: '', imageSlot: 1, parseError: 'empty_filename' };
+  }
+
+  if (dot > 0 && !IMAGE_EXT.test(name.slice(dot))) {
+    return { code: '', displayCode: '', imageSlot: 1, parseError: 'unsupported_extension' };
+  }
+
+  const displayCode = stem;
+  const code = stem.toUpperCase();
+
+  if (code.length < 2) {
+    return { code: '', displayCode: '', imageSlot: 1, parseError: 'sku_too_short' };
+  }
+
+  return { code, displayCode, imageSlot: 1, parseError: null };
+}
+
+export function isNutstoreImageName(filename) {
+  const raw = String(filename || '').trim();
+  const slash = raw.lastIndexOf('/');
+  const name = slash >= 0 ? raw.slice(slash + 1) : raw;
+  const dot = name.lastIndexOf('.');
+  if (dot <= 0) return false;
+  return IMAGE_EXT.test(name.slice(dot));
+}
+
+export function nutstoreBasename(path) {
+  const raw = String(path || '').trim();
+  const slash = raw.lastIndexOf('/');
+  return slash >= 0 ? raw.slice(slash + 1) : raw;
+}
