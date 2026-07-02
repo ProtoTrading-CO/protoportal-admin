@@ -1,6 +1,6 @@
 const IMAGE_EXT = /\.(jpe?g|png|webp)$/i;
 
-/** Nutstore: one image per product — full filename stem is the product code, always slot 1. */
+/** Nutstore PTR Photos: lookup code = stem before first hyphen; full stem kept for display. */
 export function parseNutstoreFilename(filename) {
   const raw = String(filename || '').trim();
   const slash = raw.lastIndexOf('/');
@@ -17,7 +17,8 @@ export function parseNutstoreFilename(filename) {
   }
 
   const displayCode = stem;
-  const code = stem.toUpperCase();
+  const lookupStem = stem.includes('-') ? stem.split('-')[0].trim() : stem;
+  const code = lookupStem.toUpperCase();
 
   if (code.length < 2) {
     return { code: '', displayCode: '', imageSlot: 1, parseError: 'sku_too_short' };

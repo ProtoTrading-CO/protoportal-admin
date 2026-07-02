@@ -6,7 +6,8 @@ import { downloadNutstoreFile, isNutstoreConfigured, nutstoreSetupMessage } from
 export const config = { api: { bodyParser: { sizeLimit: '4mb' } } };
 
 const BUCKET = 'product-images';
-const DORMANT_BY = 'new-products';
+/** Catalogue archive tag — shows in Product Manager → Archived (not dormant queue). */
+export const NUTSTORE_ARCHIVED_BY = 'nutstore';
 const SLOT_FIELDS = ['image_url_one', 'image_url_two', 'image_url_three', 'image_url_four'];
 
 function getStockClient() {
@@ -122,21 +123,11 @@ async function publishOne(sb, item, { overwriteImage }) {
   return { sku, action, imageUrl };
 }
 
-async function archiveOne(sb, item) {
-  const sku = String(item.code || '').trim().toUpperCase();
-  const path = String(item.path || '').trim();
-  if (!sku || !path) throw new Error('code and path required');
-
+function buildArchivePayload(item, { sku, imageUrl, filename, now }) {
   const category = String(item.category || '').trim();
   const subcategoryOne = String(item.subcategoryOne || item.subcategory_one || category).trim();
-  if (!category || !subcategoryOne) throw new Error('category and subcategoryOne required');
-
-  const { buffer, contentType, filename } = await downloadNutstoreFile(path);
-  const imageUrl = await uploadImageBuffer(sb, { sku, slot: 1, filename, buffer, contentType });
-
   const title = String(item.title || item.sqlRow?.title || sku).trim();
-  const now = new Date().toISOString();
-  const payload = {
+  return {
     sku,
     barcode: sku,
     title,
@@ -150,17 +141,63 @@ async function archiveOne(sb, item) {
     subcategory_three: item.subcategoryThree || item.subcategory_three || null,
     subcategory_four: item.subcategoryFour || item.subcategory_four || null,
     image_url_one: imageUrl,
-    archived_by: DORMANT_BY,
+    archived_by: NUTSTORE_ARCHIVED_BY,
     archived_at: now,
     updated_at: now,
   };
+}
 
-  const { data: existing } = await sb.from('archived_products').select('sku, archived_by').eq('sku', sku).maybeSingle();
-  if (existing && existing.archived_by !== DORMANT_BY) {
-    throw new Error(`SKU "${sku}" is archived as "${existing.archived_by}"`);
+async function archiveOne(sb, item) {
+  const sku = String(item.code || '').trim().toUpperCase();
+  const path = String(item.path || '').trim();
+  if (!sku || !path) throw new Error('code and path required');
+
+  const category = String(item.category || '').trim();
+  const subcategoryOne = String(item.subcategoryOne || item.subcategory_one || category).trim();
+  if (!category || !subcategoryOne) throw new Error('category and subcategoryOne required');
+
+  const [{ data: liveRow }, { data: archivedRow }] = await Promise.all([
+    sb.from('website_stock').select('*').eq('sku', sku).maybeSingle(),
+    sb.from('archived_products').select('sku, archived_by').eq('sku', sku).maybeSingle(),
+  ]);
+
+  if (archivedRow && archivedRow.archived_by !== NUTSTORE_ARCHIVED_BY) {
+    throw new Error(`SKU "${sku}" is archived as "${archivedRow.archived_by}"`);
   }
 
-  if (existing) {
+  const { buffer, contentType, filename } = await downloadNutstoreFile(path);
+  const imageUrl = await uploadImageBuffer(sb, { sku, slot: 1, filename, buffer, contentType });
+  const now = new Date().toISOString();
+  const payload = buildArchivePayload(item, { sku, imageUrl, filename, now });
+  const title = payload.title;
+
+  let archiveAction = 'create';
+
+  if (liveRow) {
+    const shouldOverwrite = item.overwriteImage || item.warnings?.includes('image_exists') || !liveRow.image_url_one;
+    const livePatch = {
+      title: payload.title,
+      price: payload.price,
+      category: payload.category,
+      subcategory_one: payload.subcategory_one,
+      subcategory_two: payload.subcategory_two,
+      original_description: payload.original_description,
+      updated_at: now,
+    };
+    if (shouldOverwrite || !liveRow.image_url_one) {
+      livePatch.image_url_one = imageUrl;
+    }
+    if (item.sqlRow?.onhand != null) livePatch.stock_qty = Number(item.sqlRow.onhand);
+    if (item.sqlRow?.available != null) livePatch.available_stock = Number(item.sqlRow.available);
+
+    const { error: updateErr } = await sb.from('website_stock').update(livePatch).eq('sku', sku);
+    if (updateErr) throw updateErr;
+
+    const { error: rpcErr } = await sb.rpc('archive_product', { p_sku: sku, p_by: NUTSTORE_ARCHIVED_BY });
+    if (rpcErr) throw rpcErr;
+    archiveAction = 'archive_live';
+  } else if (archivedRow) {
+    archiveAction = 'update';
     const { error } = await sb.from('archived_products').update(payload).eq('sku', sku);
     if (error) throw error;
   } else {
@@ -170,16 +207,17 @@ async function archiveOne(sb, item) {
 
   await logProductLoaderAudit(sb, {
     sku,
-    action: existing ? 'update' : 'create',
+    action: archiveAction === 'create' ? 'create' : 'update',
     source: 'nutstore_product_loader',
-    publishMode: 'dormant',
+    publishMode: 'archive',
     imageSlot: 1,
     imageSource: 'nutstore',
     newValues: {
-      outcome: 'dormant',
+      outcome: 'archived',
+      archivedBy: NUTSTORE_ARCHIVED_BY,
       title,
-      category,
-      subcategoryOne,
+      category: payload.category,
+      subcategoryOne: payload.subcategory_one,
       imageUrl,
       nutstorePath: path,
       filename: item.filename || filename,
@@ -187,7 +225,7 @@ async function archiveOne(sb, item) {
     publishedBy: String(item.publishedBy || '').trim() || null,
   });
 
-  return { sku, imageUrl };
+  return { sku, imageUrl, archivedBy: NUTSTORE_ARCHIVED_BY };
 }
 
 export default async function handler(req, res) {

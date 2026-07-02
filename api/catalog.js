@@ -248,6 +248,7 @@ export default async function handler(req, res) {
       });
     } else if (status === 'archived') {
       const stockFilter = String(req.query.stockFilter || 'archived').trim();
+      const archivedSource = String(req.query.archivedSource || 'all').trim();
       if (stockFilter === 'negative') {
         // Live products with negative ERP stock only — zeros excluded.
         let rows = await fetchAllLiveRows(sb, { search, categoryPath, tree, sort });
@@ -257,7 +258,12 @@ export default async function handler(req, res) {
         result = { ...pageSlice, archived: false, archiveView: 'negative-live' };
         stockAlreadyEnriched = true;
       } else {
-        let rows = await fetchAllArchivedRows(sb, { search, categoryPath, tree, sort, excludeBy: EXCLUDE_ARCHIVED });
+        const archiveFetch = archivedSource === 'nutstore'
+          ? { archivedBy: 'nutstore', sort }
+          : archivedSource === 'other'
+            ? { excludeBy: [...EXCLUDE_ARCHIVED, 'nutstore'], sort }
+            : { excludeBy: EXCLUDE_ARCHIVED, sort };
+        let rows = await fetchAllArchivedRows(sb, { search, categoryPath, tree, ...archiveFetch });
         rows = await enrichRowsWithProductStock(sb, rows);
         rows = rows.filter((r) => !isExactlyZeroStock(r));
         const pageSlice = paginateRows(rows, page, pageSize);

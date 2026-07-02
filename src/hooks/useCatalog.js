@@ -12,8 +12,9 @@ export function buildCatalogParams({
   categoryPath = [],
   sort = 'title',
   stockFilter,
+  archivedSource,
 } = {}) {
-  return { status, page, pageSize, search, categoryPath, sort, stockFilter };
+  return { status, page, pageSize, search, categoryPath, sort, stockFilter, archivedSource };
 }
 
 async function fetchCatalog(params) {
@@ -26,6 +27,7 @@ async function fetchCatalog(params) {
   if (params.search) qs.set('search', params.search);
   if (params.categoryPath?.length) qs.set('categoryPath', JSON.stringify(params.categoryPath));
   if (params.stockFilter) qs.set('stockFilter', params.stockFilter);
+  if (params.archivedSource && params.archivedSource !== 'all') qs.set('archivedSource', params.archivedSource);
   try {
     const res = await fetch(`/api/catalog?${qs}`);
     return readApiJson(res, { fallback: 'Catalog fetch failed — try Refresh' });
