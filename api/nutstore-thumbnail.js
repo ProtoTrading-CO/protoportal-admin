@@ -2,6 +2,7 @@ import { requireAdminKey } from './_admin-auth.js';
 import {
   downloadNutstoreFile,
   isNutstoreConfigured,
+  isPathInLibrary,
   normalizeDavPath,
   nutstoreSetupMessage,
 } from './_nutstore-webdav.js';
@@ -17,8 +18,8 @@ export default async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).end();
 
   const path = normalizeDavPath(req.query.path || '');
-  if (!path || path === '/') {
-    return res.status(400).json({ error: 'path query required' });
+  if (!path || path === '/' || !isPathInLibrary(path)) {
+    return res.status(400).json({ error: 'path query required (within PTR Photos)' });
   }
 
   try {

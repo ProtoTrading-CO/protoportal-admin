@@ -1,6 +1,38 @@
 import { isNutstoreImageName } from './_nutstore-filename.js';
 
 const DEFAULT_WEBDAV_URL = 'https://dav.jianguoyun.com/dav/';
+/** Only this Nutstore folder is exposed in Product Loader. */
+export const DEFAULT_LIBRARY_ROOT = '/PTR-photos';
+
+function decodeDisplayName(name) {
+  return String(name || '')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .trim();
+}
+
+export function libraryRoot() {
+  const raw = String(
+    process.env.NUTSTORE_PHOTOS_ROOT || process.env.NUTSTORE_ROOT_PATH || DEFAULT_LIBRARY_ROOT,
+  ).trim();
+  return normalizeDavPath(raw || DEFAULT_LIBRARY_ROOT);
+}
+
+/** Keep browse/download inside the PTR Photos library tree. */
+export function clampToLibrary(requestedPath) {
+  const root = libraryRoot();
+  const path = normalizeDavPath(requestedPath || root);
+  if (path === root || path.startsWith(`${root}/`)) return path;
+  return root;
+}
+
+export function isPathInLibrary(path) {
+  const root = libraryRoot();
+  const p = normalizeDavPath(path);
+  return p === root || p.startsWith(`${root}/`);
+}
 
 function nutstoreConfig() {
   const baseUrl = String(process.env.NUTSTORE_WEBDAV_URL || DEFAULT_WEBDAV_URL).trim().replace(/\/+$/, '') + '/';
@@ -10,9 +42,7 @@ function nutstoreConfig() {
   const password = String(
     process.env.NUTSTORE_APP_PASSWORD || process.env.NUTSTORE_WEBDAV_PASSWORD || '',
   ).trim();
-  const rootPath = normalizeDavPath(
-    process.env.NUTSTORE_ROOT_PATH || process.env.NUTSTORE_PHOTOS_ROOT || '/',
-  );
+  const rootPath = libraryRoot();
   return { baseUrl, user, password, rootPath };
 }
 
@@ -49,14 +79,16 @@ function joinDavPath(...parts) {
   return normalizeDavPath(joined.startsWith('/') ? joined : `/${joined}`);
 }
 
-function davUrlForPath(path) {
+function davUrlForPath(path, { directory = false } = {}) {
   const { baseUrl } = nutstoreConfig();
   const normalized = normalizeDavPath(path);
   const encoded = normalized
     .split('/')
     .map((seg, i) => (i === 0 && !seg ? '' : encodeURIComponent(seg)))
     .join('/');
-  return `${baseUrl}${encoded.startsWith('/') ? encoded.slice(1) : encoded}`;
+  let url = `${baseUrl}${encoded.startsWith('/') ? encoded.slice(1) : encoded}`;
+  if (directory && !url.endsWith('/')) url += '/';
+  return url;
 }
 
 function decodeHref(href) {
@@ -99,7 +131,7 @@ function parsePropfindResponse(xml) {
     const contentType = getTag(block, 'getcontenttype') || '';
     const size = Number.parseInt(lenRaw, 10) || 0;
     const path = hrefToDavPath(href);
-    const name = displayname || path.split('/').pop() || '';
+    const name = decodeDisplayName(displayname) || path.split('/').pop() || '';
     const isDir = isCollection(block);
     responses.push({
       href,
@@ -150,9 +182,8 @@ async function propfindOnce(url) {
 }
 
 export async function listNutstoreDirectory(requestPath = '/') {
-  const { rootPath } = nutstoreConfig();
-  const path = normalizeDavPath(requestPath || rootPath);
-  const url = davUrlForPath(path);
+  const path = clampToLibrary(requestPath);
+  const url = davUrlForPath(path, { directory: true });
   const all = [];
   let currentUrl = url;
 
@@ -174,7 +205,7 @@ export async function listNutstoreDirectory(requestPath = '/') {
 }
 
 export async function listNutstoreImagesRecursive(requestPath = '/') {
-  const path = normalizeDavPath(requestPath);
+  const path = clampToLibrary(requestPath);
   const images = [];
   const queue = [path];
   const seen = new Set();
@@ -204,6 +235,9 @@ export async function listNutstoreImagesRecursive(requestPath = '/') {
 
 export async function downloadNutstoreFile(path) {
   const normalized = normalizeDavPath(path);
+  if (!isPathInLibrary(normalized)) {
+    throw new Error('Path is outside the PTR Photos library');
+  }
   const url = davUrlForPath(normalized);
   const res = await fetch(url, {
     method: 'GET',
@@ -227,9 +261,9 @@ function guessContentType(path) {
 }
 
 export async function testNutstoreConnection() {
-  const { rootPath } = nutstoreConfig();
+  const rootPath = libraryRoot();
   await listNutstoreDirectory(rootPath);
-  return { ok: true, rootPath };
+  return { ok: true, rootPath, libraryRoot: rootPath, libraryLabel: 'PTR Photos' };
 }
 
-export { joinDavPath, nutstoreConfig };
+export { joinDavPath, nutstoreConfig, libraryRoot as nutstoreLibraryRoot };

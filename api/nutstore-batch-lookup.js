@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import { requireAdminKey } from './_admin-auth.js';
 import { isSqlConfigured } from './_sql-provider.js';
 import { nutstoreBasename, parseNutstoreFilename } from './_nutstore-filename.js';
+import { isPathInLibrary } from './_nutstore-webdav.js';
 import {
   classifyBatchItem,
   fetchDormantSkuSet,
@@ -34,6 +35,22 @@ export default async function handler(req, res) {
 
   for (const rawPath of paths) {
     const path = String(rawPath || '').trim();
+    if (!isPathInLibrary(path)) {
+      items.push({
+        path,
+        filename: nutstoreBasename(path),
+        code: '',
+        title: '',
+        price: 0,
+        imageSlot: 1,
+        warnings: ['invalid_filename'],
+        parseError: 'outside_library',
+        websiteStatus: 'not_found',
+        group: 'not_found',
+      });
+      groups.not_found += 1;
+      continue;
+    }
     const filename = nutstoreBasename(path);
     const parsed = parseNutstoreFilename(filename);
 

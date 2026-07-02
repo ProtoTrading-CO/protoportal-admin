@@ -967,7 +967,7 @@ export default function ProductLoaderPanel({
   };
 
   return (
-    <div className="adm-panel" style={{ maxWidth: 920 }}>
+    <div className="adm-panel" style={{ maxWidth: 1100 }}>
       {/* Header */}
       <div className="adm-section-head" style={{ marginBottom: 24 }}>
         <div>

@@ -1,13 +1,14 @@
 import { requireAdminKey } from './_admin-auth.js';
 import {
+  clampToLibrary,
   isNutstoreConfigured,
+  isPathInLibrary,
   listNutstoreDirectory,
   listNutstoreImagesRecursive,
+  libraryRoot,
   nutstoreSetupMessage,
-  normalizeDavPath,
   testNutstoreConnection,
 } from './_nutstore-webdav.js';
-import { nutstoreConfig } from './_nutstore-webdav.js';
 
 export default async function handler(req, res) {
   if (!(await requireAdminKey(req, res))) return;
@@ -22,14 +23,27 @@ export default async function handler(req, res) {
     if (action === 'status') {
       try {
         const status = await testNutstoreConnection();
-        const { rootPath } = nutstoreConfig();
-        return res.status(200).json({ ok: true, configured: true, rootPath, ...status });
+        const rootPath = libraryRoot();
+        return res.status(200).json({
+          ok: true,
+          configured: true,
+          rootPath,
+          libraryRoot: rootPath,
+          libraryLabel: 'PTR Photos',
+          ...status,
+        });
       } catch (err) {
-        return res.status(502).json({ ok: false, configured: true, error: err.message || 'Nutstore unreachable' });
+        return res.status(502).json({
+          ok: false,
+          configured: true,
+          libraryRoot: libraryRoot(),
+          libraryLabel: 'PTR Photos',
+          error: err.message || 'Nutstore unreachable',
+        });
       }
     }
 
-    const path = normalizeDavPath(req.query.path || nutstoreConfig().rootPath);
+    const path = clampToLibrary(req.query.path || libraryRoot());
     const recursive = String(req.query.recursive || '').trim() === '1';
     const q = String(req.query.q || '').trim().toLowerCase();
 
@@ -39,14 +53,14 @@ export default async function handler(req, res) {
         const filtered = q
           ? images.filter((img) => img.name.toLowerCase().includes(q) || img.path.toLowerCase().includes(q))
           : images;
-        return res.status(200).json({ path, recursive: true, entries: filtered, count: filtered.length });
+        return res.status(200).json({ path, recursive: true, entries: filtered, count: filtered.length, libraryRoot: libraryRoot() });
       }
 
       const { entries } = await listNutstoreDirectory(path);
       const filtered = q
         ? entries.filter((e) => e.name.toLowerCase().includes(q) || e.path.toLowerCase().includes(q))
         : entries;
-      return res.status(200).json({ path, recursive: false, entries: filtered });
+      return res.status(200).json({ path, recursive: false, entries: filtered, libraryRoot: libraryRoot() });
     } catch (err) {
       return res.status(502).json({ error: err.message || 'Nutstore browse failed' });
     }

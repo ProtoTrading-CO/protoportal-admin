@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Archive,
+  ArrowLeft,
   ChevronRight,
   Folder,
   FolderOpen,
-  Image as ImageIcon,
+  Home,
   Loader2,
   RefreshCw,
   Search,
@@ -49,6 +50,13 @@ const GROUP_LABELS = {
   not_found: 'Not Found',
 };
 
+const STEPS = [
+  'Open a subfolder inside PTR Photos (or stay here).',
+  'Tick the product images you want — filename = product code.',
+  'Click Look up selected — Positill fills price, description and stock.',
+  'Publish to website or send to archive.',
+];
+
 function NutstoreThumb({ path, className = 'pl-nutstore-thumb' }) {
   const [src, setSrc] = useState('');
 
@@ -70,8 +78,35 @@ function NutstoreThumb({ path, className = 'pl-nutstore-thumb' }) {
     };
   }, [path]);
 
-  if (!src) return <span className="pl-nutstore-thumb pl-nutstore-thumb--loading" />;
+  if (!src) return <span className={`${className} pl-nutstore-thumb--loading`} />;
   return <img src={src} alt="" className={className} />;
+}
+
+function relativeCrumbs(currentPath, libraryRoot, libraryLabel) {
+  const root = libraryRoot || '/PTR-photos';
+  const label = libraryLabel || 'PTR Photos';
+  if (currentPath === root) {
+    return [{ label, path: root }];
+  }
+  const crumbs = [{ label, path: root }];
+  const suffix = currentPath.startsWith(`${root}/`) ? currentPath.slice(root.length + 1) : '';
+  if (!suffix) return crumbs;
+  let acc = root;
+  for (const part of suffix.split('/').filter(Boolean)) {
+    acc += `/${part}`;
+    crumbs.push({ label: part, path: acc });
+  }
+  return crumbs;
+}
+
+function parentPath(currentPath, libraryRoot) {
+  const root = libraryRoot || '/PTR-photos';
+  if (currentPath === root) return null;
+  const parts = currentPath.split('/').filter(Boolean);
+  parts.pop();
+  const parent = `/${parts.join('/')}`;
+  if (!parent.startsWith(root)) return root;
+  return parent || root;
 }
 
 export default function ProductLoaderNutstore({
@@ -86,7 +121,9 @@ export default function ProductLoaderNutstore({
   onPublished,
 }) {
   const [status, setStatus] = useState({ loading: true, ok: false, error: '' });
-  const [currentPath, setCurrentPath] = useState('/');
+  const [libraryRoot, setLibraryRoot] = useState('/PTR-photos');
+  const [libraryLabel, setLibraryLabel] = useState('PTR Photos');
+  const [currentPath, setCurrentPath] = useState('/PTR-photos');
   const [entries, setEntries] = useState([]);
   const [browseLoading, setBrowseLoading] = useState(false);
   const [search, setSearch] = useState('');
@@ -100,16 +137,14 @@ export default function ProductLoaderNutstore({
 
   const batchSub1Options = batchDefaultCategoryId ? childrenOf(taxonomyTree, batchDefaultCategoryId) : [];
 
-  const breadcrumbs = useMemo(() => {
-    const parts = currentPath.split('/').filter(Boolean);
-    const crumbs = [{ label: 'Root', path: '/' }];
-    let acc = '';
-    for (const part of parts) {
-      acc += `/${part}`;
-      crumbs.push({ label: part, path: acc });
-    }
-    return crumbs;
-  }, [currentPath]);
+  const breadcrumbs = useMemo(
+    () => relativeCrumbs(currentPath, libraryRoot, libraryLabel),
+    [currentPath, libraryRoot, libraryLabel],
+  );
+
+  const folders = useMemo(() => entries.filter((e) => e.type === 'dir'), [entries]);
+  const images = useMemo(() => entries.filter((e) => e.type === 'file' && e.isImage), [entries]);
+  const canGoUp = currentPath !== libraryRoot;
 
   const grouped = useMemo(() => ({
     ready: items.filter((i) => i.group === 'ready'),
@@ -124,8 +159,11 @@ export default function ProductLoaderNutstore({
     try {
       const res = await fetch('/api/nutstore-browse?action=status');
       const json = await readApiJson(res, { fallback: 'Nutstore status failed' });
+      const root = json.libraryRoot || json.rootPath || '/PTR-photos';
+      setLibraryRoot(root);
+      setLibraryLabel(json.libraryLabel || 'PTR Photos');
+      setCurrentPath(root);
       setStatus({ loading: false, ok: Boolean(json.ok), error: json.error || '' });
-      if (json.rootPath) setCurrentPath(json.rootPath);
     } catch (err) {
       setStatus({ loading: false, ok: false, error: err.message || 'Nutstore unavailable' });
     }
@@ -141,6 +179,7 @@ export default function ProductLoaderNutstore({
       const json = await readApiJson(res, { fallback: 'Browse failed' });
       setEntries(json.entries || []);
       setCurrentPath(json.path || path);
+      if (json.libraryRoot) setLibraryRoot(json.libraryRoot);
     } catch (err) {
       setError(err.message || 'Failed to load folder');
       setEntries([]);
@@ -152,8 +191,21 @@ export default function ProductLoaderNutstore({
   useEffect(() => { void loadStatus(); }, [loadStatus]);
 
   useEffect(() => {
-    if (status.ok) void loadDirectory(currentPath, search);
+    if (status.ok && currentPath) void loadDirectory(currentPath, search);
   }, [status.ok]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const goTo = (path) => {
+    void loadDirectory(path, search);
+  };
+
+  const goUp = () => {
+    const parent = parentPath(currentPath, libraryRoot);
+    if (parent) void loadDirectory(parent, search);
+  };
+
+  const goHome = () => {
+    void loadDirectory(libraryRoot, search);
+  };
 
   const toggleSelect = (path) => {
     setSelected((prev) => {
@@ -165,9 +217,15 @@ export default function ProductLoaderNutstore({
   };
 
   const selectAllImagesInView = () => {
-    const imagePaths = entries.filter((e) => e.type === 'file' && e.isImage).map((e) => e.path);
-    setSelected(new Set(imagePaths));
+    setSelected((prev) => {
+      const next = new Set(prev);
+      for (const img of images) next.add(img.path);
+      return next;
+    });
+    onShowToast?.(`Selected ${images.length} image(s) in this folder`, 'success');
   };
+
+  const clearSelection = () => setSelected(new Set());
 
   const selectEntireFolder = async () => {
     setBrowseLoading(true);
@@ -177,7 +235,7 @@ export default function ProductLoaderNutstore({
       const json = await readApiJson(res, { fallback: 'Recursive list failed' });
       const paths = (json.entries || []).map((e) => e.path);
       setSelected(new Set(paths));
-      onShowToast?.(`Selected ${paths.length} image(s) in folder tree`, 'success');
+      onShowToast?.(`Selected ${paths.length} image(s) under this folder`, 'success');
     } catch (err) {
       setError(err.message || 'Failed to select folder');
     } finally {
@@ -330,18 +388,22 @@ export default function ProductLoaderNutstore({
 
   if (status.loading) {
     return (
-      <div className="pl-section">
-        <p className="adm-muted"><Loader2 size={14} className="spin" /> Connecting to Nutstore…</p>
+      <div className="pl-section pl-nutstore">
+        <p className="adm-muted"><Loader2 size={14} className="spin" /> Connecting to PTR Photos on Nutstore…</p>
       </div>
     );
   }
 
   if (!status.ok) {
     return (
-      <div className="pl-section">
-        <p className="pl-error">{status.error || 'Nutstore is not configured or unreachable.'}</p>
+      <div className="pl-section pl-nutstore">
+        <div className="pl-nutstore-guide pl-nutstore-guide--error">
+          <h3>Could not open PTR Photos</h3>
+          <p className="pl-error">{status.error || 'Nutstore is not configured or unreachable.'}</p>
+          <p className="adm-muted">Expected folder: <strong>/PTR-photos</strong> on your Nutstore account.</p>
+        </div>
         <button type="button" className="adm-btn-ghost" onClick={() => void loadStatus()}>
-          <RefreshCw size={14} /> Retry
+          <RefreshCw size={14} /> Retry connection
         </button>
       </div>
     );
@@ -352,105 +414,149 @@ export default function ProductLoaderNutstore({
 
   return (
     <div className="pl-section pl-nutstore">
-      <p className="pl-section-note">
-        Browse your Nutstore folders. Each image filename is the product code (one image per item).
-        Look up Positill for price and description, then publish live or send to the archive queue.
-      </p>
+      <div className="pl-nutstore-guide">
+        <h3 className="pl-nutstore-guide-title">PTR Photos → Website</h3>
+        <ol className="pl-nutstore-steps">
+          {STEPS.map((step) => (
+            <li key={step}>{step}</li>
+          ))}
+        </ol>
+      </div>
+
+      <div className="pl-nutstore-nav">
+        <div className="pl-nutstore-nav-buttons">
+          <button type="button" className="adm-btn-ghost" disabled={!canGoUp || browseLoading} onClick={goUp}>
+            <ArrowLeft size={15} /> Up
+          </button>
+          <button type="button" className="adm-btn-ghost" disabled={browseLoading} onClick={goHome}>
+            <Home size={15} /> PTR Photos home
+          </button>
+          <button type="button" className="adm-btn-ghost" disabled={browseLoading} onClick={() => void loadDirectory(currentPath, search)}>
+            <RefreshCw size={15} /> Refresh
+          </button>
+        </div>
+
+        <nav className="pl-nutstore-crumbs" aria-label="Folder path">
+          {breadcrumbs.map((crumb, idx) => (
+            <span key={crumb.path} className="pl-nutstore-crumb">
+              {idx > 0 && <ChevronRight size={14} className="pl-nutstore-crumb-sep" />}
+              <button
+                type="button"
+                className={idx === breadcrumbs.length - 1 ? 'pl-nutstore-crumb--current' : ''}
+                onClick={() => goTo(crumb.path)}
+              >
+                {crumb.label}
+              </button>
+            </span>
+          ))}
+        </nav>
+      </div>
 
       <div className="pl-nutstore-toolbar">
         <div className="pl-nutstore-search">
-          <Search size={14} />
+          <Search size={15} />
           <input
             type="search"
-            placeholder="Filter current folder…"
+            placeholder="Filter folders and images in this location…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') void loadDirectory(currentPath, search); }}
           />
           <button type="button" className="adm-btn-ghost" onClick={() => void loadDirectory(currentPath, search)}>
-            Search
+            Filter
           </button>
         </div>
-        <button type="button" className="adm-btn-ghost" onClick={() => void loadDirectory(currentPath)}>
-          <RefreshCw size={14} /> Refresh
-        </button>
       </div>
 
-      <nav className="pl-nutstore-crumbs" aria-label="Folder path">
-        {breadcrumbs.map((crumb, idx) => (
-          <span key={crumb.path} className="pl-nutstore-crumb">
-            {idx > 0 && <ChevronRight size={12} />}
-            <button type="button" onClick={() => { setSelected(new Set()); void loadDirectory(crumb.path); }}>
-              {crumb.label}
-            </button>
-          </span>
-        ))}
-      </nav>
-
-      <div className="pl-nutstore-actions">
+      <div className="pl-nutstore-select-bar">
+        <button type="button" className="adm-btn-ghost" disabled={browseLoading || !images.length} onClick={selectAllImagesInView}>
+          Select all images here ({images.length})
+        </button>
         <button type="button" className="adm-btn-ghost" disabled={browseLoading} onClick={() => void selectEntireFolder()}>
-          <FolderOpen size={14} /> Select entire folder (recursive)
+          <FolderOpen size={14} /> Select all images in subfolders
         </button>
-        <button type="button" className="adm-btn-ghost" disabled={!entries.some((e) => e.isImage)} onClick={selectAllImagesInView}>
-          Select images in view ({entries.filter((e) => e.isImage).length})
-        </button>
-        <span className="adm-muted">{selected.size} selected</span>
-      </div>
-
-      <div className="pl-nutstore-browser">
-        {browseLoading ? (
-          <p className="adm-muted"><Loader2 size={14} className="spin" /> Loading…</p>
-        ) : (
-          <ul className="pl-nutstore-list">
-            {entries.map((entry) => (
-              <li key={entry.path} className={`pl-nutstore-row pl-nutstore-row--${entry.type}`}>
-                {entry.type === 'dir' ? (
-                  <button
-                    type="button"
-                    className="pl-nutstore-dir"
-                    onClick={() => { setSelected(new Set()); void loadDirectory(entry.path); }}
-                  >
-                    <Folder size={16} />
-                    <span>{entry.name}</span>
-                  </button>
-                ) : entry.isImage ? (
-                  <label className="pl-nutstore-file">
-                    <input
-                      type="checkbox"
-                      checked={selected.has(entry.path)}
-                      onChange={() => toggleSelect(entry.path)}
-                    />
-                    <NutstoreThumb path={entry.path} />
-                    <span className="pl-nutstore-name">{entry.name}</span>
-                  </label>
-                ) : (
-                  <span className="pl-nutstore-skip">
-                    <ImageIcon size={14} /> {entry.name}
-                  </span>
-                )}
-              </li>
-            ))}
-            {!entries.length && <li className="adm-muted">This folder is empty.</li>}
-          </ul>
+        {selected.size > 0 && (
+          <button type="button" className="adm-btn-ghost" onClick={clearSelection}>
+            Clear selection ({selected.size})
+          </button>
         )}
       </div>
 
-      {error && <p className="pl-error">{error}</p>}
+      <div className="pl-nutstore-panels">
+        <section className="pl-nutstore-panel">
+          <header className="pl-nutstore-panel-head">
+            <Folder size={16} />
+            <span>Subfolders</span>
+            <span className="adm-muted">{folders.length}</span>
+          </header>
+          <div className="pl-nutstore-panel-body">
+            {browseLoading ? (
+              <p className="adm-muted pl-nutstore-loading"><Loader2 size={14} className="spin" /> Loading…</p>
+            ) : folders.length ? (
+              <ul className="pl-nutstore-folder-grid">
+                {folders.map((entry) => (
+                  <li key={entry.path}>
+                    <button type="button" className="pl-nutstore-folder-card" onClick={() => goTo(entry.path)}>
+                      <Folder size={20} />
+                      <span>{entry.name}</span>
+                      <ChevronRight size={16} />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="adm-muted pl-nutstore-empty">No subfolders — product images are listed on the right.</p>
+            )}
+          </div>
+        </section>
 
-      <div className="pl-action-row" style={{ marginTop: 12 }}>
+        <section className="pl-nutstore-panel pl-nutstore-panel--images">
+          <header className="pl-nutstore-panel-head">
+            <span>Product images</span>
+            <span className="adm-muted">{images.length}</span>
+          </header>
+          <div className="pl-nutstore-panel-body">
+            {browseLoading ? (
+              <p className="adm-muted pl-nutstore-loading"><Loader2 size={14} className="spin" /> Loading…</p>
+            ) : images.length ? (
+              <ul className="pl-nutstore-image-grid">
+                {images.map((entry) => (
+                  <li key={entry.path}>
+                    <label className={`pl-nutstore-image-card${selected.has(entry.path) ? ' pl-nutstore-image-card--on' : ''}`}>
+                      <input
+                        type="checkbox"
+                        checked={selected.has(entry.path)}
+                        onChange={() => toggleSelect(entry.path)}
+                      />
+                      <NutstoreThumb path={entry.path} className="pl-nutstore-image-card-thumb" />
+                      <span className="pl-nutstore-image-card-name">{entry.name}</span>
+                    </label>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="adm-muted pl-nutstore-empty">No images in this folder. Open a subfolder on the left.</p>
+            )}
+          </div>
+        </section>
+      </div>
+
+      {error && <p className="pl-error pl-nutstore-error">{error}</p>}
+
+      <div className="pl-nutstore-lookup-bar">
         <button type="button" className="adm-btn-red" disabled={scanning || !selected.size} onClick={() => void lookupSelected()}>
           {scanning ? <Loader2 size={14} className="spin" /> : <Search size={14} />}
-          Look up selected ({selected.size})
+          Step 3 — Look up {selected.size} selected in Positill
         </button>
       </div>
 
       {items.length > 0 && (
-        <>
+        <div className="pl-nutstore-results">
           <div className="pl-summary-dashboard">
-            <div><strong>{items.length}</strong><span>Selected</span></div>
+            <div><strong>{items.length}</strong><span>Looked up</span></div>
             <div><strong>{grouped.ready.length}</strong><span>Ready</span></div>
-            <div><strong>{grouped.needs_review.length}</strong><span>Needs Review</span></div>
-            <div><strong>{grouped.not_found.length}</strong><span>Not Found</span></div>
+            <div><strong>{grouped.needs_review.length}</strong><span>Needs review</span></div>
+            <div><strong>{grouped.not_found.length}</strong><span>Not found</span></div>
           </div>
 
           {processing && (
@@ -507,7 +613,7 @@ export default function ProductLoaderNutstore({
               Send to archive ({processable.length})
             </button>
           </div>
-        </>
+        </div>
       )}
     </div>
   );
