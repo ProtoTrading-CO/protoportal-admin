@@ -15,6 +15,7 @@ import {
 import categories from '../data/categories.json';
 import { isImageFile } from '../lib/parseIntakeFilename.js';
 import { readApiJson } from '../lib/apiError.js';
+import ProductLoaderNutstore from './productLoader/ProductLoaderNutstore';
 import ProductLoaderSingleImage from './productLoader/ProductLoaderSingleImage';
 import ProductLoaderFolder from './productLoader/ProductLoaderFolder';
 import ProductLoaderPublishHistory from './productLoader/ProductLoaderPublishHistory';
@@ -22,8 +23,9 @@ import ProductLoaderPublishSuccess from './productLoader/ProductLoaderPublishSuc
 import ProductLoaderImageReplace from './productLoader/ProductLoaderImageReplace';
 
 const LOADER_TABS = [
+  { id: 'nutstore', label: 'Nutstore' },
   { id: 'single', label: 'Single Image' },
-  { id: 'folder', label: 'Image Folder' },
+  { id: 'folder', label: 'Local Folder' },
   { id: 'history', label: 'Publish History' },
   { id: 'image-replace', label: 'Image Replace' },
 ];
@@ -169,7 +171,7 @@ export default function ProductLoaderPanel({
   onGoToApollo,
   mainSiteUrl = 'https://site.proto.co.za',
 }) {
-  const [activeTab, setActiveTab] = useState('single');
+  const [activeTab, setActiveTab] = useState('nutstore');
   const [publishSuccess, setPublishSuccess] = useState(null);
   const fileRef = useRef(null);
   const folderRef = useRef(null);
@@ -993,6 +995,20 @@ export default function ProductLoaderPanel({
           </button>
         ))}
       </nav>
+
+      {activeTab === 'nutstore' && (
+        <ProductLoaderNutstore
+          taxonomyTree={taxonomyTree}
+          batchDefaultCategoryId={batchDefaultCategoryId}
+          setBatchDefaultCategoryId={setBatchDefaultCategoryId}
+          batchDefaultSub1Id={batchDefaultSub1Id}
+          setBatchDefaultSub1Id={setBatchDefaultSub1Id}
+          batchOverwrite={batchOverwrite}
+          setBatchOverwrite={setBatchOverwrite}
+          onShowToast={onShowToast}
+          onPublished={(result) => setPublishSuccess(result)}
+        />
+      )}
 
       {activeTab === 'single' && (
         <ProductLoaderSingleImage
