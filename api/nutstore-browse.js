@@ -38,6 +38,7 @@ export default async function handler(req, res) {
     }
 
     const path = clampToLibrary(req.query.path || rootPath);
+    const requestHref = String(req.query.href || '').trim() || null;
     const recursive = String(req.query.recursive || '').trim() === '1';
     const q = String(req.query.q || '').trim().toLowerCase();
 
@@ -57,7 +58,7 @@ export default async function handler(req, res) {
         });
       }
 
-      const { entries, cached } = await listNutstoreDirectory(path);
+      const { entries, cached } = await listNutstoreDirectory(path, { requestHref });
       const filtered = q
         ? entries.filter((e) => e.name.toLowerCase().includes(q) || e.path.toLowerCase().includes(q))
         : entries;

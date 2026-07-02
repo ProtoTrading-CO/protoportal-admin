@@ -24,7 +24,7 @@ export function formatNutstoreError(err) {
   }
   const msg = String(err?.message || err || 'Nutstore request failed');
   if (msg.includes('ObjectNotFound') || msg.includes('404')) {
-    return 'Folder not found on Nutstore. Use PTR Photos home or pick a subfolder that exists.';
+    return 'Nutstore could not list that folder (pagination or path error). Click PTR Photos home and try again, or pick a different subfolder.';
   }
   return msg.length > 220 ? `${msg.slice(0, 220)}…` : msg;
 }

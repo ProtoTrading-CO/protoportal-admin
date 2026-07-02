@@ -142,6 +142,7 @@ function parsePropfindResponse(xml) {
     const isDir = isCollection(block);
     responses.push({
       href,
+      requestHref: href,
       path,
       name,
       type: isDir ? 'dir' : 'file',
@@ -157,7 +158,15 @@ function parsePropfindResponse(xml) {
 function extractNextLink(linkHeader) {
   const raw = String(linkHeader || '');
   const m = raw.match(/<([^>]+)>;\s*rel="next"/i);
-  return m ? m[1].trim() : null;
+  if (!m) return null;
+  let url = m[1].trim();
+  try {
+    // Nutstore pagination URLs double-encode spaces (%2520). Decode once for fetch.
+    url = decodeURIComponent(url);
+  } catch {
+    /* use raw url */
+  }
+  return url;
 }
 
 async function propfindOnce(url) {
@@ -190,14 +199,35 @@ async function propfindOnce(url) {
   return { entries: parsePropfindResponse(text), nextUrl: extractNextLink(res.headers.get('link') || res.headers.get('Link')) };
 }
 
-export async function listNutstoreDirectory(requestPath = '/', { useCache = true } = {}) {
+function davUrlForHref(href) {
+  const raw = String(href || '').trim();
+  if (!raw) return null;
+  if (raw.startsWith('http://') || raw.startsWith('https://')) {
+    try {
+      return decodeURIComponent(raw);
+    } catch {
+      return raw;
+    }
+  }
+  const { baseUrl } = nutstoreConfig();
+  let path = raw;
+  if (path.startsWith('/dav/')) path = path.slice(4);
+  const encoded = path.split('/').map((seg) => encodeURIComponent(decodeURIComponent(seg))).join('/');
+  let url = `${baseUrl}${encoded.startsWith('/') ? encoded.slice(1) : encoded}`;
+  if (!url.endsWith('/') && !/\.[a-z0-9]+$/i.test(url)) url += '/';
+  return url;
+}
+
+export async function listNutstoreDirectory(requestPath = '/', { useCache = true, requestHref = null } = {}) {
   const path = clampToLibrary(requestPath);
   if (useCache) {
     const cached = getCachedDirectory(path);
     if (cached) return { path, entries: cached, cached: true };
   }
 
-  const url = davUrlForPath(path, { directory: true });
+  const url = requestHref
+    ? davUrlForHref(requestHref)
+    : davUrlForPath(path, { directory: true });
   const all = [];
   let currentUrl = url;
 

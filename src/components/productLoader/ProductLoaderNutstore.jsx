@@ -194,12 +194,13 @@ export default function ProductLoaderNutstore({
     return root;
   }, []);
 
-  const loadDirectory = useCallback(async (path, q = '') => {
+  const loadDirectory = useCallback(async (path, q = '', href = '') => {
     setBrowseLoading(true);
     setError('');
     try {
       const params = new URLSearchParams({ path });
       if (q.trim()) params.set('q', q.trim());
+      if (href) params.set('href', href);
       const res = await fetch(`/api/nutstore-browse?${params}`);
       const json = await readApiJson(res, { fallback: 'Browse failed' });
       setEntries(json.entries || []);
@@ -236,8 +237,8 @@ export default function ProductLoaderNutstore({
 
   useEffect(() => { void boot(); }, [boot]);
 
-  const goTo = (path) => {
-    void loadDirectory(path, search);
+  const goTo = (path, href = '') => {
+    void loadDirectory(path, search, href);
   };
 
   const goUp = () => {
@@ -538,7 +539,7 @@ export default function ProductLoaderNutstore({
               <ul className="pl-nutstore-folder-grid">
                 {folders.map((entry) => (
                   <li key={entry.path}>
-                    <button type="button" className="pl-nutstore-folder-card" onClick={() => goTo(entry.path)}>
+                    <button type="button" className="pl-nutstore-folder-card" onClick={() => goTo(entry.path, entry.href || entry.requestHref)}>
                       <Folder size={20} />
                       <span>{entry.name}</span>
                       <ChevronRight size={16} />
