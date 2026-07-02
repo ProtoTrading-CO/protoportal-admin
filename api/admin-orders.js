@@ -7,6 +7,8 @@ import {
   PAYMENT_RECEIVED_FORBIDDEN,
 } from './_fulfillment-auth.js';
 import { getPortalAdminClient, SITE_CONFIG_BUCKET } from './_site-config.js';
+import { ordersHasConfirmationSentAt } from './_order-confirmation-sent.js';
+import { parseOrderTab, parsePositiveInt } from './_admin-query-params.js';
 
 function getAdminClient() {
   return createClient(
@@ -17,6 +19,7 @@ function getAdminClient() {
 }
 
 const ORDER_SELECT = '*, customers(name, contact_name, email, phone, business_name, business_type, city, province, country, company_address, delivery_address, vat_number, customer_code, tier)';
+const LEGACY_CONFIRMATION_SCAN_LIMIT = 2000;
 
 function assertOrderScope(auth, orderId, res) {
   if (auth.type === 'admin') return true;
@@ -29,7 +32,7 @@ function safeSearchTerm(search) {
   return String(search || '').replace(/[%',()\\]/g, ' ').trim();
 }
 
-async function listConfirmationSentIds() {
+async function listLegacyConfirmationSentIds() {
   const supabase = getPortalAdminClient();
   const sent = new Set();
   let offset = 0;
@@ -47,9 +50,14 @@ async function listConfirmationSentIds() {
   return sent;
 }
 
-function orderMatchesTab(order, tab, confirmationSentIds) {
+function isConfirmationSent(order, legacyIds) {
+  if (order?.confirmation_sent_at) return true;
+  return legacyIds?.has?.(String(order?.id)) ?? false;
+}
+
+function orderMatchesTab(order, tab, legacyIds) {
   const key = normalizeOrderStatus(order?.status);
-  const sent = confirmationSentIds.has(String(order?.id));
+  const sent = isConfirmationSent(order, legacyIds);
   if (tab === 'new') return key === 'pending';
   if (tab === 'handed') return key === 'handed over';
   if (tab === 'progress') return key === 'order in progress';
@@ -73,45 +81,90 @@ function applyOrderSearch(query, term, customerIds) {
   if (!safe) return query;
   const parts = [
     `order_number.ilike.%${safe}%`,
-    `items::text.ilike.%${safe}%`,
-    `original_items::text.ilike.%${safe}%`,
+    `items.ilike.%${safe}%`,
+    `original_items.ilike.%${safe}%`,
   ];
   for (const id of customerIds) parts.push(`customer_id.eq.${id}`);
   return query.or(parts.join(','));
 }
 
-async function computeTabCounts(supabase, confirmationSentIds) {
+function applySentTabFilter(q) {
+  return q.eq('status', 'order sent').is('confirmation_sent_at', null);
+}
+
+function applyPaidTabFilter(q) {
+  return q.or('status.eq.payment received,and(status.eq.order sent,confirmation_sent_at.not.is.null)');
+}
+
+function isRangeNotSatisfiable(error) {
+  return /range not satisfiable|PGRST103/i.test(String(error?.message || ''));
+}
+
+async function computeTabCounts(supabase, useDbColumn, legacyIds) {
+  if (useDbColumn) {
+    const [all, newC, handed, progress, sentC, paidStatus, paidSent] = await Promise.all([
+      supabase.from('orders').select('*', { count: 'exact', head: true }),
+      supabase.from('orders').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
+      supabase.from('orders').select('*', { count: 'exact', head: true }).eq('status', 'handed over'),
+      supabase.from('orders').select('*', { count: 'exact', head: true }).eq('status', 'order in progress'),
+      supabase.from('orders').select('*', { count: 'exact', head: true }).eq('status', 'order sent').is('confirmation_sent_at', null),
+      supabase.from('orders').select('*', { count: 'exact', head: true }).eq('status', 'payment received'),
+      supabase.from('orders').select('*', { count: 'exact', head: true }).eq('status', 'order sent').not('confirmation_sent_at', 'is', null),
+    ]);
+    const err = [all, newC, handed, progress, sentC, paidStatus, paidSent].find((r) => r.error);
+    if (err?.error) throw err.error;
+    return {
+      all: all.count || 0,
+      new: newC.count || 0,
+      handed: handed.count || 0,
+      progress: progress.count || 0,
+      sent: sentC.count || 0,
+      paid: (paidStatus.count || 0) + (paidSent.count || 0),
+    };
+  }
+
   const { data, error } = await supabase.from('orders').select('id, status');
   if (error) throw error;
   const counts = { all: 0, new: 0, handed: 0, progress: 0, sent: 0, paid: 0 };
   for (const order of data || []) {
     counts.all += 1;
     for (const tab of ['new', 'handed', 'progress', 'sent', 'paid']) {
-      if (orderMatchesTab(order, tab, confirmationSentIds)) counts[tab] += 1;
+      if (orderMatchesTab(order, tab, legacyIds)) counts[tab] += 1;
     }
   }
   return counts;
 }
 
 async function fetchAdminOrdersPage(supabase, {
-  page, pageSize, search, tab, confirmationSentIds,
+  page, pageSize, search, tab, useDbColumn, legacyIds,
 }) {
   const term = safeSearchTerm(search);
   const customerIds = term ? await resolveCustomerIdsForSearch(supabase, term) : [];
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize - 1;
 
-  if (tab === 'sent' || tab === 'paid') {
-    let q = supabase.from('orders').select(ORDER_SELECT).order('created_at', { ascending: false });
+  if (useDbColumn && (tab === 'sent' || tab === 'paid')) {
+    let q = supabase.from('orders').select(ORDER_SELECT, { count: 'exact' }).order('created_at', { ascending: false });
+    q = applyOrderSearch(q, term, customerIds);
+    q = tab === 'sent' ? applySentTabFilter(q) : applyPaidTabFilter(q);
+    q = q.range(from, to);
+    const { data, error, count } = await q;
+    if (error && !isRangeNotSatisfiable(error)) throw error;
+    return { rows: error ? [] : (data || []), total: count || 0, page, pageSize };
+  }
+
+  if (!useDbColumn && (tab === 'sent' || tab === 'paid')) {
+    let q = supabase.from('orders').select(ORDER_SELECT).order('created_at', { ascending: false }).limit(LEGACY_CONFIRMATION_SCAN_LIMIT);
     q = applyOrderSearch(q, term, customerIds);
     const { data, error } = await q;
     if (error) throw error;
-    const filtered = (data || []).filter((o) => orderMatchesTab(o, tab, confirmationSentIds));
-    const total = filtered.length;
-    const from = (page - 1) * pageSize;
+    const filtered = (data || []).filter((o) => orderMatchesTab(o, tab, legacyIds));
     return {
       rows: filtered.slice(from, from + pageSize),
-      total,
+      total: filtered.length,
       page,
       pageSize,
+      truncated: (data || []).length >= LEGACY_CONFIRMATION_SCAN_LIMIT,
     };
   }
 
@@ -121,17 +174,10 @@ async function fetchAdminOrdersPage(supabase, {
   else if (tab === 'handed') q = q.eq('status', 'handed over');
   else if (tab === 'progress') q = q.eq('status', 'order in progress');
 
-  const from = (page - 1) * pageSize;
-  const to = from + pageSize - 1;
   q = q.range(from, to);
   const { data, error, count } = await q;
-  if (error) throw error;
-  return {
-    rows: data || [],
-    total: count || 0,
-    page,
-    pageSize,
-  };
+  if (error && !isRangeNotSatisfiable(error)) throw error;
+  return { rows: error ? [] : (data || []), total: count || 0, page, pageSize };
 }
 
 export default async function handler(req, res) {
@@ -182,14 +228,23 @@ export default async function handler(req, res) {
       return res.status(200).json({ rows: data || [] });
     }
 
-    const pageNum = Math.max(1, parseInt(page, 10) || 1);
-    const size = Math.min(200, Math.max(1, parseInt(pageSize, 10) || 50));
-    const tabKey = String(tab || 'all').trim();
-    const confirmationSentIds = await listConfirmationSentIds();
+    let pageNum;
+    let size;
+    let tabKey;
+    try {
+      pageNum = parsePositiveInt(page, { name: 'page', min: 1, max: 10_000, fallback: 1 });
+      size = parsePositiveInt(pageSize, { name: 'pageSize', min: 1, max: 200, fallback: 50 });
+      tabKey = parseOrderTab(tab);
+    } catch (err) {
+      return res.status(400).json({ error: err.message });
+    }
+
+    const useDbColumn = await ordersHasConfirmationSentAt(supabase);
+    const legacyIds = useDbColumn ? null : await listLegacyConfirmationSentIds();
 
     try {
-      const tabCounts = await computeTabCounts(supabase, confirmationSentIds);
-      if (tabKey === 'all' && !search) {
+      const tabCounts = await computeTabCounts(supabase, useDbColumn, legacyIds);
+      if (tabKey === 'all' && !safeSearchTerm(search)) {
         const from = (pageNum - 1) * size;
         const to = from + size - 1;
         const { data, error, count } = await supabase
@@ -197,9 +252,9 @@ export default async function handler(req, res) {
           .select(ORDER_SELECT, { count: 'exact' })
           .order('created_at', { ascending: false })
           .range(from, to);
-        if (error) return res.status(400).json({ error: error.message });
+        if (error && !isRangeNotSatisfiable(error)) return res.status(400).json({ error: error.message });
         return res.status(200).json({
-          rows: data || [],
+          rows: error ? [] : (data || []),
           total: count || 0,
           page: pageNum,
           pageSize: size,
@@ -212,7 +267,8 @@ export default async function handler(req, res) {
         pageSize: size,
         search,
         tab: tabKey,
-        confirmationSentIds,
+        useDbColumn,
+        legacyIds,
       });
       return res.status(200).json({ ...result, tabCounts });
     } catch (err) {
@@ -221,17 +277,26 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'PATCH') {
-    const { id, notes, advanceWorkflow, senderUserId, senderName, ...raw } = req.body || {};
+    const { id, notes, advanceWorkflow, senderUserId, senderName, status, ...raw } = req.body || {};
     if (!id) return res.status(400).json({ error: 'id required' });
     if (!assertOrderScope(auth, id, res)) return;
+
+    if (status !== undefined) {
+      const direct = String(status || '').trim().toLowerCase();
+      if (direct && !['viewed', 'paid', 'delivered'].includes(direct)) {
+        return res.status(400).json({
+          error: 'Direct status changes are not allowed — use advanceWorkflow',
+        });
+      }
+    }
 
     const patch = { ...raw };
     if (notes !== undefined) patch.order_change_notes = notes;
 
     // Legacy timestamp shims — remove after direct status PATCH is fully retired
-    if (patch.status === 'viewed' && !patch.viewed_at) patch.viewed_at = new Date().toISOString();
-    if (patch.status === 'paid' && !patch.paid_at) patch.paid_at = new Date().toISOString();
-    if (patch.status === 'delivered' && !patch.delivered_at) patch.delivered_at = new Date().toISOString();
+    if (status === 'viewed' && !patch.viewed_at) patch.viewed_at = new Date().toISOString();
+    if (status === 'paid' && !patch.paid_at) patch.paid_at = new Date().toISOString();
+    if (status === 'delivered' && !patch.delivered_at) patch.delivered_at = new Date().toISOString();
 
     const allowed = new Set([
       'final_items', 'original_items', 'order_change_notes', 'order_match',
