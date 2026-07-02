@@ -53,6 +53,11 @@ export default async function handler(req, res) {
       failed.push({ email, error: 'Missing customer code — assign a code before approving' });
       continue;
     }
+    const code = String(customer.customer_code || '').trim().toUpperCase();
+    if (!/^[A-Z0-9]{6}$/.test(code)) {
+      failed.push({ email, error: 'Customer code must be exactly 6 letters or numbers' });
+      continue;
+    }
     const { error } = await supabase
       .from('customers')
       .update({ is_approved: true })
