@@ -4,9 +4,15 @@ const DEFAULT_WEBDAV_URL = 'https://dav.jianguoyun.com/dav/';
 
 function nutstoreConfig() {
   const baseUrl = String(process.env.NUTSTORE_WEBDAV_URL || DEFAULT_WEBDAV_URL).trim().replace(/\/+$/, '') + '/';
-  const user = String(process.env.NUTSTORE_USER || '').trim();
-  const password = String(process.env.NUTSTORE_APP_PASSWORD || '').trim();
-  const rootPath = normalizeDavPath(process.env.NUTSTORE_ROOT_PATH || '/');
+  const user = String(
+    process.env.NUTSTORE_USER || process.env.NUTSTORE_WEBDAV_USER || '',
+  ).trim();
+  const password = String(
+    process.env.NUTSTORE_APP_PASSWORD || process.env.NUTSTORE_WEBDAV_PASSWORD || '',
+  ).trim();
+  const rootPath = normalizeDavPath(
+    process.env.NUTSTORE_ROOT_PATH || process.env.NUTSTORE_PHOTOS_ROOT || '/',
+  );
   return { baseUrl, user, password, rootPath };
 }
 
@@ -17,7 +23,7 @@ export function isNutstoreConfigured() {
 
 export function nutstoreSetupMessage() {
   if (isNutstoreConfigured()) return null;
-  return 'Set NUTSTORE_USER and NUTSTORE_APP_PASSWORD on Vercel (Nutstore third-party app password).';
+  return 'Set NUTSTORE_USER + NUTSTORE_APP_PASSWORD (or NUTSTORE_WEBDAV_USER + NUTSTORE_WEBDAV_PASSWORD) on Vercel.';
 }
 
 function authHeader() {
