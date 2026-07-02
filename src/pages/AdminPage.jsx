@@ -986,7 +986,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
       const pending = pendingReorderSaveRef.current;
       pendingReorderSaveRef.current = null;
       if (pending) void commitReorderOrder(pending.orderedProducts, pending.meta);
-    }, 900);
+    }, 600);
   }, [commitReorderOrder]);
 
   useEffect(() => () => {

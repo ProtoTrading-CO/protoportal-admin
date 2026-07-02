@@ -31,6 +31,7 @@ import { queryClient } from '../lib/queryClient';
 import { queryKeys } from '../lib/queryKeys';
 import { getActiveImageBatch, subscribeImageBatch } from '../lib/imageBatchTracker';
 import { sortOrderCategoryKey, lookupSortOrder, applySkuOrder, sortOrderLookupKeys } from '../lib/taxonomy';
+import { persistSortOrder, fetchSortOrderStore, sortMetaForPath } from '../lib/sortOrderStore';
 import { exportProductsCatalogXlsx, exportAllProductsCatalogXlsx, exportSelectedProductsXlsx } from '../lib/exportLiveProducts';
 import { bulkMoveProducts, invalidateAdminCache } from '../lib/products';
 import { formatWebsitePrice } from '../lib/pricing';
@@ -387,13 +388,10 @@ export default function ProductManagerEngine({
   const loadSortOrder = useCallback(async (baseRows) => {
     if (!categoryPath.length || categoryKey === '__all__') return;
     try {
-      const res = await fetch(`/api/category-sort-order?_=${Date.now()}`);
-      const store = await res.json();
-      if (!res.ok) return;
+      const store = await fetchSortOrderStore({ force: true });
+      const meta = sortMetaForPath(store, categoryPath, tree);
+      setSortOrderMeta({ updatedAt: meta.updatedAt });
       const skuOrder = lookupSortOrder(store.orders || {}, categoryPath, tree);
-      const keys = sortOrderLookupKeys(categoryPath, tree);
-      const matchedKey = keys.find((k) => store.orders?.[k]?.skuOrder?.length);
-      setSortOrderMeta({ updatedAt: store.orders?.[matchedKey || categoryKey]?.updatedAt || null });
       if (skuOrder?.length && baseRows?.length) {
         setReorderProducts(applySkuOrder(baseRows, skuOrder));
       }
@@ -434,26 +432,20 @@ export default function ProductManagerEngine({
     }
     const skuOrder = next.map((p) => p.id);
     try {
-      const res = await fetch('/api/category-sort-order', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          categoryKey,
-          skuOrder,
-          legacyKeys: sortOrderLookupKeys(categoryPath, tree).filter((k) => k !== categoryKey),
-        }),
+      const json = await persistSortOrder({
+        categoryKey,
+        skuOrder,
+        legacyKeys: sortOrderLookupKeys(categoryPath, tree).filter((k) => k !== categoryKey),
       });
-      const json = await res.json().catch(() => ({}));
-      if (res.status === 409) {
-        onShowToast?.(json.error || 'Reorder conflict — reload', 'error');
-        void loadSortOrder();
-        return;
-      }
-      if (!res.ok) throw new Error(json.error || 'Failed to save sort order');
       setSortOrderMeta({ updatedAt: json.updatedAt });
       setReorderDirty(false);
       onShowToast?.('Sort order saved — live site updates within ~30s', 'success');
     } catch (err) {
+      if (err.status === 409) {
+        onShowToast?.(err.message || 'Reorder conflict — reload', 'error');
+        void loadSortOrder(rowsRef.current);
+        return;
+      }
       onShowToast?.(err.message || 'Failed to save sort order', 'error');
       setReorderDirty(true);
     }
@@ -466,8 +458,8 @@ export default function ProductManagerEngine({
       const pending = pendingReorderSaveRef.current;
       pendingReorderSaveRef.current = null;
       if (pending) void persistOrder(pending);
-    }, 450);
-  }, [categoryKey, categoryPath, tree, onShowToast]);
+    }, 600);
+  }, [categoryKey, categoryPath, tree, onShowToast, loadSortOrder, reorderProducts]);
 
   useEffect(() => () => {
     if (reorderSaveTimerRef.current) clearTimeout(reorderSaveTimerRef.current);
