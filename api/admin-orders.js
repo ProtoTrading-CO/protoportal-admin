@@ -92,8 +92,15 @@ function applySentTabFilter(q) {
   return q.eq('status', 'order sent').is('confirmation_sent_at', null);
 }
 
-function applyPaidTabFilter(q) {
-  return q.or('status.eq.payment received,and(status.eq.order sent,confirmation_sent_at.not.is.null)');
+function isRangeNotSatisfiable(error) {
+  return /range not satisfiable|PGRST103/i.test(String(error?.message || ''));
+}
+
+async function runPagedQuery(q) {
+  const { data, error, count } = await q;
+  if (!error) return { data: data || [], count: count || 0, error: null };
+  if (isRangeNotSatisfiable(error)) return { data: [], count: count || 0, error: null };
+  return { data: [], count: 0, error };
 }
 
 async function computeTabCounts(supabase, useDbColumn, legacyIds) {
@@ -145,8 +152,8 @@ async function fetchAdminOrdersPage(supabase, {
     q = tab === 'sent' ? applySentTabFilter(q) : applyPaidTabFilter(q);
     q = q.range(from, to);
     const { data, error, count } = await q;
-    if (error) throw error;
-    return { rows: data || [], total: count || 0, page, pageSize };
+    if (error && !isRangeNotSatisfiable(error)) throw error;
+    return { rows: error ? [] : (data || []), total: count || 0, page, pageSize };
   }
 
   if (!useDbColumn && (tab === 'sent' || tab === 'paid')) {
@@ -172,8 +179,8 @@ async function fetchAdminOrdersPage(supabase, {
 
   q = q.range(from, to);
   const { data, error, count } = await q;
-  if (error) throw error;
-  return { rows: data || [], total: count || 0, page, pageSize };
+  if (error && !isRangeNotSatisfiable(error)) throw error;
+  return { rows: error ? [] : (data || []), total: count || 0, page, pageSize };
 }
 
 export default async function handler(req, res) {
@@ -248,9 +255,9 @@ export default async function handler(req, res) {
           .select(ORDER_SELECT, { count: 'exact' })
           .order('created_at', { ascending: false })
           .range(from, to);
-        if (error) return res.status(400).json({ error: error.message });
+        if (error && !isRangeNotSatisfiable(error)) return res.status(400).json({ error: error.message });
         return res.status(200).json({
-          rows: data || [],
+          rows: error ? [] : (data || []),
           total: count || 0,
           page: pageNum,
           pageSize: size,
