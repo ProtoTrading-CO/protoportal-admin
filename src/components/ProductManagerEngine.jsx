@@ -294,6 +294,8 @@ export default function ProductManagerEngine({
   const [reorderLoading, setReorderLoading] = useState(false);
   const [sortOrderMeta, setSortOrderMeta] = useState({ updatedAt: null });
   const [reorderDirty, setReorderDirty] = useState(false);
+  const [catalogChangedWhileDirty, setCatalogChangedWhileDirty] = useState(false);
+  const [reorderResyncNonce, setReorderResyncNonce] = useState(0);
   const [reorderSaving, setReorderSaving] = useState(false);
   const [exportingXlsx, setExportingXlsx] = useState(false);
   const [exportingSelected, setExportingSelected] = useState(false);
@@ -311,6 +313,8 @@ export default function ProductManagerEngine({
   const panelTopRef = useRef(null);
   const reorderSaveTimerRef = useRef(null);
   const pendingReorderSaveRef = useRef(null);
+  const reorderSyncKeyRef = useRef('');
+  const catalogTotalWhileDirtyRef = useRef(null);
   const isMobile = useMediaQuery('(max-width: 900px)');
 
   const mutations = useCatalogMutations();
@@ -365,8 +369,7 @@ export default function ProductManagerEngine({
     stockFilter: status === 'archived' ? archiveStockView : undefined,
   }), [status, page, pageSize, debouncedSearch, categoryPath, archiveStockView]);
 
-  const catalogQueryEnabled = status !== 'approval'
-    && !(reorderMode && status === 'live' && categoryPath.length > 0);
+  const catalogQueryEnabled = status !== 'approval';
 
   const { data, isLoading, isFetching, isPlaceholderData } = useCatalogQuery(catalogParams, {
     enabled: catalogQueryEnabled,
@@ -403,13 +406,25 @@ export default function ProductManagerEngine({
     } catch { /* ignore */ }
   }, [categoryPath, categoryKey, tree]);
 
+  const reorderSyncKey = `${reorderMode}|${status}|${categoryKey}`;
+
   useEffect(() => {
     if (!reorderMode || status !== 'live' || !categoryPath.length || categoryKey === '__all__') {
+      reorderSyncKeyRef.current = '';
       setReorderExpectedTotal(null);
+      setCatalogChangedWhileDirty(false);
+      catalogTotalWhileDirtyRef.current = null;
       return undefined;
     }
+
+    const syncKeyChanged = reorderSyncKeyRef.current !== reorderSyncKey;
+    if (!syncKeyChanged && reorderDirty) return undefined;
+    reorderSyncKeyRef.current = reorderSyncKey;
+
     let cancelled = false;
     setReorderLoading(true);
+    setCatalogChangedWhileDirty(false);
+    catalogTotalWhileDirtyRef.current = data?.total ?? null;
     fetchAllCatalogRows({ status: 'live', categoryPath, search: '' })
       .then((allRows) => {
         if (cancelled) return;
@@ -425,7 +440,25 @@ export default function ProductManagerEngine({
         if (!cancelled) setReorderLoading(false);
       });
     return () => { cancelled = true; };
-  }, [reorderMode, status, categoryPath, categoryKey, loadSortOrder, onShowToast]);
+  }, [reorderSyncKey, reorderResyncNonce, reorderDirty, categoryPath, categoryKey, status, loadSortOrder, onShowToast, data?.total]);
+
+  useEffect(() => {
+    if (!reorderMode || status !== 'live' || !reorderDirty) return;
+    const t = data?.total;
+    if (t == null) return;
+    if (catalogTotalWhileDirtyRef.current != null && catalogTotalWhileDirtyRef.current !== t) {
+      setCatalogChangedWhileDirty(true);
+    }
+    catalogTotalWhileDirtyRef.current = t;
+  }, [data?.total, reorderMode, status, reorderDirty]);
+
+  const discardDirtyReorderSync = useCallback(() => {
+    setCatalogChangedWhileDirty(false);
+    setReorderDirty(false);
+    reorderSyncKeyRef.current = '';
+    catalogTotalWhileDirtyRef.current = null;
+    setReorderResyncNonce((n) => n + 1);
+  }, []);
 
   const reorderIncomplete = reorderExpectedTotal != null
     && reorderProducts.length !== reorderExpectedTotal;
@@ -1123,6 +1156,18 @@ export default function ProductManagerEngine({
                   <span className="adm-reorder-count">{reorderProducts.length} products in this view</span>
                   {reorderDirty && <span className="adm-pill adm-pill--warn">Unsaved order</span>}
                   {debouncedSearch && <span className="adm-muted" style={{ fontSize: 12 }}>Clear search to save</span>}
+                  {catalogChangedWhileDirty && (
+                    <span className="adm-pill adm-pill--warn" style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                      Catalogue changed — reload to sync
+                      <button
+                        type="button"
+                        className="adm-btn-ghost adm-btn--sm"
+                        onClick={() => discardDirtyReorderSync()}
+                      >
+                        Reload
+                      </button>
+                    </span>
+                  )}
                   {reorderIncomplete && (
                     <span className="adm-pill adm-pill--warn">Category incomplete — reload before saving</span>
                   )}
