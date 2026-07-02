@@ -10,3 +10,9 @@ COMMENT ON COLUMN public.orders.confirmation_sent_at IS
 CREATE INDEX IF NOT EXISTS orders_confirmation_sent_at_idx
   ON public.orders (confirmation_sent_at)
   WHERE confirmation_sent_at IS NOT NULL;
+
+-- Denormalized line-item haystack for admin order search (jsonb ilike is not supported in PostgREST).
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS items_search text
+  GENERATED ALWAYS AS (
+    trim(both from coalesce(items::text, '') || ' ' || coalesce(original_items::text, ''))
+  ) STORED;
