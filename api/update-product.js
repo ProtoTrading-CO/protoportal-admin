@@ -67,11 +67,12 @@ export default async function handler(req, res) {
   let table = 'website_stock';
   let { data: product, error: lookupError } = await supabase
     .from('website_stock')
-    .select('sku, barcode, archived_by, updated_at')
+    .select('sku, barcode, updated_at')
     .eq('sku', sku)
     .maybeSingle();
 
   if (lookupError) return res.status(400).json({ error: lookupError.message });
+  if (product) product.archived_by = null;
 
   if (!product) {
     const archived = await supabase
