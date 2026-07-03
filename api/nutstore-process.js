@@ -253,19 +253,32 @@ export default async function handler(req, res) {
   }
 
   const sb = getStockClient();
-  const results = [];
+  // Concurrency 4 works with Nutstore's ~350ms paced fetch — WebDAV downloads
+  // are the bottleneck. Higher parallelism risks 503 rate-limit errors even
+  // with the shared paced fetcher.
+  const NUTSTORE_CONCURRENCY = 4;
+  const results = new Array(items.length);
+  let next = 0;
 
-  for (const raw of items) {
-    const sku = String(raw.code || '').trim().toUpperCase();
-    try {
-      const result = action === 'publish'
-        ? await publishOne(sb, raw, { overwriteImage })
-        : await archiveOne(sb, raw);
-      results.push({ sku, ok: true, ...result });
-    } catch (err) {
-      results.push({ sku, ok: false, error: err.message || 'failed', code: err.code || null });
+  async function worker() {
+    while (next < items.length) {
+      const idx = next;
+      next += 1;
+      const raw = items[idx];
+      const sku = String(raw.code || '').trim().toUpperCase();
+      try {
+        const result = action === 'publish'
+          ? await publishOne(sb, raw, { overwriteImage })
+          : await archiveOne(sb, raw);
+        results[idx] = { sku, ok: true, ...result };
+      } catch (err) {
+        results[idx] = { sku, ok: false, error: err.message || 'failed', code: err.code || null };
+      }
     }
   }
+
+  const workers = Math.min(NUTSTORE_CONCURRENCY, items.length);
+  await Promise.all(Array.from({ length: workers }, () => worker()));
 
   const failed = results.filter((r) => !r.ok);
   const succeeded = results.filter((r) => r.ok);

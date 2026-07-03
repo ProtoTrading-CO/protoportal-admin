@@ -5,7 +5,7 @@ import { nutstoreBasename, parseNutstoreFilename } from './_nutstore-filename.js
 import { isPathInLibrary } from './_nutstore-webdav.js';
 import {
   classifyBatchItem,
-  fetchDormantSkuSet,
+  getCachedDormantSkuSet,
   resolveProductLoaderMatch,
 } from './_product-loader-lookup.js';
 
@@ -35,55 +35,31 @@ async function mapPool(items, concurrency, fn) {
   return results;
 }
 
-async function resolvePath(sb, rawPath, dormantSkus) {
+function parseOnePath(rawPath) {
   const path = String(rawPath || '').trim();
   if (!isPathInLibrary(path)) {
-    return {
-      path,
-      filename: nutstoreBasename(path),
-      code: '',
-      title: '',
-      price: 0,
-      imageSlot: 1,
-      warnings: ['invalid_filename'],
-      parseError: 'outside_library',
-      websiteStatus: 'not_found',
-      group: 'not_found',
-    };
+    return { path, filename: nutstoreBasename(path), parseError: 'outside_library', parsed: null };
   }
-
   const filename = nutstoreBasename(path);
   const parsed = parseNutstoreFilename(filename);
-
   if (parsed.parseError || !parsed.code) {
-    return {
-      path,
-      filename,
-      code: '',
-      title: '',
-      price: 0,
-      imageSlot: 1,
-      warnings: ['invalid_filename'],
-      parseError: parsed.parseError,
-      websiteStatus: 'not_found',
-      group: 'not_found',
-    };
+    return { path, filename, parseError: parsed.parseError || 'no_code', parsed: null };
   }
+  return { path, filename, parseError: null, parsed };
+}
 
-  const match = await resolveProductLoaderMatch(sb, {
-    code: parsed.code,
-    displayCode: parsed.displayCode,
-    imageSlot: 1,
-    dormantSkus,
-  });
-  const group = classifyBatchItem(match);
-
+function invalidFilenameItem({ path, filename, parseError }) {
   return {
     path,
     filename,
-    ...match,
+    code: '',
+    title: '',
+    price: 0,
     imageSlot: 1,
-    group,
+    warnings: ['invalid_filename'],
+    parseError: parseError || null,
+    websiteStatus: 'not_found',
+    group: 'not_found',
   };
 }
 
@@ -101,8 +77,50 @@ export default async function handler(req, res) {
   }
 
   const sb = getStockClient();
-  const dormantSkus = await fetchDormantSkuSet(sb).catch(() => new Set());
-  const items = await mapPool(paths, LOOKUP_CONCURRENCY, (rawPath) => resolvePath(sb, rawPath, dormantSkus));
+  const dormantSkus = await getCachedDormantSkuSet(sb).catch(() => new Set());
+
+  // Pre-parse filenames so we can dedup lookups by SKU.
+  const parsedRows = paths.map(parseOnePath);
+
+  // Group indexes by parsed code so we only look up each unique code once.
+  const codeGroups = new Map(); // upperCode → [{ idx, displayCode }]
+  for (let i = 0; i < parsedRows.length; i += 1) {
+    const { parsed } = parsedRows[i];
+    if (!parsed?.code) continue;
+    const upper = String(parsed.code || '').trim().toUpperCase();
+    if (!upper) continue;
+    if (!codeGroups.has(upper)) codeGroups.set(upper, []);
+    codeGroups.get(upper).push({ idx: i, displayCode: parsed.displayCode });
+  }
+
+  const uniqueCodes = [...codeGroups.keys()];
+  const matchByCode = new Map();
+  await mapPool(uniqueCodes, LOOKUP_CONCURRENCY, async (code) => {
+    const group = codeGroups.get(code) || [];
+    const displayCode = group[0]?.displayCode || code;
+    const match = await resolveProductLoaderMatch(sb, {
+      code,
+      displayCode,
+      imageSlot: 1,
+      dormantSkus,
+    });
+    matchByCode.set(code, match);
+  });
+
+  const items = parsedRows.map((row) => {
+    if (row.parseError || !row.parsed) return invalidFilenameItem(row);
+    const upper = String(row.parsed.code || '').trim().toUpperCase();
+    const match = matchByCode.get(upper);
+    if (!match) return invalidFilenameItem({ ...row, parseError: 'lookup_failed' });
+    const group = classifyBatchItem(match);
+    return {
+      path: row.path,
+      filename: row.filename,
+      ...match,
+      imageSlot: 1,
+      group,
+    };
+  });
 
   let matched = 0;
   const groups = { ready: 0, needs_review: 0, not_found: 0 };

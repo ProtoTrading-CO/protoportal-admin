@@ -4,9 +4,16 @@
  * Run: node scripts/qa-smoke-check.mjs
  */
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { orderMatchesTab, isOrderConfirmationSent } from '../src/lib/orderStatus.js';
 import { parseOrderTab, parsePositiveInt, parseBusinessTypeFilter } from '../api/_admin-query-params.js';
 import { injectMotarroIntoTree } from '../lib/mottaro-category.mjs';
+import { BULK_CHUNK_SIZE, runInChunks } from '../lib/bulk-chunk.mjs';
+
+const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+const readSrc = (relPath) => readFileSync(join(REPO_ROOT, relPath), 'utf8');
 
 console.log('QA smoke checks…\n');
 
@@ -36,17 +43,12 @@ assert.equal(parseBusinessTypeFilter('__unspecified__'), '__unspecified__');
 console.log('✓ Query param validation');
 
 // Item 1 — stale sections removed + bulk chunk helpers
-import { readFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { BULK_CHUNK_SIZE, runInChunks } from '../lib/bulk-chunk.mjs';
-
-const adminPageSrc = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../src/pages/AdminPage.jsx'), 'utf8');
+const adminPageSrc = readSrc('src/pages/AdminPage.jsx');
 assert.doesNotMatch(adminPageSrc, /false\s*&&\s*activeSection/, 'No dead false&& section guards in AdminPage');
 assert.doesNotMatch(adminPageSrc, /activeSection\s*===\s*'dormant-products'/, 'No dormant-products section');
 console.log('✓ Item 1 stale AdminPage sections removed');
 
-const bulkSrc = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../api/bulk-products.js'), 'utf8');
+const bulkSrc = readSrc('api/bulk-products.js');
 assert.match(bulkSrc, /bulkDeleteProducts/, 'batched delete helper present');
 assert.match(bulkSrc, /bulkMoveProducts/, 'batched move helper present');
 assert.match(bulkSrc, /runInChunks/, 'chunked archive/unarchive');
@@ -57,16 +59,62 @@ assert.equal(chunkSum, 15, 'runInChunks runs all items');
 assert.equal(BULK_CHUNK_SIZE, 25, 'chunk size is 25');
 console.log('✓ Item 1 bulk-products batched + chunked');
 
-const taxonomyUtilsSrc = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../api/_taxonomy-utils.js'), 'utf8');
+const taxonomyUtilsSrc = readSrc('api/_taxonomy-utils.js');
 assert.match(taxonomyUtilsSrc, /expectedUpdatedAt/, 'taxonomy save checks expectedUpdatedAt');
 assert.match(taxonomyUtilsSrc, /c\.id !== 'mottaro'/, 'taxonomy save still strips mottaro');
-const taxonomyAdminSrc = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../src/lib/taxonomyAdmin.js'), 'utf8');
+const taxonomyAdminSrc = readSrc('src/lib/taxonomyAdmin.js');
 assert.match(taxonomyAdminSrc, /err\.status = 409/, 'taxonomy client handles 409');
 console.log('✓ Item 2 taxonomy optimistic locking');
 
-const approveSrc = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../api/approve-customers-bulk.js'), 'utf8');
+const approveSrc = readSrc('api/approve-customers-bulk.js');
 assert.match(approveSrc, /fetchCustomersByEmails/, 'bulk approve batches customer lookup');
 assert.match(approveSrc, /runInChunks/, 'bulk approve uses chunked parallelism');
 console.log('✓ Item 3 bulk customer approve batched');
+
+// Archive/Nutstore correctness — API contract
+const catalogSrc = readSrc('api/catalog.js');
+assert.match(catalogSrc, /r\.stockLinked === false/, 'archive filter respects stockLinked=false (item 2)');
+assert.match(catalogSrc, /r\.archived_by === 'nutstore'/, 'archive filter keeps nutstore rows visible (item 2)');
+assert.match(catalogSrc, /applyCategoryFiltersToQuery\(q, resolveCategoryFilters\(tree, categoryPath\)\)/, 'archive fetch applies category filter (item 7)');
+console.log('✓ Item 2 archive Nutstore visibility + category filter');
+
+const stockSrc = readSrc('api/_stock-client.js');
+assert.match(stockSrc, /stockLinked: false/, 'enrichRowsWithProductStock exposes stockLinked=false when no ERP row');
+assert.doesNotMatch(stockSrc, /available_stock: r\.available_stock \?\? r\.stock_qty \?\? 0/, 'stock enrichment no longer coerces missing ERP stock to 0');
+console.log('✓ Item 2 stock enrichment preserves unknown stock');
+
+// Nutstore hardening — parallelism, cache, dedup
+const vercelJson = JSON.parse(readSrc('vercel.json'));
+assert.equal(vercelJson.functions?.['api/nutstore-batch-lookup.js']?.maxDuration, 30, 'nutstore-batch-lookup has 30s timeout');
+assert.equal(vercelJson.functions?.['api/nutstore-process.js']?.maxDuration, 60, 'nutstore-process has 60s timeout');
+const nutstoreProcessSrc = readSrc('api/nutstore-process.js');
+assert.match(nutstoreProcessSrc, /NUTSTORE_CONCURRENCY = 4/, 'nutstore-process uses concurrency of 4');
+assert.doesNotMatch(nutstoreProcessSrc, /for \(const raw of items\)/, 'nutstore-process no longer sequential');
+const nutstoreLookupSrc = readSrc('api/_product-loader-lookup.js');
+assert.match(nutstoreLookupSrc, /getCachedDormantSkuSet/, 'dormant SKU set cached');
+const nutstoreBatchSrc = readSrc('api/nutstore-batch-lookup.js');
+assert.match(nutstoreBatchSrc, /codeGroups/, 'nutstore batch lookup dedups by code');
+console.log('✓ Item 3 Nutstore hardening (timeouts, parallelism, dedup, cache)');
+
+// Nutstore relink on SKU/barcode edit
+const updateProductSrc = readSrc('api/update-product.js');
+assert.match(updateProductSrc, /verified\.archived_by === 'nutstore'/, 'update-product re-runs ERP lookup on Nutstore-archived rows');
+assert.match(updateProductSrc, /resolveProductLoaderMatch/, 'update-product imports resolveProductLoaderMatch');
+console.log('✓ Item 4 Nutstore relink on SKU/barcode edit');
+
+// UI polish — Make live label + move gap validation
+const pmEngineSrc = readSrc('src/components/ProductManagerEngine.jsx');
+assert.doesNotMatch(pmEngineSrc, /Make live all/, 'Make live all label removed');
+assert.match(pmEngineSrc, /Make \{selected\.size\} live/, 'Make live label uses selection count');
+assert.doesNotMatch(pmEngineSrc, /: 'Archive all'/, 'Archive all label removed');
+assert.match(pmEngineSrc, /`Archive \$\{selected\.size\}`/, 'Archive label uses selection count');
+
+const bulkMoveSrc = readSrc('src/components/BulkMoveModal.jsx');
+assert.match(bulkMoveSrc, /hasPathGap/, 'BulkMoveModal enforces contiguous path');
+assert.doesNotMatch(bulkMoveSrc, /movePreviewPath\s*=\s*\[[^]*\]\.filter\(Boolean\)/, 'BulkMoveModal no longer silently drops gaps');
+
+const bulkProductsSrc = readSrc('api/bulk-products.js');
+assert.match(bulkProductsSrc, /409[^]*Destination category changed/, 'bulk-products returns 409 on stale destination');
+console.log('✓ Item 5 UI polish (labels + move gap 409)');
 
 console.log('\nAll smoke checks passed.');

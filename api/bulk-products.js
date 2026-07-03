@@ -158,7 +158,13 @@ export default async function handler(req, res) {
           labels = resolveLabelsForSubcategory(tree, categoryId, subcategoryId);
         }
       } catch (err) {
-        return res.status(400).json({ error: err.message || 'Invalid category path' });
+        // The taxonomy tree changed between the admin opening the modal and
+        // clicking Confirm — return 409 so the client can reload categories
+        // and re-select the destination instead of writing to a stale path.
+        return res.status(409).json({
+          error: 'Destination category changed — reload categories and reselect.',
+          detail: err.message || 'Invalid category path',
+        });
       }
       if (labels.length < 2) {
         return res.status(400).json({ error: 'Choose a main category and at least one subcategory' });

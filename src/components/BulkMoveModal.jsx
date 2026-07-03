@@ -51,15 +51,28 @@ export default function BulkMoveModal({
   const child3Options = childrenOf(taxonomyTree, moveChild2Id);
   const child4Options = childrenOf(taxonomyTree, moveChild3Id);
   const deepestId = moveChild4Id || moveChild3Id || moveChild2Id || moveChild1Id;
-  const movePreviewPath = [moveCategoryId, moveChild1Id, moveChild2Id, moveChild3Id, moveChild4Id].filter(Boolean);
-  const movePreviewLabel = movePreviewPath.length >= 2
-    ? resolvePathLabels(taxonomyTree, movePreviewPath).join(' › ')
+  // Contiguous path only — never allow a gap (e.g. child2 empty while child3 is set).
+  // The UI already resets deeper selects when a parent changes, but we assert
+  // it here so the server never sees a spliced [main, empty, sub2] path.
+  const rawPath = [moveCategoryId, moveChild1Id, moveChild2Id, moveChild3Id, moveChild4Id];
+  const firstEmpty = rawPath.findIndex((seg) => !seg);
+  const contiguousPath = firstEmpty === -1 ? rawPath : rawPath.slice(0, firstEmpty);
+  const hasPathGap = rawPath.some((seg, i) => !seg && rawPath.slice(i + 1).some(Boolean));
+  const movePreviewLabel = contiguousPath.length >= 2
+    ? resolvePathLabels(taxonomyTree, contiguousPath).join(' › ')
     : 'Select a main category and subcategory';
 
   const handleConfirm = () => {
-    const categoryPathIds = movePreviewPath;
-    const finalSubId = moveChild4Id || moveChild3Id || moveChild2Id || moveChild1Id;
-    onConfirm?.({ categoryPathIds, categoryId: moveCategoryId, subcategoryId: finalSubId, destinationLabel: movePreviewLabel });
+    if (hasPathGap) return;
+    if (contiguousPath.length < 2) return;
+    const categoryPathIds = contiguousPath;
+    const finalSubId = categoryPathIds[categoryPathIds.length - 1];
+    onConfirm?.({
+      categoryPathIds,
+      categoryId: moveCategoryId,
+      subcategoryId: finalSubId,
+      destinationLabel: movePreviewLabel,
+    });
   };
 
   return (
@@ -169,7 +182,7 @@ export default function BulkMoveModal({
               type="button"
               className="adm-btn-red"
               onClick={handleConfirm}
-              disabled={saving || movePreviewPath.length < 2}
+              disabled={saving || contiguousPath.length < 2 || hasPathGap}
             >
               {saving ? 'Moving…' : 'Confirm move'}
             </button>

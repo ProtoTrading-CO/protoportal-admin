@@ -1,5 +1,7 @@
 import { requireAdminKey } from './_admin-auth.js';
 import { createClient } from '@supabase/supabase-js';
+import { resolveProductLoaderMatch } from './_product-loader-lookup.js';
+import { ensureProductFromCatalogueRow } from './_ensure-product.js';
 
 function getStockAdminClient() {
   return createClient(
@@ -65,7 +67,7 @@ export default async function handler(req, res) {
   let table = 'website_stock';
   let { data: product, error: lookupError } = await supabase
     .from('website_stock')
-    .select('sku, updated_at')
+    .select('sku, barcode, archived_by, updated_at')
     .eq('sku', sku)
     .maybeSingle();
 
@@ -74,7 +76,7 @@ export default async function handler(req, res) {
   if (!product) {
     const archived = await supabase
       .from('archived_products')
-      .select('sku, updated_at')
+      .select('sku, barcode, archived_by, updated_at')
       .eq('sku', sku)
       .maybeSingle();
     if (archived.error) return res.status(400).json({ error: archived.error.message });
@@ -104,11 +106,54 @@ export default async function handler(req, res) {
   const verifySku = patch.sku || sku;
   const { data: verified, error: verifyError } = await supabase
     .from(table)
-    .select('sku, category, subcategory_one, subcategory_two, subcategory_three, updated_at')
+    .select('*')
     .eq('sku', verifySku)
     .maybeSingle();
   if (verifyError) return res.status(400).json({ error: verifyError.message });
   if (!verified) return res.status(500).json({ error: 'Update did not persist — product not found after save' });
 
-  return res.status(200).json({ ok: true, product: verified });
+  // Nutstore-archived placeholders often have no ERP row yet. When the admin
+  // fixes the SKU or barcode on such a row, re-run the ERP/Positill lookup so
+  // the row can attach live stock/price on the next Archive refresh.
+  let relink = null;
+  const changedIdentifier = patch.sku != null || patch.barcode != null;
+  if (
+    changedIdentifier
+    && table === 'archived_products'
+    && verified.archived_by === 'nutstore'
+  ) {
+    try {
+      const identifier = verified.barcode || verified.sku;
+      const match = await resolveProductLoaderMatch(supabase, {
+        code: identifier,
+        displayCode: identifier,
+        imageSlot: 1,
+      });
+      if (match?.sqlRow) {
+        await ensureProductFromCatalogueRow(supabase, {
+          ...verified,
+          barcode: verified.barcode || verified.sku,
+          sell_price: match.sqlRow.price,
+          stock_qty: match.sqlRow.onhand,
+          available_stock: match.sqlRow.available,
+          original_description: verified.original_description || match.sqlRow.title,
+        });
+        relink = {
+          matched: true,
+          matchedBy: match.matchedBy,
+          stock: match.sqlRow.available,
+          price: match.sqlRow.price,
+        };
+      } else if (match?.websiteRow) {
+        relink = { matched: true, matchedBy: match.matchedBy };
+      } else {
+        relink = { matched: false };
+      }
+    } catch (err) {
+      // Non-fatal — the row is updated even if relink fails.
+      relink = { matched: false, error: err.message || 'relink failed' };
+    }
+  }
+
+  return res.status(200).json({ ok: true, product: verified, relink });
 }

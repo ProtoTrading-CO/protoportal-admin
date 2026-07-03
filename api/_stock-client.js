@@ -84,19 +84,21 @@ export async function enrichRowsWithProductStock(supabase, rows, { includePrice 
 
   return rows.map((r, i) => {
     const product = findProductBySku(lookupMap, rawKeys[i]);
-    const stockQty = product?.stock_qty ?? 0;
-    const availableStock = product?.available_stock ?? product?.stock_qty ?? 0;
     if (!product) {
+      // Preserve whatever the catalogue row already has, including null/undefined.
+      // Coercing missing ERP stock to 0 makes zero-stock filters (e.g. archive)
+      // silently hide rows that never had an ERP source of truth — e.g. Nutstore
+      // placeholders waiting to be matched.
       return {
         ...r,
-        stock_qty: r.stock_qty ?? 0,
-        available_stock: r.available_stock ?? r.stock_qty ?? 0,
+        stockLinked: false,
       };
     }
     return {
       ...r,
-      stock_qty: stockQty,
-      available_stock: availableStock,
+      stock_qty: product.stock_qty ?? 0,
+      available_stock: product.available_stock ?? product.stock_qty ?? 0,
+      stockLinked: true,
       ...(includePrice ? { sell_price: product.sell_price } : {}),
       ...(includePrice && product.sell_price != null && !Number(r.price)
         ? { price: Number(product.sell_price) || 0 }

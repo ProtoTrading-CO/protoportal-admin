@@ -36,6 +36,12 @@
     "api/approve-customers-bulk.js": {
       "maxDuration": 60
     },
+    "api/nutstore-batch-lookup.js": {
+      "maxDuration": 30
+    },
+    "api/nutstore-process.js": {
+      "maxDuration": 60
+    },
     "api/apply-category-moves.js": {
       "maxDuration": 300,
       "includeFiles": "data/category-move-*.xlsx"

@@ -583,13 +583,20 @@ export default function ProductManagerEngine({
       onRefreshStats?.();
       onShowToast?.(`Moved ${skus.length} product(s) to ${destinationLabel}`, 'success');
     } catch (err) {
-      if (err.partial) {
+      if (err.status === 409) {
+        setMoveModalOpen(false);
+        clearSelection();
+        onRefreshTaxonomy?.();
+        onShowToast?.(err.message || 'Categories changed — reload and reselect', 'error');
+      } else if (err.partial) {
         setMoveModalOpen(false);
         clearSelection();
         invalidateAdminCache();
         queryClient.invalidateQueries({ queryKey: ['catalog'] });
+        onShowToast?.(err.message || 'Move failed', 'warning');
+      } else {
+        onShowToast?.(err.message || 'Move failed', 'error');
       }
-      onShowToast?.(err.message || 'Move failed', err.partial ? 'warning' : 'error');
     } finally {
       setMoveSaving(false);
     }
@@ -709,14 +716,15 @@ export default function ProductManagerEngine({
   const bulkArchiveSelected = async () => {
     const skus = [...selected];
     if (!skus.length) return;
-    if (!window.confirm(`Archive ${skus.length} product(s)? They will be hidden from the trade website.`)) return;
+    const noun = skus.length === 1 ? 'product' : 'products';
+    if (!window.confirm(`Archive ${skus.length} selected ${noun}? They will be hidden from the trade website.`)) return;
     setBulkActionPending(true);
     try {
       await mutations.bulkArchive.mutateAsync(skus);
       clearSelection();
       queryClient.invalidateQueries({ queryKey: ['catalog'] });
       onRefreshStats?.();
-      onShowToast?.(`Archived ${skus.length} product(s)`, 'success');
+      onShowToast?.(`Archived ${skus.length} ${noun}`, 'success');
     } catch (err) {
       onShowToast?.(err.message || 'Bulk archive failed', 'error');
     } finally {
@@ -787,14 +795,15 @@ export default function ProductManagerEngine({
   const bulkMakeLive = async () => {
     const skus = [...selected];
     if (!skus.length) return;
-    if (!window.confirm(`Move ${skus.length} product(s) to the live website catalogue?`)) return;
+    const noun = skus.length === 1 ? 'product' : 'products';
+    if (!window.confirm(`Make ${skus.length} selected ${noun} live on the website?`)) return;
     setBulkActionPending(true);
     try {
       await mutations.bulkUnarchive.mutateAsync(skus);
       clearSelection();
       queryClient.invalidateQueries({ queryKey: ['catalog'] });
       onRefreshStats?.();
-      onShowToast?.(`${skus.length} product(s) are now live`, 'success');
+      onShowToast?.(`${skus.length} ${noun} now live`, 'success');
     } catch (err) {
       onShowToast?.(err.message || 'Bulk restore failed', 'error');
     } finally {
@@ -1166,7 +1175,7 @@ export default function ProductManagerEngine({
                         disabled={bulkActionPending}
                         onClick={() => void bulkArchiveSelected()}
                       >
-                        {bulkActionPending ? 'Archiving…' : 'Archive all'}
+                        {bulkActionPending ? 'Archiving…' : `Archive ${selected.size}`}
                       </button>
                       <button type="button" className="adm-btn-red adm-btn--sm" onClick={() => runBulk({ mutateAsync: (sku) => mutations.softDelete.mutateAsync({ sku, fromArchive: false }) })}>To recycle</button>
                     </>
@@ -1179,7 +1188,7 @@ export default function ProductManagerEngine({
                         disabled={bulkActionPending}
                         onClick={() => void bulkArchiveSelected()}
                       >
-                        {bulkActionPending ? 'Archiving…' : 'Archive all'}
+                        {bulkActionPending ? 'Archiving…' : `Archive ${selected.size}`}
                       </button>
                       <button type="button" className="adm-btn-red adm-btn--sm" onClick={() => runBulk({ mutateAsync: (sku) => mutations.softDelete.mutateAsync({ sku, fromArchive: false }) })}>To recycle</button>
                     </>
@@ -1192,7 +1201,15 @@ export default function ProductManagerEngine({
                         disabled={bulkActionPending}
                         onClick={() => void bulkMakeLive()}
                       >
-                        {bulkActionPending ? 'Restoring…' : <><ArchiveRestore size={14} /> Make live all</>}
+                        {bulkActionPending
+                          ? 'Restoring…'
+                          : (
+                            <>
+                              <ArchiveRestore size={14} />
+                              {' '}
+                              Make {selected.size} live
+                            </>
+                          )}
                       </button>
                       <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => runBulk({ mutateAsync: (sku) => mutations.softDelete.mutateAsync({ sku, fromArchive: true }) })}>To recycle</button>
                     </>
