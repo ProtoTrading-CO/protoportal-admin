@@ -91,7 +91,6 @@ export function buildOutgoingList(overrides = {}) {
       label: meta.label,
       trigger: meta.trigger,
       mergeTags: meta.mergeTags,
-      hasHtmlBlock: meta.hasHtmlBlock,
       previewVars: meta.previewVars,
       subject: merged.subject,
       introText: merged.introText,

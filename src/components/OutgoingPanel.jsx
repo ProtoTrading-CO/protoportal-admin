@@ -53,6 +53,7 @@ export default function OutgoingPanel({ onShowToast, adminEmail = '' }) {
   const [subject, setSubject] = useState('');
   const [introBody, setIntroBody] = useState('');
   const [htmlBody, setHtmlBody] = useState('');
+  const [htmlPane, setHtmlPane] = useState('split');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testSending, setTestSending] = useState(false);
@@ -76,7 +77,7 @@ export default function OutgoingPanel({ onShowToast, adminEmail = '' }) {
 
   const previewBodyHtml = useMemo(
     () => buildEmailBodyHtml({ introText: introBody, htmlBlock: htmlBody }, previewVars)
-      || '<p style="color:#9ca3af;margin:0;">Write a message body to preview.</p>',
+      || '<p style="color:#9ca3af;margin:0;">Write a plain intro and/or HTML below to preview.</p>',
     [introBody, htmlBody, previewVars],
   );
 
@@ -94,6 +95,7 @@ export default function OutgoingPanel({ onShowToast, adminEmail = '' }) {
     setSubject(row.subject || '');
     setIntroBody(row.introText || '');
     setHtmlBody(row.htmlBlock || '');
+    setHtmlPane('split');
   }, []);
 
   const load = useCallback(async () => {
@@ -201,20 +203,23 @@ export default function OutgoingPanel({ onShowToast, adminEmail = '' }) {
     }
   };
 
+  const showHtmlEditor = htmlPane !== 'preview';
+  const showHtmlPreview = htmlPane !== 'code';
+
   return (
     <div className="adm-panel">
       <div className="adm-section-head">
         <div>
           <h2 className="adm-section-title"><Mail size={20} style={{ verticalAlign: -4, marginRight: 8 }} />Outgoing emails</h2>
           <p className="adm-section-note">
-            Edit automated emails sent by the system — trade signup, approval, and admin password reset.
+            Edit automated system emails. Use plain text for a simple intro, HTML for full layout, or HTML only (leave intro blank).
             Footer links to proto.co.za on all sends.
           </p>
         </div>
         {loading && <Loader2 size={18} className="spin" aria-label="Loading" />}
       </div>
 
-      <div className="adm-email-modal__body" style={{ maxWidth: 960 }}>
+      <div className="adm-email-modal__body adm-email-modal--html">
         <label className="adm-email-field">
           <span className="adm-email-field__label">Email type</span>
           <select
@@ -248,58 +253,91 @@ export default function OutgoingPanel({ onShowToast, adminEmail = '' }) {
         </div>
 
         <div className="adm-email-field adm-email-field--intro">
-          <span className="adm-email-field__label">Message body</span>
+          <span className="adm-email-field__label">Plain text intro (optional)</span>
           <textarea
             ref={introRef}
             className="adm-field-input adm-email-modal__textarea"
-            rows={8}
+            rows={5}
             value={introBody}
             onChange={(e) => setIntroBody(e.target.value)}
             onFocus={() => { activeFieldRef.current = 'intro'; }}
             disabled={!slug}
+            placeholder={'Hi {{name}},\n\nOptional intro shown above your HTML…'}
             spellCheck
           />
-          <span className="adm-email-field__hint">Plain text intro. Blank lines start new paragraphs.</span>
+          <span className="adm-email-field__hint">Blank lines start new paragraphs. Leave empty to send HTML only.</span>
           <MergeTagBar tags={selected?.mergeTags} onInsert={insertMergeTag} />
         </div>
 
-        {selected?.hasHtmlBlock && (
-          <div className="adm-email-field">
+        <div className="adm-email-field">
+          <div className="adm-email-field__row">
             <span className="adm-email-field__label">
               <Code2 size={14} style={{ verticalAlign: -2, marginRight: 4 }} />
-              HTML block
+              HTML body
             </span>
-            <textarea
-              ref={htmlRef}
-              className="adm-field-input adm-email-modal__textarea adm-email-modal__textarea--html"
-              rows={6}
-              value={htmlBody}
-              onChange={(e) => setHtmlBody(e.target.value)}
-              onFocus={() => { activeFieldRef.current = 'html'; }}
-              disabled={!slug}
-              spellCheck={false}
-            />
-            <MergeTagBar tags={selected?.mergeTags} onInsert={insertMergeTag} />
-          </div>
-        )}
-
-        <div className="adm-email-field">
-          <span className="adm-email-field__label">Preview</span>
-          <div className="adm-email-preview adm-email-preview--full">
-            <div className="adm-email-preview__chrome">
-              <div className="adm-email-preview__chrome-row">
-                <span className="adm-email-preview__chrome-label">Subject</span>
-                <span className="adm-email-preview__chrome-value adm-email-preview__chrome-value--subject">
-                  {previewSubject}
-                </span>
-              </div>
+            <div className="adm-email-pane-toggle" role="tablist" aria-label="HTML editor view">
+              <button
+                type="button"
+                className={`adm-email-pane-toggle__btn${htmlPane === 'code' ? ' adm-email-pane-toggle__btn--active' : ''}`}
+                onClick={() => setHtmlPane('code')}
+              >
+                HTML code
+              </button>
+              <button
+                type="button"
+                className={`adm-email-pane-toggle__btn${htmlPane === 'split' ? ' adm-email-pane-toggle__btn--active' : ''}`}
+                onClick={() => setHtmlPane('split')}
+              >
+                Split view
+              </button>
+              <button
+                type="button"
+                className={`adm-email-pane-toggle__btn${htmlPane === 'preview' ? ' adm-email-pane-toggle__btn--active' : ''}`}
+                onClick={() => setHtmlPane('preview')}
+              >
+                Preview only
+              </button>
             </div>
-            <iframe
-              title="Outgoing email preview"
-              className="adm-email-preview__iframe"
-              srcDoc={fullPreviewDoc}
-              sandbox="allow-same-origin"
-            />
+          </div>
+
+          <div className={`adm-email-split${htmlPane === 'split' ? ' adm-email-split--split' : ''}`}>
+            {showHtmlEditor && (
+              <div className="adm-email-split__editor">
+                <textarea
+                  ref={htmlRef}
+                  className="adm-field-input adm-email-modal__textarea adm-email-modal__textarea--html"
+                  rows={14}
+                  value={htmlBody}
+                  onChange={(e) => setHtmlBody(e.target.value)}
+                  onFocus={() => { activeFieldRef.current = 'html'; }}
+                  disabled={!slug}
+                  placeholder={'<p>Hi {{name}},</p>\n<p>Your full HTML email can go here.</p>'}
+                  spellCheck={false}
+                />
+                <MergeTagBar tags={selected?.mergeTags} onInsert={insertMergeTag} />
+              </div>
+            )}
+            {showHtmlPreview && (
+              <div className="adm-email-split__preview">
+                <div className="adm-email-preview adm-email-preview--full">
+                  <div className="adm-email-preview__chrome">
+                    <div className="adm-email-preview__chrome-row">
+                      <span className="adm-email-preview__chrome-label">Subject</span>
+                      <span className="adm-email-preview__chrome-value adm-email-preview__chrome-value--subject">
+                        {previewSubject}
+                      </span>
+                    </div>
+                  </div>
+                  <iframe
+                    title="Outgoing email preview"
+                    className="adm-email-preview__iframe"
+                    srcDoc={fullPreviewDoc}
+                    sandbox="allow-same-origin"
+                  />
+                </div>
+                <span className="adm-email-field__hint">Preview uses sample merge data. Each recipient gets their own values on send.</span>
+              </div>
+            )}
           </div>
         </div>
 

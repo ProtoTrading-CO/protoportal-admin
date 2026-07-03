@@ -363,6 +363,7 @@ assert.match(readSrc('api/_admin-password-reset.js'), /sendOutgoing\('admin_pass
 assert.match(readSrc('api/outgoing-emails.js'), /isOutgoingSlug/, 'outgoing-emails API validates slug allowlist');
 assert.match(sidebarSrc, /id: 'outgoing'/, 'sidebar includes Outgoing section');
 assert.match(adminPageSrc, /const OutgoingPanel = lazy\(/, 'OutgoingPanel is lazy-loaded');
+assert.match(readSrc('src/components/OutgoingPanel.jsx'), /adm-email-split/, 'OutgoingPanel supports HTML split editor');
 assert.equal(
   spawnSync('node', ['--check', join(REPO_ROOT, 'api/outgoing-emails.js')], { encoding: 'utf8' }).status,
   0,
