@@ -35,4 +35,13 @@ assert.throws(() => parsePositiveInt('abc', { name: 'page' }), /Invalid page/);
 assert.equal(parseBusinessTypeFilter('__unspecified__'), '__unspecified__');
 console.log('✓ Query param validation');
 
+// Item 1 — stale standalone PM sections removed (ProductManagerEngine owns catalogue)
+import { readFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+const adminPageSrc = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../src/pages/AdminPage.jsx'), 'utf8');
+assert.doesNotMatch(adminPageSrc, /false\s*&&\s*activeSection/, 'No dead false&& section guards in AdminPage');
+assert.doesNotMatch(adminPageSrc, /activeSection\s*===\s*'dormant-products'/, 'No dormant-products section');
+console.log('✓ Item 1 stale AdminPage sections removed');
+
 console.log('\nAll smoke checks passed.');
