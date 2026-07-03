@@ -35,6 +35,13 @@ const NAV_ITEMS = [
   { id: 'team', label: 'Team', icon: User },
 ];
 
+// Warm the JS chunk for lazy panels on hover/focus so the click-through is
+// instant. Vite dedups the import() call with the React.lazy() call in
+// AdminPage, so the chunk is fetched once per session.
+const CHUNK_PREFETCH = {
+  pricing: () => import('./PricingPanel'),
+};
+
 function prefetchSection(sectionId) {
   if (sectionId === 'catalogue' || sectionId === 'reorder') {
     queryClient.prefetchQuery({
@@ -55,6 +62,8 @@ function prefetchSection(sectionId) {
       },
     });
   }
+  const chunkLoader = CHUNK_PREFETCH[sectionId];
+  if (chunkLoader) chunkLoader().catch(() => { /* best-effort */ });
 }
 
 export default function GroupedSidebar({

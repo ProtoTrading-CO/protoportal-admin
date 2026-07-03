@@ -4,9 +4,15 @@
  * Run: node scripts/qa-smoke-check.mjs
  */
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { orderMatchesTab, isOrderConfirmationSent } from '../src/lib/orderStatus.js';
 import { parseOrderTab, parsePositiveInt, parseBusinessTypeFilter } from '../api/_admin-query-params.js';
 import { injectMotarroIntoTree } from '../lib/mottaro-category.mjs';
+
+const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+const readSrc = (relPath) => readFileSync(join(REPO_ROOT, relPath), 'utf8');
 
 console.log('QA smoke checks…\n');
 
@@ -34,5 +40,22 @@ assert.throws(() => parseOrderTab('bogus'), /Invalid tab/);
 assert.throws(() => parsePositiveInt('abc', { name: 'page' }), /Invalid page/);
 assert.equal(parseBusinessTypeFilter('__unspecified__'), '__unspecified__');
 console.log('✓ Query param validation');
+
+// PricingPanel extraction
+const adminPage = readSrc('src/pages/AdminPage.jsx');
+assert.match(adminPage, /const PricingPanel = lazy\(/, 'PricingPanel is lazy');
+assert.doesNotMatch(adminPage, /const applyPricing = async/, 'applyPricing moved into PricingPanel');
+assert.doesNotMatch(adminPage, /const toggleSelectAllPricing = /, 'toggleSelectAllPricing moved into PricingPanel');
+assert.doesNotMatch(adminPage, /const loadCategoryWorkingSet = async/, 'loadCategoryWorkingSet dispatcher removed');
+assert.doesNotMatch(adminPage, /const \[pricingCategory,/, 'pricing state moved out of AdminPage');
+assert.doesNotMatch(adminPage, /const \[priceDelta,/, 'priceDelta state moved out of AdminPage');
+
+const pricingPanel = readSrc('src/components/PricingPanel.jsx');
+assert.match(pricingPanel, /export default function PricingPanel/, 'PricingPanel default export');
+assert.match(pricingPanel, /fetchReorderProducts\(\{ mainCategory: categoryId \}\)/, 'PricingPanel fetches category rows');
+
+const sidebar = readSrc('src/components/GroupedSidebar.jsx');
+assert.match(sidebar, /pricing: \(\) => import\('\.\/PricingPanel'\)/, 'sidebar prefetches PricingPanel on hover');
+console.log('✓ PricingPanel extracted, lazy, prefetched');
 
 console.log('\nAll smoke checks passed.');
