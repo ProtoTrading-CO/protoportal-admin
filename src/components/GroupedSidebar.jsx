@@ -40,6 +40,7 @@ const NAV_ITEMS = [
 // AdminPage, so the chunk is fetched once per session.
 const CHUNK_PREFETCH = {
   pricing: () => import('./PricingPanel'),
+  reorder: () => import('./ReorderPanel'),
 };
 
 function prefetchSection(sectionId) {
