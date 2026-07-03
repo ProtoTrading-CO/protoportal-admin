@@ -11,7 +11,6 @@ import {
   Archive,
   ArrowLeftRight,
   Plus,
-  RefreshCw,
   Search,
   X,
 } from 'lucide-react';
@@ -477,20 +476,6 @@ const ReorderPanel = forwardRef(function ReorderPanel({
               disabled={!dirty || savingOrder || searchActive}
             >
               {savingOrder ? 'Saving…' : 'Save order'}
-            </button>
-            <button
-              onClick={() => {
-                setSelectedIds(new Set());
-                setDirty(false);
-                cacheByMainRef.current = {};
-                invalidateSortOrderStore();
-                invalidateAdminCache();
-                void loadProducts({ forceCatalog: true, mainId });
-              }}
-              className="adm-btn-ghost"
-              type="button"
-            >
-              <RefreshCw size={14} /> Refresh
             </button>
           </div>
         </div>

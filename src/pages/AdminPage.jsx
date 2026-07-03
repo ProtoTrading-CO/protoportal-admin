@@ -13,7 +13,6 @@ import {
   ChevronRight,
   ClipboardList,
   Clock,
-  CloudDownload,
   DollarSign,
   Eye,
   FileDown,
@@ -78,14 +77,14 @@ import {
   replaceFullTaxonomy,
   subcategoryOptionsFromTree,
 } from '../lib/taxonomyAdmin';
-import { approveCustomer, deleteCustomer, fetchCustomersPage, fetchProtoActiveCustomersPage, seedProtoActiveCustomers, updateProtoActiveCustomer, updateCustomerAdmin, deleteProtoActiveCustomer, syncBrevoContacts, pushPortalCustomersToBrevo, sendCustomerEmailBroadcast, fetchCrmContactsPage } from '../lib/customers';
+import { approveCustomer, deleteCustomer, fetchCustomersPage, fetchProtoActiveCustomersPage, updateProtoActiveCustomer, updateCustomerAdmin, deleteProtoActiveCustomer, sendCustomerEmailBroadcast, fetchCrmContactsPage } from '../lib/customers';
 import { BUSINESS_TYPES } from '../lib/businessTypes';
 import { supabase } from '../lib/supabase';
 import { buildOrderNoteSections, createEmailOrderItems, generateOrderPdfBase64, buildEmailItemsFromOrder, base64ToBlob, resolveCustomerOrderPricing, deriveAutoNotesFromItems } from '../lib/orderDocuments';
 import { displayOrderNumber, buildFulfillmentUrl } from '../lib/orderNumber';
 import { fetchPresaleInvoices, uploadPresaleInvoice } from '../lib/presaleInvoice';
 import { fetchConfirmationSent, markConfirmationSent, fetchPaymentRecords, uploadPop, setPaymentStatus } from '../lib/orderPayment';
-import { deleteOrderAdmin, fetchOrdersPage, updateOrderAdmin, advanceOrderWorkflow } from '../lib/orders';
+import { deleteOrderAdmin, deleteAllOrdersAdmin, fetchOrdersPage, updateOrderAdmin, advanceOrderWorkflow } from '../lib/orders';
 import { orderMatchesTab, normalizeOrderStatus, getWorkflowAdvanceOptions, isOrderConfirmationSent } from '../lib/orderStatus';
 import OrderWorkflowBadge from '../components/OrderWorkflowBadge';
 import { fetchFulfillmentUsers, loadActiveUserId } from '../lib/fulfillmentUsers';
@@ -103,6 +102,7 @@ import GroupedSidebar, { NAV_GROUPS } from '../components/GroupedSidebar';
 import { useDashboardStats } from '../hooks/useDashboardStats';
 import { queryClient } from '../lib/queryClient';
 import { queryKeys } from '../lib/queryKeys';
+import { dispatchAdminRefresh } from '../lib/adminRefresh';
 
 // Section panels — lazy-loaded so the initial admin bundle only ships the
 // default section (Product Manager). Each lazy chunk is fetched on demand
@@ -111,8 +111,8 @@ const AnalyticsHub = lazy(() => import('../components/AnalyticsHub'));
 const ApolloPanel = lazy(() => import('../components/ApolloPanel'));
 const CostTrackingPanel = lazy(() => import('../components/CostTrackingPanel'));
 const ProductLoaderPanel = lazy(() => import('../components/ProductLoaderPanel'));
-const CrmPanel = lazy(() => import('../components/CrmPanel'));
 const WhatsappPanel = lazy(() => import('../components/WhatsappPanel'));
+const EmailAnalyticsPanel = lazy(() => import('../components/EmailAnalyticsPanel'));
 const BannerPanel = lazy(() => import('../components/BannerPanel'));
 const SpecialsPanel = lazy(() => import('../components/SpecialsPanel'));
 const PricingPanel = lazy(() => import('../components/PricingPanel'));
@@ -447,8 +447,6 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   const imageFileInputRef = useRef(null);
 
   const [imageViewUrl, setImageViewUrl] = useState('');
-  const [customerApproveBusy, setCustomerApproveBusy] = useState(false);
-  const customerExcelRef = useRef(null);
   const reorderPanelRef = useRef(null);
 
   const [catalogTotal, setCatalogTotal] = useState(0);
@@ -464,12 +462,8 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   const [customerRows, setCustomerRows] = useState([]);
   const [customerTotal, setCustomerTotal] = useState(0);
   const [customerEmailOpen, setCustomerEmailOpen] = useState(false);
-  const [brevoSyncBusy, setBrevoSyncBusy] = useState(false);
-  const [brevoPushBusy, setBrevoPushBusy] = useState(false);
-  const [brevoLastSync, setBrevoLastSync] = useState(null);
   const [profileSource, setProfileSource] = useState('portal');
   const [approvalCodes, setApprovalCodes] = useState({});
-  const [protoSeedBusy, setProtoSeedBusy] = useState(false);
   const [protoNameSaving, setProtoNameSaving] = useState(null);
 
   // Pricing state now lives in PricingPanel.
@@ -601,22 +595,6 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     } finally { setLoading(false); }
   };
 
-  const importProtoActiveList = async () => {
-    setProtoSeedBusy(true);
-    try {
-      const json = await seedProtoActiveCustomers();
-      const dupNote = json.skippedDuplicates ? ` (${json.skippedDuplicates} duplicate emails merged)` : '';
-      const nameNote = json.missingNames ? ` · ${json.withNames} with names, ${json.missingNames} still blank (edit inline)` : '';
-      showToast(`Imported ${json.upserted} proto active customers${dupNote}${nameNote}`, 'success');
-      setCustomerTab('proto-active');
-      setCustomerPage(1);
-      await loadCustomers();
-    } catch (err) {
-      showToast(err.message || 'Import failed — check console', 'error');
-      console.error('proto active import:', err);
-    } finally { setProtoSeedBusy(false); }
-  };
-
   const saveProtoActiveName = async (row, field, value) => {
     const trimmed = String(value || '').trim();
     const current = String(row[field] || '').trim();
@@ -631,32 +609,6 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
       showToast(err.message || 'Save failed', 'error');
     } finally {
       setProtoNameSaving(null);
-    }
-  };
-
-  const handleBrevoSync = async () => {
-    setBrevoSyncBusy(true);
-    try {
-      const json = await syncBrevoContacts();
-      setBrevoLastSync(json.syncedAt || new Date().toISOString());
-      showToast(`Synced ${json.upserted ?? json.succeeded ?? 0} contacts from Brevo`, 'success');
-    } catch (err) {
-      showToast(err.message || 'Brevo sync failed', 'error');
-    } finally {
-      setBrevoSyncBusy(false);
-    }
-  };
-
-  const handlePushPortalToBrevo = async () => {
-    if (!window.confirm('Push all approved + Proto Active customer emails to Brevo contacts?')) return;
-    setBrevoPushBusy(true);
-    try {
-      const json = await pushPortalCustomersToBrevo();
-      showToast(`Pushed ${json.pushed} portal emails to Brevo`, 'success');
-    } catch (err) {
-      showToast(err.message || 'Push to Brevo failed', 'error');
-    } finally {
-      setBrevoPushBusy(false);
     }
   };
 
@@ -1003,7 +955,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     }
   };
 
-  useEffect(() => { if (activeSection === 'customers') void loadCustomers(); }, [activeSection, customerPage, customerTab, customerSearchDebounced, customerBusinessType]);
+  useEffect(() => { if (activeSection === 'customers' && customerTab !== 'email-analytics') void loadCustomers(); }, [activeSection, customerPage, customerTab, customerSearchDebounced, customerBusinessType]);
   useEffect(() => {
     if (activeSection !== 'customers') return;
     void fetchCrmContactsPage({ page: 1, pageSize: 1 })
@@ -1300,10 +1252,34 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   };
 
   const refreshCurrentSection = async () => {
-    if (activeSection === 'customers') return loadCustomers();
-    // pricing tab owns its own refresh
+    if (activeSection === 'customers') {
+      if (customerTab === 'email-analytics') {
+        dispatchAdminRefresh('customers');
+        return;
+      }
+      return loadCustomers();
+    }
     if (activeSection === 'reorder') return reorderPanelRef.current?.refresh?.();
     if (activeSection === 'orders') return loadOrders();
+    if (activeSection === 'catalogue') {
+      queryClient.invalidateQueries({ queryKey: ['catalog'] });
+      return reloadTaxonomy();
+    }
+    if (activeSection === 'crm') {
+      await loadCrmCustomers(crmMeta.page || 1);
+      return loadCrmTemplates();
+    }
+    if (activeSection === 'analytics') {
+      queryClient.invalidateQueries({ queryKey: queryKeys.dashboardStats() });
+      return;
+    }
+    if (activeSection === 'apollo') {
+      window.dispatchEvent(new CustomEvent('proto-approval-refresh'));
+      queryClient.invalidateQueries({ queryKey: queryKeys.dashboardStats() });
+      refreshDashboardStats();
+      return;
+    }
+    dispatchAdminRefresh(activeSection);
   };
 
   const saveProduct = async () => {
@@ -1525,39 +1501,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     } finally { setTaxonomySaving(false); }
   };
 
-  const handleCustomerExcelApprove = async (file) => {
-    if (!file) return;
-    setCustomerApproveBusy(true);
-    try {
-      const XLSX = await import('xlsx');
-      const buf = await file.arrayBuffer();
-      const wb = XLSX.read(buf, { type: 'array' });
-      const sheet = wb.Sheets[wb.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
-      const emails = rows.flatMap((row) => {
-        const val = row.email || row.Email || row.EMAIL || Object.values(row)[0];
-        return val ? [String(val).trim().toLowerCase()] : [];
-      }).filter(Boolean);
-      const res = await fetch('/api/approve-customers-bulk', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ emails }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || 'Bulk approve failed');
-      await refreshPendingCount();
-      await loadCustomers();
-      showToast(`Approved ${json.approved || 0}${json.notFound?.length ? `, ${json.notFound.length} not found` : ''}`);
-    } catch (err) {
-      showToast(err.message || 'Excel approve failed', 'error');
-    } finally {
-      setCustomerApproveBusy(false);
-    }
-  };
-
   const goHome = () => setActiveSection('orders');
-
-
 
   // Pricing selection + apply moved into PricingPanel.
 
@@ -1716,6 +1660,29 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
       setStatsOrderTotal((n) => Math.max(0, n - 1));
       void refreshDashboardStats();
     } finally { setSaving(''); }
+  };
+
+  const clearAllOrders = async () => {
+    if (!window.confirm('Delete ALL orders? This cannot be undone.')) return;
+    const typed = window.prompt('Type DELETE ALL ORDERS to confirm:');
+    if (typed !== 'DELETE ALL ORDERS') {
+      showToast('Confirmation text did not match — nothing deleted', 'error');
+      return;
+    }
+    setSaving('clear-all-orders');
+    try {
+      const json = await deleteAllOrdersAdmin();
+      setOrders([]);
+      setOrderTotal(0);
+      setExpandedOrderId(null);
+      setStatsOrderTotal(0);
+      void refreshDashboardStats();
+      showToast(`Deleted ${json.deleted || 0} orders`, 'success');
+    } catch (err) {
+      showToast(err.message || 'Failed to delete all orders', 'error');
+    } finally {
+      setSaving('');
+    }
   };
 
   const updateOrder = async (order, patch) => {
@@ -2020,26 +1987,12 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                   <div>
                     <h2 className="adm-section-title">Customer Management</h2>
                     <p className="adm-section-note">
-                      Manage trade requests, approved customers, and Proto Active accounts. Sync with Brevo CRM, push portal emails to Brevo, and send email campaigns to any list.
-                      {brevoLastSync && ` Brevo last synced: ${new Date(brevoLastSync).toLocaleString('en-ZA')}.`}
+                      Manage trade requests, approved customers, and Proto Active accounts. Send email campaigns from here.
                     </p>
                   </div>
                   <div className="adm-customer-actions">
                     <button type="button" className="adm-btn-red" onClick={() => setCustomerEmailOpen(true)}>
                       <Mail size={14} /> Send email
-                    </button>
-                    <button type="button" className="adm-btn-ghost" disabled={brevoSyncBusy} onClick={() => void handleBrevoSync()}>
-                      {brevoSyncBusy ? <><Loader2 size={14} className="spin" /> Syncing…</> : <><CloudDownload size={14} /> Sync from Brevo</>}
-                    </button>
-                    <button type="button" className="adm-btn-ghost" disabled={brevoPushBusy} onClick={() => void handlePushPortalToBrevo()}>
-                      {brevoPushBusy ? 'Pushing…' : <><Upload size={14} /> Push portal → Brevo</>}
-                    </button>
-                    <button type="button" className="adm-btn-ghost" disabled={protoSeedBusy} onClick={() => void importProtoActiveList()}>
-                      {protoSeedBusy ? 'Importing…' : <><Upload size={14} /> Sync proto active list</>}
-                    </button>
-                    <input ref={customerExcelRef} type="file" accept=".xlsx,.xls,.csv" style={{ display: 'none' }} onChange={(e) => { if (e.target.files?.[0]) void handleCustomerExcelApprove(e.target.files[0]); e.target.value = ''; }} />
-                    <button type="button" className="adm-btn-ghost" disabled={customerApproveBusy} onClick={() => customerExcelRef.current?.click()}>
-                      {customerApproveBusy ? 'Importing…' : <><Upload size={14} /> Approve from Excel</>}
                     </button>
                   </div>
                 </div>
@@ -2048,8 +2001,14 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                   <button onClick={() => setCustomerTab('requests')} className={`adm-tab${customerTab === 'requests' ? ' adm-tab--active' : ''}`}>Trade Requests</button>
                   <button onClick={() => setCustomerTab('regular')} className={`adm-tab${customerTab === 'regular' ? ' adm-tab--active' : ''}`}>Approved</button>
                   <button onClick={() => setCustomerTab('proto-active')} className={`adm-tab${customerTab === 'proto-active' ? ' adm-tab--active' : ''}`}>Proto Active</button>
-                  <label className="adm-search adm-search--inline"><Search size={14} /><input value={customerSearch} onChange={(e) => setCustomerSearch(e.target.value)} placeholder="Search…" className="adm-search-input" /></label>
-                  {customerTab !== 'proto-active' && (
+                  <button onClick={() => setCustomerTab('email-analytics')} className={`adm-tab${customerTab === 'email-analytics' ? ' adm-tab--active' : ''}`}>
+                    <BarChart2 size={14} style={{ marginRight: 6, verticalAlign: -2 }} />
+                    Email Analytics
+                  </button>
+                  {customerTab !== 'email-analytics' && (
+                    <label className="adm-search adm-search--inline"><Search size={14} /><input value={customerSearch} onChange={(e) => setCustomerSearch(e.target.value)} placeholder="Search…" className="adm-search-input" /></label>
+                  )}
+                  {customerTab !== 'proto-active' && customerTab !== 'email-analytics' && (
                     <select
                       className="adm-select"
                       value={customerBusinessType}
@@ -2065,14 +2024,18 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                   )}
                 </div>
 
-                {customerTab === 'proto-active' ? (
+                {customerTab === 'email-analytics' ? (
+                  <Suspense fallback={<LazySectionFallback label="Loading Email Analytics…" />}>
+                    <EmailAnalyticsPanel onShowToast={showToast} />
+                  </Suspense>
+                ) : customerTab === 'proto-active' ? (
                   <div className="adm-list">
                     <div className="adm-list-head" style={{ gridTemplateColumns: '80px 1.2fr 110px 90px 1.1fr 100px 80px 100px 120px' }}>
                       <span>Code</span><span>Business</span><span>Contact</span><span>First name</span><span>Email</span><span>12mo Sales</span><span>Invoices</span><span>Last purchase</span><span>Actions</span>
                     </div>
                     {customerRows.length === 0 && !loading && (
                       <div className="adm-empty" style={{ padding: '24px 0' }}>
-                        No proto active customers loaded. Click <strong>Sync proto active list</strong> to import from the master file.
+                        No proto active customers in this list yet.
                       </div>
                     )}
                     {customerRows.map((row) => (
@@ -2251,13 +2214,13 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                       <button
                         type="button"
                         className="adm-btn-ghost"
-                        onClick={() => void loadOrders()}
-                        disabled={loading}
-                        style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px' }}
-                        title="Refresh orders"
+                        onClick={() => void clearAllOrders()}
+                        disabled={loading || saving === 'clear-all-orders'}
+                        style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px', color: '#c40000' }}
+                        title="Delete all orders"
                       >
-                        {loading ? <Loader2 size={15} className="spin" /> : <RefreshCw size={15} />}
-                        Refresh
+                        {saving === 'clear-all-orders' ? <Loader2 size={15} className="spin" /> : <Trash2 size={15} />}
+                        Clear all
                       </button>
                       <label className="adm-search"><Search size={15} /><input value={orderSearch} onChange={(e) => setOrderSearch(e.target.value)} placeholder="Search orders" className="adm-search-input" /></label>
                     </div>
@@ -2414,15 +2377,6 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                 )}
                 </>
                 )}
-              </div>
-            )}
-
-            {/* BREVO CRM */}
-            {activeSection === 'brevo' && (
-              <div className="adm-panel">
-                <Suspense fallback={<LazySectionFallback label="Loading Brevo CRM…" />}>
-                  <CrmPanel onShowToast={showToast} />
-                </Suspense>
               </div>
             )}
 

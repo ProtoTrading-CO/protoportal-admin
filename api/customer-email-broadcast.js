@@ -7,6 +7,7 @@ import {
   TEST_MERGE_VARS,
   sendBrevoTransactional,
 } from './_brevo-email.js';
+import { appendEmailCampaign } from './_email-campaigns.js';
 
 function getAdminClient() {
   return createClient(
@@ -36,6 +37,7 @@ export default async function handler(req, res) {
     htmlContent,
     textContent,
     testEmail,
+    businessTypes,
   } = req.body || {};
 
   const aud = String(audience || '').trim();
@@ -69,16 +71,34 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, test: true, sent: 1 });
     }
 
-    const recipients = await fetchCustomerAudience(sb, aud);
+    const recipients = await fetchCustomerAudience(sb, aud, {
+      businessTypes: Array.isArray(businessTypes) ? businessTypes : [],
+    });
     if (!recipients.length) {
       return res.status(400).json({ error: 'No customers with valid email addresses in this audience.' });
     }
 
-    const { sent, failed, errors } = await sendBroadcastBatch(recipients, {
+    const { sent, failed, errors, messageIds } = await sendBroadcastBatch(recipients, {
       subject: subj,
       introText: intro,
       htmlBlock: html,
     });
+
+    try {
+      await appendEmailCampaign({
+        subject: subj,
+        audience: aud,
+        businessTypes: Array.isArray(businessTypes) ? businessTypes.filter(Boolean) : [],
+        sentAt: new Date().toISOString(),
+        recipientCount: recipients.length,
+        sent,
+        failed,
+        messageIds: messageIds || [],
+        events: {},
+      });
+    } catch (logErr) {
+      console.error('customer-email-broadcast: campaign log failed:', logErr?.message || logErr);
+    }
 
     return res.status(failed ? 207 : 200).json({
       ok: failed === 0,

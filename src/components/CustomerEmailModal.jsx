@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Code2, Loader2, Mail, Send } from 'lucide-react';
 import { PROTO_URLS } from '../lib/protoUrls';
+import { BUSINESS_TYPES } from '../lib/businessTypes';
 import {
   MERGE_TAGS,
   PREVIEW_MERGE_VARS,
@@ -84,6 +85,8 @@ export default function CustomerEmailModal({
   const [htmlBody, setHtmlBody] = useState('');
   const [htmlPane, setHtmlPane] = useState('split');
   const [audience, setAudience] = useState('all-approved');
+  const [filterBusinessTypes, setFilterBusinessTypes] = useState(false);
+  const [businessTypes, setBusinessTypes] = useState([]);
   const [sending, setSending] = useState(false);
   const [testSending, setTestSending] = useState(false);
 
@@ -96,6 +99,8 @@ export default function CustomerEmailModal({
     if (!open) return;
     setAudience(defaultAudienceForTab(customerTab));
     setHtmlPane('split');
+    setFilterBusinessTypes(false);
+    setBusinessTypes([]);
   }, [open, customerTab]);
 
   const selectedAudience = useMemo(
@@ -142,6 +147,12 @@ export default function CustomerEmailModal({
     }
   };
 
+  const toggleBusinessType = (type) => {
+    setBusinessTypes((prev) => (
+      prev.includes(type) ? prev.filter((t) => t !== type) : [...prev, type]
+    ));
+  };
+
   const handleSend = async (test = false) => {
     if (!subject.trim()) {
       onShowToast?.('Subject is required', 'error');
@@ -152,7 +163,12 @@ export default function CustomerEmailModal({
       return;
     }
 
-    if (!test && !window.confirm(`Send this email to: ${selectedAudience.label}?`)) return;
+    if (!test && filterBusinessTypes && !businessTypes.length) {
+      onShowToast?.('Select at least one business type or turn off the filter', 'error');
+      return;
+    }
+
+    if (!test && !window.confirm(`Send this email to: ${selectedAudience.label}${filterBusinessTypes && businessTypes.length ? ` (${businessTypes.length} business type${businessTypes.length === 1 ? '' : 's'})` : ''}?`)) return;
 
     if (test) {
       const testEmail = adminEmail || window.prompt('Send test to email address:');
@@ -165,6 +181,7 @@ export default function CustomerEmailModal({
           introText: introBody.trim(),
           htmlBlock: htmlBody.trim(),
           testEmail: testEmail.trim(),
+          businessTypes: filterBusinessTypes ? businessTypes : [],
         });
         onShowToast?.(`Test email sent to ${testEmail.trim()}`, 'success');
       } catch (err) {
@@ -182,6 +199,7 @@ export default function CustomerEmailModal({
         subject: subject.trim(),
         introText: introBody.trim(),
         htmlBlock: htmlBody.trim(),
+        businessTypes: filterBusinessTypes ? businessTypes : [],
       });
       onShowToast?.(
         `Sent to ${result.sent} customer(s)${result.failed ? ` — ${result.failed} failed` : ''}`,
@@ -231,6 +249,36 @@ export default function CustomerEmailModal({
               ))}
             </select>
             <span className="adm-email-field__hint">{selectedAudience.hint}</span>
+          </label>
+
+          <label className="adm-email-field">
+            <span className="adm-email-field__label">Filter by business type?</span>
+            <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+                <input
+                  type="checkbox"
+                  checked={filterBusinessTypes}
+                  onChange={(e) => setFilterBusinessTypes(e.target.checked)}
+                />
+                Yes — only send to selected business types
+              </label>
+            </div>
+            {filterBusinessTypes && (
+              <div className="adm-email-merge-bar" style={{ marginTop: 8 }}>
+                <div className="adm-email-merge-bar__chips">
+                  {BUSINESS_TYPES.map((type) => (
+                    <button
+                      key={type}
+                      type="button"
+                      className={`adm-email-merge-chip${businessTypes.includes(type) ? ' adm-email-merge-chip--active' : ''}`}
+                      onClick={() => toggleBusinessType(type)}
+                    >
+                      {type}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </label>
 
           <div className="adm-email-field">

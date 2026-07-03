@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { fetchReorderProducts, updateProduct } from '../lib/products';
 import { subcategoryOptionsFromTree } from '../lib/taxonomyAdmin';
 import { saveSpecials } from '../lib/specials';
+import { ADMIN_REFRESH_EVENT } from '../lib/adminRefresh';
 
 // Pricing — bulk-adjust selected products by a percentage and stamp them
 // onto This Week's Specials. Extracted from AdminPage so state, load and
@@ -41,6 +42,14 @@ export default function PricingPanel({
   }, [toast]);
 
   useEffect(() => { void load(category); }, [category, load]);
+
+  useEffect(() => {
+    const onRefresh = (event) => {
+      if (event.detail === 'pricing') void load(category);
+    };
+    window.addEventListener(ADMIN_REFRESH_EVENT, onRefresh);
+    return () => window.removeEventListener(ADMIN_REFRESH_EVENT, onRefresh);
+  }, [category, load]);
 
   useEffect(() => {
     if (!mainCategories.some((c) => c.id === category) && mainCategories[0]?.id) {
