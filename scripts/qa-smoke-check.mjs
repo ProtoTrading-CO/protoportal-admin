@@ -57,4 +57,16 @@ assert.equal(chunkSum, 15, 'runInChunks runs all items');
 assert.equal(BULK_CHUNK_SIZE, 25, 'chunk size is 25');
 console.log('✓ Item 1 bulk-products batched + chunked');
 
+const taxonomyUtilsSrc = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../api/_taxonomy-utils.js'), 'utf8');
+assert.match(taxonomyUtilsSrc, /expectedUpdatedAt/, 'taxonomy save checks expectedUpdatedAt');
+assert.match(taxonomyUtilsSrc, /c\.id !== 'mottaro'/, 'taxonomy save still strips mottaro');
+const taxonomyAdminSrc = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../src/lib/taxonomyAdmin.js'), 'utf8');
+assert.match(taxonomyAdminSrc, /err\.status = 409/, 'taxonomy client handles 409');
+console.log('✓ Item 2 taxonomy optimistic locking');
+
+const approveSrc = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../api/approve-customers-bulk.js'), 'utf8');
+assert.match(approveSrc, /fetchCustomersByEmails/, 'bulk approve batches customer lookup');
+assert.match(approveSrc, /runInChunks/, 'bulk approve uses chunked parallelism');
+console.log('✓ Item 3 bulk customer approve batched');
+
 console.log('\nAll smoke checks passed.');

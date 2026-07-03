@@ -10,6 +10,7 @@ import {
   deleteSubcategoryNode,
   findNodeContext,
   loadTaxonomy,
+  readTaxonomyStore,
   renameNodeLabel,
   resolveLabelsFromPathIds,
   saveTaxonomy,
@@ -19,7 +20,7 @@ function getStockClient() {
   return createClient(
     process.env.VITE_STOCK_SUPABASE_URL,
     process.env.VITE_STOCK_SUPABASE_KEY,
-    { auth: { autoRefreshToken: false, persistSession: false } }
+    { auth: { autoRefreshToken: false, persistSession: false } },
   );
 }
 
@@ -38,18 +39,26 @@ async function renameProductsForNode(supabase, ctx, oldLabel, newLabel) {
   await applyRenameToTable(supabase, 'archived_products', ctx, oldLabel, newLabel);
 }
 
+function taxonomyConflictResponse(res, err) {
+  return res.status(409).json({
+    error: err.message || 'Categories were changed by someone else — reload before saving.',
+    currentUpdatedAt: err.currentUpdatedAt || null,
+  });
+}
+
 export default async function handler(req, res) {
   if (!(await requireAdminKey(req, res))) return;
   res.setHeader('Cache-Control', 'no-store');
 
   if (req.method === 'GET') {
     try {
+      const store = await readTaxonomyStore();
       const categories = await loadTaxonomy();
       if (req.query.counts === '1') {
         const counts = await buildCategoryProductCounts(getStockClient(), categories);
-        return res.status(200).json({ categories, counts });
+        return res.status(200).json({ categories, counts, updatedAt: store.updatedAt });
       }
-      return res.status(200).json({ categories });
+      return res.status(200).json({ categories, updatedAt: store.updatedAt });
     } catch (err) {
       return res.status(500).json({ error: err.message || 'Failed to load taxonomy' });
     }
@@ -57,7 +66,7 @@ export default async function handler(req, res) {
 
   if (req.method !== 'POST') return res.status(405).end();
 
-  const { action } = req.body || {};
+  const { action, expectedUpdatedAt } = req.body || {};
   const supabase = getStockClient();
 
   try {
@@ -66,30 +75,38 @@ export default async function handler(req, res) {
     if (action === 'rename') {
       const { id, label } = req.body;
       const { tree: next, oldLabel, ctx } = renameNodeLabel(tree, id, label);
-      const counts = await renameProductsForNode(supabase, ctx, oldLabel, label.trim());
-      await saveTaxonomy(next);
-      return res.status(200).json({ ok: true, id, label: label.trim() });
+      await renameProductsForNode(supabase, ctx, oldLabel, label.trim());
+      const saved = await saveTaxonomy(next, { expectedUpdatedAt });
+      return res.status(200).json({ ok: true, id, label: label.trim(), updatedAt: saved.updatedAt });
     }
 
     if (action === 'addCategory') {
       const { label } = req.body;
       const { tree: next, node, created } = addCategoryNode(tree, label);
-      if (created) await saveTaxonomy(next);
-      return res.status(200).json({ ok: true, node, created });
+      let updatedAt = null;
+      if (created) {
+        const saved = await saveTaxonomy(next, { expectedUpdatedAt });
+        updatedAt = saved.updatedAt;
+      }
+      return res.status(200).json({ ok: true, node, created, updatedAt });
     }
 
     if (action === 'addSubcategory') {
       const { parentId, label } = req.body;
       const { tree: next, node, created } = addSubcategoryNode(tree, parentId, label);
-      if (created) await saveTaxonomy(next);
-      return res.status(200).json({ ok: true, node, created });
+      let updatedAt = null;
+      if (created) {
+        const saved = await saveTaxonomy(next, { expectedUpdatedAt });
+        updatedAt = saved.updatedAt;
+      }
+      return res.status(200).json({ ok: true, node, created, updatedAt });
     }
 
     if (action === 'replace') {
       const { categories } = req.body;
       if (!Array.isArray(categories)) return res.status(400).json({ error: 'categories array required' });
-      await saveTaxonomy(categories);
-      return res.status(200).json({ ok: true });
+      const saved = await saveTaxonomy(categories, { expectedUpdatedAt });
+      return res.status(200).json({ ok: true, updatedAt: saved.updatedAt });
     }
 
     if (action === 'deleteSubcategory') {
@@ -105,13 +122,11 @@ export default async function handler(req, res) {
         });
       }
       const { tree: next } = deleteSubcategoryNode(tree, id);
-      await saveTaxonomy(next);
-      return res.status(200).json({ ok: true, id, productCount: 0 });
+      const saved = await saveTaxonomy(next, { expectedUpdatedAt });
+      return res.status(200).json({ ok: true, id, productCount: 0, updatedAt: saved.updatedAt });
     }
 
     if (action === 'deleteNode') {
-      // Delete a category or subcategory (and its subtree). Products are kept —
-      // they just become uncategorised. We still report how many are affected.
       const { id } = req.body;
       if (!id) return res.status(400).json({ error: 'id required' });
       const ctx = findNodeContext(tree, id);
@@ -119,8 +134,8 @@ export default async function handler(req, res) {
       let productCount = 0;
       try { productCount = await countProductsForNode(supabase, ctx); } catch { /* best effort */ }
       const { tree: next } = deleteNodeCascade(tree, id);
-      await saveTaxonomy(next);
-      return res.status(200).json({ ok: true, id, productCount });
+      const saved = await saveTaxonomy(next, { expectedUpdatedAt });
+      return res.status(200).json({ ok: true, id, productCount, updatedAt: saved.updatedAt });
     }
 
     if (action === 'countSubcategoryProducts') {
@@ -134,6 +149,7 @@ export default async function handler(req, res) {
 
     return res.status(400).json({ error: `Unknown action: ${action}` });
   } catch (err) {
+    if (err.status === 409) return taxonomyConflictResponse(res, err);
     return res.status(400).json({ error: err.message || 'Taxonomy update failed' });
   }
 }

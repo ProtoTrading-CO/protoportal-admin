@@ -1,17 +1,46 @@
 import bundledCategories from '../data/categories.json';
 import { labelToSlug } from './taxonomy';
 
+let _taxonomyUpdatedAt = null;
+
+export function getTaxonomyUpdatedAt() {
+  return _taxonomyUpdatedAt;
+}
+
+async function postTaxonomy(body) {
+  const res = await fetch('/api/taxonomy', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      ...body,
+      expectedUpdatedAt: getTaxonomyUpdatedAt(),
+    }),
+  });
+  const json = await res.json();
+  if (res.status === 409) {
+    const err = new Error(json.error || 'Categories were changed by someone else — reload before saving.');
+    err.status = 409;
+    err.currentUpdatedAt = json.currentUpdatedAt;
+    throw err;
+  }
+  if (!res.ok) throw new Error(json.error || 'Taxonomy update failed');
+  if (json.updatedAt) _taxonomyUpdatedAt = json.updatedAt;
+  return json;
+}
+
 export async function fetchTaxonomy({ withCounts = false } = {}) {
   try {
     const qs = withCounts ? '?counts=1' : '';
     const res = await fetch(`/api/taxonomy${qs}`);
     if (!res.ok) throw new Error(`Taxonomy ${res.status}`);
     const json = await res.json();
+    _taxonomyUpdatedAt = json.updatedAt || _taxonomyUpdatedAt;
+    const categories = json.categories || bundledCategories;
     return withCounts
-      ? { categories: json.categories || bundledCategories, counts: json.counts || {} }
-      : (json.categories || bundledCategories);
+      ? { categories, counts: json.counts || {}, updatedAt: _taxonomyUpdatedAt }
+      : categories;
   } catch {
-    return withCounts ? { categories: bundledCategories, counts: {} } : bundledCategories;
+    return withCounts ? { categories: bundledCategories, counts: {}, updatedAt: null } : bundledCategories;
   }
 }
 
@@ -19,53 +48,26 @@ export async function fetchCategoryProductCounts() {
   const res = await fetch('/api/taxonomy?counts=1');
   const json = await res.json();
   if (!res.ok) throw new Error(json.error || 'Failed to load category counts');
+  if (json.updatedAt) _taxonomyUpdatedAt = json.updatedAt;
   return json.counts || {};
 }
 
 export async function renameTaxonomyNode(id, label) {
-  const res = await fetch('/api/taxonomy', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action: 'rename', id, label }),
-  });
-  const json = await res.json();
-  if (!res.ok) throw new Error(json.error || 'Rename failed');
-  return json;
+  return postTaxonomy({ action: 'rename', id, label });
 }
 
 export async function createCategory(label) {
-  const res = await fetch('/api/taxonomy', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action: 'addCategory', label }),
-  });
-  const json = await res.json();
-  if (!res.ok) throw new Error(json.error || 'Create category failed');
-  return json;
+  return postTaxonomy({ action: 'addCategory', label });
 }
 
 export async function createSubcategory(parentId, label) {
-  const res = await fetch('/api/taxonomy', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action: 'addSubcategory', parentId, label }),
-  });
-  const json = await res.json();
-  if (!res.ok) throw new Error(json.error || 'Create subcategory failed');
-  return json;
+  return postTaxonomy({ action: 'addSubcategory', parentId, label });
 }
 
 // Deletes a category or subcategory (and its subtree). Products are kept and
 // become uncategorised — the server reports how many were affected.
 export async function deleteTaxonomyNode(id) {
-  const res = await fetch('/api/taxonomy', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action: 'deleteNode', id }),
-  });
-  const json = await res.json();
-  if (!res.ok) throw new Error(json.error || 'Delete failed');
-  return json;
+  return postTaxonomy({ action: 'deleteNode', id });
 }
 
 export async function countSubcategoryProducts(id) {
@@ -122,14 +124,7 @@ export function flattenSubcategories(nodes, depth = 1, prefix = '') {
 }
 
 export async function replaceFullTaxonomy(categories) {
-  const res = await fetch('/api/taxonomy', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action: 'replace', categories }),
-  });
-  const json = await res.json();
-  if (!res.ok) throw new Error(json.error || 'Replace failed');
-  return json;
+  return postTaxonomy({ action: 'replace', categories });
 }
 
 export { labelToSlug, bundledCategories };

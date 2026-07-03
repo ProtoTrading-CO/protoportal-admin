@@ -901,6 +901,15 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     return tree;
   };
 
+  const handleTaxonomyConflict = async (err) => {
+    if (err.status === 409) {
+      showToast(err.message || 'Categories were changed by someone else — reloading', 'error');
+      await reloadTaxonomy();
+      return true;
+    }
+    return false;
+  };
+
   const handleCategoryReorder = async (newTree) => {
     setTaxonomyTree(newTree);
     setLiveTaxonomyTree(newTree);
@@ -911,6 +920,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
       queryClient.invalidateQueries({ queryKey: ['catalog'] });
       showToast('Category order saved — live site updates within ~30 seconds', 'success');
     } catch (err) {
+      if (await handleTaxonomyConflict(err)) return;
       showToast(err.message || 'Failed to save category order', 'error');
       const reverted = await fetchTaxonomy();
       setTaxonomyTree(reverted);
@@ -1856,6 +1866,10 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
       setEditTaxonomyModal(null);
       showToast('Category updated');
     } catch (err) {
+      if (await handleTaxonomyConflict(err)) {
+        setEditTaxonomyModal(null);
+        return;
+      }
       showToast(err.message || 'Update failed', 'error');
     } finally { setTaxonomySaving(false); }
   };
@@ -1881,6 +1895,10 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
       if (selectedIds.size > 0) setMoveModalOpen(true);
       showToast(json.created ? 'Subcategory created' : 'Subcategory already exists');
     } catch (err) {
+      if (await handleTaxonomyConflict(err)) {
+        setNewSubModal(null);
+        return;
+      }
       showToast(err.message || 'Create failed', 'error');
     } finally { setTaxonomySaving(false); }
   };
@@ -1896,6 +1914,10 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
       setNewCategoryModal(null);
       showToast(json.created ? 'Category created' : 'Category already exists');
     } catch (err) {
+      if (await handleTaxonomyConflict(err)) {
+        setNewCategoryModal(null);
+        return;
+      }
       showToast(err.message || 'Create failed', 'error');
     } finally { setTaxonomySaving(false); }
   };
@@ -1925,6 +1947,10 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
       setDeleteSubModal(null);
       showToast(isCat ? 'Category deleted' : 'Subcategory deleted');
     } catch (err) {
+      if (await handleTaxonomyConflict(err)) {
+        setDeleteSubModal(null);
+        return;
+      }
       showToast(err.message || 'Delete failed', 'error');
     } finally { setTaxonomySaving(false); }
   };
