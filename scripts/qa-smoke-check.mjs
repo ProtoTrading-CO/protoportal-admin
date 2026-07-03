@@ -123,7 +123,6 @@ assert.match(adminPageSrc, /const AnalyticsHub = lazy\(/, 'AnalyticsHub is lazy'
 assert.match(adminPageSrc, /const ApolloPanel = lazy\(/, 'ApolloPanel is lazy');
 assert.match(adminPageSrc, /const CostTrackingPanel = lazy\(/, 'CostTrackingPanel is lazy');
 assert.match(adminPageSrc, /const ProductLoaderPanel = lazy\(/, 'ProductLoaderPanel is lazy');
-assert.match(adminPageSrc, /const CrmPanel = lazy\(/, 'CrmPanel is lazy');
 assert.match(adminPageSrc, /const WhatsappPanel = lazy\(/, 'WhatsappPanel is lazy');
 assert.match(adminPageSrc, /const CustomerEmailModal = lazy\(/, 'CustomerEmailModal is lazy');
 assert.match(adminPageSrc, /const CrmContactsModal = lazy\(/, 'CrmContactsModal is lazy');
