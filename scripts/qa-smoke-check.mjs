@@ -5,6 +5,7 @@
  */
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { orderMatchesTab, isOrderConfirmationSent } from '../src/lib/orderStatus.js';
@@ -109,6 +110,11 @@ console.log('✓ Item 3 Nutstore hardening (timeouts, parallelism, dedup, cache)
 const updateProductSrc = readSrc('api/update-product.js');
 assert.match(updateProductSrc, /verified\.archived_by === 'nutstore'/, 'update-product re-runs ERP lookup on Nutstore-archived rows');
 assert.match(updateProductSrc, /resolveProductLoaderMatch/, 'update-product imports resolveProductLoaderMatch');
+assert.equal(
+  spawnSync('node', ['--check', join(REPO_ROOT, 'api/update-product.js')], { encoding: 'utf8' }).status,
+  0,
+  'update-product.js passes node --check (no syntax errors)',
+);
 const websiteStockLookup = updateProductSrc.match(/\.from\('website_stock'\)[\s\S]*?\.maybeSingle\(\)/)?.[0] || '';
 assert.doesNotMatch(
   websiteStockLookup,

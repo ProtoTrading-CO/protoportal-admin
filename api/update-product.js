@@ -143,7 +143,7 @@ export default async function handler(req, res) {
           updated_at: new Date().toISOString(),
           price: Number(match.sqlRow.price) || 0,
           stock_qty: Number(match.sqlRow.onhand) || 0,
-          available_stock: Number(match.sqlRow.available) ?? Number(match.sqlRow.onhand) || 0,
+          available_stock: Number(match.sqlRow.available) ?? (Number(match.sqlRow.onhand) || 0),
         };
         const matchedTitle = String(match.sqlRow.title || '').trim();
         if (matchedTitle) {
