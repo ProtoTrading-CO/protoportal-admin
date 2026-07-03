@@ -29,6 +29,16 @@ async function patch(path, body) {
   return { status: res.status, json };
 }
 
+async function post(path, body) {
+  const res = await fetch(`${BASE}${path}`, {
+    method: 'POST',
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const json = await res.json().catch(() => ({}));
+  return { status: res.status, json };
+}
+
 const results = [];
 
 function record(name, pass, detail = '') {
@@ -40,6 +50,18 @@ function record(name, pass, detail = '') {
 const tax = await get('/api/taxonomy');
 const cats = tax.json?.categories || tax.json || [];
 record('Mottaro in /api/taxonomy', tax.status === 200 && cats.some((c) => c.id === 'mottaro'), `status ${tax.status}`);
+record('Taxonomy exposes updatedAt', tax.status === 200 && !!tax.json?.updatedAt, tax.json?.updatedAt || 'missing');
+
+const staleTax = await post('/api/taxonomy', {
+  action: 'replace',
+  categories: cats.filter((c) => c.id !== 'mottaro'),
+  expectedUpdatedAt: '1970-01-01T00:00:00.000Z',
+});
+record('Taxonomy stale expectedUpdatedAt → 409', staleTax.status === 409, staleTax.json?.error || `status ${staleTax.status}`);
+
+// Bulk products validation
+const emptyBulk = await post('/api/bulk-products', { action: 'archive', skus: [] });
+record('Bulk products rejects empty skus', emptyBulk.status === 400, emptyBulk.json?.error || `status ${emptyBulk.status}`);
 
 // Query validation
 const badTab = await get('/api/admin-orders?tab=not-a-tab');

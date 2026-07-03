@@ -56,11 +56,41 @@ export async function loadTaxonomy({ bypassCache = false } = {}) {
   return withMotarro(bundled);
 }
 
-export async function saveTaxonomy(categories) {
+/** Read stored taxonomy payload (categories + updatedAt) without Mottaro injection. */
+export async function readTaxonomyStore() {
+  try {
+    const stored = await readSiteConfigJson(TAXONOMY_FILE, null);
+    if (Array.isArray(stored)) {
+      return { categories: stored, updatedAt: null };
+    }
+    if (stored?.categories && Array.isArray(stored.categories)) {
+      return { categories: stored.categories, updatedAt: stored.updatedAt || null };
+    }
+  } catch { /* fall through */ }
+  const bundled = loadBundledTaxonomy();
+  return { categories: bundled, updatedAt: null };
+}
+
+export async function saveTaxonomy(categories, { expectedUpdatedAt } = {}) {
   const stripped = (Array.isArray(categories) ? categories : []).filter((c) => c.id !== 'mottaro');
-  await writeSiteConfigJson(TAXONOMY_FILE, { categories: stripped });
+
+  const expected = expectedUpdatedAt != null ? String(expectedUpdatedAt).trim() : '';
+  if (expected) {
+    const fresh = await readSiteConfigJson(TAXONOMY_FILE, null);
+    const currentUpdatedAt = fresh?.updatedAt || null;
+    if (currentUpdatedAt && currentUpdatedAt !== expected) {
+      const err = new Error('Categories were changed by someone else — reload before saving.');
+      err.status = 409;
+      err.currentUpdatedAt = currentUpdatedAt;
+      throw err;
+    }
+  }
+
+  const saved = await writeSiteConfigJson(TAXONOMY_FILE, { categories: stripped });
   invalidateTaxonomyCache();
-  return withMotarro(stripped);
+  _taxonomyCache = stripped;
+  _taxonomyCachedAt = Date.now();
+  return { categories: withMotarro(stripped), updatedAt: saved.updatedAt || null };
 }
 
 export function findNodeContext(tree, id, parent = null, depth = 0, ancestors = []) {

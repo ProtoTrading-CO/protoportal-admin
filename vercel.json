@@ -30,6 +30,12 @@
     "api/catalog.js": {
       "maxDuration": 60
     },
+    "api/bulk-products.js": {
+      "maxDuration": 60
+    },
+    "api/approve-customers-bulk.js": {
+      "maxDuration": 60
+    },
     "api/apply-category-moves.js": {
       "maxDuration": 300,
       "includeFiles": "data/category-move-*.xlsx"
