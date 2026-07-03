@@ -271,6 +271,10 @@ console.log('✓ Archive flow — relink, make-live modal, edit modal guards');
 
 const productsSrc = readSrc('src/lib/products.js');
 assert.match(productsSrc, /return json;/, 'updateProduct returns API payload including relink');
+assert.match(productsSrc, /readApiJson\(res, \{ fallback: 'Update failed' \}\)/, 'updateProduct uses readApiJson (not bare res.json)');
+assert.doesNotMatch(productsSrc, /updateProduct[\s\S]*?await res\.json\(\)/, 'updateProduct must not call res.json directly');
+const apiErrorSrc = readSrc('src/lib/apiError.js');
+assert.match(apiErrorSrc, /JSON\.parse\(text\)/, 'readApiJson parses response text safely');
 const bulkEditSrc = readSrc('src/components/BulkProductEditModal.jsx');
 assert.match(bulkEditSrc, /relink\?\.matched/, 'bulk edit surfaces Positill relink match toast');
 assert.doesNotMatch(bulkEditSrc, /pm-bulk-apply-cat/, 'bulk edit removed apply-category-to-all section');

@@ -2,6 +2,7 @@ import { adminProductSearch, fuzzyFilter } from './fuzzySearch';
 import { labelToSlug, resolveCategoryIdsFromTree, slugToLabel, slugToLabelFromTree, productMatchesNavPath, LEGACY_NAV_ALIASES } from './taxonomy';
 import { queryClient } from './queryClient';
 import { queryKeys } from './queryKeys';
+import { readApiJson } from './apiError.js';
 import { enrichMotarroCategoryFields } from '../../lib/mottaro-category.mjs';
 
 function categoryMainIdMatches(productMainId, targetMainId) {
@@ -84,9 +85,7 @@ async function stockAction(body) {
       ? 'Failed to fetch catalogue — server may be busy; try Refresh'
       : (err.message || 'Stock action failed'));
   }
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(json.error || 'Stock action failed');
-  return json;
+  return readApiJson(res, { fallback: 'Stock action failed' });
 }
 
 /** Parse a DB numeric stock field; preserves negatives and zero; null if missing/invalid. */
@@ -467,8 +466,7 @@ export async function uploadDormantImage(file) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ filename: file.name, contentType: 'image/jpeg', base64 }),
   });
-  const json = await res.json();
-  if (!res.ok) throw new Error(json.error || 'Upload failed');
+  const json = await readApiJson(res, { fallback: 'Upload failed' });
   return json.url;
 }
 
@@ -554,8 +552,7 @@ export async function updateProduct(sku, payload) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
-  const json = await res.json();
-  if (!res.ok) throw new Error(json.error || 'Update failed');
+  const json = await readApiJson(res, { fallback: 'Update failed' });
   invalidateProductCache();
   invalidateAdminCache();
   return json;
@@ -578,8 +575,7 @@ export async function reorderStagedApprovalImages(sku, fromSlot, toSlot) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ action: 'reorderStagedImages', sku, fromSlot, toSlot }),
   });
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(json.error || 'Failed to reorder staged images');
+  const json = await readApiJson(res, { fallback: 'Failed to reorder staged images' });
   return json;
 }
 
@@ -590,8 +586,7 @@ export async function applyDormantLive(sku) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ sku }),
   });
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(json.error || 'Go live failed');
+  const json = await readApiJson(res, { fallback: 'Go live failed' });
   // Targeted refresh — avoid nuking the full admin catalogue cache (causes flashing load errors).
   queryClient.invalidateQueries({
     predicate: (q) => q.queryKey[0] === 'catalog' && q.queryKey[1]?.status === 'live',
@@ -630,8 +625,7 @@ export async function deleteProduct(sku) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ websiteSku: sku }),
   });
-  const json = await res.json();
-  if (!res.ok) throw new Error(json.error || 'Delete failed');
+  await readApiJson(res, { fallback: 'Delete failed' });
   invalidateAdminCache();
   invalidateProductCache();
 }
@@ -669,13 +663,17 @@ export async function bulkMoveProducts({ skus, categoryId, subcategoryId, catego
       categoryPathIds,
     }),
   });
-  const json = await res.json();
-  if (res.status === 409) {
-    const err = new Error(json.error || 'Destination category changed — reload categories and reselect.');
-    err.status = 409;
+  let json;
+  try {
+    json = await readApiJson(res, { fallback: 'Bulk move failed' });
+  } catch (err) {
+    if (res.status === 409) {
+      const e = new Error(err.message || 'Destination category changed — reload categories and reselect.');
+      e.status = 409;
+      throw e;
+    }
     throw err;
   }
-  if (!res.ok && res.status !== 207) throw new Error(json.error || 'Bulk move failed');
   if (json.failed?.length) {
     const detail = json.failed.slice(0, 3).map((f) => `${f.sku}: ${f.error}`).join('; ');
     const suffix = json.failed.length > 3 ? ` (+${json.failed.length - 3} more)` : '';
@@ -695,8 +693,7 @@ export async function bulkArchiveProducts(skus) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ action: 'archive', skus }),
   });
-  const json = await res.json();
-  if (!res.ok && res.status !== 207) throw new Error(json.error || 'Bulk archive failed');
+  const json = await readApiJson(res, { fallback: 'Bulk archive failed' });
   if (json.failed?.length) {
     throw new Error(`${json.failed.length} item(s) failed to archive`);
   }
@@ -711,8 +708,7 @@ export async function bulkUnarchiveProducts(skus) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ action: 'unarchive', skus }),
   });
-  const json = await res.json();
-  if (!res.ok && res.status !== 207) throw new Error(json.error || 'Bulk restore failed');
+  const json = await readApiJson(res, { fallback: 'Bulk restore failed' });
   invalidateProductCache();
   invalidateAdminCache();
   return json;
@@ -730,8 +726,7 @@ export async function bulkDeleteProducts(skus) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ action: 'delete', skus }),
   });
-  const json = await res.json();
-  if (!res.ok && res.status !== 207) throw new Error(json.error || 'Bulk delete failed');
+  const json = await readApiJson(res, { fallback: 'Bulk delete failed' });
   if (json.failed?.length) {
     throw new Error(`${json.failed.length} item(s) failed to delete`);
   }
