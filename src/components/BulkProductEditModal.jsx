@@ -285,12 +285,6 @@ export default function BulkProductEditModal({
   const [saving, setSaving] = useState(false);
   const [taxonomySaving, setTaxonomySaving] = useState(false);
   const [newSub, setNewSub] = useState(null);
-  const [applyCategory, setApplyCategory] = useState({
-    categoryId: taxonomyTree[0]?.id || '',
-    childOneId: '',
-    childTwoId: '',
-    childThreeId: '',
-  });
 
   useEffect(() => {
     setTree(taxonomyTree);
@@ -314,13 +308,9 @@ export default function BulkProductEditModal({
       const json = await createSubcategory(parentId, label);
       const nextTree = await refreshTree();
       const newId = json.node?.id;
-      if (newId) {
+      if (newId && typeof newSub?.target === 'number') {
         const patch = categoryPatchAfterNewSub(parentId, newId, nextTree);
-        if (newSub?.target === 'apply') {
-          setApplyCategory((prev) => ({ ...prev, ...patch }));
-        } else if (typeof newSub?.target === 'number') {
-          patchRow(newSub.target, patch);
-        }
+        patchRow(newSub.target, patch);
       }
       setNewSub(null);
       onShowToast?.(json.created ? 'Child category created' : 'Category already exists — selected it for you', 'success');
@@ -333,22 +323,6 @@ export default function BulkProductEditModal({
 
   const patchRow = (index, patch) => {
     setRows((prev) => prev.map((row, i) => (i === index ? { ...row, ...patch } : row)));
-  };
-
-  const applyCategoryToAll = () => {
-    if (!applyCategory.categoryId) {
-      onShowToast?.('Pick a main category first', 'error');
-      return;
-    }
-    setRows((prev) => prev.map((row) => ({
-      ...row,
-      categoryId: applyCategory.categoryId,
-      childOneId: applyCategory.childOneId,
-      childTwoId: applyCategory.childTwoId,
-      childThreeId: applyCategory.childThreeId,
-      childFourId: applyCategory.childFourId,
-    })));
-    onShowToast?.(`Category applied to ${rows.length} products`, 'success');
   };
 
   const handleSave = async () => {
@@ -416,20 +390,6 @@ export default function BulkProductEditModal({
             Edit descriptions, pack size, barcode, website SKU, and category placement per product.
             Use child categories 1–3 for the full path. Changes save when you click Save all.
           </p>
-
-          <section className="pm-bulk-apply-cat">
-            <h4>Apply category to all</h4>
-            <CategoryFields
-              tree={tree}
-              row={applyCategory}
-              onChange={(patch) => setApplyCategory((prev) => ({ ...prev, ...patch }))}
-              compact
-              onCreateSubcategory={(parentId) => openCreateSub(parentId, 'apply')}
-            />
-            <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={applyCategoryToAll} disabled={saving}>
-              Apply to all {rows.length}
-            </button>
-          </section>
 
           <div className="adm-modal-body pm-bulk-edit-body">
             {rows.map((row, index) => (

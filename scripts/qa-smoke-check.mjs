@@ -103,6 +103,12 @@ console.log('✓ Item 3 Nutstore hardening (timeouts, parallelism, dedup, cache)
 const updateProductSrc = readSrc('api/update-product.js');
 assert.match(updateProductSrc, /verified\.archived_by === 'nutstore'/, 'update-product re-runs ERP lookup on Nutstore-archived rows');
 assert.match(updateProductSrc, /resolveProductLoaderMatch/, 'update-product imports resolveProductLoaderMatch');
+const websiteStockLookup = updateProductSrc.match(/\.from\('website_stock'\)[\s\S]*?\.maybeSingle\(\)/)?.[0] || '';
+assert.doesNotMatch(
+  websiteStockLookup,
+  /archived_by/,
+  'website_stock pre-update lookup does not select archived_by',
+);
 console.log('✓ Item 4 Nutstore relink on SKU/barcode edit');
 
 // Compound code normalization — shared lookup candidates
@@ -167,6 +173,9 @@ const productsSrc = readSrc('src/lib/products.js');
 assert.match(productsSrc, /return json;/, 'updateProduct returns API payload including relink');
 const bulkEditSrc = readSrc('src/components/BulkProductEditModal.jsx');
 assert.match(bulkEditSrc, /relink\?\.matched/, 'bulk edit surfaces Positill relink match toast');
+assert.doesNotMatch(bulkEditSrc, /pm-bulk-apply-cat/, 'bulk edit removed apply-category-to-all section');
+assert.doesNotMatch(bulkEditSrc, /applyCategoryToAll/, 'bulk edit removed applyCategoryToAll handler');
+console.log('✓ Bulk edit modal — apply category to all removed');
 const adminPageRelinkSrc = readSrc('src/pages/AdminPage.jsx');
 assert.match(adminPageRelinkSrc, /relink\?\.matched/, 'product editor surfaces Positill relink match toast');
 console.log('✓ Item 4 client relink toast propagation');
