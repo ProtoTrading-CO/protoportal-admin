@@ -182,4 +182,19 @@ assert.match(sidebarSrc, /banner: \(\) => import\('\.\/BannerPanel'\)/, 'sidebar
 assert.match(sidebarSrc, /specials: \(\) => import\('\.\/SpecialsPanel'\)/, 'sidebar prefetches SpecialsPanel on hover');
 console.log('✓ AdminPage split — BannerPanel + SpecialsPanel extracted, lazy, prefetched');
 
+// PricingPanel extraction
+assert.match(adminPageSrc, /const PricingPanel = lazy\(/, 'PricingPanel is lazy');
+assert.doesNotMatch(adminPageSrc, /const applyPricing = async/, 'applyPricing moved into PricingPanel');
+assert.doesNotMatch(adminPageSrc, /const toggleSelectAllPricing = /, 'toggleSelectAllPricing moved into PricingPanel');
+assert.doesNotMatch(adminPageSrc, /const loadCategoryWorkingSet = async/, 'loadCategoryWorkingSet dispatcher removed');
+assert.doesNotMatch(adminPageSrc, /const \[pricingCategory,/, 'pricing state moved out of AdminPage');
+assert.doesNotMatch(adminPageSrc, /const \[priceDelta,/, 'priceDelta state moved out of AdminPage');
+
+const pricingPanel = readSrc('src/components/PricingPanel.jsx');
+assert.match(pricingPanel, /export default function PricingPanel/, 'PricingPanel default export');
+assert.match(pricingPanel, /fetchReorderProducts\(\{ mainCategory: categoryId \}\)/, 'PricingPanel fetches category rows');
+
+assert.match(sidebarSrc, /pricing: \(\) => import\('\.\/PricingPanel'\)/, 'sidebar prefetches PricingPanel on hover');
+console.log('✓ PricingPanel extracted, lazy, prefetched');
+
 console.log('\nAll smoke checks passed.');
