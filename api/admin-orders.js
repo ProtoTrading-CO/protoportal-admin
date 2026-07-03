@@ -224,7 +224,15 @@ async function listAllStorageFiles(supabase, prefix) {
     const { data, error } = await supabase.storage.from(SITE_CONFIG_BUCKET).list(prefix, { limit: 1000, offset });
     if (error || !data?.length) break;
     for (const entry of data) {
-      if (entry.id) paths.push(prefix ? `${prefix}/${entry.name}` : entry.name);
+      if (!entry?.name || entry.name.startsWith('.')) continue;
+      const childPath = prefix ? `${prefix}/${entry.name}` : entry.name;
+      const looksLikeFile = entry.metadata != null || /\.[a-z0-9]+$/i.test(entry.name);
+      if (looksLikeFile) {
+        paths.push(childPath);
+        continue;
+      }
+      const nested = await listAllStorageFiles(supabase, childPath);
+      paths.push(...nested);
     }
     if (data.length < 1000) break;
     offset += 1000;
@@ -442,7 +450,12 @@ export default async function handler(req, res) {
       } catch (err) {
         console.error('admin-orders: progress cleanup failed:', err?.message || err);
       }
-      return res.status(200).json({ ok: true, deleted: count || 0, progressFilesRemoved });
+      return res.status(200).json({
+        ok: true,
+        deleted: count || 0,
+        progressFilesRemoved,
+        tabCounts: { all: 0, new: 0, handed: 0, progress: 0, sent: 0, paid: 0 },
+      });
     }
     if (!id) return res.status(400).json({ error: 'id required' });
     const { error } = await supabase.from('orders').delete().eq('id', id);

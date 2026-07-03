@@ -26,7 +26,6 @@ import {
   invalidateProductCache,
   updateProduct,
 } from '../lib/products';
-import { fetchCategoryProductCounts } from '../lib/taxonomyAdmin';
 import { fuzzyFilter } from '../lib/fuzzySearch';
 import { LEGACY_NAV_ALIASES, sortOrderCategoryKey, sortOrderLookupKeys } from '../lib/taxonomy';
 import { childrenOf, findNodePath, subcategoryOptions } from '../lib/taxonomyTreeUtils';
@@ -72,6 +71,7 @@ const ReorderPanel = forwardRef(function ReorderPanel({
   onEditProduct,
   onShowToast,
   onRefreshStats,
+  onRefreshCategoryCounts,
 }, ref) {
   const mainCategories = useMemo(
     () => taxonomyTree.map((item) => ({ id: item.id, label: item.label })),
@@ -348,7 +348,7 @@ const ReorderPanel = forwardRef(function ReorderPanel({
       invalidateProductCache();
       await loadProducts({ forceCatalog: true, mainId: moveCategoryId });
       queryClient.invalidateQueries({ queryKey: ['catalog'] });
-      void fetchCategoryProductCounts().catch(() => {});
+      void onRefreshCategoryCounts?.();
       toast(`Moved ${count} product(s) to ${destinationLabel}`);
     } catch (err) {
       if (err.partial && err.result?.moved) {

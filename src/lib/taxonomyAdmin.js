@@ -45,7 +45,7 @@ export async function fetchTaxonomy({ withCounts = false } = {}) {
 }
 
 export async function fetchCategoryProductCounts() {
-  const res = await fetch('/api/taxonomy?counts=1');
+  const res = await fetch(`/api/taxonomy?counts=1&_=${Date.now()}`, { cache: 'no-store' });
   const json = await res.json();
   if (!res.ok) throw new Error(json.error || 'Failed to load category counts');
   if (json.updatedAt) _taxonomyUpdatedAt = json.updatedAt;

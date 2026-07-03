@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Download, Loader2, RefreshCw, Trash2, X } from 'lucide-react';
 import { downloadCsv, downloadExcel } from '../lib/exportReport';
+import { ADMIN_REFRESH_EVENT } from '../lib/adminRefresh';
 
 const PERIODS = [7, 30, 90, 120];
 
@@ -132,6 +133,14 @@ export default function OrderAnalyticsDashboard() {
   }, [period]);
 
   useEffect(() => { void load(); }, [load]);
+
+  useEffect(() => {
+    const onRefresh = (event) => {
+      if (event.detail === 'analytics') void load();
+    };
+    window.addEventListener(ADMIN_REFRESH_EVENT, onRefresh);
+    return () => window.removeEventListener(ADMIN_REFRESH_EVENT, onRefresh);
+  }, [load]);
 
   const summary = data?.summary;
   const periodTag = `${period}d`;
