@@ -58,6 +58,7 @@ export default async function handler(req, res) {
     role: 'customer',
     is_approved: false,
     business_name: name,
+    customer_code: null,
   };
 
   const { error: customerError } = await supabase

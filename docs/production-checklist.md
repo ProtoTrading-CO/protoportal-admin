@@ -18,6 +18,7 @@ See `scripts/env.example` for the full list. Required for production:
 - `BREVO_API_KEY`, `BREVO_SENDER_EMAIL`
 - `CRON_SECRET` (Vercel cron auth)
 - `ORDER_NOTIFY_SECRET` (fulfillment order links)
+- `TRADE_REGISTER_SECRET` (optional; falls back to `ORDER_NOTIFY_SECRET` for `/api/trade-application-received`)
 
 Optional: `ADMIN_DASH_KEY`, `IMAGE_GEN_CONCURRENCY`, R2 vars, OpenRouter model overrides. Image gen budgets are configured in Admin → Cost Tracking (no extra env vars).
 
@@ -56,5 +57,6 @@ Run on **stock Supabase** (`yiqsvwajozafvalwcero`):
 - [ ] Product Manager: archive / make live
 - [ ] Fulfillment: Victor gate on save + send
 - [ ] Order confirmation email (no prices on customer copy)
+- [ ] Trade signup → `POST /api/trade-application-received` sends 24h acknowledgment (after main portal wired)
 - [ ] Apollo index rebuild
 - [ ] Mobile: Admin + Fulfillment layouts

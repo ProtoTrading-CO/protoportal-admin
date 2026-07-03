@@ -16,6 +16,10 @@ import { codeLookupCandidates, firstCodeToken } from '../lib/code-normalize.mjs'
 import { catalogueDisplayTitle, catalogueDescription, loaderCodeLabel } from '../lib/product-loader-display.mjs';
 import { parseNutstoreFilename } from '../api/_nutstore-filename.js';
 import { resolveProductLoaderMatch } from '../api/_product-loader-lookup.js';
+import {
+  buildTradeApplicationEmailBodies,
+  tradeApplicationGreetingName,
+} from '../lib/trade-application-email.mjs';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const readSrc = (relPath) => readFileSync(join(REPO_ROOT, relPath), 'utf8');
@@ -331,6 +335,24 @@ assert.match(sidebarSrc, /Pending trade applications/, 'customer badge tooltip f
 assert.match(adminPageSrc, /Pre-registration/, 'customer tab renamed to Pre-registration');
 assert.match(adminPageSrc, /adm-order-tab--overview/, 'All orders tab uses overview styling');
 console.log('✓ Customer/order UX labels + sidebar notification badges');
+
+// Trade application acknowledgment email
+const tradeBodies = buildTradeApplicationEmailBodies({
+  email: 'jane@abc.co.za',
+  name: 'Jane Smith',
+  businessName: 'ABC Stationers',
+});
+assert.match(tradeBodies.introText, /within 24 hours/i, 'trade application email mentions 24 hours');
+assert.equal(tradeApplicationGreetingName({ name: 'Jane', email: 'x@y.z' }), 'Jane');
+const tradeAppApiSrc = readSrc('api/trade-application-received.js');
+assert.match(tradeAppApiSrc, /requireTradeRegisterOrAdmin/, 'trade-application-received uses register secret auth');
+assert.match(readSrc('api/register-account.js'), /customer_code:\s*null/, 'register-account never assigns customer_code');
+assert.equal(
+  spawnSync('node', ['--check', join(REPO_ROOT, 'api/trade-application-received.js')], { encoding: 'utf8' }).status,
+  0,
+  'trade-application-received.js passes node --check',
+);
+console.log('✓ Trade application acknowledgment email');
 
 // Bundle-perf follow-ups
 const orderDocsSrc = readSrc('src/lib/orderDocuments.js');

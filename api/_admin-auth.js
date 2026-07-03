@@ -151,3 +151,17 @@ export async function requireCronOrAdminKey(req, res) {
   }
   return requireAdminKey(req, res);
 }
+
+/** Server-to-server trade registration (register / main portal) or admin session. */
+export function hasTradeRegisterSecret(req) {
+  const expected = process.env.TRADE_REGISTER_SECRET || process.env.ORDER_NOTIFY_SECRET;
+  if (!expected) return false;
+  const provided = String(req.headers['x-trade-register-secret'] || '').trim();
+  return Boolean(provided) && safeEqual(provided, expected);
+}
+
+export async function requireTradeRegisterOrAdmin(req, res) {
+  if (hasTradeRegisterSecret(req)) return true;
+  if (hasAdminKey(req)) return true;
+  return requireAdminKey(req, res);
+}
