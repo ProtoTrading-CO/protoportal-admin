@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { catalogueDescription, catalogueDisplayTitle } from '../lib/product-loader-display.mjs';
 import { requireAdminKey } from './_admin-auth.js';
 import { logProductLoaderAudit } from './_product-loader-audit.js';
 import { downloadNutstoreFile, isNutstoreConfigured, nutstoreSetupMessage } from './_nutstore-webdav.js';
@@ -135,11 +136,10 @@ async function publishOne(sb, item, { overwriteImage }) {
 function resolveCatalogTextFields(item) {
   const hasMatch = Boolean(item.sqlRow || item.websiteRow);
   if (!hasMatch) return { title: '', description: '' };
-  const title = String(item.title || item.sqlRow?.title || item.websiteRow?.title || '').trim();
-  const description = String(
-    item.description || item.websiteRow?.original_description || item.sqlRow?.title || title,
-  ).trim();
-  return { title, description };
+  return {
+    title: catalogueDisplayTitle(item),
+    description: catalogueDescription(item),
+  };
 }
 
 function buildArchivePayload(item, { sku, imageUrl, filename, now }) {

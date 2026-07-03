@@ -100,6 +100,7 @@ export async function publishLoaderImageItem(item, {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       code: item.code,
+      displayCode: item.displayCode,
       title: catalogueDisplayTitle(item),
       price: item.price ?? item.sqlRow?.price ?? 0,
       barcode: item.barcode || item.websiteRow?.barcode || item.code,
@@ -111,6 +112,8 @@ export async function publishLoaderImageItem(item, {
       subcategoryOne: sub1Label,
       subcategoryTwo: item.websiteRow?.subcategory_two || null,
       description: catalogueDescription(item),
+      sqlRow: item.sqlRow || null,
+      websiteRow: item.websiteRow || null,
       stockQty: item.sqlRow?.onhand ?? item.websiteRow?.stock_qty,
       availableStock: item.sqlRow?.available ?? item.websiteRow?.available_stock,
       categoryConfidence: item.websiteRow ? 1 : 0.5,

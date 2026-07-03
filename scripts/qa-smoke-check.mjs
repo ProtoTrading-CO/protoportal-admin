@@ -94,6 +94,9 @@ assert.equal(vercelJson.functions?.['api/nutstore-process.js']?.maxDuration, 60,
 const nutstoreProcessSrc = readSrc('api/nutstore-process.js');
 assert.match(nutstoreProcessSrc, /NUTSTORE_CONCURRENCY = 4/, 'nutstore-process uses concurrency of 4');
 assert.doesNotMatch(nutstoreProcessSrc, /for \(const raw of items\)/, 'nutstore-process no longer sequential');
+assert.match(nutstoreProcessSrc, /catalogueDisplayTitle/, 'nutstore-process resolves title via shared helper');
+assert.match(nutstoreProcessSrc, /catalogueDescription/, 'nutstore-process resolves description via shared helper');
+assert.doesNotMatch(nutstoreProcessSrc, /item\.sqlRow\?\.title \|\| item\.websiteRow/, 'nutstore-process no raw sqlRow title fallback');
 const nutstoreLookupSrc = readSrc('api/_product-loader-lookup.js');
 assert.match(nutstoreLookupSrc, /getCachedDormantSkuSet/, 'dormant SKU set cached');
 const nutstoreBatchSrc = readSrc('api/nutstore-batch-lookup.js');
@@ -209,6 +212,26 @@ assert.equal(catalogueDescription({
   websiteRow: { original_description: '8610100004' },
 }), '', 'catalogueDescription never returns code/barcode text');
 assert.equal(loaderCodeLabel({ displayCode: '8610100004&8610100005', code: '8610100004' }), '8610100004&8610100005', 'loaderCodeLabel prefers full stem');
+assert.equal(catalogueDescription({
+  code: '8610100004',
+  displayCode: '8610100004&8610100005',
+  description: '8610100005',
+}), '', 'catalogueDescription rejects secondary compound token');
+assert.equal(catalogueDisplayTitle({
+  code: '8610100004',
+  displayCode: '8610100004&8610100005&8610100006',
+  title: '',
+  sqlRow: { title: '8610100004', code: '8610100004' },
+}), '', 'server-side blocks sqlRow barcode title fallback');
+
+const plPublishSrc = readSrc('api/product-loader-publish.js');
+assert.match(plPublishSrc, /catalogueDisplayTitle/, 'publish API re-validates title server-side');
+assert.doesNotMatch(plPublishSrc, /title \|\| sku/, 'publish API never falls back title to sku');
+assert.doesNotMatch(plPublishSrc, /original_description: patch\.original_description \|\| patch\.title/, 'publish create skips title-as-description');
+
+const plDormantSrc = readSrc('api/product-loader-dormant.js');
+assert.match(plDormantSrc, /catalogueDisplayTitle/, 'dormant save uses shared title helper');
+assert.doesNotMatch(plDormantSrc, /body\.title \|\| sku/, 'dormant save never falls back title to sku');
 
 const plNutstoreSrc = readSrc('src/components/productLoader/ProductLoaderNutstore.jsx');
 assert.match(plNutstoreSrc, /catalogueDisplayTitle/, 'nutstore table uses catalogueDisplayTitle');

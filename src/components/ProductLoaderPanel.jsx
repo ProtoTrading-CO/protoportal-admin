@@ -32,17 +32,6 @@ const LOADER_TABS = [
   { id: 'image-replace', label: 'Image Replace' },
 ];
 
-function displayTitle(...candidates) {
-  for (const candidate of candidates) {
-    if (typeof candidate === 'string' && candidate.trim()) return candidate.trim();
-    if (candidate && typeof candidate === 'object') {
-      const inner = candidate.title ?? candidate.DESCR ?? candidate.descr ?? candidate.name;
-      if (typeof inner === 'string' && inner.trim()) return inner.trim();
-    }
-  }
-  return '';
-}
-
 // Maps Gemini's category labels to taxonomy IDs
 const GEMINI_CATEGORY_MAP = {
   'Arts Crafts & Stationery': 'arts-crafts-stationery',
@@ -346,6 +335,7 @@ export default function ProductLoaderPanel({
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         code: item.code,
+        displayCode: item.displayCode,
         title: catalogueDisplayTitle(item),
         price: item.price ?? item.sqlRow?.price ?? 0,
         barcode: item.barcode || item.websiteRow?.barcode || item.code,
@@ -357,6 +347,8 @@ export default function ProductLoaderPanel({
         subcategoryOne: sub1Label,
         subcategoryTwo: item.websiteRow?.subcategory_two || null,
         description: catalogueDescription(item),
+        sqlRow: item.sqlRow || null,
+        websiteRow: item.websiteRow || null,
         stockQty: item.sqlRow?.onhand ?? item.websiteRow?.stock_qty,
         availableStock: item.sqlRow?.available ?? item.websiteRow?.available_stock,
         categoryConfidence: item.websiteRow ? 1 : 0.5,
@@ -882,6 +874,7 @@ export default function ProductLoaderPanel({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           code,
+          displayCode: lookupData?.displayCode,
           title,
           price,
           barcode: websiteRow?.barcode || sqlRow?.barcode || code,
@@ -895,6 +888,8 @@ export default function ProductLoaderPanel({
           subcategoryThree: sub3Node?.label || sub3Id || null,
           subcategoryFour: sub4Node?.label || sub4Id || null,
           description: catalogueDescription({ code, sqlRow, websiteRow }),
+          sqlRow: sqlRow || null,
+          websiteRow: websiteRow || null,
           stockQty: sqlRow?.onhand ?? websiteRow?.stock_qty,
           availableStock: sqlRow?.available ?? websiteRow?.available_stock,
           categoryConfidence: categorySource === 'gemini' ? 0.85 : 1.0,

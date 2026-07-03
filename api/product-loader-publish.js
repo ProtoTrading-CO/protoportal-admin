@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { catalogueDescription, catalogueDisplayTitle } from '../lib/product-loader-display.mjs';
 import { requireAdminKey } from './_admin-auth.js';
 import { logProductLoaderAudit } from './_product-loader-audit.js';
 
@@ -36,6 +37,9 @@ export default async function handler(req, res) {
     availableStock,
     barcode: bodyBarcode,
     filename,
+    displayCode,
+    sqlRow,
+    websiteRow,
   } = req.body || {};
 
   const sku = String(code || '').trim().toUpperCase();
@@ -65,9 +69,20 @@ export default async function handler(req, res) {
 
   const now = new Date().toISOString();
   const erpBarcode = String(bodyBarcode || existing?.barcode || sku).trim();
+  const catalogItem = {
+    code: sku,
+    displayCode,
+    title,
+    description,
+    barcode: erpBarcode,
+    sqlRow: sqlRow || null,
+    websiteRow: websiteRow || null,
+  };
+  const resolvedTitle = catalogueDisplayTitle(catalogItem);
+  const resolvedDescription = catalogueDescription(catalogItem);
 
   const patch = {
-    title: String(title || sku).trim(),
+    title: resolvedTitle,
     price: Number(price) || 0,
     category: String(category || '').trim(),
     subcategory_one: String(subcategoryOne || category || '').trim(),
@@ -76,7 +91,7 @@ export default async function handler(req, res) {
     updated_at: now,
   };
 
-  if (description) patch.original_description = String(description).trim();
+  if (resolvedDescription) patch.original_description = resolvedDescription;
   if (stockQty != null && Number.isFinite(Number(stockQty))) patch.stock_qty = Number(stockQty);
   if (availableStock != null && Number.isFinite(Number(availableStock))) patch.available_stock = Number(availableStock);
 
@@ -97,7 +112,7 @@ export default async function handler(req, res) {
       category: patch.category,
       subcategory_one: patch.subcategory_one,
       subcategory_two: patch.subcategory_two || null,
-      original_description: patch.original_description || patch.title,
+      original_description: patch.original_description || '',
       stock_qty: patch.stock_qty ?? 0,
       available_stock: patch.available_stock ?? patch.stock_qty ?? 0,
       image_url_one: null,

@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { catalogueDescription, catalogueDisplayTitle } from '../lib/product-loader-display.mjs';
 import { requireAdminKey } from './_admin-auth.js';
 import { logProductLoaderAudit } from './_product-loader-audit.js';
 
@@ -68,7 +69,9 @@ async function handleSave(sb, body) {
   const sku = String(body.code || '').trim().toUpperCase();
   if (!sku) return { status: 400, json: { error: 'code is required' } };
 
-  const title = String(body.title || sku).trim();
+  const catalogItem = { code: sku, title: body.title, description: body.description, displayCode: body.displayCode };
+  const title = catalogueDisplayTitle(catalogItem);
+  const resolvedDescription = catalogueDescription(catalogItem);
   const category = String(body.category || '').trim();
   const subcategoryOne = String(body.subcategoryOne || body.subcategory_one || category).trim();
   if (!category || !subcategoryOne) {
@@ -80,7 +83,7 @@ async function handleSave(sb, body) {
     sku,
     barcode: sku,
     title,
-    original_description: String(body.description || title).trim(),
+    original_description: resolvedDescription,
     price: Number(body.price) || 0,
     category,
     subcategory_one: subcategoryOne,
