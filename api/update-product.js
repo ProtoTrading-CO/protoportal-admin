@@ -139,6 +139,28 @@ export default async function handler(req, res) {
           available_stock: match.sqlRow.available,
           original_description: verified.original_description || match.sqlRow.title,
         });
+        const relinkPatch = {
+          updated_at: new Date().toISOString(),
+          price: Number(match.sqlRow.price) || 0,
+          stock_qty: Number(match.sqlRow.onhand) || 0,
+          available_stock: Number(match.sqlRow.available) ?? Number(match.sqlRow.onhand) || 0,
+        };
+        const matchedTitle = String(match.sqlRow.title || '').trim();
+        if (matchedTitle) {
+          relinkPatch.original_description = matchedTitle;
+          relinkPatch.title = matchedTitle;
+        }
+        const { error: relinkErr } = await supabase
+          .from('archived_products')
+          .update(relinkPatch)
+          .eq('sku', verifySku);
+        if (relinkErr) throw relinkErr;
+        const { data: refreshed } = await supabase
+          .from('archived_products')
+          .select('*')
+          .eq('sku', verifySku)
+          .maybeSingle();
+        if (refreshed) Object.assign(verified, refreshed);
         relink = {
           matched: true,
           matchedBy: match.matchedBy,
@@ -146,6 +168,32 @@ export default async function handler(req, res) {
           price: match.sqlRow.price,
         };
       } else if (match?.websiteRow) {
+        const relinkPatch = {
+          updated_at: new Date().toISOString(),
+          price: Number(match.websiteRow.price) || 0,
+        };
+        if (match.websiteRow.stock_qty != null) relinkPatch.stock_qty = Number(match.websiteRow.stock_qty);
+        if (match.websiteRow.available_stock != null) {
+          relinkPatch.available_stock = Number(match.websiteRow.available_stock);
+        }
+        const matchedTitle = String(
+          match.websiteRow.original_description || match.websiteRow.title || '',
+        ).trim();
+        if (matchedTitle) {
+          relinkPatch.original_description = matchedTitle;
+          relinkPatch.title = matchedTitle;
+        }
+        const { error: relinkErr } = await supabase
+          .from('archived_products')
+          .update(relinkPatch)
+          .eq('sku', verifySku);
+        if (relinkErr) throw relinkErr;
+        const { data: refreshed } = await supabase
+          .from('archived_products')
+          .select('*')
+          .eq('sku', verifySku)
+          .maybeSingle();
+        if (refreshed) Object.assign(verified, refreshed);
         relink = { matched: true, matchedBy: match.matchedBy };
       } else {
         relink = { matched: false };

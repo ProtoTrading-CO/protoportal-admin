@@ -33,8 +33,9 @@ import { getActiveImageBatch, subscribeImageBatch } from '../lib/imageBatchTrack
 import { sortOrderCategoryKey, lookupSortOrder, applySkuOrder, sortOrderLookupKeys } from '../lib/taxonomy';
 import { persistSortOrder, fetchSortOrderStore, sortMetaForPath, formatSortSavedAt, fetchSortMetaForCategory } from '../lib/sortOrderStore';
 import { exportProductsCatalogXlsx, exportAllProductsCatalogXlsx, exportSelectedProductsXlsx } from '../lib/exportLiveProducts';
-import { bulkMoveProducts, invalidateAdminCache } from '../lib/products';
+import { bulkMoveProducts, invalidateAdminCache, updateProduct } from '../lib/products';
 import { formatWebsitePrice } from '../lib/pricing';
+import { childrenOfTree, subcategoryOptionsFromTree } from '../lib/taxonomyAdmin';
 
 const STATUS_META = {
   live: { label: 'Live', icon: PackagePlus },
@@ -162,7 +163,7 @@ function PmMobileProductCard({
           <div className="adm-product-thumb adm-product-thumb--placeholder pm-mobile-card-thumb">IMG</div>
         )}
         <div className="pm-mobile-card-main">
-          <strong>{item.title || item.name || item.sku}</strong>
+          <strong>{productListTitle(item, status)}</strong>
           {!item.image && (
             <span className="pm-mobile-card-badge">No image</span>
           )}
@@ -172,8 +173,8 @@ function PmMobileProductCard({
           <NutstoreArchiveBadge archivedBy={item.archivedBy} />
           <MultiCategoryBadge item={item} tree={tree} />
           <div className="adm-muted pm-mobile-card-meta">
-            <span>BC: {item.barcode || item.code || '—'}</span>
-            {item.sku && <span>WSK: {item.sku}</span>}
+            <span>BC: <CodeEllipsis value={item.barcode || item.code} /></span>
+            {item.sku && <span>WSK: <CodeEllipsis value={item.sku} /></span>}
             {item.price > 0 && <span>R{formatWebsitePrice(item.price)}</span>}
           </div>
           {item.categoryLabel && (
@@ -281,6 +282,40 @@ function scrollToPageTop() {
   });
 }
 
+function withCurrentOption(options, currentId) {
+  if (!currentId || options.some((o) => o.id === currentId)) return options;
+  return [{ id: currentId, label: `${currentId} (missing)` }, ...options];
+}
+
+function productCategoryRowFromItem(item, tree) {
+  const path = item.categoryPath || [];
+  return {
+    categoryId: path[0] || tree[0]?.id || '',
+    childOneId: path[1] || '',
+    childTwoId: path[2] || '',
+    childThreeId: path[3] || '',
+    childFourId: path[4] || '',
+  };
+}
+
+function productListTitle(item, status) {
+  const name = String(item.title || item.name || '').trim();
+  if (name) return name;
+  if (status === 'archived') return '—';
+  return item.sku || '—';
+}
+
+function CodeEllipsis({ value, prefix = '' }) {
+  const text = String(value || '').trim();
+  if (!text) return <span>{prefix}—</span>;
+  return (
+    <span className="pm-code-ellipsis" title={text}>
+      {prefix}
+      {text}
+    </span>
+  );
+}
+
 export default function ProductManagerEngine({
   taxonomyTree = [],
   onShowToast,
@@ -328,6 +363,15 @@ export default function ProductManagerEngine({
   const [selectAllView, setSelectAllView] = useState(false);
   const [selectingAll, setSelectingAll] = useState(false);
   const [bulkActionPending, setBulkActionPending] = useState(false);
+  const [makeLiveItem, setMakeLiveItem] = useState(null);
+  const [makeLiveCategory, setMakeLiveCategory] = useState({
+    categoryId: '',
+    childOneId: '',
+    childTwoId: '',
+    childThreeId: '',
+    childFourId: '',
+  });
+  const [makeLiveSaving, setMakeLiveSaving] = useState(false);
   const [categoryDrawerOpen, setCategoryDrawerOpen] = useState(false);
   const [categoryStackNav, setCategoryStackNav] = useState(null);
   const selectedRowsRef = useRef(new Map());
@@ -781,15 +825,37 @@ export default function ProductManagerEngine({
   };
 
   const makeLive = (item) => {
-    const name = item.title || item.name || item.sku;
-    if (!window.confirm(`Move "${name}" to the live website catalogue (website_stock)?`)) return;
-    mutations.unarchive.mutate(item.sku, {
-      onSuccess: () => {
-        onRefreshStats?.();
-        onShowToast?.(`"${name}" is now live on the website`, 'success');
-      },
-      onError: (err) => onShowToast?.(err.message, 'error'),
-    });
+    setMakeLiveItem(item);
+    setMakeLiveCategory(productCategoryRowFromItem(item, tree));
+  };
+
+  const confirmMakeLive = async () => {
+    if (!makeLiveItem || makeLiveSaving) return;
+    const path = [
+      makeLiveCategory.categoryId,
+      makeLiveCategory.childOneId,
+      makeLiveCategory.childTwoId,
+      makeLiveCategory.childThreeId,
+      makeLiveCategory.childFourId,
+    ].filter(Boolean);
+    if (!path.length) {
+      onShowToast?.('Pick a main category before making live', 'error');
+      return;
+    }
+    const name = productListTitle(makeLiveItem, 'archived');
+    setMakeLiveSaving(true);
+    try {
+      await updateProduct(makeLiveItem.sku, { categoryPath: path });
+      await mutations.unarchive.mutateAsync(makeLiveItem.sku);
+      queryClient.invalidateQueries({ queryKey: ['catalog'] });
+      onRefreshStats?.();
+      onShowToast?.(`"${name}" is now live on the website`, 'success');
+      setMakeLiveItem(null);
+    } catch (err) {
+      onShowToast?.(err.message || 'Make live failed', 'error');
+    } finally {
+      setMakeLiveSaving(false);
+    }
   };
 
   const bulkMakeLive = async () => {
@@ -1360,7 +1426,7 @@ export default function ProductManagerEngine({
                       </div>
                       <div>
                         <div style={{ fontWeight: 800, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                          {item.title || item.name || item.sku}
+                          {productListTitle(item, status)}
                           {!item.image && (
                             <span style={{ fontSize: 10, fontWeight: 700, color: '#92400e', background: '#fef3c7', borderRadius: 4, padding: '1px 5px' }}>No image</span>
                           )}
@@ -1371,8 +1437,12 @@ export default function ProductManagerEngine({
                           <MultiCategoryBadge item={item} tree={tree} />
                         </div>
                         <div className="adm-muted" style={{ fontSize: 11 }}>
-                          <span title="Barcode">BC: {item.barcode || item.code || '—'}</span>
-                          {item.sku && <span title="Website SKU" style={{ marginLeft: 8 }}>WSK: {item.sku}</span>}
+                          <span>BC: <CodeEllipsis value={item.barcode || item.code} /></span>
+                          {item.sku && (
+                            <span style={{ marginLeft: 8 }}>
+                              WSK: <CodeEllipsis value={item.sku} />
+                            </span>
+                          )}
                           {item.price > 0 && (
                             <span title="Price incl. VAT" style={{ marginLeft: 8, fontWeight: 700, color: '#374151' }}>
                               R{formatWebsitePrice(item.price)}
@@ -1595,6 +1665,89 @@ export default function ProductManagerEngine({
           onAddSubcategory?.(parentId);
         }}
       />
+
+      {makeLiveItem && (
+        <div className="adm-modal-backdrop" onClick={() => !makeLiveSaving && setMakeLiveItem(null)}>
+          <div className="adm-modal adm-modal--form pm-make-live-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="adm-modal-header">
+              <h3 className="adm-modal-title">Make live</h3>
+              <button
+                type="button"
+                className="adm-modal-close"
+                onClick={() => setMakeLiveItem(null)}
+                disabled={makeLiveSaving}
+                aria-label="Close"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <p className="adm-modal-note">
+              <strong>{productListTitle(makeLiveItem, 'archived')}</strong>
+              {' '}
+              — choose the category before moving to the live catalogue.
+            </p>
+            <div className="adm-modal-body pm-make-live-fields">
+              <label className="adm-field">
+                <span className="adm-field-label">Main category</span>
+                <select
+                  value={makeLiveCategory.categoryId}
+                  onChange={(e) => {
+                    const categoryId = e.target.value;
+                    const firstChild = subcategoryOptionsFromTree(tree, categoryId)[0]?.id || '';
+                    setMakeLiveCategory({
+                      categoryId,
+                      childOneId: firstChild,
+                      childTwoId: '',
+                      childThreeId: '',
+                      childFourId: '',
+                    });
+                  }}
+                  className="adm-field-input"
+                  disabled={makeLiveSaving}
+                >
+                  {tree.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+                </select>
+              </label>
+              {withCurrentOption(
+                subcategoryOptionsFromTree(tree, makeLiveCategory.categoryId),
+                makeLiveCategory.childOneId,
+              ).length > 0 && (
+                <label className="adm-field">
+                  <span className="adm-field-label">Child category 1</span>
+                  <select
+                    value={makeLiveCategory.childOneId}
+                    onChange={(e) => setMakeLiveCategory((prev) => ({
+                      ...prev,
+                      childOneId: e.target.value,
+                      childTwoId: '',
+                      childThreeId: '',
+                      childFourId: '',
+                    }))}
+                    className="adm-field-input"
+                    disabled={makeLiveSaving}
+                  >
+                    <option value="">— None —</option>
+                    {withCurrentOption(
+                      subcategoryOptionsFromTree(tree, makeLiveCategory.categoryId),
+                      makeLiveCategory.childOneId,
+                    ).map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+                  </select>
+                </label>
+              )}
+            </div>
+            <div className="adm-modal-footer adm-modal-footer--end">
+              <div className="adm-modal-footer__actions">
+                <button type="button" className="adm-btn-ghost" onClick={() => setMakeLiveItem(null)} disabled={makeLiveSaving}>
+                  Cancel
+                </button>
+                <button type="button" className="adm-btn-red" onClick={() => void confirmMakeLive()} disabled={makeLiveSaving}>
+                  {makeLiveSaving ? <><Loader2 size={14} className="spin" /> Making live…</> : 'Make live'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
