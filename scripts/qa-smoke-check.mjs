@@ -197,4 +197,22 @@ assert.match(pricingPanel, /fetchReorderProducts\(\{ mainCategory: categoryId \}
 assert.match(sidebarSrc, /pricing: \(\) => import\('\.\/PricingPanel'\)/, 'sidebar prefetches PricingPanel on hover');
 console.log('✓ PricingPanel extracted, lazy, prefetched');
 
+// ReorderPanel + TaxonomyModals extraction
+assert.match(adminPageSrc, /const ReorderPanel = lazy\(/, 'ReorderPanel is lazy');
+assert.doesNotMatch(adminPageSrc, /const \[reorderCategoryPath,/, 'reorder state moved out of AdminPage');
+assert.doesNotMatch(adminPageSrc, /const \[moveModalOpen,/, 'reorder move modal state moved out of AdminPage');
+assert.doesNotMatch(adminPageSrc, /import ReorderGrid from/, 'ReorderGrid only imported by ReorderPanel');
+assert.match(adminPageSrc, /<TaxonomyModals/, 'TaxonomyModals used once at page level');
+assert.doesNotMatch(adminPageSrc, /Rename \{editTaxonomyModal\.type/, 'inline taxonomy rename modal removed');
+
+const reorderPanel = readSrc('src/components/ReorderPanel.jsx');
+assert.match(reorderPanel, /adm-reorder-toolbar/, 'ReorderPanel owns reorder toolbar');
+assert.match(reorderPanel, /forwardRef\(function ReorderPanel/, 'ReorderPanel uses forwardRef for imperative refresh');
+
+const taxonomyModals = readSrc('src/components/TaxonomyModals.jsx');
+assert.match(taxonomyModals, /export default function TaxonomyModals/, 'TaxonomyModals default export');
+
+assert.match(sidebarSrc, /reorder: \(\) => import\('\.\/ReorderPanel'\)/, 'sidebar prefetches ReorderPanel on hover');
+console.log('✓ ReorderPanel + TaxonomyModals extracted');
+
 console.log('\nAll smoke checks passed.');

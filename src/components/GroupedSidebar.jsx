@@ -45,6 +45,7 @@ const CHUNK_PREFETCH = {
   banner: () => import('./BannerPanel'),
   specials: () => import('./SpecialsPanel'),
   pricing: () => import('./PricingPanel'),
+  reorder: () => import('./ReorderPanel'),
 };
 
 function prefetchSection(sectionId) {
