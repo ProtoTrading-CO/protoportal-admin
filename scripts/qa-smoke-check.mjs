@@ -140,4 +140,24 @@ const sidebarSrc = readSrc('src/components/GroupedSidebar.jsx');
 assert.match(sidebarSrc, /CHUNK_PREFETCH/, 'GroupedSidebar warms lazy chunks on hover');
 console.log('✓ Lazy-loaded admin sections + hover chunk prefetch');
 
+// Bundle-perf follow-ups
+const orderDocsSrc = readSrc('src/lib/orderDocuments.js');
+assert.doesNotMatch(orderDocsSrc, /^import \{ jsPDF \} from 'jspdf'/m, 'jspdf no longer statically imported');
+assert.match(orderDocsSrc, /loadJsPDF/, 'orderDocuments uses lazy jspdf loader');
+
+const apolloSrc = readSrc('src/components/ApolloPanel.jsx');
+assert.doesNotMatch(apolloSrc, /^import \{ jsPDF \} from 'jspdf'/m, 'ApolloPanel does not statically import jspdf');
+assert.match(apolloSrc, /loadJsPDF/, 'ApolloPanel uses lazy jspdf loader');
+
+const lazyJsPdfSrc = readSrc('src/lib/lazyJspdf.js');
+assert.match(lazyJsPdfSrc, /_jspdfPromise/, 'lazyJspdf caches the dynamic import');
+
+const useCatalogSrc = readSrc('src/hooks/useCatalog.js');
+assert.match(useCatalogSrc, /Promise\.all\(Array\.from\(\{ length: Math\.min\(CONCURRENCY/, 'fetchAllCatalogRows fans out in parallel');
+
+const taxonomySrc = readSrc('api/taxonomy.js');
+assert.match(taxonomySrc, /Cache-Control', 's-maxage=60, stale-while-revalidate=300/, 'taxonomy counts endpoint has SWR cache');
+
+console.log('✓ Bundle + perf follow-ups (jspdf lazy, catalog parallel, counts SWR)');
+
 console.log('\nAll smoke checks passed.');

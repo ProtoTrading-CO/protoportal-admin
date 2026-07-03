@@ -48,7 +48,6 @@ function taxonomyConflictResponse(res, err) {
 
 export default async function handler(req, res) {
   if (!(await requireAdminKey(req, res))) return;
-  res.setHeader('Cache-Control', 'no-store');
 
   if (req.method === 'GET') {
     try {
@@ -56,13 +55,20 @@ export default async function handler(req, res) {
       const categories = await loadTaxonomy();
       if (req.query.counts === '1') {
         const counts = await buildCategoryProductCounts(getStockClient(), categories);
+        // Category counts require a full-table scan; serve from the edge for
+        // 60s and revalidate in the background for the next 5 minutes.
+        res.setHeader('Cache-Control', 's-maxage=60, stale-while-revalidate=300');
         return res.status(200).json({ categories, counts, updatedAt: store.updatedAt });
       }
+      res.setHeader('Cache-Control', 'no-store');
       return res.status(200).json({ categories, updatedAt: store.updatedAt });
     } catch (err) {
+      res.setHeader('Cache-Control', 'no-store');
       return res.status(500).json({ error: err.message || 'Failed to load taxonomy' });
     }
   }
+
+  res.setHeader('Cache-Control', 'no-store');
 
   if (req.method !== 'POST') return res.status(405).end();
 
