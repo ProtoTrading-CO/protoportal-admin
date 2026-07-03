@@ -53,3 +53,14 @@ export async function deleteOrderAdmin(id) {
   const json = await res.json();
   if (!res.ok) throw new Error(json.error || 'Failed to delete order');
 }
+
+export async function deleteAllOrdersAdmin() {
+  const res = await fetch('/api/admin-orders', {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ all: true, confirm: 'DELETE ALL ORDERS' }),
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || 'Failed to delete all orders');
+  return json;
+}

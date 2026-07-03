@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Check, Eye, Loader2, Megaphone, RefreshCw, Search, Send } from 'lucide-react';
+import { Check, Eye, Loader2, Megaphone, Search, Send } from 'lucide-react';
 import { fetchBroadcastSchedule } from '../lib/broadcastSchedule';
 
 function Chip({ active, onClick, children }) {
@@ -126,9 +126,6 @@ export default function WhatsappPanel({
         <aside className="wa-audience">
           <div className="wa-audience__head">
             <h3>Audience</h3>
-            <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={onRefresh}>
-              <RefreshCw size={13} /> Refresh
-            </button>
           </div>
 
           <label className="adm-search wa-search">

@@ -1,6 +1,7 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { readSiteConfigJson, writeSiteConfigJson } from './_site-config.js';
+import { isPublishableOnWebsite } from '../lib/catalog-stock.mjs';
 import { isMotarroProduct, inferMotarroPathFromRow, injectMotarroIntoTree } from './_mottaro-category.js';
 
 const TAXONOMY_FILE = 'taxonomy/categories.json';
@@ -347,6 +348,7 @@ export async function buildCategoryProductCounts(supabase, tree) {
     if (error) throw error;
     const batch = data || [];
     for (const row of batch) {
+      if (!isPublishableOnWebsite(row)) continue;
       counts.__all__ += 1;
       const { categoryPath } = resolveCategoryIds(row, tree);
       if (!categoryPath.length) {

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
-import { DollarSign, ImagePlus, Megaphone, RefreshCw, Star, X } from 'lucide-react';
+import { DollarSign, ImagePlus, Megaphone, Star, X } from 'lucide-react';
 import { fetchSpecials, saveSpecials } from '../lib/specials';
 import { fetchPopupSpecial, savePopupSpecial, uploadPopupImage } from '../lib/popupSpecial';
 import { fetchCheckoutPromo, saveCheckoutPromo } from '../lib/checkoutPromo';
+import { ADMIN_REFRESH_EVENT } from '../lib/adminRefresh';
 
 // Specials — three sub-panels sharing the "Specials" tab: weekly featured
 // products, PROTO75 checkout promo, and the popup flyer. Extracted from
@@ -53,6 +54,17 @@ export default function SpecialsPanel({
   useEffect(() => {
     void loadPopup();
     void loadCheckoutPromo();
+  }, [loadPopup, loadCheckoutPromo]);
+
+  useEffect(() => {
+    const onRefresh = (event) => {
+      if (event.detail === 'specials') {
+        void loadPopup();
+        void loadCheckoutPromo();
+      }
+    };
+    window.addEventListener(ADMIN_REFRESH_EVENT, onRefresh);
+    return () => window.removeEventListener(ADMIN_REFRESH_EVENT, onRefresh);
   }, [loadPopup, loadCheckoutPromo]);
 
   const updateSpecialDeal = async (productId, patch) => {
@@ -240,7 +252,6 @@ export default function SpecialsPanel({
           <h3 className="adm-subtitle"><DollarSign size={16} /> PROTO75 — Cart checkout discount</h3>
           <p className="adm-section-note">Amount deducted at cart checkout on site.proto.co.za when customers enter the promo code.</p>
         </div>
-        <button type="button" onClick={() => void loadCheckoutPromo()} className="adm-btn-ghost"><RefreshCw size={15} /></button>
       </div>
       <div className="adm-responsive-2col" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, maxWidth: 720, marginBottom: 8 }}>
         <label style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 14, fontWeight: 600 }}>
@@ -270,7 +281,6 @@ export default function SpecialsPanel({
           <h3 className="adm-subtitle"><Megaphone size={16} /> Popup / Banner Promo</h3>
           <p className="adm-section-note">Flyer popup shown once per customer when they log in (while active).</p>
         </div>
-        <button type="button" onClick={() => void loadPopup()} className="adm-btn-ghost"><RefreshCw size={15} /><span className="adm-btn-text">Refresh</span></button>
       </div>
       <div className="adm-responsive-2col" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, alignItems: 'start' }}>
         <div style={{ display: 'grid', gap: 12 }}>

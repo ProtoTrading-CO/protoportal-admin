@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { DollarSign, Loader2, RefreshCw, Users, Zap } from 'lucide-react';
+import { DollarSign, Loader2, Users, Zap } from 'lucide-react';
 import { getImageGenOperator, setImageGenOperator } from '../lib/imageGenSession';
+import { ADMIN_REFRESH_EVENT } from '../lib/adminRefresh';
 
 const randFormatter = new Intl.NumberFormat('en-ZA', {
   style: 'currency',
@@ -128,6 +129,14 @@ export default function CostTrackingPanel({ onShowToast }) {
     return () => clearInterval(timer);
   }, [load]);
 
+  useEffect(() => {
+    const onRefresh = (event) => {
+      if (event.detail === 'cost-tracking') void load();
+    };
+    window.addEventListener(ADMIN_REFRESH_EVENT, onRefresh);
+    return () => window.removeEventListener(ADMIN_REFRESH_EVENT, onRefresh);
+  }, [load]);
+
   const summary = data?.summary;
   const logs = data?.logs || [];
   const budget = data?.budget;
@@ -196,9 +205,7 @@ export default function CostTrackingPanel({ onShowToast }) {
             <option value={30}>Last 30 days</option>
             <option value={90}>Last 90 days</option>
           </select>
-          <button type="button" className="adm-btn-ghost" onClick={() => void load()} disabled={loading}>
-            {loading ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} />} Refresh
-          </button>
+          {loading && <Loader2 size={14} className="spin" aria-label="Refreshing" />}
         </div>
       </div>
 

@@ -159,40 +159,56 @@ function upsertRecipient(seen, row) {
   seen.set(email, { ...prev, ...row, email });
 }
 
-export async function fetchCustomerAudience(sb, audience) {
+export async function fetchCustomerAudience(sb, audience, { businessTypes = [] } = {}) {
   const seen = new Map();
+  const types = [...new Set((businessTypes || []).map((t) => String(t || '').trim()).filter(Boolean))];
+  const matchesBusinessType = (row) => {
+    if (!types.length) return true;
+    const bt = String(row.business_type || '').trim();
+    return types.includes(bt);
+  };
 
   if (audience === 'requests' || audience === 'regular' || audience === 'all-portal' || audience === 'all-approved') {
     const portalRows = await fetchAllFromTable(sb, 'customers', (q) => {
-      if (audience === 'requests') return q.eq('is_approved', false);
-      if (audience === 'regular' || audience === 'all-approved' || audience === 'all-portal') {
-        return q.eq('is_approved', true);
+      let query = q;
+      if (audience === 'requests') query = query.eq('is_approved', false);
+      else if (audience === 'regular' || audience === 'all-approved' || audience === 'all-portal') {
+        query = query.eq('is_approved', true);
       }
-      return q;
+      if (types.length) query = query.in('business_type', types);
+      return query;
     });
-    portalRows.forEach((r) => upsertRecipient(seen, {
-      email: r.email,
-      name: r.first_name || r.contact_name || r.name || r.business_name || '',
-      first_name: r.first_name || '',
-      contact_name: r.contact_name || r.name || '',
-      business_name: r.business_name || r.name || '',
-      customer_code: r.customer_code || '',
-      account_code: r.customer_code || '',
-      phone: r.phone || '',
-    }));
+    portalRows.forEach((r) => {
+      if (!matchesBusinessType(r)) return;
+      upsertRecipient(seen, {
+        email: r.email,
+        name: r.first_name || r.contact_name || r.name || r.business_name || '',
+        first_name: r.first_name || '',
+        contact_name: r.contact_name || r.name || '',
+        business_name: r.business_name || r.name || '',
+        customer_code: r.customer_code || '',
+        account_code: r.customer_code || '',
+        phone: r.phone || '',
+        business_type: r.business_type || '',
+      });
+    });
   }
 
   if (audience === 'proto-active' || audience === 'all-portal') {
     const protoRows = await fetchAllFromTable(sb, 'proto_active_customers');
-    protoRows.forEach((r) => upsertRecipient(seen, {
-      email: r.email,
-      name: r.first_name || r.contact_name || r.name || '',
-      first_name: r.first_name || '',
-      contact_name: r.contact_name || '',
-      business_name: r.name || '',
-      account_code: r.account_code || '',
-      customer_code: r.account_code || '',
-    }));
+    protoRows.forEach((r) => {
+      if (!matchesBusinessType(r)) return;
+      upsertRecipient(seen, {
+        email: r.email,
+        name: r.first_name || r.contact_name || r.name || '',
+        first_name: r.first_name || '',
+        contact_name: r.contact_name || '',
+        business_name: r.name || '',
+        account_code: r.account_code || '',
+        customer_code: r.account_code || '',
+        business_type: r.business_type || '',
+      });
+    });
   }
 
   return [...seen.values()];
@@ -202,6 +218,7 @@ export async function sendBroadcastBatch(recipients, { subject, introText = '', 
   let sent = 0;
   let failed = 0;
   const errors = [];
+  const messageIds = [];
 
   for (const recipient of recipients) {
     try {
@@ -210,12 +227,14 @@ export async function sendBroadcastBatch(recipients, { subject, introText = '', 
         { subject, introText, htmlBlock },
         vars,
       );
-      await sendBrevoTransactional({
+      const result = await sendBrevoTransactional({
         to: { email: recipient.email, name: vars.name || recipient.email },
         subject: personalizedSubject,
         htmlContent,
         textContent,
       });
+      const messageId = result?.messageId || result?.['message-id'] || result?.messageIds?.[0];
+      if (messageId) messageIds.push(String(messageId));
       sent += 1;
       if (onProgress) onProgress({ sent, failed, total: recipients.length });
       if (sent % 10 === 0) await new Promise((r) => setTimeout(r, 200));
@@ -225,5 +244,5 @@ export async function sendBroadcastBatch(recipients, { subject, introText = '', 
     }
   }
 
-  return { sent, failed, errors };
+  return { sent, failed, errors, messageIds };
 }

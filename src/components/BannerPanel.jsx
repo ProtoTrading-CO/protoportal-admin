@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ImagePlus, RefreshCw } from 'lucide-react';
+import { ImagePlus } from 'lucide-react';
 import { fetchBanner, saveBanner, uploadBannerImage } from '../lib/banner';
 import { BANNER_LABEL } from '../lib/bannerSpec';
+import { ADMIN_REFRESH_EVENT } from '../lib/adminRefresh';
 
 // Banner Editor — extracted from AdminPage so section state, effects and
 // handlers live with the panel that renders them. AdminPage now mounts this
@@ -25,6 +26,14 @@ export default function BannerPanel({ onShowToast }) {
   }, [toast]);
 
   useEffect(() => { void load(); }, [load]);
+
+  useEffect(() => {
+    const onRefresh = (event) => {
+      if (event.detail === 'banner') void load();
+    };
+    window.addEventListener(ADMIN_REFRESH_EVENT, onRefresh);
+    return () => window.removeEventListener(ADMIN_REFRESH_EVENT, onRefresh);
+  }, [load]);
 
   const handleImage = async (file) => {
     if (!file) return;
@@ -73,9 +82,6 @@ export default function BannerPanel({ onShowToast }) {
             With no image uploaded, the site shows an empty space until you add one.
           </p>
         </div>
-        <button type="button" onClick={() => void load()} className="adm-btn-ghost">
-          <RefreshCw size={15} /><span className="adm-btn-text">Refresh</span>
-        </button>
       </div>
       <div className="adm-responsive-2col" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, alignItems: 'start' }}>
         <div style={{ display: 'grid', gap: 12 }}>

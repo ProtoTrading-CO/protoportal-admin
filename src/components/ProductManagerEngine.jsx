@@ -915,9 +915,6 @@ export default function ProductManagerEngine({
             </>
           )}
           {isFetching && !isLoading && <Loader2 size={16} className="spin" aria-label="Refreshing" />}
-          <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => queryClient.invalidateQueries({ queryKey: ['catalog'] })}>
-            <RefreshCw size={14} /> Refresh
-          </button>
         </div>
       </div>
 

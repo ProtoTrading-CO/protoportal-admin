@@ -217,6 +217,39 @@ async function fetchAdminOrdersPage(supabase, {
   return { rows: error ? [] : (data || []), total: count || 0, page, pageSize };
 }
 
+async function listAllStorageFiles(supabase, prefix) {
+  const paths = [];
+  let offset = 0;
+  while (true) {
+    const { data, error } = await supabase.storage.from(SITE_CONFIG_BUCKET).list(prefix, { limit: 1000, offset });
+    if (error || !data?.length) break;
+    for (const entry of data) {
+      if (entry.id) paths.push(prefix ? `${prefix}/${entry.name}` : entry.name);
+    }
+    if (data.length < 1000) break;
+    offset += 1000;
+  }
+  return paths;
+}
+
+async function purgeOrderSiteConfigFiles() {
+  const supabase = getPortalAdminClient();
+  const prefixes = ['fulfillment/progress', 'orders/confirmation', 'orders/notify'];
+  const files = [];
+  for (const prefix of prefixes) {
+    const listed = await listAllStorageFiles(supabase, prefix);
+    files.push(...listed);
+  }
+  if (!files.length) return 0;
+  const chunkSize = 100;
+  for (let i = 0; i < files.length; i += chunkSize) {
+    const chunk = files.slice(i, i + chunkSize);
+    const { error } = await supabase.storage.from(SITE_CONFIG_BUCKET).remove(chunk);
+    if (error) throw error;
+  }
+  return files.length;
+}
+
 export default async function handler(req, res) {
   const auth = await requireAdminOrOrderToken(req, res);
   if (!auth) return;
@@ -392,7 +425,25 @@ export default async function handler(req, res) {
     if (auth.type !== 'admin') {
       return res.status(403).json({ error: 'Admin access required' });
     }
-    const { id } = req.body || {};
+    const { id, all, confirm } = req.body || {};
+    if (all) {
+      if (confirm !== 'DELETE ALL ORDERS') {
+        return res.status(400).json({ error: 'confirm must be DELETE ALL ORDERS' });
+      }
+      const { count, error: countError } = await supabase
+        .from('orders')
+        .select('*', { count: 'exact', head: true });
+      if (countError) return res.status(400).json({ error: countError.message });
+      const { error } = await supabase.from('orders').delete().not('id', 'is', null);
+      if (error) return res.status(400).json({ error: error.message });
+      let progressFilesRemoved = 0;
+      try {
+        progressFilesRemoved = await purgeOrderSiteConfigFiles();
+      } catch (err) {
+        console.error('admin-orders: progress cleanup failed:', err?.message || err);
+      }
+      return res.status(200).json({ ok: true, deleted: count || 0, progressFilesRemoved });
+    }
     if (!id) return res.status(400).json({ error: 'id required' });
     const { error } = await supabase.from('orders').delete().eq('id', id);
     if (error) return res.status(400).json({ error: error.message });
