@@ -167,6 +167,13 @@ export default function ProductLoaderFolder({
         <h4>{GROUP_LABELS[key]} <span className="adm-muted">({rows.length})</span></h4>
         <div className="pl-folder-table-wrap">
           <table className="pl-folder-table">
+            <colgroup>
+              <col style={{ width: 48 }} />
+              <col style={{ width: '22%' }} />
+              <col style={{ width: '30%' }} />
+              <col style={{ width: 56 }} />
+              <col style={{ width: 88 }} />
+            </colgroup>
             <thead>
               <tr>
                 <th>Preview</th>
@@ -180,8 +187,10 @@ export default function ProductLoaderFolder({
               {rows.map((row) => (
                 <tr key={row.filename}>
                   <td>{row.previewUrl ? <img src={row.previewUrl} alt="" className="pl-folder-thumb" /> : '—'}</td>
-                  <td><LoaderCodeEllipsis value={loaderCodeLabel(row)} /></td>
-                  <td>{catalogueDisplayTitle(row) || '—'}</td>
+                  <td className="pl-table-clip"><LoaderCodeEllipsis value={loaderCodeLabel(row)} maxCh={22} /></td>
+                  <td className="pl-table-clip">
+                    <LoaderCodeEllipsis value={catalogueDisplayTitle(row)} strong={false} maxCh={28} />
+                  </td>
                   <td>{row.imageSlot}</td>
                   <td className={row.status === 'error' ? 'pl-error' : ''}>{row.status || row.group}{row.processError ? ` — ${row.processError}` : ''}</td>
                 </tr>

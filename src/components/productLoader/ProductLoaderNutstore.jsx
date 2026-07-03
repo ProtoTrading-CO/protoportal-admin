@@ -462,6 +462,15 @@ export default function ProductLoaderNutstore({
         <h4>{GROUP_LABELS[key]} <span className="adm-muted">({rows.length})</span></h4>
         <div className="pl-folder-table-wrap">
           <table className="pl-folder-table">
+            <colgroup>
+              <col style={{ width: 48 }} />
+              <col style={{ width: '28%' }} />
+              <col style={{ width: '20%' }} />
+              <col style={{ width: '22%' }} />
+              <col style={{ width: 72 }} />
+              <col style={{ width: 48 }} />
+              <col style={{ width: 72 }} />
+            </colgroup>
             <thead>
               <tr>
                 <th>Preview</th>
@@ -479,11 +488,15 @@ export default function ProductLoaderNutstore({
                   <td>
                     <FolderNutstoreThumb path={row.path} folderScope={row.path} />
                   </td>
-                  <td className="adm-muted" style={{ fontSize: 12, maxWidth: 140 }} title={row.filename}>
-                    {row.filename}
+                  <td className="adm-muted pl-table-clip">
+                    <LoaderCodeEllipsis value={row.filename} strong={false} maxCh={32} />
                   </td>
-                  <td><LoaderCodeEllipsis value={loaderCodeLabel(row)} /></td>
-                  <td>{catalogueDisplayTitle(row) || '—'}</td>
+                  <td className="pl-table-clip">
+                    <LoaderCodeEllipsis value={loaderCodeLabel(row)} maxCh={22} />
+                  </td>
+                  <td className="pl-table-clip">
+                    <LoaderCodeEllipsis value={catalogueDisplayTitle(row)} strong={false} maxCh={26} />
+                  </td>
                   <td>{row.price != null ? `R ${Number(row.price).toFixed(2)}` : '—'}</td>
                   <td>{row.stockOnHand ?? row.sqlRow?.available ?? '—'}</td>
                   <td className={row.processStatus === 'error' ? 'pl-error' : ''}>
@@ -642,7 +655,7 @@ export default function ProductLoaderNutstore({
                         onChange={() => toggleSelect(entry.path)}
                       />
                       <FolderNutstoreThumb path={entry.path} folderScope={currentPath} />
-                      <span className="pl-nutstore-image-card-name">{entry.name}</span>
+                      <span className="pl-nutstore-image-card-name" title={entry.name}>{entry.name}</span>
                     </label>
                   </li>
                 ))}

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Loader2, RefreshCw, Search } from 'lucide-react';
 import { fetchPublishHistory } from '../../lib/productLoaderApi';
+import LoaderCodeEllipsis from './LoaderCodeEllipsis.jsx';
 
 const ACTION_FILTERS = [
   { id: '', label: 'All actions' },
@@ -53,6 +54,15 @@ export default function ProductLoaderPublishHistory({
 
       <div className="pl-folder-table-wrap">
         <table className="pl-folder-table">
+          <colgroup>
+            <col style={{ width: '18%' }} />
+            <col style={{ width: '12%' }} />
+            <col style={{ width: '14%' }} />
+            <col style={{ width: '28%' }} />
+            <col style={{ width: '12%' }} />
+            <col style={{ width: '16%' }} />
+            <col style={{ width: 56 }} />
+          </colgroup>
           <thead>
             <tr>
               <th>Date</th>
@@ -69,8 +79,10 @@ export default function ProductLoaderPublishHistory({
               <tr key={row.id}>
                 <td>{row.date ? new Date(row.date).toLocaleString() : '—'}</td>
                 <td>{row.user}</td>
-                <td><strong>{row.sku}</strong></td>
-                <td>{row.filename || '—'}</td>
+                <td className="pl-table-clip"><LoaderCodeEllipsis value={row.sku} maxCh={18} /></td>
+                <td className="pl-table-clip">
+                  <LoaderCodeEllipsis value={row.filename} strong={false} maxCh={30} />
+                </td>
                 <td><span className={`pl-history-action pl-history-action--${row.action}`}>{row.action}</span></td>
                 <td>{row.reason || '—'}</td>
                 <td>

@@ -235,7 +235,11 @@ assert.doesNotMatch(plDormantSrc, /body\.title \|\| sku/, 'dormant save never fa
 
 const plNutstoreSrc = readSrc('src/components/productLoader/ProductLoaderNutstore.jsx');
 assert.match(plNutstoreSrc, /catalogueDisplayTitle/, 'nutstore table uses catalogueDisplayTitle');
-assert.match(plNutstoreSrc, /LoaderCodeEllipsis/, 'nutstore table truncates code with ellipsis');
+assert.match(plNutstoreSrc, /LoaderCodeEllipsis value=\{row\.filename\}/, 'nutstore File column truncates with ellipsis');
+assert.match(plNutstoreSrc, /pl-table-clip/, 'nutstore table clips overflowing cells');
+assert.doesNotMatch(plNutstoreSrc, /maxWidth: 140/, 'nutstore File column no broken inline maxWidth');
+assert.match(readSrc('src/index.css'), /pl-table-clip/, 'folder table clip CSS present');
+assert.match(readSrc('src/index.css'), /table-layout: fixed/, 'folder tables use fixed layout for ellipsis');
 assert.doesNotMatch(plNutstoreSrc, /item\.title \|\| item\.sqlRow\?\.title \|\| item\.code/, 'nutstore process payload skips code-as-title');
 
 const plApiSrc = readSrc('src/lib/productLoaderApi.js');
