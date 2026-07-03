@@ -117,4 +117,27 @@ const bulkProductsSrc = readSrc('api/bulk-products.js');
 assert.match(bulkProductsSrc, /409[^]*Destination category changed/, 'bulk-products returns 409 on stale destination');
 console.log('✓ Item 5 UI polish (labels + move gap 409)');
 
+// Perf — heavy section panels are lazy-loaded so the initial AdminPage chunk
+// only ships Product Manager. Assert we don't accidentally re-add eager imports.
+assert.match(adminPageSrc, /const AnalyticsHub = lazy\(/, 'AnalyticsHub is lazy');
+assert.match(adminPageSrc, /const ApolloPanel = lazy\(/, 'ApolloPanel is lazy');
+assert.match(adminPageSrc, /const CostTrackingPanel = lazy\(/, 'CostTrackingPanel is lazy');
+assert.match(adminPageSrc, /const ProductLoaderPanel = lazy\(/, 'ProductLoaderPanel is lazy');
+assert.match(adminPageSrc, /const CrmPanel = lazy\(/, 'CrmPanel is lazy');
+assert.match(adminPageSrc, /const WhatsappPanel = lazy\(/, 'WhatsappPanel is lazy');
+assert.match(adminPageSrc, /const CustomerEmailModal = lazy\(/, 'CustomerEmailModal is lazy');
+assert.match(adminPageSrc, /const CrmContactsModal = lazy\(/, 'CrmContactsModal is lazy');
+assert.match(adminPageSrc, /const FulfillmentSettingsModal = lazy\(/, 'FulfillmentSettingsModal is lazy');
+assert.doesNotMatch(adminPageSrc, /^import AnalyticsHub /m, 'no eager AnalyticsHub import');
+assert.doesNotMatch(adminPageSrc, /^import ApolloPanel /m, 'no eager ApolloPanel import');
+assert.doesNotMatch(adminPageSrc, /^import ProductLoaderPanel /m, 'no eager ProductLoaderPanel import');
+assert.match(adminPageSrc, /apolloEverActive/, 'Apollo mounted only after first activation');
+assert.match(adminPageSrc, /\{customerEmailOpen && \(/, 'CustomerEmailModal mounts only when open');
+assert.match(adminPageSrc, /\{crmContactsOpen && \(/, 'CrmContactsModal mounts only when open');
+assert.match(adminPageSrc, /\{fulfillmentSettingsOpen && \(/, 'FulfillmentSettingsModal mounts only when open');
+
+const sidebarSrc = readSrc('src/components/GroupedSidebar.jsx');
+assert.match(sidebarSrc, /CHUNK_PREFETCH/, 'GroupedSidebar warms lazy chunks on hover');
+console.log('✓ Lazy-loaded admin sections + hover chunk prefetch');
+
 console.log('\nAll smoke checks passed.');
