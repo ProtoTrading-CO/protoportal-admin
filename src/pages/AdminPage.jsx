@@ -477,6 +477,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   const [taxonomySaving, setTaxonomySaving] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
+  const [newOrdersCount, setNewOrdersCount] = useState(0);
   const [expandedOrderId, setExpandedOrderId] = useState(null);
 
   const [fulfillmentOrder, setFulfillmentOrder] = useState(null);
@@ -613,13 +614,13 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   };
 
   const removeProtoActiveCustomer = async (row) => {
-    if (!window.confirm(`Remove ${row.name || row.email} from Proto Active list?`)) return;
+    if (!window.confirm(`Remove ${row.name || row.email} from the pre-registration list?`)) return;
     setSaving(`del-proto-${row.id}`);
     try {
       await deleteProtoActiveCustomer(row.id);
       await loadCustomers();
       if (profileCustomer?.id === row.id) closeCustomerProfile();
-      showToast('Proto Active customer removed');
+      showToast('Pre-registration contact removed');
     } catch (err) {
       showToast(err.message || 'Delete failed', 'error');
     } finally {
@@ -683,7 +684,10 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
       });
       setOrders(data.rows);
       setOrderTotal(data.total);
-      if (data.tabCounts) setOrderTabCounts(data.tabCounts);
+      if (data.tabCounts) {
+        setOrderTabCounts(data.tabCounts);
+        if (data.tabCounts.new != null) setNewOrdersCount(data.tabCounts.new);
+      }
     } catch (err) {
       showToast(err.message || 'Failed to load orders', 'error');
     } finally {
@@ -1054,13 +1058,17 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     fetchSpecials().then((data) => setSpecials(data?.items || [])).catch(() => {});
   }, []);
 
-  // Poll pending trade request count for nav badge
+  // Poll pending trade applications + new orders for sidebar badges
   useEffect(() => {
     const load = async () => {
       try {
-        const data = await fetchCustomersPage({ tab: 'requests', pageSize: 1, searchQuery: '' });
-        setPendingCount(data.total || 0);
-      } catch {}
+        const [requests, ordersData] = await Promise.all([
+          fetchCustomersPage({ tab: 'requests', pageSize: 1, searchQuery: '' }),
+          fetchOrdersPage({ tab: 'new', pageSize: 1, page: 1 }),
+        ]);
+        setPendingCount(requests.total || 0);
+        setNewOrdersCount(ordersData.tabCounts?.new ?? 0);
+      } catch { /* badges are best-effort */ }
     };
     load();
     const iv = setInterval(load, 60000);
@@ -1567,7 +1575,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
         setProfileCustomer(row);
         setProfileEditing(false);
         await loadCustomers();
-        showToast('Proto Active customer updated');
+        showToast('Pre-registration contact updated');
       } else {
         const row = await updateCustomerAdmin(profileCustomer.id, profileForm);
         setProfileCustomer(row);
@@ -1865,7 +1873,8 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                   window.scrollTo({ top: 0, behavior: 'instant' });
                 }
               }}
-              pendingCount={pendingCount}
+              pendingCustomerCount={pendingCount}
+              newOrdersCount={newOrdersCount}
             />
           </aside>
 
@@ -2002,7 +2011,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                   <div>
                     <h2 className="adm-section-title">Customer Management</h2>
                     <p className="adm-section-note">
-                      Manage trade requests, approved customers, and Proto Active accounts. Send email campaigns from here.
+                      Review trade applications, manage pre-registration contacts for CRM email, and approved trade portal accounts.
                     </p>
                   </div>
                   <div className="adm-customer-actions">
@@ -2014,8 +2023,8 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
 
                 <div className="adm-customer-tabs">
                   <button onClick={() => setCustomerTab('requests')} className={`adm-tab${customerTab === 'requests' ? ' adm-tab--active' : ''}`}>Trade Requests</button>
+                  <button onClick={() => setCustomerTab('proto-active')} className={`adm-tab${customerTab === 'proto-active' ? ' adm-tab--active' : ''}`}>Pre-registration</button>
                   <button onClick={() => setCustomerTab('regular')} className={`adm-tab${customerTab === 'regular' ? ' adm-tab--active' : ''}`}>Approved</button>
-                  <button onClick={() => setCustomerTab('proto-active')} className={`adm-tab${customerTab === 'proto-active' ? ' adm-tab--active' : ''}`}>Proto Active</button>
                   <button onClick={() => setCustomerTab('email-analytics')} className={`adm-tab${customerTab === 'email-analytics' ? ' adm-tab--active' : ''}`}>
                     <BarChart2 size={14} style={{ marginRight: 6, verticalAlign: -2 }} />
                     Email Analytics
@@ -2039,6 +2048,12 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                   )}
                 </div>
 
+                {customerTab === 'proto-active' && (
+                  <p className="adm-muted adm-tab-helper">
+                    Contacts for CRM email campaigns before trade portal approval.
+                  </p>
+                )}
+
                 {customerTab === 'email-analytics' ? (
                   <Suspense fallback={<LazySectionFallback label="Loading Email Analytics…" />}>
                     <EmailAnalyticsPanel onShowToast={showToast} />
@@ -2050,7 +2065,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                     </div>
                     {customerRows.length === 0 && !loading && (
                       <div className="adm-empty" style={{ padding: '24px 0' }}>
-                        No proto active customers in this list yet.
+                        No pre-registration contacts in this list yet.
                       </div>
                     )}
                     {customerRows.map((row) => (
@@ -2254,40 +2269,38 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                   <AnalyticsHub />
                 ) : (
                 <>
-                <div style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
+                <div className="adm-order-tabs">
                   {[
-                    { key: 'all', label: 'All' },
                     { key: 'new', label: 'New' },
                     { key: 'handed', label: 'Handed Over' },
                     { key: 'progress', label: 'In Progress' },
                     { key: 'sent', label: 'Order Confirmation' },
                     { key: 'paid', label: 'Payment' },
-                  ].map(({ key, label }) => {
+                    { key: 'all', label: 'All orders', overview: true },
+                  ].map(({ key, label, overview }) => {
                     const count = orderTabCounts?.[key] ?? (key === 'all'
                       ? orderTabCounts?.all ?? orderTotal
                       : 0);
+                    const isActive = orderTab === key;
                     return (
                       <button
                         key={key}
+                        type="button"
                         onClick={() => { setOrderTab(key); setOrderPage(1); }}
-                        style={{
-                          padding: '7px 14px',
-                          borderRadius: 8,
-                          border: 'none',
-                          cursor: 'pointer',
-                          fontSize: 13,
-                          fontWeight: 700,
-                          fontFamily: 'inherit',
-                          background: orderTab === key ? '#0f172a' : '#f1f5f9',
-                          color: orderTab === key ? '#fff' : '#374151',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 6,
-                        }}
+                        className={[
+                          'adm-order-tab',
+                          isActive ? 'adm-order-tab--active' : '',
+                          overview ? 'adm-order-tab--overview' : '',
+                          isActive && overview ? 'adm-order-tab--overview-active' : '',
+                        ].filter(Boolean).join(' ')}
                       >
                         {label}
                         {count > 0 && (
-                          <span style={{ fontSize: 11, fontWeight: 700, background: orderTab === key ? 'rgba(255,255,255,0.2)' : '#e2e8f0', color: orderTab === key ? '#fff' : '#64748b', padding: '1px 6px', borderRadius: 999 }}>
+                          <span className={[
+                            'adm-order-tab-count',
+                            overview ? 'adm-order-tab-count--muted' : '',
+                            isActive && !overview ? 'adm-order-tab-count--on-dark' : '',
+                          ].filter(Boolean).join(' ')}>
                             {count}
                           </span>
                         )}
@@ -2295,6 +2308,11 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                     );
                   })}
                 </div>
+                {orderTab === 'all' && (
+                  <p className="adm-muted adm-tab-helper">
+                    Overview only — new orders always start in <strong>New</strong>. Use the workflow tabs above for day-to-day work.
+                  </p>
+                )}
                 {orderTab === 'paid' && (
                   <p className="adm-muted" style={{ fontSize: 12, margin: '0 0 12px' }}>
                     Payment tab includes sent confirmations awaiting payment.
@@ -2383,7 +2401,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                   )}
                   {!loading && orderRows.length === 0 && (
                     <div style={{ padding: '20px 16px', color: '#6b7280', fontSize: 13 }}>
-                      {orderSearch ? 'No orders match your search.' : orderTab === 'all' ? 'No orders yet.' : `No orders in the "${orderTab}" tab.`}
+                      {orderSearch ? 'No orders match your search.' : orderTab === 'all' ? 'No orders yet.' : `No orders in this tab.`}
                     </div>
                   )}
                 </div>

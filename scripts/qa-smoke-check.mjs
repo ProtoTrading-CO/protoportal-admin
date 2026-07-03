@@ -326,7 +326,11 @@ assert.match(adminPageSrc, /\{fulfillmentSettingsOpen && \(/, 'FulfillmentSettin
 
 const sidebarSrc = readSrc('src/components/GroupedSidebar.jsx');
 assert.match(sidebarSrc, /CHUNK_PREFETCH/, 'GroupedSidebar warms lazy chunks on hover');
-console.log('✓ Lazy-loaded admin sections + hover chunk prefetch');
+assert.match(sidebarSrc, /newOrdersCount/, 'sidebar shows new order notification badge');
+assert.match(sidebarSrc, /Pending trade applications/, 'customer badge tooltip for pending applications');
+assert.match(adminPageSrc, /Pre-registration/, 'customer tab renamed to Pre-registration');
+assert.match(adminPageSrc, /adm-order-tab--overview/, 'All orders tab uses overview styling');
+console.log('✓ Customer/order UX labels + sidebar notification badges');
 
 // Bundle-perf follow-ups
 const orderDocsSrc = readSrc('src/lib/orderDocuments.js');

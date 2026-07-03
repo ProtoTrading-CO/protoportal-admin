@@ -13,8 +13,8 @@ import {
 const AUDIENCE_OPTIONS = [
   {
     value: 'all-approved',
-    label: 'Approved only',
-    hint: 'All approved portal customers — no Proto Active, no trade requests',
+    label: 'Approved trade customers only',
+    hint: 'Customers with trade portal access',
   },
   {
     value: 'requests',
@@ -23,13 +23,13 @@ const AUDIENCE_OPTIONS = [
   },
   {
     value: 'proto-active',
-    label: 'Proto Active only',
-    hint: 'Customers on the Proto Active allowlist',
+    label: 'Pre-registration only',
+    hint: 'CRM contacts on the pre-registration email list',
   },
   {
     value: 'all-portal',
-    label: 'Approved + Proto Active',
-    hint: 'Everyone with portal access (deduped by email)',
+    label: 'Approved + Pre-registration',
+    hint: 'Everyone you can email (deduped by email)',
   },
 ];
 

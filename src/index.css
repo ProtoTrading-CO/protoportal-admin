@@ -1184,6 +1184,75 @@ input, select, textarea { font-family: inherit; outline: none; }
   flex-shrink: 0;
 }
 
+.adm-tab-helper {
+  font-size: 12px;
+  margin: 0 0 14px;
+  line-height: 1.45;
+}
+
+.adm-order-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.adm-order-tab {
+  padding: 7px 14px;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+  font-family: inherit;
+  background: #f1f5f9;
+  color: #374151;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.adm-order-tab--active {
+  background: #0f172a;
+  color: #fff;
+}
+
+.adm-order-tab--overview {
+  border: 1px solid #fecaca;
+  background: #fff5f5;
+  color: #c40000;
+}
+
+.adm-order-tab--overview-active {
+  background: #c40000;
+  color: #fff;
+  border-color: #c40000;
+}
+
+.adm-order-tab-count {
+  font-size: 11px;
+  font-weight: 700;
+  background: #e2e8f0;
+  color: #64748b;
+  padding: 1px 6px;
+  border-radius: 999px;
+}
+
+.adm-order-tab-count--on-dark {
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+}
+
+.adm-order-tab-count--muted {
+  background: #f1f5f9;
+  color: #94a3b8;
+}
+
+.adm-order-tab--overview-active .adm-order-tab-count--muted {
+  background: rgba(255, 255, 255, 0.25);
+  color: #fff;
+}
+
 .adm-order-row:hover { background: #f8fafc; }
 
 .adm-main {

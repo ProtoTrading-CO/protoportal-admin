@@ -72,13 +72,19 @@ function prefetchSection(sectionId) {
 export default function GroupedSidebar({
   activeSection,
   onSelectSection,
-  pendingCount = 0,
+  pendingCustomerCount = 0,
+  newOrdersCount = 0,
 }) {
   return (
     <nav aria-label="Admin sections">
       {NAV_ITEMS.map((item) => {
         const Icon = item.icon;
         const active = activeSection === item.id;
+        const badge = item.id === 'customers' && pendingCustomerCount > 0
+          ? { count: pendingCustomerCount, title: 'Pending trade applications' }
+          : item.id === 'orders' && newOrdersCount > 0
+            ? { count: newOrdersCount, title: 'New orders' }
+            : null;
         return (
           <button
             key={item.id}
@@ -90,8 +96,10 @@ export default function GroupedSidebar({
           >
             <Icon size={17} />
             {item.label}
-            {item.id === 'customers' && pendingCount > 0 && (
-              <span className="adm-nav-badge">{pendingCount}</span>
+            {badge && (
+              <span className="adm-nav-badge" title={badge.title} aria-label={`${badge.title}: ${badge.count}`}>
+                {badge.count}
+              </span>
             )}
           </button>
         );
