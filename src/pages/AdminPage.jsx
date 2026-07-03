@@ -121,6 +121,7 @@ const CrmPanel = lazy(() => import('../components/CrmPanel'));
 const WhatsappPanel = lazy(() => import('../components/WhatsappPanel'));
 const BannerPanel = lazy(() => import('../components/BannerPanel'));
 const SpecialsPanel = lazy(() => import('../components/SpecialsPanel'));
+const PricingPanel = lazy(() => import('../components/PricingPanel'));
 
 function SectionSuspenseFallback({ label = 'Loading…' }) {
   return (
@@ -514,11 +515,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   const [protoSeedBusy, setProtoSeedBusy] = useState(false);
   const [protoNameSaving, setProtoNameSaving] = useState(null);
 
-  const [pricingCategory, setPricingCategory] = useState(categories[0]?.id || '');
-  const [pricingSubcategory, setPricingSubcategory] = useState('all');
-  const [pricingProducts, setPricingProducts] = useState([]);
-  const [selectedPricing, setSelectedPricing] = useState([]);
-  const [priceDelta, setPriceDelta] = useState('-10');
+  // Pricing state now lives in PricingPanel.
 
   const [reorderCategoryPath, setReorderCategoryPath] = useState([]);
   const [reorderSearch, setReorderSearch] = useState('');
@@ -744,20 +741,9 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     }
   };
 
-  const loadCategoryWorkingSet = async (categoryId, target) => {
-    setLoading(true);
-    try {
-      if (target === 'pricing') {
-        const rows = await fetchReorderProducts({ mainCategory: categoryId });
-        setPricingProducts(rows);
-      }
-      if (target === 'reorder') {
-        await loadReorderProducts();
-      }
-    } catch (err) {
-      showToast(err.message || 'Failed to load products', 'error');
-    } finally { setLoading(false); }
-  };
+  // loadCategoryWorkingSet was a dispatcher for the Pricing + Reorder tabs.
+  // Pricing has moved to PricingPanel; only the reorder path remains, so we
+  // inline it in refreshCurrentSection below.
 
   const reorderNavPath = reorderCategoryPath;
 
@@ -1243,7 +1229,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
       .then((data) => { if (data?.lastSyncedAt) setBrevoLastSync(data.lastSyncedAt); })
       .catch(() => {});
   }, [activeSection]);
-  useEffect(() => { if (activeSection === 'pricing') void loadCategoryWorkingSet(pricingCategory, 'pricing'); }, [activeSection, pricingCategory]);
+  // Pricing load lives in PricingPanel.
   useEffect(() => { void reloadTaxonomy(); }, []);
 
   useEffect(() => {
@@ -1551,7 +1537,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
 
   const refreshCurrentSection = async () => {
     if (activeSection === 'customers') return loadCustomers();
-    if (activeSection === 'pricing') return loadCategoryWorkingSet(pricingCategory, 'pricing');
+    // pricing tab owns its own refresh
     if (activeSection === 'reorder') return loadReorderProducts();
     if (activeSection === 'orders') return loadOrders();
   };
@@ -1960,42 +1946,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     setSelectedIds(new Set());
   };
 
-  const toggleSelectAllPricing = () => {
-    if (selectedPricing.length === pricingProducts.length) return setSelectedPricing([]);
-    setSelectedPricing(pricingProducts.map((item) => item.id));
-  };
-
-  const applyPricing = async () => {
-    const delta = Number(priceDelta || 0);
-    setSaving('pricing');
-    try {
-      const selected = pricingProducts.filter((product) => selectedPricing.includes(product.id));
-      await Promise.all(selected.map((product) => updateProduct(product.id, { price: Number(((product.price || 0) * (1 + delta / 100)).toFixed(2)) })));
-      const nextSpecials = [...specials];
-      const specialsIds = new Set(specials.map((s) => s.productId));
-      for (const product of selected) {
-        if (specialsIds.has(product.id)) continue;
-        if (nextSpecials.length >= 10) break;
-        nextSpecials.push({
-          productId: product.id,
-          productName: product.name,
-          productCode: product.code,
-          productImage: product.image || '',
-          deal: 'none',
-          discountPct: 10,
-          bogoX: 1,
-          bogoY: 1,
-        });
-        specialsIds.add(product.id);
-      }
-      if (nextSpecials.length !== specials.length) {
-        await saveSpecials(nextSpecials);
-        setSpecials(nextSpecials);
-      }
-      await loadCategoryWorkingSet(pricingCategory, 'pricing');
-      showToast(`Updated ${selected.length} product price(s) — added to This Week's Specials`);
-    } finally { setSaving(''); }
-  };
+  // Pricing selection + apply moved into PricingPanel.
 
   const openCustomerProfile = async (person, source = 'portal') => {
     setProfileCustomer(person);
@@ -3027,37 +2978,14 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
 
             {/* PRICING */}
             {activeSection === 'pricing' && (
-              <div className="adm-panel">
-                <div className="adm-section-head">
-                  <div>
-                    <h2 className="adm-section-title">Pricing</h2>
-                    <p className="adm-section-note">Select products and apply a percentage price adjustment.</p>
-                  </div>
-                </div>
-                <div className="adm-toolbar" style={{ gridTemplateColumns: '1fr 1fr auto auto' }}>
-                  <select value={pricingCategory} onChange={(e) => { setPricingCategory(e.target.value); setPricingSubcategory('all'); setSelectedPricing([]); }} className="adm-select">
-                    {mainCategories.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
-                  </select>
-                  <select value={pricingSubcategory} onChange={(e) => { setPricingSubcategory(e.target.value); setSelectedPricing([]); }} className="adm-select">
-                    <option value="all">All subcategories</option>
-                    {subcategoryOptions(pricingCategory).map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
-                  </select>
-                  <button onClick={toggleSelectAllPricing} className="adm-btn-ghost">{selectedPricing.length === pricingProducts.length ? 'Clear all' : 'Select all'}</button>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <input value={priceDelta} onChange={(e) => setPriceDelta(e.target.value)} className="adm-tiny-input" placeholder="-10" />
-                    <button onClick={() => void applyPricing()} className="adm-btn-red">{saving === 'pricing' ? 'Applying…' : 'Apply %'}</button>
-                  </div>
-                </div>
-                <div className="adm-checkbox-list">
-                  {(pricingSubcategory === 'all' ? pricingProducts : pricingProducts.filter((p) => p.categoryPath?.[1] === pricingSubcategory)).map((product) => (
-                    <label key={product.id} className={`adm-checkbox-row${selectedPricing.includes(product.id) ? ' adm-checkbox-row--pricing-selected' : ''}`}>
-                      <input type="checkbox" checked={selectedPricing.includes(product.id)} onChange={(e) => setSelectedPricing((prev) => e.target.checked ? [...prev, product.id] : prev.filter((id) => id !== product.id))} />
-                      <span style={{ fontWeight: 700 }}>{product.name}</span>
-                      <small className="adm-muted">{product.code}{product.price > 0 ? ` · R${Number(product.price).toFixed(2)}` : ''}</small>
-                    </label>
-                  ))}
-                </div>
-              </div>
+              <Suspense fallback={<SectionSuspenseFallback label="Loading Pricing…" />}>
+                <PricingPanel
+                  taxonomyTree={taxonomyTree}
+                  specials={specials}
+                  onSpecialsChange={setSpecials}
+                  onShowToast={showToast}
+                />
+              </Suspense>
             )}
 
             {/* ORDERS */}

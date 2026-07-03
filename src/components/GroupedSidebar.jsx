@@ -35,8 +35,6 @@ const NAV_ITEMS = [
   { id: 'team', label: 'Team', icon: User },
 ];
 
-// Warm lazy JS chunks on hover so click-through is instant. Vite dedups
-// import() with React.lazy in AdminPage.
 const CHUNK_PREFETCH = {
   analytics: () => import('./AnalyticsHub'),
   apollo: () => import('./ApolloPanel'),
@@ -46,6 +44,7 @@ const CHUNK_PREFETCH = {
   crm: () => import('./WhatsappPanel'),
   banner: () => import('./BannerPanel'),
   specials: () => import('./SpecialsPanel'),
+  pricing: () => import('./PricingPanel'),
 };
 
 function prefetchSection(sectionId) {
