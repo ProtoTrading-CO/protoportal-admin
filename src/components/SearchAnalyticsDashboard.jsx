@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Download, Loader2, RefreshCw } from 'lucide-react';
 import { downloadCsv } from '../lib/exportReport';
 import { PROTO_URLS } from '../lib/protoUrls';
+import { ADMIN_REFRESH_EVENT } from '../lib/adminRefresh';
 
 const PERIODS = [
   { days: 7, label: '7D' },
@@ -126,6 +127,14 @@ export default function SearchAnalyticsDashboard() {
   }, [period]);
 
   useEffect(() => { void load(); }, [load]);
+
+  useEffect(() => {
+    const onRefresh = (event) => {
+      if (event.detail === 'analytics') void load();
+    };
+    window.addEventListener(ADMIN_REFRESH_EVENT, onRefresh);
+    return () => window.removeEventListener(ADMIN_REFRESH_EVENT, onRefresh);
+  }, [load]);
 
   const kpis = data?.kpis;
   const dateTag = todayTag();

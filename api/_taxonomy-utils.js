@@ -332,24 +332,29 @@ export function resolveLabelsFromPathIds(tree, pathIds = []) {
   return labels;
 }
 
-const STOCK_CATEGORY_COLS = 'category,subcategory_one,subcategory_two,subcategory_three,subcategory_four';
+const COUNT_ROW_COLS = 'category,subcategory_one,subcategory_two,subcategory_three,subcategory_four,title,available_stock,stock_qty';
 
 /** Count live products per taxonomy node (includes all descendants). */
 export async function buildCategoryProductCounts(supabase, tree) {
   const counts = { __uncategorized__: 0, __all__: 0 };
+  let mottaroLive = 0;
   let from = 0;
   const PAGE = 1000;
 
   while (true) {
     const { data, error } = await supabase
       .from('website_stock')
-      .select(STOCK_CATEGORY_COLS)
+      .select(COUNT_ROW_COLS)
       .range(from, from + PAGE - 1);
     if (error) throw error;
     const batch = data || [];
     for (const row of batch) {
       if (!isPublishableOnWebsite(row)) continue;
       counts.__all__ += 1;
+
+      const isMottaro = isMotarroProduct(row);
+      if (isMottaro) mottaroLive += 1;
+
       const { categoryPath } = resolveCategoryIds(row, tree);
       if (!categoryPath.length) {
         counts.__uncategorized__ += 1;
@@ -358,7 +363,8 @@ export async function buildCategoryProductCounts(supabase, tree) {
           counts[id] = (counts[id] || 0) + 1;
         }
       }
-      if (isMotarroProduct(row)) {
+
+      if (isMottaro) {
         const mottaroPath = inferMotarroPathFromRow(row, tree);
         for (const id of mottaroPath) {
           counts[id] = (counts[id] || 0) + 1;
@@ -367,6 +373,10 @@ export async function buildCategoryProductCounts(supabase, tree) {
     }
     if (batch.length < PAGE) break;
     from += PAGE;
+  }
+
+  if (mottaroLive > 0) {
+    counts.mottaro = Math.max(counts.mottaro || 0, mottaroLive);
   }
 
   return counts;

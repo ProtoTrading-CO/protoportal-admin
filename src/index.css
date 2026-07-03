@@ -8120,6 +8120,18 @@ html, body { background: #f5f5f5; color: #111827; }
   color: #c40000;
 }
 
+.adm-email-merge-chip--active {
+  border-color: #c40000;
+  background: #c40000;
+  color: #fff;
+}
+
+.adm-email-merge-chip--active:hover {
+  background: #a30000;
+  border-color: #a30000;
+  color: #fff;
+}
+
 .adm-email-field--intro {
   padding: 14px;
   border: 1px solid #e5e7eb;

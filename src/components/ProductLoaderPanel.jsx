@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AlertTriangle,
   CheckCircle,
@@ -21,6 +21,7 @@ import ProductLoaderFolder from './productLoader/ProductLoaderFolder';
 import ProductLoaderPublishHistory from './productLoader/ProductLoaderPublishHistory';
 import ProductLoaderPublishSuccess from './productLoader/ProductLoaderPublishSuccess';
 import ProductLoaderImageReplace from './productLoader/ProductLoaderImageReplace';
+import { ADMIN_REFRESH_EVENT } from '../lib/adminRefresh';
 
 const LOADER_TABS = [
   { id: 'nutstore', label: 'Nutstore' },
@@ -198,7 +199,7 @@ export default function ProductLoaderPanel({
   const [dormantSaving, setDormantSaving] = useState('');
   const singleProductRef = useRef(null);
 
-  const loadDormant = async () => {
+  const loadDormant = useCallback(async () => {
     setDormantLoading(true);
     try {
       const res = await fetch('/api/product-loader-dormant');
@@ -216,11 +217,19 @@ export default function ProductLoaderPanel({
     } finally {
       setDormantLoading(false);
     }
-  };
+  }, [taxonomyTree, onShowToast]);
 
   useEffect(() => {
     void loadDormant();
-  }, [taxonomyTree]);
+  }, [loadDormant]);
+
+  useEffect(() => {
+    const onRefresh = (event) => {
+      if (event.detail === 'product-loader') void loadDormant();
+    };
+    window.addEventListener(ADMIN_REFRESH_EVENT, onRefresh);
+    return () => window.removeEventListener(ADMIN_REFRESH_EVENT, onRefresh);
+  }, [loadDormant]);
 
   useEffect(() => {
     let cancelled = false;

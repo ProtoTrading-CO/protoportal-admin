@@ -1259,8 +1259,14 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
       }
       return loadCustomers();
     }
-    if (activeSection === 'reorder') return reorderPanelRef.current?.refresh?.();
-    if (activeSection === 'orders') return loadOrders();
+    if (activeSection === 'reorder') {
+      reorderPanelRef.current?.refresh?.();
+      return reloadTaxonomy();
+    }
+    if (activeSection === 'orders') {
+      if (orderSubView === 'analytics') dispatchAdminRefresh('analytics');
+      return loadOrders();
+    }
     if (activeSection === 'catalogue') {
       queryClient.invalidateQueries({ queryKey: ['catalog'] });
       return reloadTaxonomy();
@@ -1270,6 +1276,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
       return loadCrmTemplates();
     }
     if (activeSection === 'analytics') {
+      dispatchAdminRefresh('analytics');
       queryClient.invalidateQueries({ queryKey: queryKeys.dashboardStats() });
       return;
     }
@@ -1676,7 +1683,9 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
       setOrderTotal(0);
       setExpandedOrderId(null);
       setStatsOrderTotal(0);
+      setOrderTabCounts(json.tabCounts || { all: 0, new: 0, handed: 0, progress: 0, sent: 0, paid: 0 });
       void refreshDashboardStats();
+      await loadOrders();
       showToast(`Deleted ${json.deleted || 0} orders`, 'success');
     } catch (err) {
       showToast(err.message || 'Failed to delete all orders', 'error');
@@ -1976,6 +1985,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                   onEditProduct={openContentEdit}
                   onShowToast={showToast}
                   onRefreshStats={refreshDashboardStats}
+                  onRefreshCategoryCounts={reloadTaxonomy}
                 />
               </Suspense>
             )}
