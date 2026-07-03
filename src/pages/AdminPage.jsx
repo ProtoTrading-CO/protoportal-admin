@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Archive,
   ArchiveRestore,
@@ -101,25 +101,33 @@ import { fetchBanner, saveBanner, uploadBannerImage } from '../lib/banner';
 import { fetchCheckoutPromo, saveCheckoutPromo } from '../lib/checkoutPromo';
 import { BANNER_LABEL, BANNER_ASPECT_CSS } from '../lib/bannerSpec';
 import { fetchPopupSpecial, savePopupSpecial, uploadPopupImage } from '../lib/popupSpecial';
-import CrmContactsModal from '../components/CrmContactsModal';
-import WhatsappPanel from '../components/WhatsappPanel';
 import { fuzzyFilter } from '../lib/fuzzySearch';
 import ReorderGrid from '../components/ReorderGrid';
 import CategorySidebar, { resolvePathLabels } from '../components/CategorySidebar';
 import SectionErrorBoundary from '../components/SectionErrorBoundary';
-import FulfillmentSettingsModal from '../components/FulfillmentSettingsModal';
+import ComingSoonPanel from '../components/ComingSoonPanel';
+import ApprovalPanel from '../components/ApprovalPanel';
 import OrderWhatsappNotify from '../components/OrderWhatsappNotify';
-import AnalyticsHub from '../components/AnalyticsHub';
 import ProductManagerEngine from '../components/ProductManagerEngine';
 import GroupedSidebar, { NAV_GROUPS } from '../components/GroupedSidebar';
-import CrmPanel from '../components/CrmPanel';
-import CustomerEmailModal from '../components/CustomerEmailModal';
 import { useDashboardStats } from '../hooks/useDashboardStats';
 import { queryClient } from '../lib/queryClient';
 import { queryKeys } from '../lib/queryKeys';
-import ApolloPanel from '../components/ApolloPanel';
-import CostTrackingPanel from '../components/CostTrackingPanel';
-import ProductLoaderPanel from '../components/ProductLoaderPanel';
+
+// Section panels — lazy-loaded so the initial admin bundle only ships the
+// default section (Product Manager). Each lazy chunk is fetched on demand
+// when the admin clicks a nav item.
+const AnalyticsHub = lazy(() => import('../components/AnalyticsHub'));
+const ApolloPanel = lazy(() => import('../components/ApolloPanel'));
+const CostTrackingPanel = lazy(() => import('../components/CostTrackingPanel'));
+const ProductLoaderPanel = lazy(() => import('../components/ProductLoaderPanel'));
+const CrmPanel = lazy(() => import('../components/CrmPanel'));
+const WhatsappPanel = lazy(() => import('../components/WhatsappPanel'));
+
+// Modal-only — chunk downloads the first time the admin opens the dialog.
+const CustomerEmailModal = lazy(() => import('../components/CustomerEmailModal'));
+const CrmContactsModal = lazy(() => import('../components/CrmContactsModal'));
+const FulfillmentSettingsModal = lazy(() => import('../components/FulfillmentSettingsModal'));
 import { sortOrderCategoryKey, sortOrderLookupKeys, LEGACY_NAV_ALIASES } from '../lib/taxonomy';
 import {
   applySortOrdersToProducts,
@@ -154,6 +162,19 @@ function mergeVisibleReorder(prev, currentVisible, nextVisible) {
 }
 
 // Legacy flat nav removed — see GroupedSidebar.jsx
+
+function LazySectionFallback({ label = 'Loading section…' }) {
+  return (
+    <div
+      className="adm-panel"
+      style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 24, color: '#64748b' }}
+      role="status"
+      aria-live="polite"
+    >
+      <Loader2 size={16} className="spin" /> {label}
+    </div>
+  );
+}
 
 const productTypes = ['General product', 'Hot seller', 'New stock', 'Clearance stock'];
 const ADMIN_PAGE_SIZE = 50;
@@ -424,6 +445,13 @@ function WhatsappOptIn({ value }) {
 
 export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   const [activeSection, setActiveSection] = useState('catalogue');
+  // Apollo panel keeps its own state (chat, staged image ops). Track when it
+  // was first opened so we can lazily mount it once and then keep it in the
+  // DOM via CSS display, matching the pre-lazy behaviour.
+  const [apolloEverActive, setApolloEverActive] = useState(false);
+  useEffect(() => {
+    if (activeSection === 'apollo') setApolloEverActive(true);
+  }, [activeSection]);
   const [catalogStatus, setCatalogStatus] = useState('live');
   const [imageFixRequest, setImageFixRequest] = useState(null);
   const [productLoaderCode, setProductLoaderCode] = useState('');
@@ -2408,54 +2436,64 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
             </div>
 
             {activeSection === 'analytics' && (
-              <AnalyticsHub />
+              <Suspense fallback={<LazySectionFallback label="Loading Analytics…" />}>
+                <AnalyticsHub />
+              </Suspense>
             )}
 
-            {/* Apollo — keep mounted so chat survives tab switches */}
-            <div style={{ display: activeSection === 'apollo' ? 'block' : 'none' }}>
-              <ApolloPanel
-                isActive={activeSection === 'apollo'}
-                taxonomyTree={taxonomyTree}
-                onShowToast={showToast}
-                onGoToApproval={() => { setCatalogStatus('approval'); setActiveSection('catalogue'); window.scrollTo({ top: 0, behavior: 'instant' }); }}
-                onGoToProductLoader={(code) => {
-                  setProductLoaderCode(String(code || '').trim());
-                  setActiveSection('product-loader');
-                }}
-                onRefreshCatalog={() => {
-                  window.dispatchEvent(new CustomEvent('proto-approval-refresh'));
-                  queryClient.invalidateQueries({ queryKey: queryKeys.dashboardStats() });
-                  refreshDashboardStats();
-                }}
-                imageFixRequest={imageFixRequest}
-                onImageFixRequestHandled={() => setImageFixRequest(null)}
-              />
-            </div>
+            {/* Apollo — keep mounted after first open so chat survives tab switches. */}
+            {apolloEverActive && (
+              <div style={{ display: activeSection === 'apollo' ? 'block' : 'none' }}>
+                <Suspense fallback={<LazySectionFallback label="Loading Apollo…" />}>
+                  <ApolloPanel
+                    isActive={activeSection === 'apollo'}
+                    taxonomyTree={taxonomyTree}
+                    onShowToast={showToast}
+                    onGoToApproval={() => { setCatalogStatus('approval'); setActiveSection('catalogue'); window.scrollTo({ top: 0, behavior: 'instant' }); }}
+                    onGoToProductLoader={(code) => {
+                      setProductLoaderCode(String(code || '').trim());
+                      setActiveSection('product-loader');
+                    }}
+                    onRefreshCatalog={() => {
+                      window.dispatchEvent(new CustomEvent('proto-approval-refresh'));
+                      queryClient.invalidateQueries({ queryKey: queryKeys.dashboardStats() });
+                      refreshDashboardStats();
+                    }}
+                    imageFixRequest={imageFixRequest}
+                    onImageFixRequestHandled={() => setImageFixRequest(null)}
+                  />
+                </Suspense>
+              </div>
+            )}
 
             {activeSection === 'cost-tracking' && (
-              <CostTrackingPanel onShowToast={showToast} />
+              <Suspense fallback={<LazySectionFallback label="Loading Cost Tracking…" />}>
+                <CostTrackingPanel onShowToast={showToast} />
+              </Suspense>
             )}
 
             {activeSection === 'product-loader' && (
-              <ProductLoaderPanel
-                taxonomyTree={taxonomyTree}
-                onShowToast={showToast}
-                initialCode={productLoaderCode}
-                onInitialCodeConsumed={() => setProductLoaderCode('')}
-                onGoToApollo={(productsOrSku) => {
-                  const products = Array.isArray(productsOrSku)
-                    ? productsOrSku
-                    : [{
-                      id: String(productsOrSku || ''),
-                      sku: String(productsOrSku || ''),
-                      name: String(productsOrSku || ''),
-                      title: String(productsOrSku || ''),
-                    }];
-                  if (!products[0]?.sku) return;
-                  setImageFixRequest({ id: Date.now(), products });
-                  setActiveSection('apollo');
-                }}
-              />
+              <Suspense fallback={<LazySectionFallback label="Loading Product Loader…" />}>
+                <ProductLoaderPanel
+                  taxonomyTree={taxonomyTree}
+                  onShowToast={showToast}
+                  initialCode={productLoaderCode}
+                  onInitialCodeConsumed={() => setProductLoaderCode('')}
+                  onGoToApollo={(productsOrSku) => {
+                    const products = Array.isArray(productsOrSku)
+                      ? productsOrSku
+                      : [{
+                        id: String(productsOrSku || ''),
+                        sku: String(productsOrSku || ''),
+                        name: String(productsOrSku || ''),
+                        title: String(productsOrSku || ''),
+                      }];
+                    if (!products[0]?.sku) return;
+                    setImageFixRequest({ id: Date.now(), products });
+                    setActiveSection('apollo');
+                  }}
+                />
+              </Suspense>
             )}
 
 
@@ -3476,7 +3514,9 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
             {/* BREVO CRM */}
             {activeSection === 'brevo' && (
               <div className="adm-panel">
-                <CrmPanel onShowToast={showToast} />
+                <Suspense fallback={<LazySectionFallback label="Loading Brevo CRM…" />}>
+                  <CrmPanel onShowToast={showToast} />
+                </Suspense>
               </div>
             )}
 
@@ -3496,26 +3536,28 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                   </div>
                 )}
 
-                <WhatsappPanel
-                  summary={crmMeta.summary}
-                  totalFiltered={crmMeta.totalFiltered}
-                  search={crmSearch}
-                  onSearchChange={setCrmSearch}
-                  filters={crmFilters}
-                  onFiltersChange={setCrmFilters}
-                  businessTypeOptions={crmBusinessTypeOptions}
-                  joinStatusOptions={crmJoinStatusOptions}
-                  templates={crmTemplates}
-                  templatesLoading={crmTemplatesLoading}
-                  selectedTemplate={crmSelectedTemplate}
-                  onSelectTemplate={setCrmSelectedTemplate}
-                  onSend={(overrides) => void sendCrmEmail(overrides)}
-                  sending={crmSending}
-                  sentCount={crmSentCount}
-                  lastSentTemplate={crmLastSentTemplate}
-                  onViewContacts={() => setCrmContactsOpen(true)}
-                  onRefresh={() => { void loadCrmCustomers(crmMeta.page || 1); void loadCrmTemplates(); }}
-                />
+                <Suspense fallback={<LazySectionFallback label="Loading WhatsApp…" />}>
+                  <WhatsappPanel
+                    summary={crmMeta.summary}
+                    totalFiltered={crmMeta.totalFiltered}
+                    search={crmSearch}
+                    onSearchChange={setCrmSearch}
+                    filters={crmFilters}
+                    onFiltersChange={setCrmFilters}
+                    businessTypeOptions={crmBusinessTypeOptions}
+                    joinStatusOptions={crmJoinStatusOptions}
+                    templates={crmTemplates}
+                    templatesLoading={crmTemplatesLoading}
+                    selectedTemplate={crmSelectedTemplate}
+                    onSelectTemplate={setCrmSelectedTemplate}
+                    onSend={(overrides) => void sendCrmEmail(overrides)}
+                    sending={crmSending}
+                    sentCount={crmSentCount}
+                    lastSentTemplate={crmLastSentTemplate}
+                    onViewContacts={() => setCrmContactsOpen(true)}
+                    onRefresh={() => { void loadCrmCustomers(crmMeta.page || 1); void loadCrmTemplates(); }}
+                  />
+                </Suspense>
               </div>
             )}
 
@@ -3758,14 +3800,18 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
         </div>
       )}
 
-      <CustomerEmailModal
-        open={customerEmailOpen}
-        onClose={() => setCustomerEmailOpen(false)}
-        customerTab={customerTab}
-        onSend={sendCustomerEmailBroadcast}
-        onShowToast={showToast}
-        adminEmail={customer?.email || ''}
-      />
+      {customerEmailOpen && (
+        <Suspense fallback={null}>
+          <CustomerEmailModal
+            open={customerEmailOpen}
+            onClose={() => setCustomerEmailOpen(false)}
+            customerTab={customerTab}
+            onSend={sendCustomerEmailBroadcast}
+            onShowToast={showToast}
+            adminEmail={customer?.email || ''}
+          />
+        </Suspense>
+      )}
 
       {/* Taxonomy modals — used by Product Manager reorder + category sidebar */}
       {editTaxonomyModal && (
@@ -4506,29 +4552,37 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
         </div>
       )}
 
-      <CrmContactsModal
-        open={crmContactsOpen}
-        onClose={() => setCrmContactsOpen(false)}
-        contacts={crmFilteredCustomers}
-        loading={crmLoading}
-        search={crmSearch}
-        onSearchChange={setCrmSearch}
-        meta={crmMeta}
-        onPageChange={(page) => void loadCrmCustomers(page)}
-        onRefresh={() => void loadCrmCustomers(crmMeta.page || 1)}
-        formatJoinStatus={formatJoinStatus}
-        formatRelativeDate={formatRelativeDate}
-        formatDateTime={formatDateTime}
-      />
+      {crmContactsOpen && (
+        <Suspense fallback={null}>
+          <CrmContactsModal
+            open={crmContactsOpen}
+            onClose={() => setCrmContactsOpen(false)}
+            contacts={crmFilteredCustomers}
+            loading={crmLoading}
+            search={crmSearch}
+            onSearchChange={setCrmSearch}
+            meta={crmMeta}
+            onPageChange={(page) => void loadCrmCustomers(page)}
+            onRefresh={() => void loadCrmCustomers(crmMeta.page || 1)}
+            formatJoinStatus={formatJoinStatus}
+            formatRelativeDate={formatRelativeDate}
+            formatDateTime={formatDateTime}
+          />
+        </Suspense>
+      )}
 
-      <FulfillmentSettingsModal
-        open={fulfillmentSettingsOpen}
-        taxonomyTree={taxonomyTree}
-        onClose={(saved) => {
-          setFulfillmentSettingsOpen(false);
-          if (saved) void fetchFulfillmentUsers().then(setFulfillmentUsers);
-        }}
-      />
+      {fulfillmentSettingsOpen && (
+        <Suspense fallback={null}>
+          <FulfillmentSettingsModal
+            open={fulfillmentSettingsOpen}
+            taxonomyTree={taxonomyTree}
+            onClose={(saved) => {
+              setFulfillmentSettingsOpen(false);
+              if (saved) void fetchFulfillmentUsers().then(setFulfillmentUsers);
+            }}
+          />
+        </Suspense>
+      )}
 
       {toast && (
         <div className={`adm-toast adm-toast--${toast.type}`} role="status">{toast.message}</div>
