@@ -363,7 +363,13 @@ assert.match(readSrc('api/_admin-password-reset.js'), /sendOutgoing\('admin_pass
 assert.match(readSrc('api/outgoing-emails.js'), /isOutgoingSlug/, 'outgoing-emails API validates slug allowlist');
 assert.match(sidebarSrc, /id: 'outgoing'/, 'sidebar includes Outgoing section');
 assert.match(adminPageSrc, /const OutgoingPanel = lazy\(/, 'OutgoingPanel is lazy-loaded');
-assert.match(readSrc('src/components/OutgoingPanel.jsx'), /adm-email-split/, 'OutgoingPanel supports HTML split editor');
+assert.match(readSrc('api/outgoing-emails.js'), /\[TEST\]/, 'outgoing test sends use [TEST] prefix');
+assert.match(readSrc('api/customer-password-reset-email.js'), /customer_password_reset/, 'customer password reset API wired');
+assert.match(readSrc('api/send-order-email.js'), /order_confirmation_customer/, 'order confirmation uses outgoing template');
+assert.match(readSrc('lib/outgoing-emails.mjs'), /customer_password_reset/, 'registry includes customer password reset');
+assert.match(readSrc('lib/outgoing-emails.mjs'), /order_confirmation_customer/, 'registry includes order confirmation');
+assert.match(readSrc('src/components/OutgoingPanel.jsx'), /useDebouncedValue/, 'OutgoingPanel debounces preview');
+assert.match(readSrc('src/hooks/useDebouncedValue.js'), /export default function useDebouncedValue/, 'debounce hook exists');
 assert.equal(
   spawnSync('node', ['--check', join(REPO_ROOT, 'api/outgoing-emails.js')], { encoding: 'utf8' }).status,
   0,

@@ -9,6 +9,7 @@ import {
   buildEmailBodyHtml,
   wrapBroadcastHtml,
 } from '../lib/emailMergeTags';
+import useDebouncedValue from '../hooks/useDebouncedValue';
 
 const AUDIENCE_OPTIONS = [
   {
@@ -113,10 +114,13 @@ export default function CustomerEmailModal({
     [subject],
   );
 
+  const debouncedIntro = useDebouncedValue(introBody, 300);
+  const debouncedHtml = useDebouncedValue(htmlBody, 300);
+
   const previewBodyHtml = useMemo(
-    () => buildEmailBodyHtml({ introText: introBody, htmlBlock: htmlBody }, PREVIEW_MERGE_VARS)
+    () => buildEmailBodyHtml({ introText: debouncedIntro, htmlBlock: debouncedHtml }, PREVIEW_MERGE_VARS)
       || '<p style="color:#9ca3af;margin:0;">Write a message body and/or HTML block to preview.</p>',
-    [introBody, htmlBody],
+    [debouncedIntro, debouncedHtml],
   );
 
   const fullPreviewDoc = useMemo(

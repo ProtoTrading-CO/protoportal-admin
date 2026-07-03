@@ -75,6 +75,18 @@ export const TEST_MERGE_VARS = {
   phone: '082 555 1234',
 };
 
+export function composeOutgoingParts({ subject = '', introText = '', htmlBlock = '' }, vars = {}) {
+  const intro = introText.trim();
+  const html = htmlBlock.trim();
+  const introHtml = intro ? plainToHtml(applyMergeTags(intro, vars)) : '';
+  const htmlPart = html ? stripDangerousHtml(applyMergeTags(html, vars)) : '';
+  return {
+    subject: applyMergeTags(subject, vars),
+    introHtml: [introHtml, htmlPart].filter(Boolean).join('\n'),
+    textContent: buildComposedText({ introText, htmlBlock }, vars),
+  };
+}
+
 export function buildComposedEmail({ subject, introText = '', htmlBlock = '' }, vars = {}) {
   const personalizedSubject = applyMergeTags(subject, vars);
   const intro = introText.trim();

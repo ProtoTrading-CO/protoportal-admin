@@ -12,6 +12,9 @@ import {
   sendOutgoingTest,
 } from '../lib/outgoingEmails';
 import { ADMIN_REFRESH_EVENT } from '../lib/adminRefresh';
+import useDebouncedValue from '../hooks/useDebouncedValue';
+
+const ORDER_PREVIEW_NOTE = 'Sample order line items, customer details, and PDF attachment appear below your intro on live send.';
 
 function insertAtCursor(textarea, insertValue) {
   if (!textarea) return insertValue;
@@ -69,26 +72,33 @@ export default function OutgoingPanel({ onShowToast, adminEmail = '' }) {
   );
 
   const previewVars = selected?.previewVars || {};
+  const debouncedIntro = useDebouncedValue(introBody, 300);
+  const debouncedHtml = useDebouncedValue(htmlBody, 300);
 
   const previewSubject = useMemo(
     () => applyMergeTags(subject.trim() || 'Subject line', previewVars),
     [subject, previewVars],
   );
 
-  const previewBodyHtml = useMemo(
-    () => buildEmailBodyHtml({ introText: introBody, htmlBlock: htmlBody }, previewVars)
-      || '<p style="color:#9ca3af;margin:0;">Write a plain intro and/or HTML below to preview.</p>',
-    [introBody, htmlBody, previewVars],
-  );
+  const previewBodyHtml = useMemo(() => {
+    const intro = buildEmailBodyHtml({ introText: debouncedIntro, htmlBlock: debouncedHtml }, previewVars);
+    if (selected?.previewLayout === 'order') {
+      const sampleBlock = `<div style="margin-top:16px;padding:14px 16px;border:1px dashed #cbd5e1;border-radius:8px;color:#64748b;font-size:13px;line-height:1.55">${ORDER_PREVIEW_NOTE}</div>`;
+      return (intro || '<p style="color:#9ca3af;margin:0;">Write an intro to preview.</p>') + sampleBlock;
+    }
+    return intro || '<p style="color:#9ca3af;margin:0;">Write a plain intro and/or HTML below to preview.</p>';
+  }, [debouncedIntro, debouncedHtml, previewVars, selected?.previewLayout]);
 
-  const fullPreviewDoc = useMemo(
-    () => wrapBroadcastHtml({
+  const fullPreviewDoc = useMemo(() => {
+    if (selected?.previewLayout === 'order') {
+      return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${previewSubject}</title></head><body style="font-family:Arial,sans-serif;padding:16px;max-width:640px;margin:0 auto;color:#111827;line-height:1.55">${previewBodyHtml}</body></html>`;
+    }
+    return wrapBroadcastHtml({
       subject: previewSubject,
       bodyHtml: previewBodyHtml,
       websiteUrl: PROTO_URLS.website,
-    }),
-    [previewSubject, previewBodyHtml],
-  );
+    });
+  }, [previewSubject, previewBodyHtml, selected?.previewLayout]);
 
   const applyTemplate = useCallback((row) => {
     if (!row) return;
@@ -235,7 +245,12 @@ export default function OutgoingPanel({ onShowToast, adminEmail = '' }) {
             ))}
           </select>
           {selected && (
-            <span className="adm-email-field__hint">{selected.trigger}</span>
+            <>
+              <span className="adm-email-field__hint">{selected.trigger}</span>
+              {selected.systemNote && (
+                <span className="adm-email-field__hint">{selected.systemNote}</span>
+              )}
+            </>
           )}
         </label>
 
@@ -335,7 +350,10 @@ export default function OutgoingPanel({ onShowToast, adminEmail = '' }) {
                     sandbox="allow-same-origin"
                   />
                 </div>
-                <span className="adm-email-field__hint">Preview uses sample merge data. Each recipient gets their own values on send.</span>
+                <span className="adm-email-field__hint">
+                  Preview uses sample data (e.g. Jane Smith). Live sends use each recipient&apos;s real fields.
+                  Test emails are prefixed with [TEST].
+                </span>
               </div>
             )}
           </div>

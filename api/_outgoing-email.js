@@ -62,13 +62,14 @@ export async function saveOutgoingTemplate(slug, patch) {
   return loadOutgoingTemplate(slug);
 }
 
-export async function sendOutgoing(slug, { to, vars = {}, templateOverride = null } = {}) {
+export async function sendOutgoing(slug, { to, vars = {}, templateOverride = null, subjectPrefix = '' } = {}) {
   if (!to?.email) throw new Error('Recipient email is required');
   const template = templateOverride || await loadOutgoingTemplate(slug);
   const composed = buildComposedEmail(template, vars);
+  const subject = `${subjectPrefix}${composed.subject}`;
   await sendBrevoTransactional({
     to: { email: to.email, name: to.name || to.email },
-    subject: composed.subject,
+    subject,
     htmlContent: composed.htmlContent,
     textContent: composed.textContent,
   });
@@ -91,6 +92,8 @@ export function buildOutgoingList(overrides = {}) {
       label: meta.label,
       trigger: meta.trigger,
       mergeTags: meta.mergeTags,
+      previewLayout: meta.previewLayout || 'standard',
+      systemNote: meta.systemNote || '',
       previewVars: meta.previewVars,
       subject: merged.subject,
       introText: merged.introText,

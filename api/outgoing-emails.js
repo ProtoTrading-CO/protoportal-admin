@@ -7,7 +7,40 @@ import {
   sendOutgoing,
   mergeOutgoingTemplate,
 } from './_outgoing-email.js';
+import { composeOutgoingParts, sendBrevoTransactional } from './_brevo-email.js';
 import { getOutgoingMeta, isOutgoingSlug } from '../lib/outgoing-emails.mjs';
+import {
+  ORDER_CONFIRMATION_SAMPLE,
+  buildOrderEmailHtml,
+} from '../lib/order-confirmation-email.mjs';
+
+const TEST_PREFIX = '[TEST] ';
+
+async function sendOutgoingTestEmail(slug, { testEmail, templateOverride, previewVars }) {
+  if (slug === 'order_confirmation_customer') {
+    const { subject, introHtml } = composeOutgoingParts(templateOverride, previewVars);
+    const html = buildOrderEmailHtml({
+      ...ORDER_CONFIRMATION_SAMPLE,
+      customerName: previewVars.name,
+      orderNumber: previewVars.order_number,
+      introHtml,
+    });
+    await sendBrevoTransactional({
+      to: { email: testEmail, name: previewVars.name || 'Test' },
+      subject: `${TEST_PREFIX}${subject}`.trim(),
+      htmlContent: html,
+      textContent: `Test order confirmation for ${previewVars.order_number}`,
+    });
+    return;
+  }
+
+  await sendOutgoing(slug, {
+    to: { email: testEmail, name: previewVars?.name || 'Test' },
+    vars: previewVars || {},
+    templateOverride,
+    subjectPrefix: TEST_PREFIX,
+  });
+}
 
 /** Admin CRUD + test send for fixed outgoing transactional emails. */
 export default async function handler(req, res) {
@@ -66,10 +99,10 @@ export default async function handler(req, res) {
         })
         : await loadOutgoingTemplate(slug);
 
-      await sendOutgoing(slug, {
-        to: { email: testEmail, name: meta.previewVars?.name || 'Test' },
-        vars: meta.previewVars || {},
+      await sendOutgoingTestEmail(slug, {
+        testEmail,
         templateOverride,
+        previewVars: meta.previewVars || {},
       });
       return res.status(200).json({ ok: true, test: true, email: testEmail });
     } catch (err) {
