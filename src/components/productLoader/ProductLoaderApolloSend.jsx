@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from 'react';
 import { CheckSquare, FolderOpen, Loader2, RefreshCw, Square, Upload } from 'lucide-react';
 import { isImageFile } from '../../lib/parseIntakeFilename';
+import { catalogueDisplayTitle } from '../../lib/productLoaderDisplay.js';
 
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {
@@ -41,8 +42,8 @@ export default function ProductLoaderApolloSend({ items = [], onSendToApollo, on
     const products = picked.map((row) => ({
       id: row.code,
       sku: row.code,
-      name: row.title || row.sqlRow?.title || row.code,
-      title: row.title || row.sqlRow?.title || row.code,
+      name: catalogueDisplayTitle(row) || row.code,
+      title: catalogueDisplayTitle(row) || row.code,
       image: row.websiteRow?.image_url_one || row.previewUrl || '',
       images: [
         row.websiteRow?.image_url_one,
@@ -90,7 +91,7 @@ export default function ProductLoaderApolloSend({ items = [], onSendToApollo, on
               </div>
               <div className="pl-apollo-meta">
                 <strong>{row.code}</strong>
-                <span>{row.title || row.sqlRow?.title || '—'}</span>
+                <span>{catalogueDisplayTitle(row) || '—'}</span>
                 <span>SOH {row.stockOnHand ?? row.sqlRow?.available ?? row.websiteRow?.available_stock ?? '—'}</span>
                 <span>R{Number(row.price ?? row.sqlRow?.sell_price ?? row.websiteRow?.price ?? 0).toFixed(2)}</span>
               </div>

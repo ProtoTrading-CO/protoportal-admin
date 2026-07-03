@@ -9,14 +9,9 @@ import {
 } from 'lucide-react';
 import { exportBatchReportCsv, isImageFile } from '../../lib/parseIntakeFilename';
 import { lookupFilenames, logPublishFailure, publishLoaderImageItem } from '../../lib/productLoaderApi';
+import { catalogueDisplayTitle, loaderCodeLabel } from '../../lib/productLoaderDisplay.js';
 import ProductLoaderApolloSend from './ProductLoaderApolloSend';
-
-function displayTitle(...candidates) {
-  for (const c of candidates) {
-    if (typeof c === 'string' && c.trim()) return c.trim();
-  }
-  return '';
-}
+import LoaderCodeEllipsis from './LoaderCodeEllipsis.jsx';
 
 function findNode(tree, id) {
   for (const n of tree) {
@@ -185,8 +180,8 @@ export default function ProductLoaderFolder({
               {rows.map((row) => (
                 <tr key={row.filename}>
                   <td>{row.previewUrl ? <img src={row.previewUrl} alt="" className="pl-folder-thumb" /> : '—'}</td>
-                  <td><strong>{row.code || '—'}</strong></td>
-                  <td>{displayTitle(row.title, row.sqlRow?.title) || '—'}</td>
+                  <td><LoaderCodeEllipsis value={loaderCodeLabel(row)} /></td>
+                  <td>{catalogueDisplayTitle(row) || '—'}</td>
                   <td>{row.imageSlot}</td>
                   <td className={row.status === 'error' ? 'pl-error' : ''}>{row.status || row.group}{row.processError ? ` — ${row.processError}` : ''}</td>
                 </tr>

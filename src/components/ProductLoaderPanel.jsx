@@ -22,6 +22,7 @@ import ProductLoaderPublishHistory from './productLoader/ProductLoaderPublishHis
 import ProductLoaderPublishSuccess from './productLoader/ProductLoaderPublishSuccess';
 import ProductLoaderImageReplace from './productLoader/ProductLoaderImageReplace';
 import { ADMIN_REFRESH_EVENT } from '../lib/adminRefresh';
+import { catalogueDisplayTitle, catalogueDescription } from '../lib/productLoaderDisplay.js';
 
 const LOADER_TABS = [
   { id: 'nutstore', label: 'Nutstore' },
@@ -345,7 +346,7 @@ export default function ProductLoaderPanel({
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         code: item.code,
-        title: item.title || item.sqlRow?.title || item.code,
+        title: catalogueDisplayTitle(item),
         price: item.price ?? item.sqlRow?.price ?? 0,
         barcode: item.barcode || item.websiteRow?.barcode || item.code,
         imageUrl: uploadJson.url,
@@ -355,7 +356,7 @@ export default function ProductLoaderPanel({
         category: categoryLabel,
         subcategoryOne: sub1Label,
         subcategoryTwo: item.websiteRow?.subcategory_two || null,
-        description: item.websiteRow?.original_description || item.sqlRow?.title || '',
+        description: catalogueDescription(item),
         stockQty: item.sqlRow?.onhand ?? item.websiteRow?.stock_qty,
         availableStock: item.sqlRow?.available ?? item.websiteRow?.available_stock,
         categoryConfidence: item.websiteRow ? 1 : 0.5,
@@ -386,7 +387,7 @@ export default function ProductLoaderPanel({
       setSingleImageItem(item);
       setSingleImagePreview(URL.createObjectURL(file));
       if (item.canPublish) {
-        onShowToast?.(`Matched ${item.code} — ${displayTitle(item.title, item.sqlRow?.title)}`, 'success');
+        onShowToast?.(`Matched ${item.code} — ${catalogueDisplayTitle(item) || '—'}`, 'success');
       } else {
         onShowToast?.('No catalogue match for that filename', 'warning');
       }
@@ -430,9 +431,9 @@ export default function ProductLoaderPanel({
       await dormantApi({
         action: 'save',
         code: singleImageItem.code,
-        title: singleImageItem.title || singleImageItem.sqlRow?.title || singleImageItem.code,
+        title: catalogueDisplayTitle(singleImageItem),
         price: singleImageItem.price ?? singleImageItem.sqlRow?.price ?? 0,
-        description: singleImageItem.websiteRow?.original_description || singleImageItem.sqlRow?.title || '',
+        description: catalogueDescription(singleImageItem),
         category: singleImageItem.websiteRow?.category || labels.category,
         subcategoryOne: singleImageItem.websiteRow?.subcategory_one || labels.subcategoryOne,
         subcategoryTwo: singleImageItem.websiteRow?.subcategory_two || null,
@@ -546,9 +547,9 @@ export default function ProductLoaderPanel({
       await dormantApi({
         action: 'save',
         code: websiteRow?.sku || code,
-        title: sqlRow?.title || websiteRow?.title || code,
+        title: catalogueDisplayTitle({ code, title: sqlRow?.title, sqlRow, websiteRow }),
         price: sqlRow?.price ?? websiteRow?.price ?? 0,
-        description: websiteRow?.original_description || sqlRow?.title || '',
+        description: catalogueDescription({ code, sqlRow, websiteRow }),
         ...labels,
       });
       await loadDormant();
@@ -576,9 +577,9 @@ export default function ProductLoaderPanel({
         await dormantApi({
           action: 'save',
           code: item.code,
-          title: item.title || item.sqlRow?.title || item.code,
+          title: catalogueDisplayTitle(item),
           price: item.price ?? item.sqlRow?.price ?? 0,
-          description: item.websiteRow?.original_description || item.sqlRow?.title || '',
+          description: catalogueDescription(item),
           category: item.websiteRow?.category || labels.category,
           subcategoryOne: item.websiteRow?.subcategory_one || labels.subcategoryOne,
           subcategoryTwo: item.websiteRow?.subcategory_two || null,
@@ -865,7 +866,7 @@ export default function ProductLoaderPanel({
 
   const handlePublish = async () => {
     if (!canPublish) return;
-    const title = sqlRow?.title || websiteRow?.title || code;
+    const title = catalogueDisplayTitle({ code, title: sqlRow?.title, sqlRow, websiteRow });
     const price = sqlRow?.price ?? websiteRow?.price ?? 0;
     const catNode = findNode(taxonomyTree, categoryId);
     const sub1Node = findNode(taxonomyTree, sub1Id);
@@ -893,7 +894,7 @@ export default function ProductLoaderPanel({
           subcategoryTwo: sub2Node?.label || sub2Id || null,
           subcategoryThree: sub3Node?.label || sub3Id || null,
           subcategoryFour: sub4Node?.label || sub4Id || null,
-          description: websiteRow?.original_description || sqlRow?.title || '',
+          description: catalogueDescription({ code, sqlRow, websiteRow }),
           stockQty: sqlRow?.onhand ?? websiteRow?.stock_qty,
           availableStock: sqlRow?.available ?? websiteRow?.available_stock,
           categoryConfidence: categorySource === 'gemini' ? 0.85 : 1.0,
@@ -944,9 +945,9 @@ export default function ProductLoaderPanel({
       await dormantApi({
         action: 'save',
         code: item.code,
-        title: item.title || item.sqlRow?.title || item.code,
+        title: catalogueDisplayTitle(item),
         price: item.price ?? item.sqlRow?.price ?? 0,
-        description: item.websiteRow?.original_description || item.sqlRow?.title || '',
+        description: catalogueDescription(item),
         category: item.websiteRow?.category || labels.category,
         subcategoryOne: item.websiteRow?.subcategory_one || labels.subcategoryOne,
         subcategoryTwo: item.websiteRow?.subcategory_two || null,

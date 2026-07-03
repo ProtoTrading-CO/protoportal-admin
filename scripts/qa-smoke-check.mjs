@@ -12,6 +12,7 @@ import { parseOrderTab, parsePositiveInt, parseBusinessTypeFilter } from '../api
 import { injectMotarroIntoTree } from '../lib/mottaro-category.mjs';
 import { BULK_CHUNK_SIZE, runInChunks } from '../lib/bulk-chunk.mjs';
 import { codeLookupCandidates, firstCodeToken } from '../lib/code-normalize.mjs';
+import { catalogueDisplayTitle, catalogueDescription, loaderCodeLabel } from '../lib/product-loader-display.mjs';
 import { parseNutstoreFilename } from '../api/_nutstore-filename.js';
 import { resolveProductLoaderMatch } from '../api/_product-loader-lookup.js';
 
@@ -97,6 +98,8 @@ const nutstoreLookupSrc = readSrc('api/_product-loader-lookup.js');
 assert.match(nutstoreLookupSrc, /getCachedDormantSkuSet/, 'dormant SKU set cached');
 const nutstoreBatchSrc = readSrc('api/nutstore-batch-lookup.js');
 assert.match(nutstoreBatchSrc, /codeGroups/, 'nutstore batch lookup dedups by code');
+assert.match(nutstoreBatchSrc, /displayCode \|\| parsed\.code/, 'nutstore batch dedups by filename stem');
+assert.match(nutstoreBatchSrc, /code: displayCode/, 'nutstore batch passes full stem to resolveProductLoaderMatch');
 console.log('✓ Item 3 Nutstore hardening (timeouts, parallelism, dedup, cache)');
 
 // Nutstore relink on SKU/barcode edit
@@ -189,6 +192,33 @@ assert.equal(noCatalogMatch.title, '', 'no-match lookup leaves title empty');
 assert.equal(noCatalogMatch.canPublish, false);
 assert.ok(noCatalogMatch.warnings?.includes('not_in_catalog'));
 console.log('✓ Archive flow — no-match lookup returns empty title');
+
+assert.doesNotMatch(nutstoreLookupSrc, /title \|\| effectiveCode/, 'lookup never falls back to effectiveCode as title');
+assert.match(nutstoreLookupSrc, /rawTitle\.toUpperCase\(\) !== upperEffective/, 'lookup rejects code-as-title from Positill');
+
+const compoundDisplay = catalogueDisplayTitle({
+  code: '8610100004',
+  displayCode: '8610100004&8610100005&8610100006',
+  title: '8610100004',
+  sqlRow: { title: '8610100004', code: '8610100004' },
+});
+assert.equal(compoundDisplay, '', 'catalogueDisplayTitle rejects barcode token as description');
+assert.equal(catalogueDescription({
+  code: '8610100004',
+  sqlRow: { title: '8610100004' },
+  websiteRow: { original_description: '8610100004' },
+}), '', 'catalogueDescription never returns code/barcode text');
+assert.equal(loaderCodeLabel({ displayCode: '8610100004&8610100005', code: '8610100004' }), '8610100004&8610100005', 'loaderCodeLabel prefers full stem');
+
+const plNutstoreSrc = readSrc('src/components/productLoader/ProductLoaderNutstore.jsx');
+assert.match(plNutstoreSrc, /catalogueDisplayTitle/, 'nutstore table uses catalogueDisplayTitle');
+assert.match(plNutstoreSrc, /LoaderCodeEllipsis/, 'nutstore table truncates code with ellipsis');
+assert.doesNotMatch(plNutstoreSrc, /item\.title \|\| item\.sqlRow\?\.title \|\| item\.code/, 'nutstore process payload skips code-as-title');
+
+const plApiSrc = readSrc('src/lib/productLoaderApi.js');
+assert.match(plApiSrc, /catalogueDisplayTitle/, 'publish API helper uses catalogueDisplayTitle');
+assert.doesNotMatch(plApiSrc, /item\.title \|\| item\.sqlRow\?\.title \|\| item\.code/, 'publish API skips code-as-title');
+console.log('✓ Product Loader — no barcode in description, code ellipsis');
 
 assert.match(nutstoreProcessSrc, /resolveCatalogTextFields/, 'nutstore archive uses shared no-match text resolver');
 assert.match(nutstoreProcessSrc, /if \(!hasMatch\) return \{ title: '', description: '' \}/, 'nutstore skips code fallback when unmatched');

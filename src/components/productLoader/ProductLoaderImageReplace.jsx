@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { FolderOpen, Loader2, Upload } from 'lucide-react';
 import { isImageFile, parseIntakeFilename } from '../../lib/parseIntakeFilename';
+import { catalogueDisplayTitle } from '../../lib/productLoaderDisplay.js';
 
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {
@@ -51,7 +52,7 @@ export default function ProductLoaderImageReplace({ onShowToast }) {
         return {
           ...r,
           websiteRow: match?.websiteRow || null,
-          title: match?.title || match?.sqlRow?.title || r.code,
+          title: catalogueDisplayTitle({ ...r, ...match, code: r.code }) || '',
           found: Boolean(match?.websiteRow),
         };
       });

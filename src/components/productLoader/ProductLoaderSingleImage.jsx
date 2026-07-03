@@ -9,13 +9,8 @@ import {
 } from 'lucide-react';
 import { isImageFile, websiteStatusLabel } from '../../lib/parseIntakeFilename';
 import { lookupFilenames, logPublishFailure, publishLoaderImageItem } from '../../lib/productLoaderApi';
-
-function displayTitle(...candidates) {
-  for (const candidate of candidates) {
-    if (typeof candidate === 'string' && candidate.trim()) return candidate.trim();
-  }
-  return '';
-}
+import { catalogueDisplayTitle, loaderCodeLabel } from '../../lib/productLoaderDisplay.js';
+import LoaderCodeEllipsis from './LoaderCodeEllipsis.jsx';
 
 function findNode(tree, id) {
   for (const n of tree) {
@@ -154,9 +149,9 @@ export default function ProductLoaderSingleImage({
             )}
             <div className="pl-preview-meta">
               <span className={`pl-status-badge pl-status-badge--${status}`}>{websiteStatusLabel(status)}</span>
-              <h4>{displayTitle(item.title, item.sqlRow?.title) || item.code || '—'}</h4>
+              <h4>{catalogueDisplayTitle(item) || '—'}</h4>
               <dl className="pl-meta-grid">
-                <div><dt>SKU</dt><dd>{item.code || '—'}</dd></div>
+                <div><dt>SKU</dt><dd><LoaderCodeEllipsis value={loaderCodeLabel(item)} /></dd></div>
                 <div><dt>Department</dt><dd>{item.department || item.sqlRow?.dept || '—'}</dd></div>
                 <div><dt>Category</dt><dd>{item.category || item.websiteRow?.category || '—'}</dd></div>
                 <div><dt>Price</dt><dd>R{Number(item.price ?? 0).toFixed(2)}</dd></div>
@@ -210,8 +205,8 @@ export default function ProductLoaderSingleImage({
                 onClick={() => onSendToApollo?.([{
                   id: item.code,
                   sku: item.code,
-                  name: displayTitle(item.title, item.sqlRow?.title) || item.code,
-                  title: displayTitle(item.title, item.sqlRow?.title) || item.code,
+                  name: catalogueDisplayTitle(item) || item.code,
+                  title: catalogueDisplayTitle(item) || item.code,
                   image: item.websiteRow?.image_url_one || preview,
                   images: [
                     item.websiteRow?.image_url_one,

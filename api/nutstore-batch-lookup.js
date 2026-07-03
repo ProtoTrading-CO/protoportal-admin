@@ -82,35 +82,36 @@ export default async function handler(req, res) {
   // Pre-parse filenames so we can dedup lookups by SKU.
   const parsedRows = paths.map(parseOnePath);
 
-  // Group indexes by parsed code so we only look up each unique code once.
-  const codeGroups = new Map(); // upperCode → [{ idx, displayCode }]
+  // Dedup lookups by filename stem so compound codes share one resolve pass.
+  const codeGroups = new Map(); // upperStem → [{ idx, displayCode }]
   for (let i = 0; i < parsedRows.length; i += 1) {
     const { parsed } = parsedRows[i];
     if (!parsed?.code) continue;
-    const upper = String(parsed.code || '').trim().toUpperCase();
-    if (!upper) continue;
-    if (!codeGroups.has(upper)) codeGroups.set(upper, []);
-    codeGroups.get(upper).push({ idx: i, displayCode: parsed.displayCode });
+    const stem = String(parsed.displayCode || parsed.code || '').trim();
+    const lookupKey = stem.toUpperCase();
+    if (!lookupKey) continue;
+    if (!codeGroups.has(lookupKey)) codeGroups.set(lookupKey, []);
+    codeGroups.get(lookupKey).push({ idx: i, displayCode: stem });
   }
 
-  const uniqueCodes = [...codeGroups.keys()];
-  const matchByCode = new Map();
-  await mapPool(uniqueCodes, LOOKUP_CONCURRENCY, async (code) => {
-    const group = codeGroups.get(code) || [];
-    const displayCode = group[0]?.displayCode || code;
+  const uniqueStems = [...codeGroups.keys()];
+  const matchByStem = new Map();
+  await mapPool(uniqueStems, LOOKUP_CONCURRENCY, async (lookupKey) => {
+    const group = codeGroups.get(lookupKey) || [];
+    const displayCode = group[0]?.displayCode || lookupKey;
     const match = await resolveProductLoaderMatch(sb, {
-      code,
+      code: displayCode,
       displayCode,
       imageSlot: 1,
       dormantSkus,
     });
-    matchByCode.set(code, match);
+    matchByStem.set(lookupKey, match);
   });
 
   const items = parsedRows.map((row) => {
     if (row.parseError || !row.parsed) return invalidFilenameItem(row);
-    const upper = String(row.parsed.code || '').trim().toUpperCase();
-    const match = matchByCode.get(upper);
+    const stem = String(row.parsed.displayCode || row.parsed.code || '').trim().toUpperCase();
+    const match = matchByStem.get(stem);
     if (!match) return invalidFilenameItem({ ...row, parseError: 'lookup_failed' });
     const group = classifyBatchItem(match);
     return {

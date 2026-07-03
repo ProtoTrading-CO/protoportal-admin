@@ -13,13 +13,8 @@ import {
   Upload,
 } from 'lucide-react';
 import { readApiJson } from '../../lib/apiError.js';
-
-function displayTitle(...candidates) {
-  for (const c of candidates) {
-    if (typeof c === 'string' && c.trim()) return c.trim();
-  }
-  return '';
-}
+import { catalogueDisplayTitle, catalogueDescription, loaderCodeLabel } from '../../lib/productLoaderDisplay.js';
+import LoaderCodeEllipsis from './LoaderCodeEllipsis.jsx';
 
 function findNode(tree, id) {
   for (const n of tree) {
@@ -373,9 +368,10 @@ export default function ProductLoaderNutstore({
         path: item.path,
         filename: item.filename,
         code: item.code,
-        title: item.title || item.sqlRow?.title || item.code,
+        displayCode: item.displayCode,
+        title: catalogueDisplayTitle(item),
         price: item.price ?? item.sqlRow?.price ?? 0,
-        description: item.websiteRow?.original_description || item.sqlRow?.title || item.title || '',
+        description: catalogueDescription(item),
         category: item.websiteRow?.category || (action === 'publish' ? labels.category : labels.category || ''),
         subcategoryOne: item.websiteRow?.subcategory_one || (action === 'publish' ? labels.subcategoryOne : labels.subcategoryOne || ''),
         subcategoryTwo: item.websiteRow?.subcategory_two || null,
@@ -486,8 +482,8 @@ export default function ProductLoaderNutstore({
                   <td className="adm-muted" style={{ fontSize: 12, maxWidth: 140 }} title={row.filename}>
                     {row.filename}
                   </td>
-                  <td><strong>{row.code || '—'}</strong></td>
-                  <td>{displayTitle(row.title, row.sqlRow?.title) || '—'}</td>
+                  <td><LoaderCodeEllipsis value={loaderCodeLabel(row)} /></td>
+                  <td>{catalogueDisplayTitle(row) || '—'}</td>
                   <td>{row.price != null ? `R ${Number(row.price).toFixed(2)}` : '—'}</td>
                   <td>{row.stockOnHand ?? row.sqlRow?.available ?? '—'}</td>
                   <td className={row.processStatus === 'error' ? 'pl-error' : ''}>
