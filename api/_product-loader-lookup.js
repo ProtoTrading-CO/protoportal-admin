@@ -132,7 +132,10 @@ export async function resolveProductLoaderMatch(sb, {
   }
 
   const effectiveCode = websiteRow?.sku || sqlRow?.code || matchedCandidate || code;
-  const title = String(sqlRow?.title || websiteRow?.title || displayCode || code || '').trim();
+  const hasCatalogMatch = Boolean(websiteRow || sqlRow);
+  const title = hasCatalogMatch
+    ? String(sqlRow?.title || websiteRow?.title || '').trim()
+    : '';
   const price = Number(sqlRow?.price ?? websiteRow?.price ?? 0);
   const slot = Math.min(4, Math.max(1, Number(imageSlot) || 1));
   const warnings = [];
@@ -155,7 +158,7 @@ export async function resolveProductLoaderMatch(sb, {
   return {
     code: effectiveCode,
     displayCode: displayCode || code,
-    title: title || effectiveCode,
+    title: hasCatalogMatch ? (title || effectiveCode) : '',
     price,
     imageSlot: slot,
     sqlRow,

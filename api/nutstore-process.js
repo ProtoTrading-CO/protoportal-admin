@@ -72,11 +72,8 @@ async function publishOne(sb, item, { overwriteImage }) {
   }
 
   const now = new Date().toISOString();
-  const title = String(item.title || item.sqlRow?.title || sku).trim();
+  const { title, description } = resolveCatalogTextFields(item);
   const price = Number(item.price ?? item.sqlRow?.price ?? 0);
-  const description = String(
-    item.description || item.websiteRow?.original_description || item.sqlRow?.title || title,
-  ).trim();
 
   const patch = {
     title,
@@ -135,16 +132,24 @@ async function publishOne(sb, item, { overwriteImage }) {
   return { sku, action, imageUrl };
 }
 
+function resolveCatalogTextFields(item) {
+  const hasMatch = Boolean(item.sqlRow || item.websiteRow);
+  if (!hasMatch) return { title: '', description: '' };
+  const title = String(item.title || item.sqlRow?.title || item.websiteRow?.title || '').trim();
+  const description = String(
+    item.description || item.websiteRow?.original_description || item.sqlRow?.title || title,
+  ).trim();
+  return { title, description };
+}
+
 function buildArchivePayload(item, { sku, imageUrl, filename, now }) {
   const { category, subcategoryOne } = resolveArchiveCategories(item);
-  const title = String(item.title || item.sqlRow?.title || sku).trim();
+  const { title, description } = resolveCatalogTextFields(item);
   return {
     sku,
     barcode: sku,
     title,
-    original_description: String(
-      item.description || item.websiteRow?.original_description || item.sqlRow?.title || title,
-    ).trim(),
+    original_description: description,
     price: Number(item.price ?? item.sqlRow?.price ?? 0),
     category,
     subcategory_one: subcategoryOne,

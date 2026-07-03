@@ -1298,7 +1298,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
       productForm.childFourId,
     ].filter(Boolean);
 
-    if (!categoryPath.length) {
+    if (!categoryPath.length && !editingProduct?.archivedBy) {
       setEditorError('Pick a main category before saving — every product needs a category.');
       return;
     }
@@ -1314,7 +1314,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
       imageFour: productForm.imageFour.trim(),
       price: Number(productForm.price || 0),
       stockOnHand: Number(productForm.stockOnHand || 0),
-      categoryPath,
+      ...(categoryPath.length ? { categoryPath } : {}),
       ...typePatch(productForm.productType, editingProduct || {}),
     };
     setSaving(editingProduct?.id || 'new-product');
@@ -3133,11 +3133,10 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
               <AdminField label="Stock on hand"><input value={productForm.stockOnHand} onChange={(e) => setProductForm((p) => ({ ...p, stockOnHand: e.target.value }))} className="adm-field-input" /></AdminField>
               {/*
                 Cascading category pickers — Main → Child 1 → Child 2 → Child 3 → Child 4.
-                Each deeper level only shows up when its parent has children
-                in the live taxonomy. We always reset deeper levels when a
-                shallower one changes so the saved categoryPath stays
-                consistent with the tree.
+                Hidden for archived products — category is chosen at Make live instead.
               */}
+              {!editingProduct?.archivedBy && (
+              <>
               <AdminField label="Main category" full>
                 <select
                   value={productForm.categoryId}
@@ -3243,6 +3242,8 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                   </AdminField>
                 );
               })()}
+              </>
+              )}
             </div>
             </div>
             {editorError && (

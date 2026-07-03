@@ -169,6 +169,44 @@ assert.equal(compoundMatch.code, '8636737332');
 assert.equal(compoundMatch.websiteRow?.sku, '8636737332');
 console.log('✓ Item 2 resolveProductLoaderMatch tries candidate fallbacks');
 
+const noMatchSb = {
+  from() {
+    const api = {
+      select: () => api,
+      eq: () => api,
+      ilike: () => api,
+      limit: () => api,
+      maybeSingle: async () => ({ data: null }),
+    };
+    return api;
+  },
+};
+const noCatalogMatch = await resolveProductLoaderMatch(noMatchSb, {
+  code: '8610100004&8610100005',
+  displayCode: '8610100004&8610100005',
+});
+assert.equal(noCatalogMatch.title, '', 'no-match lookup leaves title empty');
+assert.equal(noCatalogMatch.canPublish, false);
+assert.ok(noCatalogMatch.warnings?.includes('not_in_catalog'));
+console.log('✓ Archive flow — no-match lookup returns empty title');
+
+assert.match(nutstoreProcessSrc, /resolveCatalogTextFields/, 'nutstore archive uses shared no-match text resolver');
+assert.match(nutstoreProcessSrc, /if \(!hasMatch\) return \{ title: '', description: '' \}/, 'nutstore skips code fallback when unmatched');
+
+const updateProductRelinkSrc = readSrc('api/update-product.js');
+assert.match(updateProductRelinkSrc, /\.from\('archived_products'\)[\s\S]*\.update\(relinkPatch\)/, 'relink writes match fields back to archived row');
+
+const pmEngineArchiveSrc = readSrc('src/components/ProductManagerEngine.jsx');
+assert.match(pmEngineArchiveSrc, /productListTitle/, 'archive list avoids sku-as-title fallback');
+assert.match(pmEngineArchiveSrc, /pm-code-ellipsis/, 'archive code display uses ellipsis');
+assert.match(pmEngineArchiveSrc, /makeLiveItem/, 'single make live opens category picker modal');
+assert.doesNotMatch(pmEngineArchiveSrc, /window\.confirm\(`Move "\$\{name\}" to the live website/, 'single make live no longer uses bare confirm');
+
+const adminPageArchiveEditSrc = readSrc('src/pages/AdminPage.jsx');
+assert.match(adminPageArchiveEditSrc, /!editingProduct\?\.archivedBy/, 'archive edit modal hides category cascade');
+assert.match(adminPageArchiveEditSrc, /!categoryPath\.length && !editingProduct\?\.archivedBy/, 'archive edit save skips category requirement');
+console.log('✓ Archive flow — relink, make-live modal, edit modal guards');
+
 const productsSrc = readSrc('src/lib/products.js');
 assert.match(productsSrc, /return json;/, 'updateProduct returns API payload including relink');
 const bulkEditSrc = readSrc('src/components/BulkProductEditModal.jsx');
