@@ -3016,13 +3016,13 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
             ))}
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 14 }}>
-              <AdminField label="Product code"><input value={productForm.code} onChange={(e) => setProductForm((p) => ({ ...p, code: e.target.value }))} className="adm-field-input" /></AdminField>
+              <AdminField label="Product code"><input type="text" value={productForm.code} onChange={(e) => setProductForm((p) => ({ ...p, code: e.target.value }))} className="adm-field-input" /></AdminField>
               <AdminField label="Product type">
                 <select value={productForm.productType} onChange={(e) => setProductForm((p) => ({ ...p, productType: e.target.value }))} className="adm-field-input">
                   {productTypes.map((t) => <option key={t} value={t}>{t}</option>)}
                 </select>
               </AdminField>
-              <AdminField label="Product name" full><input value={productForm.name} onChange={(e) => setProductForm((p) => ({ ...p, name: e.target.value }))} className="adm-field-input" /></AdminField>
+              <AdminField label="Product name" full><input type="text" value={productForm.name} onChange={(e) => setProductForm((p) => ({ ...p, name: e.target.value }))} className="adm-field-input" /></AdminField>
               <AdminField label="Description" full>
                 <textarea value={productForm.description} onChange={(e) => setProductForm((p) => ({ ...p, description: e.target.value }))} className="adm-field-input" rows={3} style={{ resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }} placeholder="Product description shown to customers…" />
               </AdminField>
@@ -3123,14 +3123,15 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
               {PRODUCT_IMAGE_SLOTS.map((slot) => (
                 <AdminField key={`url-${slot.key}`} label={`${slot.label} URL`} full>
                   <input
+                    type="text"
                     value={productForm[slot.key]}
                     onChange={(e) => setProductForm((p) => ({ ...p, [slot.key]: e.target.value }))}
                     className="adm-field-input"
                   />
                 </AdminField>
               ))}
-              <AdminField label="Price"><input value={productForm.price} onChange={(e) => setProductForm((p) => ({ ...p, price: e.target.value }))} className="adm-field-input" /></AdminField>
-              <AdminField label="Stock on hand"><input value={productForm.stockOnHand} onChange={(e) => setProductForm((p) => ({ ...p, stockOnHand: e.target.value }))} className="adm-field-input" /></AdminField>
+              <AdminField label="Price"><input type="text" inputMode="decimal" value={productForm.price} onChange={(e) => setProductForm((p) => ({ ...p, price: e.target.value }))} className="adm-field-input" /></AdminField>
+              <AdminField label="Stock on hand"><input type="text" inputMode="numeric" value={productForm.stockOnHand} onChange={(e) => setProductForm((p) => ({ ...p, stockOnHand: e.target.value }))} className="adm-field-input" /></AdminField>
               {/*
                 Cascading category pickers — Main → Child 1 → Child 2 → Child 3 → Child 4.
                 Hidden for archived products — category is chosen at Make live instead.
@@ -3252,8 +3253,8 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
               </div>
             )}
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 16, paddingTop: 14, borderTop: '1px solid #e5e7eb', background: '#fff', flexShrink: 0 }}>
-              <button onClick={closeEditor} className="adm-btn-ghost"><ChevronLeft size={15} /> Cancel</button>
-              <button onClick={() => void saveProduct()} className="adm-btn-red" disabled={editorImageUploading}>
+              <button type="button" onClick={closeEditor} className="adm-btn-ghost"><ChevronLeft size={15} /> Cancel</button>
+              <button type="button" onClick={() => void saveProduct()} className="adm-btn-red" disabled={editorImageUploading}>
                 {saving === 'new-product' || saving === editingProduct?.id ? 'Saving…' : <><Check size={15} /> Save product</>}
               </button>
             </div>

@@ -489,13 +489,13 @@ export default function ProductLoaderNutstore({
                     <FolderNutstoreThumb path={row.path} folderScope={row.path} />
                   </td>
                   <td className="adm-muted pl-table-clip">
-                    <LoaderCodeEllipsis value={row.filename} strong={false} maxCh={32} />
+                    <LoaderCodeEllipsis value={row.filename} strong={false} fill />
                   </td>
                   <td className="pl-table-clip">
-                    <LoaderCodeEllipsis value={loaderCodeLabel(row)} maxCh={22} />
+                    <LoaderCodeEllipsis value={loaderCodeLabel(row)} fill />
                   </td>
                   <td className="pl-table-clip">
-                    <LoaderCodeEllipsis value={catalogueDisplayTitle(row)} strong={false} maxCh={26} />
+                    <LoaderCodeEllipsis value={catalogueDisplayTitle(row)} strong={false} fill />
                   </td>
                   <td>{row.price != null ? `R ${Number(row.price).toFixed(2)}` : '—'}</td>
                   <td>{row.stockOnHand ?? row.sqlRow?.available ?? '—'}</td>

@@ -235,10 +235,15 @@ assert.doesNotMatch(plDormantSrc, /body\.title \|\| sku/, 'dormant save never fa
 
 const plNutstoreSrc = readSrc('src/components/productLoader/ProductLoaderNutstore.jsx');
 assert.match(plNutstoreSrc, /catalogueDisplayTitle/, 'nutstore table uses catalogueDisplayTitle');
-assert.match(plNutstoreSrc, /LoaderCodeEllipsis value=\{row\.filename\}/, 'nutstore File column truncates with ellipsis');
+assert.match(plNutstoreSrc, /LoaderCodeEllipsis value=\{row\.filename\}.*fill/, 'nutstore File column truncates with fill ellipsis');
 assert.match(plNutstoreSrc, /pl-table-clip/, 'nutstore table clips overflowing cells');
 assert.doesNotMatch(plNutstoreSrc, /maxWidth: 140/, 'nutstore File column no broken inline maxWidth');
-assert.match(readSrc('src/index.css'), /pl-table-clip/, 'folder table clip CSS present');
+const plCss = readSrc('src/index.css');
+assert.match(plCss, /pl-table-clip/, 'folder table clip CSS present');
+assert.match(plCss, /min-width: 0/, 'table clip uses min-width not max-width zero hack');
+assert.doesNotMatch(plCss, /\.pl-table-clip \{ overflow: hidden; max-width: 0/, 'removed broken max-width 0 clip');
+assert.match(plCss, /pm-code-ellipsis--fill/, 'table ellipsis fill class present');
+assert.match(readSrc('src/pages/AdminPage.jsx'), /type="button".*saveProduct/, 'product editor Save uses type=button');
 assert.match(readSrc('src/index.css'), /table-layout: fixed/, 'folder tables use fixed layout for ellipsis');
 assert.doesNotMatch(plNutstoreSrc, /item\.title \|\| item\.sqlRow\?\.title \|\| item\.code/, 'nutstore process payload skips code-as-title');
 

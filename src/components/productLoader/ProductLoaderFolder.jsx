@@ -187,9 +187,9 @@ export default function ProductLoaderFolder({
               {rows.map((row) => (
                 <tr key={row.filename}>
                   <td>{row.previewUrl ? <img src={row.previewUrl} alt="" className="pl-folder-thumb" /> : '—'}</td>
-                  <td className="pl-table-clip"><LoaderCodeEllipsis value={loaderCodeLabel(row)} maxCh={22} /></td>
+                  <td className="pl-table-clip"><LoaderCodeEllipsis value={loaderCodeLabel(row)} fill /></td>
                   <td className="pl-table-clip">
-                    <LoaderCodeEllipsis value={catalogueDisplayTitle(row)} strong={false} maxCh={28} />
+                    <LoaderCodeEllipsis value={catalogueDisplayTitle(row)} strong={false} fill />
                   </td>
                   <td>{row.imageSlot}</td>
                   <td className={row.status === 'error' ? 'pl-error' : ''}>{row.status || row.group}{row.processError ? ` — ${row.processError}` : ''}</td>

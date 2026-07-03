@@ -79,9 +79,9 @@ export default function ProductLoaderPublishHistory({
               <tr key={row.id}>
                 <td>{row.date ? new Date(row.date).toLocaleString() : '—'}</td>
                 <td>{row.user}</td>
-                <td className="pl-table-clip"><LoaderCodeEllipsis value={row.sku} maxCh={18} /></td>
+                <td className="pl-table-clip"><LoaderCodeEllipsis value={row.sku} fill /></td>
                 <td className="pl-table-clip">
-                  <LoaderCodeEllipsis value={row.filename} strong={false} maxCh={30} />
+                  <LoaderCodeEllipsis value={row.filename} strong={false} fill />
                 </td>
                 <td><span className={`pl-history-action pl-history-action--${row.action}`}>{row.action}</span></td>
                 <td>{row.reason || '—'}</td>
