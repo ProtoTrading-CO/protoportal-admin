@@ -35,13 +35,26 @@ assert.throws(() => parsePositiveInt('abc', { name: 'page' }), /Invalid page/);
 assert.equal(parseBusinessTypeFilter('__unspecified__'), '__unspecified__');
 console.log('✓ Query param validation');
 
-// Item 1 — stale standalone PM sections removed (ProductManagerEngine owns catalogue)
+// Item 1 — stale sections removed + bulk chunk helpers
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { BULK_CHUNK_SIZE, runInChunks } from '../lib/bulk-chunk.mjs';
+
 const adminPageSrc = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../src/pages/AdminPage.jsx'), 'utf8');
 assert.doesNotMatch(adminPageSrc, /false\s*&&\s*activeSection/, 'No dead false&& section guards in AdminPage');
 assert.doesNotMatch(adminPageSrc, /activeSection\s*===\s*'dormant-products'/, 'No dormant-products section');
 console.log('✓ Item 1 stale AdminPage sections removed');
+
+const bulkSrc = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../api/bulk-products.js'), 'utf8');
+assert.match(bulkSrc, /bulkDeleteProducts/, 'batched delete helper present');
+assert.match(bulkSrc, /bulkMoveProducts/, 'batched move helper present');
+assert.match(bulkSrc, /runInChunks/, 'chunked archive/unarchive');
+
+let chunkSum = 0;
+await runInChunks([1, 2, 3, 4, 5], 2, async (n) => { chunkSum += n; return n; });
+assert.equal(chunkSum, 15, 'runInChunks runs all items');
+assert.equal(BULK_CHUNK_SIZE, 25, 'chunk size is 25');
+console.log('✓ Item 1 bulk-products batched + chunked');
 
 console.log('\nAll smoke checks passed.');

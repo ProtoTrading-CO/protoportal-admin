@@ -2,32 +2,30 @@ import { requireAdminKey } from './_admin-auth.js';
 import { createClient } from '@supabase/supabase-js';
 import { labelsToDbFields, loadTaxonomy, resolveLabelsForSubcategory, resolveLabelsFromPathIds } from './_taxonomy-utils.js';
 import { restoreArchivedToLive } from './_ensure-product.js';
+import { BULK_CHUNK_SIZE, runInChunks } from '../lib/bulk-chunk.mjs';
 
 function getStockClient() {
   return createClient(
     process.env.VITE_STOCK_SUPABASE_URL,
     process.env.VITE_STOCK_SUPABASE_KEY,
-    { auth: { autoRefreshToken: false, persistSession: false } }
+    { auth: { autoRefreshToken: false, persistSession: false } },
   );
 }
 
-async function findProductTable(supabase, sku) {
-  const { data: live } = await supabase.from('website_stock').select('sku').eq('sku', sku).maybeSingle();
-  if (live) return 'website_stock';
-  const { data: archived } = await supabase.from('archived_products').select('sku').eq('sku', sku).maybeSingle();
-  if (archived) return 'archived_products';
-  return null;
-}
-
-async function moveProduct(supabase, sku, dbFields) {
-  const table = await findProductTable(supabase, sku);
-  if (!table) return { sku, ok: false, error: 'Not found' };
-  const { error } = await supabase
-    .from(table)
-    .update({ ...dbFields, updated_at: new Date().toISOString() })
-    .eq('sku', sku);
-  if (error) return { sku, ok: false, error: error.message };
-  return { sku, ok: true };
+async function resolveSkuTables(supabase, skus) {
+  const liveSkus = new Set();
+  const archSkus = new Set();
+  const CHUNK = 200;
+  for (let i = 0; i < skus.length; i += CHUNK) {
+    const chunk = skus.slice(i, i + CHUNK);
+    const [{ data: live }, { data: arch }] = await Promise.all([
+      supabase.from('website_stock').select('sku').in('sku', chunk),
+      supabase.from('archived_products').select('sku').in('sku', chunk),
+    ]);
+    for (const row of live || []) liveSkus.add(row.sku);
+    for (const row of arch || []) archSkus.add(row.sku);
+  }
+  return { liveSkus, archSkus };
 }
 
 async function archiveProduct(supabase, sku) {
@@ -47,20 +45,90 @@ async function unarchiveProduct(supabase, sku) {
   }
 }
 
-/**
- * Permanently delete a product. Hits both tables because a SKU lives in
- * `website_stock` OR `archived_products` depending on state — and admins
- * may bulk-delete from either Product Manager or the Archive view.
- */
-async function permanentlyDeleteProduct(supabase, sku) {
-  const errors = [];
-  const { error: liveError } = await supabase.from('website_stock').delete().eq('sku', sku);
-  if (liveError) errors.push(liveError.message);
-  const { error: archError } = await supabase.from('archived_products').delete().eq('sku', sku);
-  if (archError) errors.push(archError.message);
-  await supabase.from('staged_product_previews').delete().eq('sku', sku).catch(() => {});
-  if (errors.length) return { sku, ok: false, error: errors.join('; ') };
-  return { sku, ok: true };
+async function bulkMoveProducts(supabase, normalizedSkus, dbFields) {
+  const updatePayload = { ...dbFields, updated_at: new Date().toISOString() };
+  const { liveSkus, archSkus } = await resolveSkuTables(supabase, normalizedSkus);
+  const found = new Set([...liveSkus, ...archSkus]);
+  const results = [];
+  const liveList = normalizedSkus.filter((sku) => liveSkus.has(sku));
+  const archList = normalizedSkus.filter((sku) => archSkus.has(sku));
+
+  if (liveList.length) {
+    const { error } = await supabase.from('website_stock').update(updatePayload).in('sku', liveList);
+    if (error) {
+      for (const sku of liveList) results.push({ sku, ok: false, error: error.message });
+    } else {
+      for (const sku of liveList) results.push({ sku, ok: true });
+    }
+  }
+
+  if (archList.length) {
+    const { error } = await supabase.from('archived_products').update(updatePayload).in('sku', archList);
+    if (error) {
+      for (const sku of archList) results.push({ sku, ok: false, error: error.message });
+    } else {
+      for (const sku of archList) results.push({ sku, ok: true });
+    }
+  }
+
+  for (const sku of normalizedSkus) {
+    if (!found.has(sku)) results.push({ sku, ok: false, error: 'Not found' });
+  }
+
+  return results;
+}
+
+async function bulkDeleteProducts(supabase, normalizedSkus) {
+  const { liveSkus, archSkus } = await resolveSkuTables(supabase, normalizedSkus);
+  const found = new Set([...liveSkus, ...archSkus]);
+  const results = [];
+  const failedSkus = new Set();
+
+  const liveList = normalizedSkus.filter((sku) => liveSkus.has(sku));
+  const archList = normalizedSkus.filter((sku) => archSkus.has(sku));
+
+  if (liveList.length) {
+    const { error } = await supabase.from('website_stock').delete().in('sku', liveList);
+    if (error) {
+      for (const sku of liveList) {
+        failedSkus.add(sku);
+        results.push({ sku, ok: false, error: error.message });
+      }
+    }
+  }
+
+  if (archList.length) {
+    const { error } = await supabase.from('archived_products').delete().in('sku', archList);
+    if (error) {
+      for (const sku of archList) {
+        if (!failedSkus.has(sku)) {
+          failedSkus.add(sku);
+          results.push({ sku, ok: false, error: error.message });
+        }
+      }
+    }
+  }
+
+  await supabase.from('staged_product_previews').delete().in('sku', normalizedSkus).catch(() => {});
+
+  for (const sku of normalizedSkus) {
+    if (!found.has(sku)) {
+      results.push({ sku, ok: false, error: 'Not found' });
+    } else if (!failedSkus.has(sku)) {
+      results.push({ sku, ok: true });
+    }
+  }
+
+  return results;
+}
+
+async function bulkArchiveOrUnarchive(supabase, normalizedSkus, action) {
+  const fn = action === 'archive' ? archiveProduct : unarchiveProduct;
+  const chunked = await runInChunks(normalizedSkus, BULK_CHUNK_SIZE, (sku) => fn(supabase, sku));
+  return chunked.map((row) => {
+    if (row.error && !row.sku) return { sku: row.item, ok: false, error: row.error };
+    return row;
+  });
 }
 
 export default async function handler(req, res) {
@@ -97,11 +165,7 @@ export default async function handler(req, res) {
       }
       const dbFields = labelsToDbFields(labels);
       const destinationPath = labels.join(' › ');
-
-      const results = [];
-      for (const sku of normalizedSkus) {
-        results.push(await moveProduct(supabase, sku, dbFields));
-      }
+      const results = await bulkMoveProducts(supabase, normalizedSkus, dbFields);
       const failed = results.filter((r) => !r.ok);
       return res.status(failed.length ? 207 : 200).json({
         ok: failed.length === 0,
@@ -112,10 +176,7 @@ export default async function handler(req, res) {
     }
 
     if (action === 'archive') {
-      const results = [];
-      for (const sku of normalizedSkus) {
-        results.push(await archiveProduct(supabase, sku));
-      }
+      const results = await bulkArchiveOrUnarchive(supabase, normalizedSkus, 'archive');
       const failed = results.filter((r) => !r.ok);
       return res.status(failed.length ? 207 : 200).json({
         ok: failed.length === 0,
@@ -125,10 +186,7 @@ export default async function handler(req, res) {
     }
 
     if (action === 'delete') {
-      const results = [];
-      for (const sku of normalizedSkus) {
-        results.push(await permanentlyDeleteProduct(supabase, sku));
-      }
+      const results = await bulkDeleteProducts(supabase, normalizedSkus);
       const failed = results.filter((r) => !r.ok);
       return res.status(failed.length ? 207 : 200).json({
         ok: failed.length === 0,
@@ -138,10 +196,7 @@ export default async function handler(req, res) {
     }
 
     if (action === 'unarchive') {
-      const results = [];
-      for (const sku of normalizedSkus) {
-        results.push(await unarchiveProduct(supabase, sku));
-      }
+      const results = await bulkArchiveOrUnarchive(supabase, normalizedSkus, 'unarchive');
       const failed = results.filter((r) => !r.ok);
       return res.status(failed.length ? 207 : 200).json({
         ok: failed.length === 0,
