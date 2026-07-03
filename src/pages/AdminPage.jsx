@@ -53,32 +53,21 @@ import {
 } from 'lucide-react';
 // xlsx is loaded on demand in the export handlers — keeps it out of the main bundle
 import {
-  archiveProduct,
-  applyDormantLive,
   bulkArchiveProducts,
-  bulkDeleteProducts,
   bulkMoveProducts,
-  bulkUnarchiveProducts,
   createProduct,
-  deleteProduct,
   fetchAdminProductsPage,
   fetchAllProductsAdmin,
   fetchCatalogArchiveCount,
-  fetchUncategorizedCount,
   fetchDistinctCategories,
-  fetchDormantProducts,
   fetchReorderProducts,
   applyPathFilter,
   invalidateAdminCache,
   invalidateProductCache,
-  recycleProduct,
-  restoreRecycledProduct,
   saveSortOrder,
-  setNewArrival,
   setLiveTaxonomyTree,
   updateProduct,
   uploadDormantImage,
-  uploadDormantImageWithBase64,
 } from '../lib/products';
 import {
   categoryLabelFromTree,
@@ -118,8 +107,6 @@ import { fuzzyFilter } from '../lib/fuzzySearch';
 import ReorderGrid from '../components/ReorderGrid';
 import CategorySidebar, { resolvePathLabels } from '../components/CategorySidebar';
 import SectionErrorBoundary from '../components/SectionErrorBoundary';
-import ComingSoonPanel from '../components/ComingSoonPanel';
-import ApprovalPanel from '../components/ApprovalPanel';
 import FulfillmentSettingsModal from '../components/FulfillmentSettingsModal';
 import OrderWhatsappNotify from '../components/OrderWhatsappNotify';
 import AnalyticsHub from '../components/AnalyticsHub';
@@ -468,43 +455,14 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   const [imageDragOver, setImageDragOver] = useState(false);
   const imageFileInputRef = useRef(null);
 
-  const [dormantRows, setDormantRows] = useState([]);
-  const [dormantSearch, setDormantSearch] = useState('');
-  const [dormantSelected, setDormantSelected] = useState(new Set());
   const [imageViewUrl, setImageViewUrl] = useState('');
-  const [uploadQueue, setUploadQueue] = useState([]);
-  const [reprocessBusy, setReprocessBusy] = useState(false);
-  const singleImageRef = useRef(null);
-  const folderImageRef = useRef(null);
-  const reprocessAbortRef = useRef(null);
   const [customerApproveBusy, setCustomerApproveBusy] = useState(false);
   const customerExcelRef = useRef(null);
 
-  const [productSearchInput, setProductSearchInput] = useState('');
-  const [productSearchDebounced, setProductSearchDebounced] = useState('');
-  const [productCategoryPath, setProductCategoryPath] = useState([]);
-  const [productPageSize, setProductPageSize] = useState(50);
-  const [productPage, setProductPage] = useState(1);
-  const [productRows, setProductRows] = useState([]);
-  const [productTotal, setProductTotal] = useState(0);
-
   const [catalogTotal, setCatalogTotal] = useState(0);
   const [archiveCatalogTotal, setArchiveCatalogTotal] = useState(0);
-  const [uncategorizedCount, setUncategorizedCount] = useState(0);
   const [statsCustomerTotal, setStatsCustomerTotal] = useState(0);
   const [statsOrderTotal, setStatsOrderTotal] = useState(0);
-
-  const [archiveSearch, setArchiveSearch] = useState('');
-  const [archiveCategoryPath, setArchiveCategoryPath] = useState([]);
-  const [archivePage, setArchivePage] = useState(1);
-  const [archiveRows, setArchiveRows] = useState([]);
-  const [archiveTotal, setArchiveTotal] = useState(0);
-
-  const [recycleSearch, setRecycleSearch] = useState('');
-  const [recyclePage, setRecyclePage] = useState(1);
-  const [recycleRows, setRecycleRows] = useState([]);
-  const [recycleTotal, setRecycleTotal] = useState(0);
-  const [recycleCatalogTotal, setRecycleCatalogTotal] = useState(0);
 
   const [customerTab, setCustomerTab] = useState('regular');
   const [customerSearch, setCustomerSearch] = useState('');
@@ -556,13 +514,6 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   const [deleteSubModal, setDeleteSubModal] = useState(null);
   const [taxonomySaving, setTaxonomySaving] = useState(false);
   const [selectedIds, setSelectedIds] = useState(new Set());
-  const [productSelectedIds, setProductSelectedIds] = useState(new Set());
-  const lastProductClickIdxRef = useRef(null);
-  const [productArchiveConfirmOpen, setProductArchiveConfirmOpen] = useState(false);
-  const [productDeleteConfirmOpen, setProductDeleteConfirmOpen] = useState(false);
-  const [archiveSelectedIds, setArchiveSelectedIds] = useState(new Set());
-  const [archiveDeleteConfirmOpen, setArchiveDeleteConfirmOpen] = useState(false);
-
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
   const [expandedOrderId, setExpandedOrderId] = useState(null);
@@ -649,13 +600,6 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   }, []);
 
   useEffect(() => {
-    const timer = setTimeout(() => setProductSearchDebounced(productSearchInput.trim()), 250);
-    return () => clearTimeout(timer);
-  }, [productSearchInput]);
-  useEffect(() => { setProductPage(1); }, [productSearchDebounced, productCategoryPath.join('|'), productPageSize]);
-  useEffect(() => { setArchivePage(1); }, [archiveSearch, archiveCategoryPath.join('|')]);
-  useEffect(() => { setRecyclePage(1); }, [recycleSearch]);
-  useEffect(() => {
     const timer = setTimeout(() => setCustomerSearchDebounced(customerSearch.trim()), 300);
     return () => clearTimeout(timer);
   }, [customerSearch]);
@@ -675,145 +619,11 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     }
   }, [activeSection]);
 
-  const processUploadFiles = async (files) => {
-    const imageFiles = Array.from(files).filter((f) => f.type.startsWith('image/'));
-    if (!imageFiles.length) return;
-
-    const initial = imageFiles.map((f) => ({ name: f.name, status: 'pending', message: '', cost: null }));
-    setUploadQueue(initial);
-
-    for (let i = 0; i < imageFiles.length; i++) {
-      const file = imageFiles[i];
-      const sku = file.name.replace(/\.[^.]+$/, '');
-
-      // Step 1: compress + upload (compression also produces the base64 we reuse for Gemini)
-      setUploadQueue((prev) => prev.map((item, idx) => idx === i ? { ...item, status: 'transforming', message: 'Uploading…' } : item));
-      let imageUrl = '', uploadedBase64 = '';
-      try {
-        // compressImage returns a Blob; we need both the URL and the base64 for Gemini
-        const { url, base64 } = await uploadDormantImageWithBase64(file, {});
-        imageUrl = url;
-        uploadedBase64 = base64;
-      } catch (err) {
-        setUploadQueue((prev) => prev.map((item, idx) => idx === i ? { ...item, status: 'error', message: err.message } : item));
-        continue;
-      }
-
-      // Step 2: Gemini 2.5 Flash analysis for metadata (non-fatal)
-      setUploadQueue((prev) => prev.map((item, idx) => idx === i ? { ...item, status: 'transforming', message: 'Gemini analysing…' } : item));
-      let title = sku, category = '', description = '', cost = 0, costZar = 0, usdToZar = 0, model = '';
-      if (uploadedBase64) {
-        try {
-          const analyseRes = await fetch('/api/analyze-product-image', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ filename: file.name, contentType: 'image/jpeg', base64: uploadedBase64 }),
-          });
-          const analyseJson = await analyseRes.json();
-          if (analyseRes.ok) {
-            title       = analyseJson.title       || sku;
-            category    = analyseJson.category    || '';
-            description = analyseJson.description || '';
-            cost        = analyseJson.costUsd ?? analyseJson.cost ?? 0;
-            costZar     = analyseJson.costZar ?? 0;
-            usdToZar    = analyseJson.usdToZar ?? 0;
-            model       = analyseJson.model       || '';
-          }
-        } catch { /* non-fatal */ }
-      }
-
-      // Step 3: save dormant
-      setUploadQueue((prev) => prev.map((item, idx) => idx === i ? { ...item, status: 'saving', message: 'Saving dormant…' } : item));
-      try {
-        const saveRes = await fetch('/api/save-dormant-product', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ websiteSku: sku, title, imageUrl, category, description }),
-        });
-        const saveJson = await saveRes.json();
-        if (!saveRes.ok) throw new Error(saveJson.error || 'Save failed');
-        const costLabel = costZar === 0 ? 'free' : formatRandAmount(costZar);
-        setUploadQueue((prev) => prev.map((item, idx) => idx === i ? { ...item, status: 'done', message: `Saved ✓  ·  ${costLabel}`, cost: costZar } : item));
-      } catch (err) {
-        setUploadQueue((prev) => prev.map((item, idx) => idx === i ? { ...item, status: 'error', message: err.message } : item));
-      }
-    }
-
-    invalidateAdminCache();
-    void loadDormant();
-  };
-
-  const loadDormant = async () => {
-    setLoadingProgress(0);
-    setLoadingError('');
-    try {
-      const rows = await fetchDormantProducts({ searchQuery: dormantSearch });
-      setDormantRows(rows);
-    } catch (err) {
-      setLoadingError(err.message || 'Failed to load dormant products');
-    } finally { setLoadingProgress(null); }
-  };
-
-  const loadProducts = async () => {
-    setLoadingProgress(0);
-    setLoadingError('');
-    try {
-      const data = await fetchAdminProductsPage({
-        page: productPage,
-        pageSize: productPageSize,
-        searchQuery: productSearchDebounced,
-        categoryPathFilter: productCategoryPath,
-        onProgress: setLoadingProgress,
-      });
-      setProductRows(data.rows);
-      setProductTotal(data.total);
-    } catch (err) {
-      setLoadingError(err.message || 'Failed to load products');
-    } finally { setLoadingProgress(null); }
-  };
-
-  const loadArchive = async () => {
-    setLoadingProgress(0);
-    setLoadingError('');
-    try {
-      const data = await fetchAdminProductsPage({
-        page: archivePage,
-        pageSize: ADMIN_PAGE_SIZE,
-        searchQuery: archiveSearch,
-        archived: true,
-        categoryPathFilter: archiveCategoryPath,
-        onProgress: setLoadingProgress,
-      });
-      setArchiveRows(data.rows);
-      setArchiveTotal(data.total);
-    } catch (err) {
-      setLoadingError(err.message || 'Failed to load archive');
-    } finally { setLoadingProgress(null); }
-  };
-
-  const loadRecycle = async () => {
-    setLoadingProgress(0);
-    setLoadingError('');
-    try {
-      const data = await fetchAdminProductsPage({ page: recyclePage, pageSize: ADMIN_PAGE_SIZE, searchQuery: recycleSearch, recycled: true, onProgress: setLoadingProgress });
-      setRecycleRows(data.rows);
-      setRecycleTotal(data.total);
-      setRecycleCatalogTotal(data.total);
-    } catch (err) {
-      setLoadingError(err.message || 'Failed to load recycle bin');
-    } finally { setLoadingProgress(null); }
-  };
 
   const refreshDashboardStats = () => {
     queryClient.invalidateQueries({ queryKey: queryKeys.dashboardStats() });
   };
 
-  const refreshRecycleCatalogCount = async () => {
-    try {
-      const data = await fetchAdminProductsPage({ page: 1, pageSize: 1, recycled: true });
-      setRecycleCatalogTotal(data.total);
-    } catch {}
-  };
 
   const loadCustomers = async () => {
     setLoading(true);
@@ -1393,20 +1203,6 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     }
   };
 
-  useEffect(() => { if (activeSection === 'new-items') void loadDormant(); }, [activeSection, dormantSearch]);
-  useEffect(() => { if (activeSection === 'products') void loadProducts(); }, [activeSection, productPage, productSearchDebounced, productCategoryPath.join('|'), productPageSize]);
-  useEffect(() => { setProductSelectedIds(new Set()); }, [productPage, productSearchDebounced, productCategoryPath.join('|')]);
-  useEffect(() => { if (activeSection === 'archive') void loadArchive(); }, [activeSection, archivePage, archiveSearch, archiveCategoryPath.join('|')]);
-  useEffect(() => { setArchiveSelectedIds(new Set()); }, [archivePage, archiveSearch, activeSection]);
-  useEffect(() => { if (activeSection === 'recycle') void loadRecycle(); }, [activeSection, recyclePage, recycleSearch]);
-  useEffect(() => {
-    void refreshRecycleCatalogCount();
-  }, []);
-  useEffect(() => {
-    if (activeSection === 'products' || activeSection === 'archive' || activeSection === 'recycle') {
-      window.scrollTo({ top: 0, behavior: 'auto' });
-    }
-  }, [productPage, archivePage, recyclePage, activeSection]);
   useEffect(() => { if (activeSection === 'customers') void loadCustomers(); }, [activeSection, customerPage, customerTab, customerSearchDebounced, customerBusinessType]);
   useEffect(() => {
     if (activeSection !== 'customers') return;
@@ -1709,7 +1505,6 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
         code: contentEditForm.code?.trim() || '',
         barcode: contentEditForm.code.trim(),
       };
-      setProductRows((prev) => prev.map((p) => p.id === contentEditProduct.id ? { ...p, ...patch } : p));
       setReorderProducts((prev) => prev.map((p) => p.id === contentEditProduct.id ? { ...p, ...patch } : p));
       queryClient.invalidateQueries({ queryKey: ['catalog'] });
       invalidateProductCache();
@@ -1722,14 +1517,9 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   };
 
   const refreshCurrentSection = async () => {
-    if (activeSection === 'products' || activeSection === 'archive' || activeSection === 'recycle') invalidateAdminCache();
-    if (activeSection === 'products') return loadProducts();
-    if (activeSection === 'archive') return loadArchive();
-    if (activeSection === 'recycle') return loadRecycle();
     if (activeSection === 'customers') return loadCustomers();
     if (activeSection === 'pricing') return loadCategoryWorkingSet(pricingCategory, 'pricing');
     if (activeSection === 'reorder') return loadReorderProducts();
-    if (activeSection === 'new-items') return loadDormant();
     if (activeSection === 'orders') return loadOrders();
   };
 
@@ -1768,158 +1558,12 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
       queryClient.invalidateQueries({ queryKey: ['catalog'] });
       invalidateProductCache();
       invalidateAdminCache();
-      await loadProducts();
     } catch (err) {
       setEditorError(err.message || 'Save failed');
     } finally { setSaving(''); }
   };
 
-  const goLive = async (product) => {
-    setSaving(product.id);
-    try {
-      await applyDormantLive(product.id);
-      setDormantRows((prev) => prev.filter((p) => p.id !== product.id));
-      setDormantSelected((prev) => { const next = new Set(prev); next.delete(product.id); return next; });
-      invalidateProductCache();
-      invalidateAdminCache();
-      await loadProducts();
-      showToast(product.stillLive ? `"${product.name}" live image updated` : `"${product.name}" is now live`);
-    } catch (err) {
-      alert(err.message || 'Failed to go live');
-    } finally { setSaving(''); }
-  };
 
-  const goLiveSelected = async () => {
-    if (!dormantSelected.size) return;
-    const ids = [...dormantSelected];
-    setSaving('bulk-live');
-    const errors = [];
-    let ok = 0;
-    const succeeded = new Set();
-    try {
-      for (const id of ids) {
-        try {
-          await applyDormantLive(id);
-          ok += 1;
-          succeeded.add(id);
-        } catch (err) {
-          errors.push(`${id}: ${err.message}`);
-        }
-      }
-      setDormantRows((prev) => prev.filter((p) => !succeeded.has(p.id)));
-      setDormantSelected(new Set(ids.filter((id) => !succeeded.has(id))));
-      invalidateProductCache();
-      invalidateAdminCache();
-      await loadProducts();
-      await loadDormant();
-      if (errors.length) {
-        alert(`Set live: ${ok} succeeded, ${errors.length} failed:\n\n${errors.slice(0, 10).join('\n')}${errors.length > 10 ? '\n…' : ''}`);
-      } else {
-        showToast(`${ok} product${ok === 1 ? '' : 's'} updated on site`);
-      }
-    } catch (err) {
-      alert(err.message || 'Failed to go live');
-    } finally { setSaving(''); }
-  };
-
-  const removeDormantProduct = async (product) => {
-    if (!window.confirm(`Delete "${product.name}"? This cannot be undone.`)) return;
-    setSaving(`del-dormant-${product.id}`);
-    try {
-      await deleteProduct(product.id);
-      setDormantRows((prev) => prev.filter((p) => p.id !== product.id));
-      setDormantSelected((prev) => { const next = new Set(prev); next.delete(product.id); return next; });
-    } catch (err) {
-      alert(err.message || 'Failed to delete');
-    } finally { setSaving(''); }
-  };
-
-  const removeManagedProduct = async (product) => {
-    if (!window.confirm(`Move "${product.name}" to the Recycle Bin? You can restore it later or delete permanently from there.`)) return;
-    setSaving(`del-live-${product.id}`);
-    try {
-      await recycleProduct(product.id);
-      await loadProducts();
-      await refreshDashboardStats();
-      await refreshRecycleCatalogCount();
-      invalidateProductCache();
-      invalidateAdminCache();
-      showToast(`"${product.name}" moved to Recycle Bin`);
-    } catch (err) {
-      alert(err.message || 'Failed to move to Recycle Bin');
-    } finally { setSaving(''); }
-  };
-
-  const restoreFromRecycle = async (product) => {
-    if (!window.confirm(`Restore "${product.name}" to the live catalogue?`)) return;
-    setSaving(product.id);
-    try {
-      await restoreRecycledProduct(product.id);
-      invalidateAdminCache();
-      invalidateProductCache();
-      await loadRecycle();
-      await refreshDashboardStats();
-      await refreshRecycleCatalogCount();
-      showToast(`"${product.name}" restored`);
-    } catch (err) {
-      alert(err.message || 'Failed to restore');
-    } finally { setSaving(''); }
-  };
-
-  const permanentlyDeleteRecycled = async (product) => {
-    if (!window.confirm(`Permanently delete "${product.name}"? This cannot be undone.`)) return;
-    setSaving(`perm-del-${product.id}`);
-    try {
-      await deleteProduct(product.id);
-      await loadRecycle();
-      await refreshRecycleCatalogCount();
-      invalidateProductCache();
-      invalidateAdminCache();
-      showToast(`"${product.name}" permanently deleted`);
-    } catch (err) {
-      alert(err.message || 'Failed to delete');
-    } finally { setSaving(''); }
-  };
-
-  const toggleArchive = async (product) => {
-    const archiving = !product.isArchived;
-    setSaving(product.id);
-    try {
-      await archiveProduct(product.id, archiving);
-      invalidateAdminCache();
-      invalidateProductCache();
-      await refreshDashboardStats();
-      if (activeSection === 'products') await loadProducts();
-      else if (activeSection === 'archive') await loadArchive();
-    } catch (err) {
-      alert(err.message || 'Failed to update archive status');
-      await refreshCurrentSection();
-    } finally { setSaving(''); }
-  };
-
-  const toggleNewArrival = async (product) => {
-    const next = !product.isNew;
-    setSaving(`new-${product.id}`);
-    try {
-      await setNewArrival(product.id, next);
-      await refreshDashboardStats();
-      if (activeSection === 'products') await loadProducts();
-      else if (activeSection === 'archive') await loadArchive();
-      showToast(next ? 'Added to New Arrivals' : 'Removed from New Arrivals');
-    } catch (err) {
-      showToast(err.message || 'Could not update New Arrivals', 'error');
-    } finally { setSaving(''); }
-  };
-
-  const toXlsxRow = (p) => ({
-    Name: p.name,
-    Barcode: p.barcode || p.code,
-    'Website SKU': p.websiteSku || '',
-    'Parent SKU': p.parentSku || '',
-    Category: p.category || '',
-    'Price (incl. VAT)': p.price,
-    'Stock Qty': p.stockQty,
-  });
 
   const loadCrmCustomers = async (page = crmMeta.page || 1) => {
     setCrmLoading(true);
@@ -2072,76 +1716,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     finally { setPopupUploading(false); }
   };
 
-  const exportLiveXlsx = async () => {
-    setSaving('export-live');
-    try {
-      const XLSX = await import('xlsx');
-      const data = await fetchAdminProductsPage({ page: 1, pageSize: 999999, searchQuery: '', categoryFilter: 'all' });
-      const all = data.rows;
-      const wb = XLSX.utils.book_new();
 
-      // Build sheet per main category
-      categories.forEach((cat) => {
-        const catProducts = all.filter((p) => p.category === cat.id || p.categoryPath?.[0] === cat.id);
-        if (!catProducts.length) return;
-
-        const rows = [];
-        const subMap = new Map((cat.children || []).map((s) => [s.id, s.label]));
-
-        // Group by subcategory (categoryPath[1]) — falls back to 'General'
-        const subGroups = new Map();
-        catProducts.forEach((p) => {
-          const subId = p.categoryPath?.[1] || '__general__';
-          if (!subGroups.has(subId)) subGroups.set(subId, []);
-          subGroups.get(subId).push(p);
-        });
-
-        subGroups.forEach((prods, subId) => {
-          const subLabel = subId === '__general__' ? '' : (subMap.get(subId) || subId);
-          if (subLabel) {
-            rows.push({ Subcategory: `── ${subLabel} ──`, Code: '', Name: '', Price: '', Stock: '', SKU: '', 'Parent SKU': '' });
-          }
-          prods.forEach((p) => {
-            rows.push({
-              Subcategory: subLabel,
-              Code: p.barcode || p.code,
-              Name: p.name,
-              Price: p.price,
-              Stock: p.stockQty,
-              SKU: p.websiteSku || '',
-              'Parent SKU': p.parentSku || '',
-            });
-          });
-        });
-
-        const ws = XLSX.utils.json_to_sheet(rows);
-        // Truncate sheet name to 31 chars (Excel limit)
-        const sheetName = cat.label.slice(0, 31);
-        XLSX.utils.book_append_sheet(wb, ws, sheetName);
-      });
-
-      // Fallback: uncategorised products
-      const uncatProducts = all.filter((p) => !p.category || !categories.find((c) => c.id === p.category));
-      if (uncatProducts.length) {
-        const ws = XLSX.utils.json_to_sheet(uncatProducts.map(toXlsxRow));
-        XLSX.utils.book_append_sheet(wb, ws, 'Uncategorised');
-      }
-
-      XLSX.writeFile(wb, 'proto-live-products.xlsx');
-    } finally { setSaving(''); }
-  };
-
-  const exportArchiveXlsx = async () => {
-    setSaving('export-archive');
-    try {
-      const XLSX = await import('xlsx');
-      const data = await fetchAdminProductsPage({ page: 1, pageSize: 999999, searchQuery: archiveSearch, archived: true });
-      const ws = XLSX.utils.json_to_sheet(data.rows.map(toXlsxRow));
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, 'Archive 0 Stock');
-      XLSX.writeFile(wb, 'proto-archive-products.xlsx');
-    } finally { setSaving(''); }
-  };
 
   const reorderSearchActive = reorderSearch.trim().length > 0;
 
@@ -2363,89 +1938,9 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     });
   };
 
-  const toggleSelectProduct = (id, idx, shiftKey = false) => {
-    setProductSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (shiftKey && lastProductClickIdxRef.current !== null && idx !== lastProductClickIdxRef.current) {
-        const start = Math.min(lastProductClickIdxRef.current, idx);
-        const end = Math.max(lastProductClickIdxRef.current, idx);
-        const rangeIds = productRows.slice(start, end + 1).map((p) => p.id);
-        const allSelected = rangeIds.every((rid) => next.has(rid));
-        rangeIds.forEach((rid) => (allSelected ? next.delete(rid) : next.add(rid)));
-      } else {
-        if (next.has(id)) next.delete(id);
-        else next.add(id);
-      }
-      return next;
-    });
-    lastProductClickIdxRef.current = idx ?? null;
-  };
 
-  const toggleSelectAllProducts = () => {
-    const ids = productRows.map((p) => p.id);
-    const allSelected = ids.length > 0 && ids.every((id) => productSelectedIds.has(id));
-    setProductSelectedIds(allSelected ? new Set() : new Set(ids));
-  };
 
-  const confirmBulkArchiveProducts = async () => {
-    const count = productSelectedIds.size;
-    const ids = [...productSelectedIds];
-    setSaving('bulk-archive-pm');
-    try {
-      await bulkArchiveProducts(ids);
-      invalidateAdminCache();
-      invalidateProductCache();
-      setProductArchiveConfirmOpen(false);
-      setProductSelectedIds(new Set());
-      await refreshDashboardStats();
-      await loadProducts();
-      showToast(`Archived ${count} product(s)`);
-    } catch (err) {
-      showToast(err.message || 'Archive failed', 'error');
-    } finally { setSaving(''); }
-  };
 
-  // Permanently delete the products selected in Product Manager. Unlike
-  // archive/recycle this skips the Recycle Bin and removes rows from both
-  // `website_stock` and `archived_products`, so we gate it behind an
-  // explicit confirmation modal.
-  const confirmBulkDeleteProducts = async () => {
-    const count = productSelectedIds.size;
-    const ids = [...productSelectedIds];
-    setSaving('bulk-delete-pm');
-    try {
-      await bulkDeleteProducts(ids);
-      invalidateAdminCache();
-      invalidateProductCache();
-      setProductDeleteConfirmOpen(false);
-      setProductSelectedIds(new Set());
-      await refreshDashboardStats();
-      await refreshRecycleCatalogCount();
-      await loadProducts();
-      showToast(`Deleted ${count} product(s)`);
-    } catch (err) {
-      showToast(err.message || 'Delete failed', 'error');
-    } finally { setSaving(''); }
-  };
-
-  const confirmBulkRestoreArchive = async () => {
-    const count = archiveSelectedIds.size;
-    const ids = [...archiveSelectedIds];
-    setSaving('bulk-restore-archive');
-    try {
-      const json = await bulkUnarchiveProducts(ids);
-      invalidateAdminCache();
-      invalidateProductCache();
-      setArchiveSelectedIds(new Set());
-      await refreshDashboardStats();
-      await loadArchive();
-      await loadProducts();
-      const failed = json.failed?.length || 0;
-      showToast(failed ? `Restored ${json.restored || 0}, ${failed} failed` : `Restored ${count} product${count === 1 ? '' : 's'}`);
-    } catch (err) {
-      showToast(err.message || 'Restore failed', 'error');
-    } finally { setSaving(''); }
-  };
 
   const handleCustomerExcelApprove = async (file) => {
     if (!file) return;
@@ -2479,41 +1974,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
 
   const goHome = () => setActiveSection('orders');
 
-  // Archive bulk-select handlers — mirror the Product Manager bulk bar so
-  // admins can multi-select archived rows and either restore or permanently
-  // delete them in one click.
-  const toggleSelectArchive = (id) => {
-    setArchiveSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
 
-  const toggleSelectAllArchive = () => {
-    const ids = archiveRows.map((p) => p.id);
-    const allSelected = ids.length > 0 && ids.every((id) => archiveSelectedIds.has(id));
-    setArchiveSelectedIds(allSelected ? new Set() : new Set(ids));
-  };
-
-  const confirmBulkDeleteArchive = async () => {
-    const count = archiveSelectedIds.size;
-    const ids = [...archiveSelectedIds];
-    setSaving('bulk-delete-archive');
-    try {
-      await bulkDeleteProducts(ids);
-      invalidateAdminCache();
-      invalidateProductCache();
-      setArchiveDeleteConfirmOpen(false);
-      setArchiveSelectedIds(new Set());
-      await refreshDashboardStats();
-      await loadArchive();
-      showToast(`Deleted ${count} archived product(s)`);
-    } catch (err) {
-      showToast(err.message || 'Delete failed', 'error');
-    } finally { setSaving(''); }
-  };
 
   const moveSelectedToTop = () => {
     if (!selectedIds.size) return;
@@ -2825,7 +2286,6 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
 
   const orderPages = Math.max(1, Math.ceil(orderTotal / ADMIN_PAGE_SIZE));
 
-  const productPages = Math.max(1, Math.ceil(productTotal / productPageSize));
   const customerPages = Math.max(1, Math.ceil(customerTotal / ADMIN_PAGE_SIZE));
   const fulfillmentNoteSections = buildOrderNoteSections({ userNotes: fulfillmentNotes });
 
@@ -2972,252 +2432,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
               />
             )}
 
-            {false && activeSection === 'approval' && (
-              <ApprovalPanel
-                onShowToast={showToast}
-                onRefreshStats={() => {
-                  invalidateAdminCache();
-                  void refreshDashboardStats();
-                  void loadProducts();
-                }}
-              />
-            )}
 
-            {/* PRODUCTS */}
-            {false && activeSection === 'products' && (
-              <div className="adm-panel adm-panel-with-sidebar">
-                <div className="adm-section-head">
-                  <div>
-                    <h2 className="adm-section-title">Product Manager</h2>
-                    <p className="adm-section-note">In-stock products are live on the site automatically. Out-of-stock items auto-archive unless you pin them to stay live (📌).</p>
-                  </div>
-                  <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                    <button type="button" onClick={goHome} className="adm-btn-ghost"><Home size={15} /> Home</button>
-                    <button onClick={openNewProduct} className="adm-btn-red"><PackagePlus size={15} /> Add product</button>
-                    <button onClick={() => void exportLiveXlsx()} className="adm-btn-ghost">{saving === 'export-live' ? 'Exporting…' : 'Export Excel'}</button>
-                  </div>
-                </div>
-
-                <div className="adm-panel-split">
-                  <CategorySidebar
-                    tree={taxonomyTree}
-                    selectedPath={productCategoryPath}
-                    onSelectPath={setProductCategoryPath}
-                    showUncategorized
-                    uncategorizedCount={uncategorizedCount}
-                    onReorder={handleCategoryReorder}
-                  />
-                  <div className="adm-panel-main">
-                <div className="adm-toolbar" style={{ gridTemplateColumns: '1fr auto auto' }}>
-                  <label className="adm-search"><Search size={15} /><input value={productSearchInput} onChange={(e) => setProductSearchInput(e.target.value)} placeholder="Search SKU, barcode, title, category…" className="adm-search-input" /></label>
-                  <select value={productPageSize} onChange={(e) => setProductPageSize(Number(e.target.value))} className="adm-select adm-select--enhanced" style={{ width: 90 }}>
-                    <option value={25}>25 / page</option>
-                    <option value={50}>50 / page</option>
-                    <option value={100}>100 / page</option>
-                  </select>
-                </div>
-
-                {uncategorizedCount > 0 && productCategoryPath[0] !== '__uncategorized__' && (
-                  <div
-                    role="alert"
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 12,
-                      padding: '10px 14px', margin: '0 0 12px',
-                      background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 8,
-                      fontSize: 13, color: '#9a3412',
-                    }}
-                  >
-                    <span style={{ fontWeight: 700 }}>⚠️ {uncategorizedCount} product{uncategorizedCount === 1 ? '' : 's'} have no category.</span>
-                    <span style={{ flex: 1 }}>They are hidden from the live website until a main category is assigned.</span>
-                    <button
-                      type="button"
-                      className="adm-btn-ghost adm-btn--sm"
-                      onClick={() => { setProductCategoryPath(['__uncategorized__']); }}
-                    >
-                      Show them
-                    </button>
-                  </div>
-                )}
-
-                {productSearchInput.trim() && productSearchInput.trim() !== productSearchDebounced && (
-                  <p className="adm-muted" style={{ fontSize: 12, margin: '0 0 8px' }}>Searching…</p>
-                )}
-                {productSearchDebounced && productRows.length === 0 && loadingProgress === null && (
-                  <div className="adm-empty" style={{ padding: '24px 0', textAlign: 'center' }}>
-                    No products match &ldquo;{productSearchDebounced}&rdquo;.
-                  </div>
-                )}
-
-                {productSelectedIds.size > 0 && (
-                  <div className="adm-bulk-bar" role="region" aria-label="Bulk product actions">
-                    <div className="adm-bulk-bar__left">
-                      <span className="adm-bulk-bar__badge">{productSelectedIds.size}</span>
-                      <span className="adm-bulk-bar__count">selected</span>
-                      <button type="button" className="adm-bulk-bar__link" onClick={toggleSelectAllProducts}>
-                        {productRows.length > 0 && productRows.every((p) => productSelectedIds.has(p.id))
-                          ? 'Deselect all'
-                          : `Select all on page (${productRows.length})`}
-                      </button>
-                    </div>
-                    <div className="adm-bulk-bar__actions">
-                      <button
-                        type="button"
-                        className="adm-btn-ghost adm-btn--sm adm-btn-ghost--danger"
-                        onClick={() => setProductArchiveConfirmOpen(true)}
-                        disabled={!!saving}
-                      >
-                        <Archive size={15} /> Archive
-                      </button>
-                      <button
-                        type="button"
-                        className="adm-btn-ghost adm-btn--sm adm-btn-ghost--danger"
-                        onClick={() => setProductDeleteConfirmOpen(true)}
-                        disabled={!!saving}
-                        style={{ color: '#c40000', borderColor: '#fecaca' }}
-                      >
-                        <Trash2 size={15} /> Delete Selected
-                      </button>
-                      <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => setProductSelectedIds(new Set())}>Clear</button>
-                    </div>
-                  </div>
-                )}
-
-                <div className="adm-list">
-                  <div className="adm-list-head" style={{ gridTemplateColumns: '32px 80px 2fr 180px 120px' }}>
-                    <span>
-                      <input
-                        type="checkbox"
-                        checked={productRows.length > 0 && productRows.every((p) => productSelectedIds.has(p.id))}
-                        onChange={toggleSelectAllProducts}
-                        style={{ accentColor: '#8B1A1A', cursor: 'pointer' }}
-                        aria-label="Select all products on this page"
-                      />
-                    </span>
-                    <span></span><span>Product</span><span>Stock</span><span>Actions</span>
-                  </div>
-                  {productRows.reduce((acc, product, i) => {
-                    const cat = product.category || 'Uncategorized';
-                    const prevCat = i > 0 ? (productRows[i - 1].category || 'Uncategorized') : null;
-                    if (cat !== prevCat) {
-                      acc.push(
-                        <div key={`cat-${cat}`} className="adm-category-header">{categoryLabel(cat) || cat}</div>
-                      );
-                    }
-                    acc.push(
-                      <div key={product.id} className="adm-list-row" style={{ gridTemplateColumns: '32px 80px 2fr 180px 120px' }}>
-                        <div>
-                          <input
-                            type="checkbox"
-                            checked={productSelectedIds.has(product.id)}
-                            onChange={(e) => toggleSelectProduct(product.id, i, e.nativeEvent.shiftKey)}
-                            style={{ accentColor: '#8B1A1A', cursor: 'pointer' }}
-                            aria-label={`Select ${product.name}`}
-                          />
-                        </div>
-                        <div style={{ display: 'flex', alignItems: 'center' }}>
-                          {product.image
-                            ? <img src={product.image} alt="" className="adm-product-thumb" />
-                            : <div className="adm-product-thumb adm-product-thumb--placeholder">IMG</div>}
-                        </div>
-                        <div>
-                          <div style={{ fontWeight: 800, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
-                            {product.name}
-                            {!product.image && <span style={{ fontSize: 10, fontWeight: 700, color: '#92400e', background: '#fef3c7', borderRadius: 4, padding: '1px 5px' }}>No image</span>}
-                            {specialsSet.has(product.id) && <span style={{ fontSize: 10, fontWeight: 700, color: '#fff', background: '#8B1A1A', borderRadius: 4, padding: '1px 5px' }}>Special</span>}
-                            {product.isNew && <span style={{ fontSize: 10, fontWeight: 700, color: '#fff', background: '#0f766e', borderRadius: 4, padding: '1px 5px' }}>New arrival</span>}
-                          </div>
-                          <div className="adm-muted" style={{ fontSize: 11 }}>
-                            <span title="Barcode (customer code)">BC: {product.barcode || product.code}</span>
-                            {product.websiteSku && <span title="Website SKU" style={{ marginLeft: 8 }}>WSK: {product.websiteSku}</span>}
-                            {product.parentSku && <span title="Parent SKU" style={{ marginLeft: 8 }}>PSK: {product.parentSku}</span>}
-                            {product.price > 0 && <span title="Price incl. VAT" style={{ marginLeft: 8, fontWeight: 700, color: '#374151' }}>R{formatWebsitePrice(product.price)}</span>}
-                          </div>
-                        </div>
-                        <div>
-                          <span style={{ fontWeight: 700, color: product.stockQty < 0 ? '#b91c1c' : undefined }}>{formatStockUnits(product.stockQty)}</span>
-                          {product.supplier && <div className="adm-muted" style={{ fontSize: 11 }}>{product.supplier}</div>}
-                        </div>
-                        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-                          <button
-                            onClick={() => void toggleSpecial(product)}
-                            className="adm-icon-btn"
-                            title={specialsSet.has(product.id) ? 'Remove from specials' : 'Add to specials'}
-                          >
-                            <Star size={14} className={specialsSet.has(product.id) ? 'star-spinning' : ''} style={{ color: specialsSet.has(product.id) ? '#f59e0b' : undefined }} />
-                          </button>
-                          <button
-                            onClick={() => void toggleNewArrival(product)}
-                            className="adm-icon-btn"
-                            title={product.isNew ? 'Remove from New Arrivals' : 'Add to New Arrivals'}
-                            disabled={saving === `new-${product.id}`}
-                            style={{ color: product.isNew ? '#0f766e' : undefined }}
-                          >
-                            <Sparkles size={14} />
-                          </button>
-                          <button onClick={() => openEditProduct(product)} className="adm-icon-btn" title="Edit product details"><Pencil size={14} /></button>
-                          <button onClick={() => void toggleArchive(product)} className="adm-icon-btn">{product.isArchived ? <ArchiveRestore size={14} /> : <Archive size={14} />}</button>
-                          <button
-                            onClick={() => void removeManagedProduct(product)}
-                            className="adm-icon-btn"
-                            title="Move to Recycle Bin"
-                            disabled={saving === `del-live-${product.id}`}
-                            style={{ color: '#c40000' }}
-                          >
-                            {saving === `del-live-${product.id}` ? '…' : <Trash2 size={14} />}
-                          </button>
-                        </div>
-                      </div>
-                    );
-                    return acc;
-                  }, [])}
-                </div>
-                <Pager page={productPage} totalPages={productPages} onChange={setProductPage} />
-
-                {productArchiveConfirmOpen && (
-                  <div className="adm-modal-backdrop" onClick={() => setProductArchiveConfirmOpen(false)}>
-                    <div className="adm-modal adm-modal--form" onClick={(e) => e.stopPropagation()}>
-                      <div className="adm-modal-header">
-                        <h3 className="adm-modal-title">Archive {productSelectedIds.size} product{productSelectedIds.size === 1 ? '' : 's'}?</h3>
-                        <button type="button" className="adm-modal-close" onClick={() => setProductArchiveConfirmOpen(false)} aria-label="Close"><X size={18} /></button>
-                      </div>
-                      <p className="adm-modal-note">Products leave the live catalogue but are not deleted. Restore them anytime from Archive.</p>
-                      <div className="adm-modal-footer adm-modal-footer--end">
-                        <div className="adm-modal-footer__actions">
-                          <button type="button" className="adm-btn-ghost" onClick={() => setProductArchiveConfirmOpen(false)}>Cancel</button>
-                          <button type="button" className="adm-btn-red" onClick={() => void confirmBulkArchiveProducts()} disabled={saving === 'bulk-archive-pm'}>
-                            {saving === 'bulk-archive-pm' ? 'Archiving…' : 'Archive'}
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {productDeleteConfirmOpen && (
-                  <div className="adm-modal-backdrop" onClick={() => setProductDeleteConfirmOpen(false)}>
-                    <div className="adm-modal adm-modal--form" onClick={(e) => e.stopPropagation()}>
-                      <div className="adm-modal-header">
-                        <h3 className="adm-modal-title">Permanently delete {productSelectedIds.size} product{productSelectedIds.size === 1 ? '' : 's'}?</h3>
-                        <button type="button" className="adm-modal-close" onClick={() => setProductDeleteConfirmOpen(false)} aria-label="Close"><X size={18} /></button>
-                      </div>
-                      <p className="adm-modal-note" style={{ color: '#7f1d1d' }}>
-                        This removes them from the live catalogue AND from the archive. The action cannot be undone — there is no Recycle Bin step.
-                      </p>
-                      <div className="adm-modal-footer adm-modal-footer--end">
-                        <div className="adm-modal-footer__actions">
-                          <button type="button" className="adm-btn-ghost" onClick={() => setProductDeleteConfirmOpen(false)}>Cancel</button>
-                          <button type="button" className="adm-btn-red" onClick={() => void confirmBulkDeleteProducts()} disabled={saving === 'bulk-delete-pm'}>
-                            {saving === 'bulk-delete-pm' ? 'Deleting…' : <><Trash2 size={14} /> Delete permanently</>}
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-                  </div>
-                </div>
-              </div>
-            )}
 
             {/* SPECIALS */}
             {activeSection === 'specials' && (
@@ -3408,226 +2623,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
               </div>
             )}
 
-            {/* ARCHIVE */}
-            {false && activeSection === 'archive' && (
-              <div className="adm-panel adm-panel-with-sidebar">
-                <div className="adm-section-head">
-                  <div>
-                    <h2 className="adm-section-title">Archive — 0 Stock</h2>
-                    <p className="adm-section-note">Products hidden from customers when stock hits 0. Restore or edit directly from here.</p>
-                  </div>
-                  <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                    <button type="button" onClick={goHome} className="adm-btn-ghost"><Home size={15} /> Home</button>
-                    <button onClick={() => void exportArchiveXlsx()} className="adm-btn-ghost">{saving === 'export-archive' ? 'Exporting…' : 'Export Excel'}</button>
-                    <span className="adm-pill" style={{ fontSize: 13, padding: '6px 14px' }}>{archiveTotal} products</span>
-                  </div>
-                </div>
 
-                <div className="adm-panel-split">
-                  <CategorySidebar
-                    tree={taxonomyTree}
-                    selectedPath={archiveCategoryPath}
-                    onSelectPath={setArchiveCategoryPath}
-                  />
-                  <div className="adm-panel-main">
-                <div className="adm-toolbar" style={{ gridTemplateColumns: '1fr' }}>
-                  <label className="adm-search"><Search size={15} /><input value={archiveSearch} onChange={(e) => setArchiveSearch(e.target.value)} placeholder="Search SKU, barcode, title, category…" className="adm-search-input" /></label>
-                </div>
-
-                {archiveRows.length === 0 && loadingProgress === null && (
-                  <div className="adm-empty" style={{ padding: '40px 0', textAlign: 'center', color: '#64748b' }}>
-                    No products with 0 stock right now.
-                  </div>
-                )}
-
-                {/* Archive bulk action bar — only renders when at least one row is selected. */}
-                {archiveSelectedIds.size > 0 && (
-                  <div className="adm-bulk-bar" role="region" aria-label="Bulk archive actions">
-                    <div className="adm-bulk-bar__left">
-                      <span className="adm-bulk-bar__badge">{archiveSelectedIds.size}</span>
-                      <span className="adm-bulk-bar__count">selected</span>
-                      <button type="button" className="adm-bulk-bar__link" onClick={toggleSelectAllArchive}>
-                        {archiveRows.length > 0 && archiveRows.every((p) => archiveSelectedIds.has(p.id))
-                          ? 'Deselect all'
-                          : `Select all on page (${archiveRows.length})`}
-                      </button>
-                    </div>
-                    <div className="adm-bulk-bar__actions">
-                      <button
-                        type="button"
-                        className="adm-btn-ghost adm-btn--sm"
-                        onClick={() => void confirmBulkRestoreArchive()}
-                        disabled={!!saving || saving === 'bulk-restore-archive'}
-                      >
-                        <ArchiveRestore size={15} /> Make Live
-                      </button>
-                      <button
-                        type="button"
-                        className="adm-btn-ghost adm-btn--sm adm-btn-ghost--danger"
-                        onClick={() => setArchiveDeleteConfirmOpen(true)}
-                        disabled={!!saving}
-                        style={{ color: '#c40000', borderColor: '#fecaca' }}
-                      >
-                        <Trash2 size={15} /> Delete Selected
-                      </button>
-                      <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => setArchiveSelectedIds(new Set())}>Clear</button>
-                    </div>
-                  </div>
-                )}
-
-                <div className="adm-list">
-                  {archiveRows.length > 0 && (
-                    <div className="adm-list-head" style={{ gridTemplateColumns: '32px 36px 2fr 180px 120px' }}>
-                      <span>
-                        <input
-                          type="checkbox"
-                          checked={archiveRows.length > 0 && archiveRows.every((p) => archiveSelectedIds.has(p.id))}
-                          onChange={toggleSelectAllArchive}
-                          style={{ accentColor: '#8B1A1A', cursor: 'pointer' }}
-                          aria-label="Select all archived products on this page"
-                        />
-                      </span>
-                      <span></span><span>Product</span><span>Stock</span><span>Actions</span>
-                    </div>
-                  )}
-                  {archiveRows.reduce((acc, product, i) => {
-                    const cat = product.category || 'Uncategorized';
-                    const prevCat = i > 0 ? (archiveRows[i - 1].category || 'Uncategorized') : null;
-                    if (cat !== prevCat) {
-                      acc.push(<div key={`cat-${cat}`} className="adm-category-header">{categoryLabel(cat) || cat}</div>);
-                    }
-                    acc.push(
-                      <div key={product.id} className="adm-list-row" style={{ gridTemplateColumns: '32px 36px 2fr 180px 120px' }}>
-                        <div>
-                          <input
-                            type="checkbox"
-                            checked={archiveSelectedIds.has(product.id)}
-                            onChange={() => toggleSelectArchive(product.id)}
-                            style={{ accentColor: '#8B1A1A', cursor: 'pointer' }}
-                            aria-label={`Select ${product.name}`}
-                          />
-                        </div>
-                        <div style={{ display: 'flex', alignItems: 'center' }}>
-                          {product.image
-                            ? <img src={product.image} alt="" style={{ width: 32, height: 32, objectFit: 'contain', borderRadius: 4, background: '#f3f4f6', mixBlendMode: 'multiply' }} />
-                            : <div style={{ width: 32, height: 32, borderRadius: 4, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, color: '#9ca3af' }}>IMG</div>}
-                        </div>
-                        <div>
-                          <div style={{ fontWeight: 800, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
-                            {product.name}
-                            {!product.image && <span style={{ fontSize: 10, fontWeight: 700, color: '#92400e', background: '#fef3c7', borderRadius: 4, padding: '1px 5px' }}>No image</span>}
-                          </div>
-                          <div className="adm-muted" style={{ fontSize: 11 }}>
-                            <span title="Barcode">BC: {product.barcode || product.code}</span>
-                            {product.websiteSku && <span title="Website SKU" style={{ marginLeft: 8 }}>WSK: {product.websiteSku}</span>}
-                            {product.parentSku && <span title="Parent SKU" style={{ marginLeft: 8 }}>PSK: {product.parentSku}</span>}
-                          </div>
-                        </div>
-                        <div>
-                          <span style={{ fontWeight: 900, fontSize: 15, color: product.stockQty < 0 ? '#b91c1c' : '#8B1A1A' }}>{formatStockUnits(product.stockQty)}</span>
-                          {product.supplier && <div className="adm-muted" style={{ fontSize: 11 }}>{product.supplier}</div>}
-                        </div>
-                        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-                          <button onClick={() => openEditProduct(product)} className="adm-icon-btn" title="Edit product"><Pencil size={14} /></button>
-                          <button onClick={() => void toggleArchive(product)} className="adm-icon-btn" title="Restore from archive"><ArchiveRestore size={14} /></button>
-                        </div>
-                      </div>
-                    );
-                    return acc;
-                  }, [])}
-                </div>
-                <Pager page={archivePage} totalPages={Math.max(1, Math.ceil(archiveTotal / ADMIN_PAGE_SIZE))} onChange={setArchivePage} />
-
-                {archiveDeleteConfirmOpen && (
-                  <div className="adm-modal-backdrop" onClick={() => setArchiveDeleteConfirmOpen(false)}>
-                    <div className="adm-modal adm-modal--form" onClick={(e) => e.stopPropagation()}>
-                      <div className="adm-modal-header">
-                        <h3 className="adm-modal-title">Permanently delete {archiveSelectedIds.size} archived product{archiveSelectedIds.size === 1 ? '' : 's'}?</h3>
-                        <button type="button" className="adm-modal-close" onClick={() => setArchiveDeleteConfirmOpen(false)} aria-label="Close"><X size={18} /></button>
-                      </div>
-                      <p className="adm-modal-note" style={{ color: '#7f1d1d' }}>
-                        These rows will be removed from `archived_products` (and `website_stock` if still present). This cannot be undone.
-                      </p>
-                      <div className="adm-modal-footer adm-modal-footer--end">
-                        <div className="adm-modal-footer__actions">
-                          <button type="button" className="adm-btn-ghost" onClick={() => setArchiveDeleteConfirmOpen(false)}>Cancel</button>
-                          <button type="button" className="adm-btn-red" onClick={() => void confirmBulkDeleteArchive()} disabled={saving === 'bulk-delete-archive'}>
-                            {saving === 'bulk-delete-archive' ? 'Deleting…' : <><Trash2 size={14} /> Delete permanently</>}
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* RECYCLE BIN */}
-            {false && activeSection === 'recycle' && (
-              <div className="adm-panel">
-                <div className="adm-section-head">
-                  <div>
-                    <h2 className="adm-section-title">Recycle Bin</h2>
-                    <p className="adm-section-note">Deleted products are kept here until restored or permanently removed.</p>
-                  </div>
-                  <span className="adm-pill" style={{ fontSize: 13, padding: '6px 14px' }}>{recycleCatalogTotal} products</span>
-                </div>
-
-                <div className="adm-toolbar" style={{ gridTemplateColumns: '1fr' }}>
-                  <label className="adm-search"><Search size={15} /><input value={recycleSearch} onChange={(e) => setRecycleSearch(e.target.value)} placeholder="Search recycled products" className="adm-search-input" /></label>
-                </div>
-
-                {recycleRows.length === 0 && loadingProgress === null && (
-                  <div className="adm-empty" style={{ padding: '40px 0', textAlign: 'center', color: '#64748b' }}>
-                    Recycle Bin is empty.
-                  </div>
-                )}
-
-                <div className="adm-list">
-                  {recycleRows.length > 0 && (
-                    <div className="adm-list-head" style={{ gridTemplateColumns: '80px 2fr 180px 140px' }}>
-                      <span></span><span>Product</span><span>Stock</span><span>Actions</span>
-                    </div>
-                  )}
-                  {recycleRows.map((product) => (
-                    <div key={product.id} className="adm-list-row" style={{ gridTemplateColumns: '80px 2fr 180px 140px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center' }}>
-                        {product.image
-                          ? <img src={product.image} alt="" className="adm-product-thumb" />
-                          : <div className="adm-product-thumb adm-product-thumb--placeholder">IMG</div>}
-                      </div>
-                      <div>
-                        <div style={{ fontWeight: 800, fontSize: 14 }}>{product.name}</div>
-                        <div className="adm-muted" style={{ fontSize: 11 }}>
-                          <span title="Barcode">BC: {product.barcode || product.code}</span>
-                          {product.websiteSku && <span title="Website SKU" style={{ marginLeft: 8 }}>WSK: {product.websiteSku}</span>}
-                        </div>
-                      </div>
-                      <div>
-                        <span style={{ fontWeight: 700, color: product.stockQty < 0 ? '#b91c1c' : undefined }}>{formatStockUnits(product.stockQty)}</span>
-                      </div>
-                      <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-                        <button onClick={() => void restoreFromRecycle(product)} className="adm-icon-btn" title="Restore to live catalogue" disabled={saving === product.id}>
-                          <ArchiveRestore size={14} />
-                        </button>
-                        <button
-                          onClick={() => void permanentlyDeleteRecycled(product)}
-                          className="adm-icon-btn"
-                          title="Delete permanently"
-                          disabled={saving === `perm-del-${product.id}`}
-                          style={{ color: '#c40000' }}
-                        >
-                          {saving === `perm-del-${product.id}` ? '…' : <Trash2 size={14} />}
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                <Pager page={recyclePage} totalPages={Math.max(1, Math.ceil(recycleTotal / ADMIN_PAGE_SIZE))} onChange={setRecyclePage} />
-              </div>
-            )}
 
             {/* REORDER */}
             {activeSection === 'reorder' && (
@@ -4557,9 +3553,6 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
 
             {/* POPUP SPECIALS — merged into Specials tab */}
 
-            {false && activeSection === 'dormant-products' && (
-              <ComingSoonPanel taxonomyTree={taxonomyTree} />
-            )}
 
           </main>
         </div>
