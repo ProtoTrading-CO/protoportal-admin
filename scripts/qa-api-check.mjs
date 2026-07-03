@@ -59,6 +59,10 @@ const staleTax = await post('/api/taxonomy', {
 });
 record('Taxonomy stale expectedUpdatedAt → 409', staleTax.status === 409, staleTax.json?.error || `status ${staleTax.status}`);
 
+// Bulk products validation
+const emptyBulk = await post('/api/bulk-products', { action: 'archive', skus: [] });
+record('Bulk products rejects empty skus', emptyBulk.status === 400, emptyBulk.json?.error || `status ${emptyBulk.status}`);
+
 // Query validation
 const badTab = await get('/api/admin-orders?tab=not-a-tab');
 record('Orders invalid tab → 400', badTab.status === 400, `status ${badTab.status}`);
