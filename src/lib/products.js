@@ -558,6 +558,7 @@ export async function updateProduct(sku, payload) {
   if (!res.ok) throw new Error(json.error || 'Update failed');
   invalidateProductCache();
   invalidateAdminCache();
+  return json;
 }
 
 export async function archiveProduct(sku, shouldArchive = true) {

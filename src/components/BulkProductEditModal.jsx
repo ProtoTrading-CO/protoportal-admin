@@ -356,6 +356,7 @@ export default function BulkProductEditModal({
     setLiveTaxonomyTree(tree);
     let saved = 0;
     let skipped = 0;
+    let relinked = 0;
     const errors = [];
 
     for (let i = 0; i < rows.length; i += 1) {
@@ -367,7 +368,8 @@ export default function BulkProductEditModal({
           skipped += 1;
           continue;
         }
-        await updateProduct(original.sku, payload);
+        const result = await updateProduct(original.sku, payload);
+        if (result?.relink?.matched) relinked += 1;
         saved += 1;
       } catch (err) {
         errors.push(`${row.title || row.sku}: ${err.message}`);
@@ -386,6 +388,11 @@ export default function BulkProductEditModal({
     } else if (saved === 0) {
       onShowToast?.('No changes to save', 'warning');
       return;
+    } else if (relinked > 0) {
+      onShowToast?.(
+        `${saved} product${saved === 1 ? '' : 's'} saved — ${relinked} matched to Positill; refresh Archive to see live stock`,
+        'success',
+      );
     } else {
       onShowToast?.(`${saved} product${saved === 1 ? '' : 's'} saved`, 'success');
     }

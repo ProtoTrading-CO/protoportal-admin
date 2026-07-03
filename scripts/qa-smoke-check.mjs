@@ -11,6 +11,9 @@ import { orderMatchesTab, isOrderConfirmationSent } from '../src/lib/orderStatus
 import { parseOrderTab, parsePositiveInt, parseBusinessTypeFilter } from '../api/_admin-query-params.js';
 import { injectMotarroIntoTree } from '../lib/mottaro-category.mjs';
 import { BULK_CHUNK_SIZE, runInChunks } from '../lib/bulk-chunk.mjs';
+import { codeLookupCandidates, firstCodeToken } from '../lib/code-normalize.mjs';
+import { parseNutstoreFilename } from '../api/_nutstore-filename.js';
+import { resolveProductLoaderMatch } from '../api/_product-loader-lookup.js';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const readSrc = (relPath) => readFileSync(join(REPO_ROOT, relPath), 'utf8');
@@ -101,6 +104,73 @@ const updateProductSrc = readSrc('api/update-product.js');
 assert.match(updateProductSrc, /verified\.archived_by === 'nutstore'/, 'update-product re-runs ERP lookup on Nutstore-archived rows');
 assert.match(updateProductSrc, /resolveProductLoaderMatch/, 'update-product imports resolveProductLoaderMatch');
 console.log('✓ Item 4 Nutstore relink on SKU/barcode edit');
+
+// Compound code normalization — shared lookup candidates
+assert.deepEqual(codeLookupCandidates('abc123'), ['ABC123']);
+assert.deepEqual(
+  codeLookupCandidates('8636737332-8636737333'),
+  ['8636737332-8636737333', '8636737332', '8636737333'],
+);
+assert.deepEqual(codeLookupCandidates('ABC-2'), ['ABC-2', 'ABC', '2']);
+assert.deepEqual(
+  codeLookupCandidates('sku1 / sku2 & sku3'),
+  ['SKU1 / SKU2 & SKU3', 'SKU1', 'SKU2', 'SKU3'],
+);
+assert.deepEqual(codeLookupCandidates(''), []);
+assert.equal(firstCodeToken('8636737332-8636737333'), '8636737332');
+assert.equal(firstCodeToken('abc123'), 'ABC123');
+console.log('✓ Item 1 codeLookupCandidates + firstCodeToken');
+
+const nutstoreParsed = parseNutstoreFilename('863673733-8636737332.jpg');
+assert.equal(nutstoreParsed.code, '863673733');
+assert.equal(parseNutstoreFilename('ABC-2.jpg').code, 'ABC');
+console.log('✓ Item 3 Nutstore filename parser uses firstCodeToken');
+
+const lookupTried = [];
+const fakeSb = {
+  from(table) {
+    const query = { table, val: null };
+    const api = {
+      select: () => api,
+      eq: (_col, val) => { query.val = val; return api; },
+      ilike: () => api,
+      limit: () => api,
+      maybeSingle: async () => {
+        lookupTried.push(query.val);
+        if (table === 'website_stock' && query.val === '8636737332') {
+          return {
+            data: {
+              sku: '8636737332',
+              title: 'Compound fallback',
+              price: 12,
+              category: 'Test',
+            },
+          };
+        }
+        return { data: null };
+      },
+    };
+    return api;
+  },
+};
+const compoundMatch = await resolveProductLoaderMatch(fakeSb, {
+  code: '8636737332-8636737333',
+  displayCode: '8636737332-8636737333',
+});
+assert.ok(lookupTried.includes('8636737332-8636737333'), 'tries raw compound code first');
+assert.ok(lookupTried.includes('8636737332'), 'falls through to first token');
+assert.equal(compoundMatch.code, '8636737332');
+assert.equal(compoundMatch.websiteRow?.sku, '8636737332');
+console.log('✓ Item 2 resolveProductLoaderMatch tries candidate fallbacks');
+
+const productsSrc = readSrc('src/lib/products.js');
+assert.match(productsSrc, /return json;/, 'updateProduct returns API payload including relink');
+const bulkEditSrc = readSrc('src/components/BulkProductEditModal.jsx');
+assert.match(bulkEditSrc, /relink\?\.matched/, 'bulk edit surfaces Positill relink match toast');
+const adminPageRelinkSrc = readSrc('src/pages/AdminPage.jsx');
+assert.match(adminPageRelinkSrc, /relink\?\.matched/, 'product editor surfaces Positill relink match toast');
+console.log('✓ Item 4 client relink toast propagation');
+
 
 // UI polish — Make live label + move gap validation
 const pmEngineSrc = readSrc('src/components/ProductManagerEngine.jsx');
