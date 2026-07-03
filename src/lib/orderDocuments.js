@@ -1,4 +1,4 @@
-import { jsPDF } from 'jspdf';
+import { loadJsPDF } from './lazyJspdf';
 import { displayOrderNumber, buildFulfillmentUrl } from './orderNumber';
 import {
   buildOrderNoteSections,
@@ -170,6 +170,7 @@ export async function generateOrderPdfBase64({
   includeInternalLink = false,
   fulfillmentUrl = '',
 }) {
+  const jsPDF = await loadJsPDF();
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();

@@ -39,16 +39,43 @@ async function fetchCatalog(params) {
   }
 }
 
-/** Fetch every row matching catalog filters (paged server reads). */
+/** Fetch every row matching catalog filters — parallel after page 1 knows the total. */
 export async function fetchAllCatalogRows(params) {
   const pageSize = 200;
-  let page = 1;
+  const firstPage = await fetchCatalog({ ...params, page: 1, pageSize });
+  const first = firstPage.rows || [];
+
+  // Server tells us `total`; use it to skip the sequential poll and fetch the
+  // remaining pages concurrently. Falls back to sequential if the total is
+  // missing (older API shape) or unreliable.
+  const total = Number(firstPage.total) || 0;
+  const totalPages = total > 0 ? Math.ceil(total / pageSize) : 1;
+
+  if (totalPages <= 1 || !firstPage.hasMore) return first;
+
+  // Bound concurrency so we don't fan out unbounded when a category has
+  // thousands of items. 4 in parallel is well within Supabase's pooler.
+  const CONCURRENCY = 4;
+  const remainingPages = [];
+  for (let p = 2; p <= totalPages; p += 1) remainingPages.push(p);
+
+  const buckets = new Array(totalPages);
+  buckets[0] = first;
+  let cursor = 0;
+  async function worker() {
+    while (cursor < remainingPages.length) {
+      const idx = cursor;
+      cursor += 1;
+      const page = remainingPages[idx];
+      const json = await fetchCatalog({ ...params, page, pageSize });
+      buckets[page - 1] = json.rows || [];
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, remainingPages.length) }, worker));
+
   const all = [];
-  while (true) {
-    const json = await fetchCatalog({ ...params, page, pageSize });
-    all.push(...(json.rows || []));
-    if (!json.hasMore) break;
-    page += 1;
+  for (const bucket of buckets) {
+    if (bucket) all.push(...bucket);
   }
   return all;
 }

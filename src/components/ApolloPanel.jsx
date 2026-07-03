@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { jsPDF } from 'jspdf';
+import { loadJsPDF } from '../lib/lazyJspdf';
 import { Bot, CheckCircle, FileDown, Loader2, PackagePlus, Send, Sparkles, Square, User, Users, Wrench } from 'lucide-react';
 import ApolloImageWizard from './ApolloImageWizard';
 import { getActiveImageBatch, subscribeImageBatch } from '../lib/imageBatchTracker';
@@ -227,7 +227,8 @@ function ChatMessage({ msg, isLastAssistant, onExportPdf, onFix, fixBusy, onOpen
   );
 }
 
-function exportMessagePdf(content, title = 'Apollo Report') {
+async function exportMessagePdf(content, title = 'Apollo Report') {
+  const jsPDF = await loadJsPDF();
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
   const margin = 48;
   let y = margin;
