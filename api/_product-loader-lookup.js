@@ -1,3 +1,4 @@
+import { codeLookupCandidates } from '../lib/code-normalize.mjs';
 import { getProductByCode } from './_sql-provider.js';
 import { toSqlPreview } from './_sql-stmast.js';
 import { parseLoaderFilename } from './_product-loader-filename.js';
@@ -108,13 +109,29 @@ export async function resolveProductLoaderMatch(sb, {
     };
   }
 
-  const [{ row: websiteRow, matchedBy: webMatch }, positill] = await Promise.all([
-    lookupWebsiteStock(sb, code, displayCode),
-    lookupPositill(sb, code, displayCode),
-  ]);
+  const candidates = codeLookupCandidates(code);
+  let websiteRow = null;
+  let webMatch = null;
+  let sqlRow = null;
+  let positillMatch = null;
+  let matchedCandidate = null;
 
-  const sqlRow = positill.sqlRow;
-  const effectiveCode = websiteRow?.sku || sqlRow?.code || code;
+  for (const candidate of candidates) {
+    const [webResult, positill] = await Promise.all([
+      lookupWebsiteStock(sb, candidate, displayCode),
+      lookupPositill(sb, candidate, displayCode),
+    ]);
+    if (webResult.row || positill.sqlRow) {
+      websiteRow = webResult.row;
+      webMatch = webResult.matchedBy;
+      sqlRow = positill.sqlRow;
+      positillMatch = positill.matchedBy;
+      matchedCandidate = candidate;
+      break;
+    }
+  }
+
+  const effectiveCode = websiteRow?.sku || sqlRow?.code || matchedCandidate || code;
   const title = String(sqlRow?.title || websiteRow?.title || displayCode || code || '').trim();
   const price = Number(sqlRow?.price ?? websiteRow?.price ?? 0);
   const slot = Math.min(4, Math.max(1, Number(imageSlot) || 1));
@@ -144,7 +161,7 @@ export async function resolveProductLoaderMatch(sb, {
     sqlRow,
     websiteRow,
     warnings,
-    matchedBy: webMatch || positill.matchedBy || null,
+    matchedBy: webMatch || positillMatch || null,
     canPublish: Boolean(websiteRow || sqlRow) && !parseError,
     websiteStatus,
     department: String(sqlRow?.dept || '').trim(),

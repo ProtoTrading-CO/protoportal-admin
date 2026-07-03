@@ -1,3 +1,5 @@
+import { firstCodeToken } from '../lib/code-normalize.mjs';
+
 const IMAGE_EXT = /\.(jpe?g|png|webp)$/i;
 
 /** Nutstore PTR Photos: lookup code = stem before first hyphen; full stem kept for display. */
@@ -17,8 +19,7 @@ export function parseNutstoreFilename(filename) {
   }
 
   const displayCode = stem;
-  const lookupStem = stem.includes('-') ? stem.split('-')[0].trim() : stem;
-  const code = lookupStem.toUpperCase();
+  const code = firstCodeToken(stem);
 
   if (code.length < 2) {
     return { code: '', displayCode: '', imageSlot: 1, parseError: 'sku_too_short' };

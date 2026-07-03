@@ -1319,7 +1319,12 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     };
     setSaving(editingProduct?.id || 'new-product');
     try {
-      await (editingProduct ? updateProduct(editingProduct.id, payload) : createProduct(payload));
+      const result = editingProduct
+        ? await updateProduct(editingProduct.id, payload)
+        : await createProduct(payload);
+      if (result?.relink?.matched) {
+        showToast('Matched to Positill — refresh Archive to see live stock', 'success');
+      }
       closeEditor();
       queryClient.invalidateQueries({ queryKey: ['catalog'] });
       invalidateProductCache();
