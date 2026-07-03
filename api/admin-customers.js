@@ -1,6 +1,8 @@
 import { requireAdminKey } from './_admin-auth.js';
 import { createClient } from '@supabase/supabase-js';
 import { parseCustomerTab, parsePositiveInt, parseBusinessTypeFilter } from './_admin-query-params.js';
+import { buildRecipientVars } from './_brevo-email.js';
+import { sendOutgoing } from './_outgoing-email.js';
 
 function getAdminClient() {
   return createClient(
@@ -131,6 +133,20 @@ export default async function handler(req, res) {
 
     // Send WhatsApp welcome via WATI on approval — skip only if customer explicitly opted out
     let watiWelcome = 'skipped';
+    let approvalEmail = 'skipped';
+    if (patch.is_approved === true && data?.email) {
+      try {
+        const vars = buildRecipientVars(data);
+        await sendOutgoing('trade_application_approved', {
+          to: { email: data.email, name: vars.name || data.email },
+          vars,
+        });
+        approvalEmail = 'sent';
+      } catch (emailErr) {
+        console.error('trade approval email:', emailErr.message);
+        approvalEmail = 'failed';
+      }
+    }
     if (patch.is_approved === true && data?.accept_whatsapp !== false && data?.phone) {
       const rawPhone = data.phone.replace(/\D/g, '');
       // WATI expects numbers without + in international format: 27821234567
@@ -177,7 +193,7 @@ export default async function handler(req, res) {
       }
     }
 
-    return res.status(200).json({ row: data, watiWelcome });
+    return res.status(200).json({ row: data, watiWelcome, approvalEmail });
   }
 
   // DELETE — remove customer

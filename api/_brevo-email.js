@@ -94,12 +94,14 @@ export function buildComposedText({ introText = '', htmlBlock = '' }, vars = {})
   return parts.join('\n\n').trim();
 }
 
-export function wrapBroadcastHtml({ subject, bodyHtml }) {
+export function wrapBroadcastHtml({ subject, bodyHtml, websiteUrl = PROTO_URLS.website }) {
   const safeBody = bodyHtml || '<p>Hello from Proto Trading.</p>';
+  const siteLabel = String(websiteUrl || PROTO_URLS.website).replace(/^https?:\/\//, '');
+  const href = websiteUrl || PROTO_URLS.website;
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escapeHtml(subject)}</title></head><body style="font-family:Arial,sans-serif;line-height:1.5;color:#111827;max-width:640px;margin:0 auto;padding:24px;">
   ${safeBody}
   <hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0;" />
-  <p style="font-size:12px;color:#6b7280;margin:0;">Proto Trading · <a href="${PROTO_URLS.site}">${PROTO_URLS.site.replace('https://', '')}</a> · <a href="${PROTO_URLS.register}">Register</a></p>
+  <p style="font-size:12px;color:#6b7280;margin:0;">Proto Trading · <a href="${href}">${siteLabel}</a></p>
 </body></html>`;
 }
 
