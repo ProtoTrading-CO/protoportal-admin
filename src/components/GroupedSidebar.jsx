@@ -35,10 +35,8 @@ const NAV_ITEMS = [
   { id: 'team', label: 'Team', icon: User },
 ];
 
-// Warm the lazy JS chunk for a section so the click-through is instant. These
-// import() calls target the same modules as AdminPage.jsx's React.lazy — Vite
-// dedups module ids, so triggering the fetch on hover means the chunk is in
-// the browser cache by the time the admin clicks.
+// Warm lazy JS chunks on hover so click-through is instant. Vite dedups
+// import() with React.lazy in AdminPage.
 const CHUNK_PREFETCH = {
   analytics: () => import('./AnalyticsHub'),
   apollo: () => import('./ApolloPanel'),
@@ -46,6 +44,8 @@ const CHUNK_PREFETCH = {
   'product-loader': () => import('./ProductLoaderPanel'),
   brevo: () => import('./CrmPanel'),
   crm: () => import('./WhatsappPanel'),
+  banner: () => import('./BannerPanel'),
+  specials: () => import('./SpecialsPanel'),
 };
 
 function prefetchSection(sectionId) {

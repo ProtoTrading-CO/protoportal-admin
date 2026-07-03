@@ -160,4 +160,26 @@ assert.match(taxonomySrc, /Cache-Control', 's-maxage=60, stale-while-revalidate=
 
 console.log('✓ Bundle + perf follow-ups (jspdf lazy, catalog parallel, counts SWR)');
 
+// Section split — Banner + Specials extracted to their own lazy panels
+assert.match(adminPageSrc, /const BannerPanel = lazy\(/, 'BannerPanel is lazy');
+assert.match(adminPageSrc, /const SpecialsPanel = lazy\(/, 'SpecialsPanel is lazy');
+assert.doesNotMatch(adminPageSrc, /^import BannerPanel /m, 'BannerPanel not eagerly imported');
+assert.doesNotMatch(adminPageSrc, /^import SpecialsPanel /m, 'SpecialsPanel not eagerly imported');
+assert.doesNotMatch(adminPageSrc, /const loadBannerEditor = async/, 'loadBannerEditor moved into BannerPanel');
+assert.doesNotMatch(adminPageSrc, /const loadPopupEditor = async/, 'loadPopupEditor moved into SpecialsPanel');
+assert.doesNotMatch(adminPageSrc, /const loadCheckoutPromoEditor = async/, 'loadCheckoutPromoEditor moved into SpecialsPanel');
+assert.doesNotMatch(adminPageSrc, /const savePopupEditor = async/, 'savePopupEditor moved into SpecialsPanel');
+assert.doesNotMatch(adminPageSrc, /const handleBannerImage = async/, 'handleBannerImage moved into BannerPanel');
+
+const bannerPanel = readSrc('src/components/BannerPanel.jsx');
+assert.match(bannerPanel, /export default function BannerPanel/, 'BannerPanel exports a default component');
+
+const specialsPanel = readSrc('src/components/SpecialsPanel.jsx');
+assert.match(specialsPanel, /export default function SpecialsPanel/, 'SpecialsPanel exports a default component');
+assert.match(specialsPanel, /onSpecialsChange/, 'SpecialsPanel accepts an onSpecialsChange prop for parent star-toggle');
+
+assert.match(sidebarSrc, /banner: \(\) => import\('\.\/BannerPanel'\)/, 'sidebar prefetches BannerPanel on hover');
+assert.match(sidebarSrc, /specials: \(\) => import\('\.\/SpecialsPanel'\)/, 'sidebar prefetches SpecialsPanel on hover');
+console.log('✓ AdminPage split — BannerPanel + SpecialsPanel extracted, lazy, prefetched');
+
 console.log('\nAll smoke checks passed.');

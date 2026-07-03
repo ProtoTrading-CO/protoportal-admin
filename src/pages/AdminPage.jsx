@@ -97,10 +97,6 @@ import { isVictorSender, CUSTOMER_SEND_FORBIDDEN, PAYMENT_RECEIVED_FORBIDDEN } f
 import { errorFromJson } from '../lib/apiError';
 import { formatWebsitePrice } from '../lib/pricing';
 import { fetchSpecials, saveSpecials } from '../lib/specials';
-import { fetchBanner, saveBanner, uploadBannerImage } from '../lib/banner';
-import { fetchCheckoutPromo, saveCheckoutPromo } from '../lib/checkoutPromo';
-import { BANNER_LABEL, BANNER_ASPECT_CSS } from '../lib/bannerSpec';
-import { fetchPopupSpecial, savePopupSpecial, uploadPopupImage } from '../lib/popupSpecial';
 import { fuzzyFilter } from '../lib/fuzzySearch';
 import ReorderGrid from '../components/ReorderGrid';
 import CategorySidebar, { resolvePathLabels } from '../components/CategorySidebar';
@@ -123,6 +119,16 @@ const CostTrackingPanel = lazy(() => import('../components/CostTrackingPanel'));
 const ProductLoaderPanel = lazy(() => import('../components/ProductLoaderPanel'));
 const CrmPanel = lazy(() => import('../components/CrmPanel'));
 const WhatsappPanel = lazy(() => import('../components/WhatsappPanel'));
+const BannerPanel = lazy(() => import('../components/BannerPanel'));
+const SpecialsPanel = lazy(() => import('../components/SpecialsPanel'));
+
+function SectionSuspenseFallback({ label = 'Loading…' }) {
+  return (
+    <div className="adm-panel" style={{ padding: 24, color: '#64748b' }} role="status" aria-live="polite">
+      {label}
+    </div>
+  );
+}
 
 // Modal-only — chunk downloads the first time the admin opens the dialog.
 const CustomerEmailModal = lazy(() => import('../components/CustomerEmailModal'));
@@ -574,7 +580,10 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   const [paymentRecords, setPaymentRecords] = useState({});
   const [popUploading, setPopUploading] = useState('');
 
-  const [specials, setSpecials] = useState([]); // [{productId, productName, productCode, productImage, deal, discountPct, bogoX, bogoY}]
+  // Weekly featured specials — state stays in AdminPage so the Product
+  // Manager star toggle can add/remove without cross-tab coupling. The
+  // Specials tab reads/writes via SpecialsPanel (see props below).
+  const [specials, setSpecials] = useState([]);
   const [specialsSaving, setSpecialsSaving] = useState(false);
 
   const [crmAllCustomers, setCrmAllCustomers] = useState([]);
@@ -591,15 +600,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   const [crmMeta, setCrmMeta] = useState({ total: 0, totalFiltered: 0, page: 1, pageSize: 25, summary: null });
   const [crmContactsOpen, setCrmContactsOpen] = useState(false);
 
-  const [bannerForm, setBannerForm] = useState({ imageUrl: '' });
-  const [bannerSaving, setBannerSaving] = useState(false);
-  const [bannerUploading, setBannerUploading] = useState(false);
 
-  const [popupForm, setPopupForm] = useState({ active: false, imageUrl: '', title: '' });
-  const [checkoutPromo, setCheckoutPromo] = useState({ active: true, code: 'PROTO75', percent: 7.5, label: '7.5% off your order' });
-  const [checkoutPromoSaving, setCheckoutPromoSaving] = useState(false);
-  const [popupSaving, setPopupSaving] = useState(false);
-  const [popupUploading, setPopupUploading] = useState(false);
 
   const [categoryProductCounts, setCategoryProductCounts] = useState({});
 
@@ -639,13 +640,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   useEffect(() => { setOrderPage(1); }, [orderTab, orderSearchDebounced]);
   useEffect(() => { if (activeSection === 'crm') void loadCrmCustomers(1); }, [crmFilters.businessTypes.join('|'), crmFilters.joinedStatuses.join('|'), crmSearch]);
   useEffect(() => { if (activeSection === 'crm' && !crmTemplates.length && !crmTemplatesLoading) void loadCrmTemplates(); }, [activeSection, crmTemplates.length, crmTemplatesLoading]);
-  useEffect(() => { if (activeSection === 'banner') void loadBannerEditor(); }, [activeSection]);
-  useEffect(() => {
-    if (activeSection === 'specials') {
-      void loadPopupEditor();
-      void loadCheckoutPromoEditor();
-    }
-  }, [activeSection]);
+  // Banner + Specials own their own load effects — see BannerPanel and SpecialsPanel.
 
 
   const refreshDashboardStats = () => {
@@ -1676,83 +1671,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     finally { setCrmSending(false); }
   };
 
-  const loadBannerEditor = async () => {
-    try {
-      const data = await fetchBanner({ force: true });
-      setBannerForm({ imageUrl: data.imageUrl || '' });
-    } catch (e) { alert(e.message || 'Failed to load banner'); }
-  };
-
-  const handleBannerImage = async (file) => {
-    if (!file) return;
-    setBannerUploading(true);
-    try {
-      const { url } = await uploadBannerImage(file);
-      const next = { ...bannerForm, imageUrl: url };
-      setBannerForm(next);
-      setBannerSaving(true);
-      try {
-        const saved = await saveBanner(next);
-        setBannerForm({ imageUrl: saved.imageUrl || url });
-        showToast('Banner uploaded and saved — refresh the trade portal to see it.');
-      } catch (e) {
-        showToast(e.message || 'Uploaded but save failed — click Save banner', 'error');
-      } finally {
-        setBannerSaving(false);
-      }
-    } catch (e) { alert(e.message || 'Failed to upload image'); }
-    finally { setBannerUploading(false); }
-  };
-
-  const loadPopupEditor = async () => {
-    try {
-      const data = await fetchPopupSpecial();
-      setPopupForm({ active: Boolean(data.active), imageUrl: data.imageUrl || '', title: data.title || '' });
-    } catch (e) { alert(e.message || 'Failed to load popup'); }
-  };
-
-  const savePopupEditor = async () => {
-    setPopupSaving(true);
-    try {
-      await savePopupSpecial(popupForm);
-      alert('Popup special saved');
-    } catch (e) { alert(e.message || 'Failed to save popup'); }
-    finally { setPopupSaving(false); }
-  };
-
-  const loadCheckoutPromoEditor = async () => {
-    try {
-      const data = await fetchCheckoutPromo({ force: true });
-      setCheckoutPromo({
-        active: !!data.active,
-        code: data.code || 'PROTO75',
-        percent: Number(data.percent) || 7.5,
-        label: data.label || '7.5% off your order',
-      });
-    } catch { /* ignore */ }
-  };
-
-  const saveCheckoutPromoEditor = async () => {
-    setCheckoutPromoSaving(true);
-    try {
-      await saveCheckoutPromo(checkoutPromo);
-      showToast('Checkout promo saved — applies on trade portal cart');
-    } catch (e) {
-      showToast(e.message || 'Failed to save checkout promo', 'error');
-    } finally {
-      setCheckoutPromoSaving(false);
-    }
-  };
-
-  const handlePopupImage = async (file) => {
-    if (!file) return;
-    setPopupUploading(true);
-    try {
-      const { url } = await uploadPopupImage(file);
-      setPopupForm((prev) => ({ ...prev, imageUrl: url }));
-    } catch (e) { alert(e.message || 'Failed to upload image'); }
-    finally { setPopupUploading(false); }
-  };
+  // Banner + Specials editors now live in BannerPanel / SpecialsPanel.
 
 
 
@@ -2500,191 +2419,13 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
 
             {/* SPECIALS */}
             {activeSection === 'specials' && (
-              <div className="adm-panel">
-                <div className="adm-section-head">
-                  <div>
-                    <h2 className="adm-section-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <Star size={20} style={{ color: '#f59e0b' }} /> Specials
-                    </h2>
-                    <p className="adm-section-note">Weekly featured products and login popup promo. Star a product in Product Manager to add it here.</p>
-                  </div>
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    {specialsSaving && <span className="adm-muted" style={{ fontSize: 12 }}>Saving…</span>}
-                    {specials.length > 0 && (
-                      <button onClick={() => void clearAllSpecials()} className="adm-btn-ghost" style={{ color: '#c40000' }}>
-                        Clear all
-                      </button>
-                    )}
-                    <span className="adm-pill">{specials.length} / 10</span>
-                  </div>
-                </div>
-
-                {specials.length === 0 && (
-                  <div className="adm-empty" style={{ padding: '48px 0', textAlign: 'center', color: '#64748b' }}>
-                    <Star size={36} style={{ color: '#d1d5db', marginBottom: 12 }} />
-                    <p style={{ margin: 0 }}>No specials yet. Go to <strong>Product Manager</strong> and click the ☆ star on any product to add it here.</p>
-                  </div>
-                )}
-
-                {specials.length > 0 && (
-                  <div style={{ display: 'grid', gap: 12 }}>
-                    {specials.map((item) => (
-                      <div key={item.productId} style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 16, alignItems: 'start', padding: '16px', background: '#fafafa', borderRadius: 12, border: '1px solid #e5e7eb' }}>
-                        <div>
-                          <div style={{ fontWeight: 800, fontSize: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <Star size={14} className="star-spinning" />
-                            {item.productName}
-                          </div>
-                          <div className="adm-muted" style={{ fontSize: 11, marginTop: 4 }}>{item.productCode}</div>
-
-                          {/* Deal selector */}
-                          <div style={{ display: 'flex', gap: 10, marginTop: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-                            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
-                              <span style={{ fontWeight: 600 }}>Deal:</span>
-                              <select
-                                value={item.deal || 'none'}
-                                onChange={(e) => void updateSpecialDeal(item.productId, { deal: e.target.value })}
-                                className="adm-select"
-                                style={{ fontSize: 12, padding: '4px 8px' }}
-                              >
-                                <option value="none">No deal — just featured</option>
-                                <option value="discount">Discount %</option>
-                                <option value="bogo">Buy X Get Y Free</option>
-                              </select>
-                            </label>
-
-                            {item.deal === 'discount' && (
-                              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
-                                <span style={{ fontWeight: 600 }}>Discount:</span>
-                                <input
-                                  type="number"
-                                  min="1"
-                                  max="99"
-                                  value={item.discountPct || 10}
-                                  onChange={(e) => void updateSpecialDeal(item.productId, { discountPct: Number(e.target.value) })}
-                                  className="adm-tiny-input"
-                                  style={{ width: 56 }}
-                                />
-                                <span className="adm-muted">%</span>
-                              </label>
-                            )}
-
-                            {item.deal === 'bogo' && (
-                              <>
-                                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
-                                  <span style={{ fontWeight: 600 }}>Buy</span>
-                                  <input
-                                    type="number"
-                                    min="1"
-                                    max="99"
-                                    value={item.bogoX || 1}
-                                    onChange={(e) => void updateSpecialDeal(item.productId, { bogoX: Number(e.target.value) })}
-                                    className="adm-tiny-input"
-                                    style={{ width: 48 }}
-                                  />
-                                </label>
-                                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
-                                  <span style={{ fontWeight: 600 }}>Get</span>
-                                  <input
-                                    type="number"
-                                    min="1"
-                                    max="99"
-                                    value={item.bogoY || 1}
-                                    onChange={(e) => void updateSpecialDeal(item.productId, { bogoY: Number(e.target.value) })}
-                                    className="adm-tiny-input"
-                                    style={{ width: 48 }}
-                                  />
-                                  <span style={{ fontWeight: 600 }}>Free</span>
-                                </label>
-                              </>
-                            )}
-
-                            {/* Preview badge */}
-                            <span style={{ marginLeft: 'auto', background: '#8B1A1A', color: '#fff', fontSize: 10, fontWeight: 800, padding: '3px 10px', borderRadius: 4, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
-                              {item.deal === 'discount' ? `${item.discountPct || 10}% OFF`
-                                : item.deal === 'bogo' ? `Buy ${item.bogoX || 1} Get ${item.bogoY || 1} Free`
-                                : "This Week's Special"}
-                            </span>
-                          </div>
-                        </div>
-
-                        <button
-                          onClick={() => void toggleSpecial({ id: item.productId, name: item.productName, code: item.productCode, image: item.productImage })}
-                          className="adm-icon-btn"
-                          title="Remove from specials"
-                          style={{ color: '#c40000', marginTop: 2 }}
-                        >
-                          <X size={16} />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                <hr style={{ margin: '32px 0', border: 'none', borderTop: '1px solid #e5e7eb' }} />
-                <div className="adm-section-head">
-                  <div>
-                    <h3 className="adm-subtitle"><DollarSign size={16} /> PROTO75 — Cart checkout discount</h3>
-                    <p className="adm-section-note">Amount deducted at cart checkout on site.proto.co.za when customers enter the promo code.</p>
-                  </div>
-                  <button type="button" onClick={() => void loadCheckoutPromoEditor()} className="adm-btn-ghost"><RefreshCw size={15} /></button>
-                </div>
-                <div className="adm-responsive-2col" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, maxWidth: 720, marginBottom: 8 }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 14, fontWeight: 600 }}>
-                    <input type="checkbox" checked={checkoutPromo.active} onChange={(e) => setCheckoutPromo((p) => ({ ...p, active: e.target.checked }))} style={{ accentColor: '#dc2626' }} />
-                    Active at checkout
-                  </label>
-                  <label>
-                    <span className="adm-muted" style={{ fontSize: 12, fontWeight: 700 }}>Promo code</span>
-                    <input className="adm-field-input" style={{ width: '100%' }} value={checkoutPromo.code} onChange={(e) => setCheckoutPromo((p) => ({ ...p, code: e.target.value.toUpperCase() }))} />
-                  </label>
-                  <label>
-                    <span className="adm-muted" style={{ fontSize: 12, fontWeight: 700 }}>Discount %</span>
-                    <input className="adm-field-input" type="number" min="0" max="50" step="0.5" style={{ width: '100%' }} value={checkoutPromo.percent} onChange={(e) => setCheckoutPromo((p) => ({ ...p, percent: Number(e.target.value) }))} />
-                  </label>
-                  <label>
-                    <span className="adm-muted" style={{ fontSize: 12, fontWeight: 700 }}>Cart label</span>
-                    <input className="adm-field-input" style={{ width: '100%' }} value={checkoutPromo.label} onChange={(e) => setCheckoutPromo((p) => ({ ...p, label: e.target.value }))} />
-                  </label>
-                </div>
-                <button type="button" className="adm-btn-red" disabled={checkoutPromoSaving} onClick={() => void saveCheckoutPromoEditor()} style={{ marginBottom: 24 }}>
-                  {checkoutPromoSaving ? 'Saving…' : 'Save PROTO75 checkout promo'}
-                </button>
-
-                <hr style={{ margin: '32px 0', border: 'none', borderTop: '1px solid #e5e7eb' }} />
-                <div className="adm-section-head">
-                  <div>
-                    <h3 className="adm-subtitle"><Megaphone size={16} /> Popup / Banner Promo</h3>
-                    <p className="adm-section-note">Flyer popup shown once per customer when they log in (while active).</p>
-                  </div>
-                  <button type="button" onClick={() => void loadPopupEditor()} className="adm-btn-ghost"><RefreshCw size={15} /><span className="adm-btn-text">Refresh</span></button>
-                </div>
-                <div className="adm-responsive-2col" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, alignItems: 'start' }}>
-                  <div style={{ display: 'grid', gap: 12 }}>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 14, fontWeight: 600 }}>
-                      <input type="checkbox" checked={popupForm.active} onChange={(e) => setPopupForm((p) => ({ ...p, active: e.target.checked }))} style={{ accentColor: '#dc2626' }} />
-                      Active — show popup to logged-in customers
-                    </label>
-                    <div>
-                      <label className="adm-muted" style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Admin label (optional)</label>
-                      <input className="adm-field-input" style={{ width: '100%' }} value={popupForm.title} onChange={(e) => setPopupForm((p) => ({ ...p, title: e.target.value }))} placeholder="e.g. June clearance flyer" />
-                    </div>
-                    <div>
-                      <label className="adm-muted" style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Flyer image</label>
-                      <label className="adm-btn-ghost" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-                        <ImagePlus size={15} /> {popupUploading ? 'Uploading…' : 'Upload flyer'}
-                        <input type="file" accept="image/*" hidden onChange={(e) => { void handlePopupImage(e.target.files?.[0]); e.target.value = ''; }} />
-                      </label>
-                    </div>
-                    <button type="button" className="adm-btn-red" disabled={popupSaving} onClick={() => void savePopupEditor()}>{popupSaving ? 'Saving…' : 'Save popup'}</button>
-                  </div>
-                  <div style={{ border: '1px solid #e5e7eb', borderRadius: 16, padding: 16, background: '#f9fafb', minHeight: 200, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    {popupForm.imageUrl
-                      ? <img src={popupForm.imageUrl} alt="Popup preview" style={{ maxWidth: '100%', maxHeight: 400, borderRadius: 8 }} />
-                      : <span className="adm-muted">No image uploaded</span>}
-                  </div>
-                </div>
-              </div>
+              <Suspense fallback={<SectionSuspenseFallback label="Loading Specials…" />}>
+                <SpecialsPanel
+                  specials={specials}
+                  onSpecialsChange={setSpecials}
+                  onShowToast={showToast}
+                />
+              </Suspense>
             )}
 
 
@@ -3563,60 +3304,9 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
 
             {/* BANNER EDITOR */}
             {activeSection === 'banner' && (
-              <div className="adm-panel">
-                <div className="adm-section-head">
-                  <div>
-                    <h2 className="adm-section-title">Banner Editor</h2>
-                    <p className="adm-section-note">
-                      Products page banner — upload a <strong>{BANNER_LABEL}</strong> image. It fills the full banner area on the trade portal.
-                      With no image uploaded, the site shows an empty space until you add one.
-                    </p>
-                  </div>
-                  <button type="button" onClick={() => void loadBannerEditor()} className="adm-btn-ghost"><RefreshCw size={15} /><span className="adm-btn-text">Refresh</span></button>
-                </div>
-                <div className="adm-responsive-2col" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, alignItems: 'start' }}>
-                  <div style={{ display: 'grid', gap: 12 }}>
-                    <div>
-                      <label className="adm-muted" style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Banner image — {BANNER_LABEL}</label>
-                      <label className="adm-btn-ghost" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-                        <ImagePlus size={15} /> {bannerUploading ? 'Uploading…' : `Upload banner (${BANNER_LABEL})`}
-                        <input type="file" accept="image/*" hidden onChange={(e) => { void handleBannerImage(e.target.files?.[0]); e.target.value = ''; }} />
-                      </label>
-                    </div>
-                    {bannerForm.imageUrl && (
-                      <button
-                        type="button"
-                        className="adm-btn-ghost"
-                        disabled={bannerSaving}
-                        onClick={() => {
-                          setBannerForm({ imageUrl: '' });
-                          void saveBanner({ imageUrl: '' }).then(() => showToast('Banner removed — trade portal will show empty space.')).catch((e) => showToast(e.message || 'Failed to remove banner', 'error'));
-                        }}
-                      >
-                        Remove banner
-                      </button>
-                    )}
-                  </div>
-                  <div>
-                    <span className="adm-muted" style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Trade portal preview</span>
-                    <div className="adm-banner-preview-wrap">
-                      <div className="adm-banner-preview-chrome">
-                        <span>site.proto.co.za — Products</span>
-                      </div>
-                      <div className="catalog-page adm-banner-preview-page">
-                        <div className="site-hero-banner adm-banner-preview-hero">
-                          {bannerForm.imageUrl
-                            ? <img src={bannerForm.imageUrl} alt="Banner preview" />
-                            : <div className="adm-banner-preview-empty">No banner — empty space on live site</div>}
-                        </div>
-                        <div className="adm-banner-preview-grid">
-                          <div /><div /><div /><div />
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
+              <Suspense fallback={<SectionSuspenseFallback label="Loading Banner Editor…" />}>
+                <BannerPanel onShowToast={showToast} />
+              </Suspense>
             )}
 
             {/* POPUP SPECIALS — merged into Specials tab */}
