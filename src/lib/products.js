@@ -669,6 +669,11 @@ export async function bulkMoveProducts({ skus, categoryId, subcategoryId, catego
     }),
   });
   const json = await res.json();
+  if (res.status === 409) {
+    const err = new Error(json.error || 'Destination category changed — reload categories and reselect.');
+    err.status = 409;
+    throw err;
+  }
   if (!res.ok && res.status !== 207) throw new Error(json.error || 'Bulk move failed');
   if (json.failed?.length) {
     const detail = json.failed.slice(0, 3).map((f) => `${f.sku}: ${f.error}`).join('; ');

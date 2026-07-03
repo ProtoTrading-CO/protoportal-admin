@@ -173,6 +173,27 @@ export async function fetchDormantSkuSet(sb) {
   return skus;
 }
 
+// Short-lived module cache — dormant queue changes slowly; refreshing every
+// 60s is plenty for the Product Loader lookup path and keeps concurrent
+// admins from thrashing archived_products with full-table scans.
+let _dormantCache = null;
+let _dormantCacheAt = 0;
+const DORMANT_TTL_MS = 60_000;
+
+export function invalidateDormantSkuCache() {
+  _dormantCache = null;
+  _dormantCacheAt = 0;
+}
+
+export async function getCachedDormantSkuSet(sb) {
+  const now = Date.now();
+  if (_dormantCache && now - _dormantCacheAt < DORMANT_TTL_MS) return _dormantCache;
+  const fresh = await fetchDormantSkuSet(sb);
+  _dormantCache = fresh;
+  _dormantCacheAt = now;
+  return fresh;
+}
+
 export function classifyBatchItem(item) {
   if (!item.canPublish || item.parseError) return 'not_found';
   if (item.needsReview || item.warnings?.length) return 'needs_review';

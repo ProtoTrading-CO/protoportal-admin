@@ -65,7 +65,7 @@ async function fetchAllLiveRows(sb, { search, categoryPath, tree, sort }) {
   return rows;
 }
 
-async function fetchAllArchivedRows(sb, { archivedBy, excludeBy, sort }) {
+async function fetchAllArchivedRows(sb, { archivedBy, excludeBy, sort, search, categoryPath, tree } = {}) {
   const rows = [];
   let from = 0;
   while (true) {
@@ -74,6 +74,11 @@ async function fetchAllArchivedRows(sb, { archivedBy, excludeBy, sort }) {
     if (excludeBy?.length) {
       const quoted = excludeBy.map((v) => `"${v}"`).join(',');
       q = q.or(`archived_by.is.null,archived_by.not.in.(${quoted})`);
+    }
+    const term = safeSearchTerm(search);
+    if (term) q = applyCatalogSearchFilter(q, term);
+    if (Array.isArray(categoryPath) && categoryPath.length && !isMotarroBrowsePath(categoryPath)) {
+      q = applyCategoryFiltersToQuery(q, resolveCategoryFilters(tree, categoryPath));
     }
     if (sort === 'updated') q = q.order('updated_at', { ascending: false });
     else q = q.order('title', { ascending: true });
@@ -263,9 +268,25 @@ export default async function handler(req, res) {
           : archivedSource === 'other'
             ? { excludeBy: [...EXCLUDE_ARCHIVED, 'nutstore'], sort }
             : { excludeBy: EXCLUDE_ARCHIVED, sort };
-        let rows = await fetchAllArchivedRows(sb, { search, categoryPath, tree, ...archiveFetch });
+        let rows = await fetchAllArchivedRows(sb, {
+          ...archiveFetch,
+          search,
+          categoryPath,
+          tree,
+        });
         rows = await enrichRowsWithProductStock(sb, rows);
-        rows = rows.filter((r) => !isExactlyZeroStock(r));
+        // Hide zero-stock rows only when the ERP link is live and reports zero.
+        // Placeholders without an ERP row (e.g. Nutstore-only) stay visible so
+        // admins can edit their code and re-link them.
+        rows = rows.filter((r) => {
+          if (r.stockLinked === false) return true;
+          if (r.archived_by === 'nutstore') return true;
+          return !isExactlyZeroStock(r);
+        });
+        if (isMotarroBrowsePath(categoryPath)) {
+          rows = filterByCategoryPath(rows, categoryPath, tree);
+        }
+        rows = applySearchFilter(rows, search);
         const pageSlice = paginateRows(rows, page, pageSize);
         result = { ...pageSlice, archived: true, archiveView: 'archived' };
         stockAlreadyEnriched = true;
