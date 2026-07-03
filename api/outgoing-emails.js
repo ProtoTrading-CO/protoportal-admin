@@ -1,6 +1,8 @@
 import { requireAdminKey } from './_admin-auth.js';
 import {
   buildOutgoingList,
+  deleteOutgoingOverride,
+  isOutgoingConflictError,
   loadOutgoingTemplate,
   readOutgoingOverrides,
   saveOutgoingTemplate,
@@ -15,6 +17,10 @@ import {
 } from '../lib/order-confirmation-email.mjs';
 
 const TEST_PREFIX = '[TEST] ';
+
+function conflictStatus(err) {
+  return isOutgoingConflictError(err) ? 409 : 400;
+}
 
 async function sendOutgoingTestEmail(slug, { testEmail, templateOverride, previewVars }) {
   if (slug === 'order_confirmation_customer') {
@@ -69,7 +75,20 @@ export default async function handler(req, res) {
       });
       return res.status(200).json({ ok: true, slug, template: saved });
     } catch (err) {
-      return res.status(400).json({ error: err.message || 'Save failed' });
+      return res.status(conflictStatus(err)).json({ error: err.message || 'Save failed' });
+    }
+  }
+
+  if (req.method === 'DELETE') {
+    const slug = String(req.query?.slug || req.body?.slug || '').trim();
+    if (!isOutgoingSlug(slug)) {
+      return res.status(400).json({ error: 'Unknown email template' });
+    }
+    try {
+      const restored = await deleteOutgoingOverride(slug);
+      return res.status(200).json({ ok: true, slug, reverted: true, template: restored });
+    } catch (err) {
+      return res.status(conflictStatus(err)).json({ error: err.message || 'Revert failed' });
     }
   }
 

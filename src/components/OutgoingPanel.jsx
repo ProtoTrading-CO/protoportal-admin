@@ -8,6 +8,7 @@ import {
 import { PROTO_URLS } from '../lib/protoUrls';
 import {
   fetchOutgoingTemplates,
+  revertOutgoingTemplate,
   saveOutgoingTemplate,
   sendOutgoingTest,
 } from '../lib/outgoingEmails';
@@ -15,6 +16,8 @@ import { ADMIN_REFRESH_EVENT } from '../lib/adminRefresh';
 import useDebouncedValue from '../hooks/useDebouncedValue';
 
 const ORDER_PREVIEW_NOTE = 'Sample order line items, customer details, and PDF attachment appear below your intro on live send.';
+
+const EMPTY_BASELINE = { slug: '', subject: '', introText: '', htmlBlock: '' };
 
 function insertAtCursor(textarea, insertValue) {
   if (!textarea) return insertValue;
@@ -60,6 +63,7 @@ export default function OutgoingPanel({ onShowToast, adminEmail = '' }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testSending, setTestSending] = useState(false);
+  const [baseline, setBaseline] = useState(EMPTY_BASELINE);
 
   const subjectRef = useRef(null);
   const introRef = useRef(null);
@@ -70,6 +74,15 @@ export default function OutgoingPanel({ onShowToast, adminEmail = '' }) {
     () => templates.find((t) => t.slug === slug) || null,
     [templates, slug],
   );
+
+  const isDirty = useMemo(() => {
+    if (!slug || baseline.slug !== slug) return false;
+    return (
+      subject !== baseline.subject
+      || introBody !== baseline.introText
+      || htmlBody !== baseline.htmlBlock
+    );
+  }, [slug, subject, introBody, htmlBody, baseline]);
 
   const previewVars = selected?.previewVars || {};
   const debouncedIntro = useDebouncedValue(introBody, 300);
@@ -102,10 +115,19 @@ export default function OutgoingPanel({ onShowToast, adminEmail = '' }) {
 
   const applyTemplate = useCallback((row) => {
     if (!row) return;
-    setSubject(row.subject || '');
-    setIntroBody(row.introText || '');
-    setHtmlBody(row.htmlBlock || '');
+    const nextSubject = row.subject || '';
+    const nextIntro = row.introText || '';
+    const nextHtml = row.htmlBlock || '';
+    setSubject(nextSubject);
+    setIntroBody(nextIntro);
+    setHtmlBody(nextHtml);
     setHtmlPane('split');
+    setBaseline({
+      slug: row.slug,
+      subject: nextSubject,
+      introText: nextIntro,
+      htmlBlock: nextHtml,
+    });
   }, []);
 
   const load = useCallback(async () => {
@@ -137,7 +159,14 @@ export default function OutgoingPanel({ onShowToast, adminEmail = '' }) {
     return () => window.removeEventListener(ADMIN_REFRESH_EVENT, onRefresh);
   }, [load]);
 
+  const confirmDiscard = () => {
+    if (!isDirty) return true;
+    return window.confirm('Discard unsaved changes to this template?');
+  };
+
   const handleSlugChange = (nextSlug) => {
+    if (nextSlug === slug) return;
+    if (!confirmDiscard()) return;
     setSlug(nextSlug);
     const row = templates.find((t) => t.slug === nextSlug);
     applyTemplate(row);
@@ -179,18 +208,33 @@ export default function OutgoingPanel({ onShowToast, adminEmail = '' }) {
       await load();
       onShowToast?.('Email template saved', 'success');
     } catch (err) {
-      onShowToast?.(err.message || 'Save failed', 'error');
+      const msg = err.status === 409
+        ? 'Someone else saved this template — reload and try again'
+        : (err.message || 'Save failed');
+      onShowToast?.(msg, 'error');
+      if (err.status === 409) await load();
     } finally {
       setSaving(false);
     }
   };
 
-  const handleReset = () => {
-    if (!selected) return;
-    if (!window.confirm('Reset editor to built-in default copy? Click Save to persist.')) return;
-    setSubject(selected.defaultSubject || '');
-    setIntroBody(selected.defaultIntroText || '');
-    setHtmlBody(selected.defaultHtmlBlock || '');
+  const handleReset = async () => {
+    if (!selected || !slug) return;
+    if (!window.confirm('Remove your custom copy and restore built-in defaults? This cannot be undone.')) return;
+    setSaving(true);
+    try {
+      await revertOutgoingTemplate(slug);
+      await load();
+      onShowToast?.('Template restored to default', 'success');
+    } catch (err) {
+      const msg = err.status === 409
+        ? 'Someone else updated templates — reload and try again'
+        : (err.message || 'Revert failed');
+      onShowToast?.(msg, 'error');
+      if (err.status === 409) await load();
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleTestSend = async () => {
@@ -217,19 +261,20 @@ export default function OutgoingPanel({ onShowToast, adminEmail = '' }) {
   const showHtmlPreview = htmlPane !== 'code';
 
   return (
-    <div className="adm-panel">
+    <div className="adm-panel adm-outgoing-panel">
       <div className="adm-section-head">
         <div>
           <h2 className="adm-section-title"><Mail size={20} style={{ verticalAlign: -4, marginRight: 8 }} />Outgoing emails</h2>
           <p className="adm-section-note">
             Edit automated system emails. Use plain text for a simple intro, HTML for full layout, or HTML only (leave intro blank).
             Footer links to proto.co.za on all sends.
+            {isDirty && <span style={{ display: 'block', marginTop: 4, color: '#b45309' }}>Unsaved changes</span>}
           </p>
         </div>
         {loading && <Loader2 size={18} className="spin" aria-label="Loading" />}
       </div>
 
-      <div className="adm-email-modal__body adm-email-modal--html">
+      <div className="adm-email-modal__body adm-outgoing-editor">
         <label className="adm-email-field">
           <span className="adm-email-field__label">Email type</span>
           <select
@@ -364,7 +409,7 @@ export default function OutgoingPanel({ onShowToast, adminEmail = '' }) {
             type="button"
             className="adm-btn-red"
             onClick={() => void handleSave()}
-            disabled={!slug || saving || loading}
+            disabled={!slug || saving || loading || !isDirty}
           >
             {saving ? <><Loader2 size={14} className="spin" /> Saving…</> : <><Save size={14} /> Save template</>}
           </button>
@@ -379,9 +424,9 @@ export default function OutgoingPanel({ onShowToast, adminEmail = '' }) {
           <button
             type="button"
             className="adm-btn-ghost"
-            onClick={handleReset}
-            disabled={!slug || loading}
-            title="Load default copy into the editor (click Save to persist)"
+            onClick={() => void handleReset()}
+            disabled={!slug || saving || loading || !selected?.isCustomized}
+            title="Remove custom copy and restore built-in defaults"
           >
             <RotateCcw size={14} /> Reset to default
           </button>

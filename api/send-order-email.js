@@ -8,7 +8,7 @@ import {
   deriveAutoNotesFromItems,
 } from './_order-format.js';
 import { composeOutgoingParts } from './_brevo-email.js';
-import { loadOutgoingTemplate } from './_outgoing-email.js';
+import { loadOutgoingTemplate, mergeOutgoingTemplate } from './_outgoing-email.js';
 import {
   buildOrderConfirmationMergeVars,
   buildOrderEmailHtml,
@@ -118,7 +118,13 @@ export default async function handler(req, res) {
     orderRow,
     to,
   });
-  const template = await loadOutgoingTemplate('order_confirmation_customer');
+  let template;
+  try {
+    template = await loadOutgoingTemplate('order_confirmation_customer');
+  } catch (err) {
+    console.error('send-order-email: template load failed, using defaults', err?.message || err);
+    template = mergeOutgoingTemplate('order_confirmation_customer', {});
+  }
   const { subject, introHtml } = composeOutgoingParts(template, mergeVars);
 
   const autoNotes = autoNotesBody || deriveAutoNotesFromItems(items).join('\n');

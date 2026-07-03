@@ -8242,6 +8242,13 @@ html, body { background: #f5f5f5; color: #111827; }
   max-height: min(94vh, 960px);
 }
 
+/* Outgoing section — full panel width (not modal-capped) */
+.adm-outgoing-panel .adm-outgoing-editor {
+  width: 100%;
+  max-width: none;
+  max-height: none;
+}
+
 .adm-email-modal__lead {
   margin: 6px 0 0;
   font-size: 13px;

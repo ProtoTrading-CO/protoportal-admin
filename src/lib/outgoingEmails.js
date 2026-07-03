@@ -8,7 +8,11 @@ async function authFetch(url, options = {}) {
   };
   const res = await fetch(url, { ...options, headers });
   const json = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(json.error || `Request failed (${res.status})`);
+  if (!res.ok) {
+    const err = new Error(json.error || `Request failed (${res.status})`);
+    err.status = res.status;
+    throw err;
+  }
   return json;
 }
 
@@ -23,6 +27,11 @@ export async function saveOutgoingTemplate(slug, { subject, introText, htmlBlock
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ slug, subject, introText, htmlBlock }),
   });
+}
+
+export async function revertOutgoingTemplate(slug) {
+  const qs = new URLSearchParams({ slug });
+  return authFetch(`/api/outgoing-emails?${qs}`, { method: 'DELETE' });
 }
 
 export async function sendOutgoingTest(slug, { testEmail, subject, introText, htmlBlock }) {

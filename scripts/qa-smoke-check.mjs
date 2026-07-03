@@ -375,6 +375,26 @@ assert.equal(
   0,
   'outgoing-emails.js passes node --check',
 );
+
+// Outgoing hardening — cache, revert, conflict, send fallback
+const outgoingCoreSrc = readSrc('api/_outgoing-email.js');
+assert.match(outgoingCoreSrc, /invalidateOutgoingCache/, 'outgoing cache invalidation on save');
+assert.match(outgoingCoreSrc, /deleteOutgoingOverride/, 'outgoing revert removes stored override');
+assert.match(outgoingCoreSrc, /isOutgoingConflictError/, 'outgoing conflict helper exists');
+assert.match(readSrc('api/outgoing-emails.js'), /req\.method === 'DELETE'/, 'outgoing-emails supports DELETE revert');
+assert.match(readSrc('api/outgoing-emails.js'), /409/, 'outgoing save maps concurrent conflict to 409');
+assert.match(readSrc('src/lib/outgoingEmails.js'), /revertOutgoingTemplate/, 'client revert API helper');
+assert.match(readSrc('src/components/OutgoingPanel.jsx'), /adm-outgoing-panel/, 'Outgoing panel uses full-width layout class');
+assert.match(readSrc('src/components/OutgoingPanel.jsx'), /revertOutgoingTemplate/, 'OutgoingPanel calls revert API');
+assert.match(readSrc('src/components/OutgoingPanel.jsx'), /Discard unsaved changes/, 'OutgoingPanel warns on unsaved switch');
+assert.match(readSrc('api/send-order-email.js'), /template load failed, using defaults/, 'order send falls back to code defaults');
+assert.equal(vercelJson.functions?.['api/run-scheduled-broadcasts.js']?.maxDuration, 300, 'scheduled WhatsApp cron has 300s timeout');
+
+const { mergeOutgoingTemplate, isOutgoingConflictError } = await import('../api/_outgoing-email.js');
+const tradeDefaults = mergeOutgoingTemplate('trade_application_received', {});
+assert.ok(tradeDefaults.subject.toLowerCase().includes('trade'), 'mergeOutgoingTemplate applies code defaults');
+assert.equal(isOutgoingConflictError(new Error('Concurrent update conflict — try again shortly')), true);
+
 console.log('✓ Outgoing transactional email registry + panel');
 
 // Bundle-perf follow-ups
