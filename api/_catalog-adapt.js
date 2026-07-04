@@ -3,6 +3,7 @@ import {
   enrichMotarroCategoryFields,
   filterRowsByMotarroPath,
   isMotarroBrowsePath,
+  isMisplacedMotarroDbCategory,
   isMotarroProduct,
 } from './_mottaro-category.js';
 import { isExactlyZeroStock, isPublishableOnWebsite, isNegativeStock } from '../lib/catalog-stock.mjs';
@@ -129,7 +130,11 @@ export function adaptCatalogRow(row, tree, { archived = false } = {}) {
     stockReady: row._stockReady ?? null,
     stockError: row._stockError ?? null,
   };
-  return enrichMotarroCategoryFields(base, row, tree, categoryPath);
+  const enriched = enrichMotarroCategoryFields(base, row, tree, categoryPath);
+  return {
+    ...enriched,
+    misplacedMotarroCategory: isMisplacedMotarroDbCategory(row) && !isMotarroProduct(row),
+  };
 }
 
 export function paginateRows(rows, page, pageSize) {

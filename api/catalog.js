@@ -13,18 +13,28 @@ import {
   isNegativeStock,
   isPublishableOnWebsite,
 } from './_catalog-adapt.js';
-import { isMotarroBrowsePath, isMotarroProduct } from './_mottaro-category.js';
+import { isMotarroBrowsePath, isMisplacedMotarroDbCategory, isMotarroProduct } from './_mottaro-category.js';
 
 const VALID_STATUS = new Set(['live', 'archived', 'new-items', 'approval', 'recycle']);
 const EXCLUDE_ARCHIVED = ['new-products', 'recycle-bin'];
 const PAGE_CHUNK = 1000;
 
 async function fetchAllMotarroRows(sb, { search, categoryPath, tree, sort }) {
-  const rows = [];
+  const bySku = new Map();
+  const term = safeSearchTerm(search);
+
+  const ingest = (batch) => {
+    for (const row of batch || []) {
+      if (isMotarroProduct(row) || isMisplacedMotarroDbCategory(row)) {
+        bySku.set(row.sku, row);
+      }
+    }
+  };
+
+  // Title-matched Mottaro brand products
   let from = 0;
   while (true) {
     let q = sb.from('website_stock').select('*');
-    const term = safeSearchTerm(search);
     if (term) {
       q = q.or(`title.ilike.%${term}%,sku.ilike.%${term}%,barcode.ilike.%${term}%`);
     } else {
@@ -35,12 +45,27 @@ async function fetchAllMotarroRows(sb, { search, categoryPath, tree, sort }) {
     q = q.range(from, from + PAGE_CHUNK - 1);
     const { data, error } = await q;
     if (error) throw error;
-    const batch = (data || []).filter(isMotarroProduct);
-    rows.push(...batch);
+    ingest((data || []).filter(isMotarroProduct));
     if ((data || []).length < PAGE_CHUNK) break;
     from += PAGE_CHUNK;
   }
-  return filterByCategoryPath(rows, categoryPath, tree);
+
+  // Recovery: rows incorrectly assigned category=Mottaro in the DB
+  from = 0;
+  while (true) {
+    let q = sb.from('website_stock').select('*').ilike('category', 'mottaro');
+    if (term) q = applyCatalogSearchFilter(q, term);
+    if (sort === 'updated') q = q.order('updated_at', { ascending: false });
+    else q = q.order('title', { ascending: true });
+    q = q.range(from, from + PAGE_CHUNK - 1);
+    const { data, error } = await q;
+    if (error) throw error;
+    ingest(data);
+    if ((data || []).length < PAGE_CHUNK) break;
+    from += PAGE_CHUNK;
+  }
+
+  return filterByCategoryPath([...bySku.values()], categoryPath, tree);
 }
 
 async function fetchAllLiveRows(sb, { search, categoryPath, tree, sort }) {

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Plus, X } from 'lucide-react';
 import { resolvePathLabels } from './CategorySidebar';
-import { subcategoryOptionsFromTree } from '../lib/taxonomyAdmin';
+import { primaryMainCategories, subcategoryOptionsFromTree, isVirtualMotarroPath, VIRTUAL_MOTTARO_PATH_MESSAGE } from '../lib/taxonomyAdmin';
 
 function childrenOf(tree, id) {
   if (!id) return [];
@@ -25,7 +25,7 @@ export default function BulkMoveModal({
   onAddSubcategory,
 }) {
   const mainCategories = useMemo(
-    () => (taxonomyTree || []).map((c) => ({ id: c.id, label: c.label })),
+    () => primaryMainCategories(taxonomyTree).map((c) => ({ id: c.id, label: c.label })),
     [taxonomyTree],
   );
 
@@ -37,7 +37,10 @@ export default function BulkMoveModal({
 
   useEffect(() => {
     if (!open) return;
-    setMoveCategoryId(initialCategoryId || mainCategories[0]?.id || '');
+    const fallbackId = initialCategoryId && initialCategoryId !== 'mottaro'
+      ? initialCategoryId
+      : mainCategories[0]?.id || '';
+    setMoveCategoryId(fallbackId);
     setMoveChild1Id('');
     setMoveChild2Id('');
     setMoveChild3Id('');
@@ -65,6 +68,7 @@ export default function BulkMoveModal({
   const handleConfirm = () => {
     if (hasPathGap) return;
     if (contiguousPath.length < 2) return;
+    if (isVirtualMotarroPath(contiguousPath)) return;
     const categoryPathIds = contiguousPath;
     const finalSubId = categoryPathIds[categoryPathIds.length - 1];
     onConfirm?.({
@@ -83,6 +87,9 @@ export default function BulkMoveModal({
           <button type="button" className="adm-modal-close" onClick={onClose} aria-label="Close"><X size={18} /></button>
         </div>
         <p className="adm-modal-note">Choose the destination category. Products update on the trade website immediately.</p>
+        <p className="adm-modal-note" style={{ fontSize: 12, color: '#64748b' }}>
+          Mottaro is a virtual browse category only — pick Arts &amp; Crafts or Stationery for the primary category.
+        </p>
         <p className="adm-modal-note" style={{ fontWeight: 700, color: '#334155' }}>
           Destination: {movePreviewLabel}
         </p>

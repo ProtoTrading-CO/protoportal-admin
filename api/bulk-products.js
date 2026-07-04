@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { labelsToDbFields, loadTaxonomy, resolveLabelsForSubcategory, resolveLabelsFromPathIds } from './_taxonomy-utils.js';
 import { restoreArchivedToLive } from './_ensure-product.js';
 import { BULK_CHUNK_SIZE, runInChunks } from '../lib/bulk-chunk.mjs';
+import { isVirtualMotarroPath, VIRTUAL_MOTTARO_PATH_ERROR } from './_mottaro-category.js';
 
 function getStockClient() {
   return createClient(
@@ -146,6 +147,9 @@ export default async function handler(req, res) {
     if (action === 'move') {
       if (!categoryId && !(Array.isArray(categoryPathIds) && categoryPathIds.length)) {
         return res.status(400).json({ error: 'Destination category is required' });
+      }
+      if (isVirtualMotarroPath(categoryPathIds) || categoryId === 'mottaro') {
+        return res.status(400).json({ error: VIRTUAL_MOTTARO_PATH_ERROR });
       }
       const tree = await loadTaxonomy();
       let labels;

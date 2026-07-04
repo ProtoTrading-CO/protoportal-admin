@@ -35,7 +35,7 @@ import { persistSortOrder, fetchSortOrderStore, sortMetaForPath, formatSortSaved
 import { exportProductsCatalogXlsx, exportAllProductsCatalogXlsx, exportSelectedProductsXlsx } from '../lib/exportLiveProducts';
 import { bulkMoveProducts, invalidateAdminCache, updateProduct } from '../lib/products';
 import { formatWebsitePrice } from '../lib/pricing';
-import { childrenOfTree, subcategoryOptionsFromTree } from '../lib/taxonomyAdmin';
+import { childrenOfTree, subcategoryOptionsFromTree, primaryMainCategories, isVirtualMotarroPath, VIRTUAL_MOTTARO_PATH_MESSAGE } from '../lib/taxonomyAdmin';
 
 const STATUS_META = {
   live: { label: 'Live', icon: PackagePlus },
@@ -117,6 +117,25 @@ function NutstoreArchiveBadge({ archivedBy }) {
   );
 }
 
+function MisplacedMotarroBadge() {
+  return (
+    <span
+      title="Category was set to virtual Mottaro — move to Arts & Crafts or Stationery"
+      style={{
+        fontSize: 10,
+        fontWeight: 700,
+        color: '#b45309',
+        background: '#fef3c7',
+        borderRadius: 4,
+        padding: '1px 6px',
+        whiteSpace: 'nowrap',
+      }}
+    >
+      Fix category
+    </span>
+  );
+}
+
 function CatalogSkeleton() {
   return (
     <div className="pm-skeleton">
@@ -171,6 +190,7 @@ function PmMobileProductCard({
             <span className="pm-mobile-card-badge" style={{ background: '#0f766e', color: '#fff' }}>New arrival</span>
           )}
           <NutstoreArchiveBadge archivedBy={item.archivedBy} />
+          {item.misplacedMotarroCategory && <MisplacedMotarroBadge />}
           <MultiCategoryBadge item={item} tree={tree} />
           <div className="adm-muted pm-mobile-card-meta">
             <span>BC: <CodeEllipsis value={item.barcode || item.code} /></span>
@@ -288,9 +308,10 @@ function withCurrentOption(options, currentId) {
 }
 
 function productCategoryRowFromItem(item, tree) {
-  const path = item.categoryPath || [];
+  const path = (item.categoryPath || []).filter((id) => id && id !== 'mottaro');
+  const primaryTree = primaryMainCategories(tree);
   return {
-    categoryId: path[0] || tree[0]?.id || '',
+    categoryId: path[0] || primaryTree[0]?.id || '',
     childOneId: path[1] || '',
     childTwoId: path[2] || '',
     childThreeId: path[3] || '',
@@ -614,6 +635,10 @@ export default function ProductManagerEngine({
       onShowToast?.('Choose a main category and at least one subcategory', 'error');
       return;
     }
+    if (isVirtualMotarroPath(categoryPathIds)) {
+      onShowToast?.(VIRTUAL_MOTTARO_PATH_MESSAGE, 'error');
+      return;
+    }
     if (!window.confirm(`Move ${skus.length} product(s) to:\n${destinationLabel}?`)) return;
     setMoveSaving(true);
     try {
@@ -840,6 +865,10 @@ export default function ProductManagerEngine({
     ].filter(Boolean);
     if (!path.length) {
       onShowToast?.('Pick a main category before making live', 'error');
+      return;
+    }
+    if (isVirtualMotarroPath(path)) {
+      onShowToast?.(VIRTUAL_MOTTARO_PATH_MESSAGE, 'error');
       return;
     }
     const name = productListTitle(makeLiveItem, 'archived');
@@ -1434,6 +1463,7 @@ export default function ProductManagerEngine({
                             <span style={{ fontSize: 10, fontWeight: 700, color: '#fff', background: '#0f766e', borderRadius: 4, padding: '1px 5px' }}>New arrival</span>
                           )}
                           <NutstoreArchiveBadge archivedBy={item.archivedBy} />
+                          {item.misplacedMotarroCategory && <MisplacedMotarroBadge />}
                           <MultiCategoryBadge item={item} tree={tree} />
                         </div>
                         <div className="adm-muted" style={{ fontSize: 11 }}>
@@ -1705,7 +1735,7 @@ export default function ProductManagerEngine({
                   className="adm-field-input"
                   disabled={makeLiveSaving}
                 >
-                  {tree.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+                  {tree.filter((c) => c.id !== 'mottaro').map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
                 </select>
               </label>
               {withCurrentOption(

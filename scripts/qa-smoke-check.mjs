@@ -10,7 +10,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { orderMatchesTab, isOrderConfirmationSent } from '../src/lib/orderStatus.js';
 import { parseOrderTab, parsePositiveInt, parseBusinessTypeFilter } from '../api/_admin-query-params.js';
-import { injectMotarroIntoTree } from '../lib/mottaro-category.mjs';
+import { injectMotarroIntoTree, isVirtualMotarroPath, isMisplacedMotarroDbCategory, filterRowsByMotarroPath } from '../lib/mottaro-category.mjs';
 import { BULK_CHUNK_SIZE, runInChunks } from '../lib/bulk-chunk.mjs';
 import { codeLookupCandidates, firstCodeToken } from '../lib/code-normalize.mjs';
 import { catalogueDisplayTitle, catalogueDescription, loaderCodeLabel } from '../lib/product-loader-display.mjs';
@@ -34,6 +34,12 @@ const tree = injectMotarroIntoTree([
 assert.ok(tree.some((n) => n.id === 'mottaro'), 'Mottaro node present after inject');
 const tree2 = injectMotarroIntoTree(tree);
 assert.equal(tree2.filter((n) => n.id === 'mottaro').length, 1, 'No double-inject');
+assert.equal(isVirtualMotarroPath(['mottaro', 'mottaro-other']), true, 'Mottaro path is virtual');
+assert.equal(isVirtualMotarroPath(['arts-and-crafts', 'crafts']), false, 'Primary path is writable');
+const misplacedRow = { title: 'Plain Paint Brush', category: 'Mottaro', subcategory_one: 'Other' };
+assert.ok(isMisplacedMotarroDbCategory(misplacedRow), 'detect misplaced DB category');
+const recovered = filterRowsByMotarroPath([misplacedRow], ['mottaro', 'mottaro-other'], tree);
+assert.equal(recovered.length, 1, 'misplaced row visible under Mottaro > Other browse');
 console.log('✓ B1 Mottaro inject');
 
 // D4 — order tab bucketing with confirmation_sent_at
@@ -304,9 +310,11 @@ assert.match(pmEngineSrc, /`Archive \$\{selected\.size\}`/, 'Archive label uses 
 
 const bulkMoveSrc = readSrc('src/components/BulkMoveModal.jsx');
 assert.match(bulkMoveSrc, /hasPathGap/, 'BulkMoveModal enforces contiguous path');
+assert.match(bulkMoveSrc, /primaryMainCategories/, 'BulkMoveModal excludes Mottaro destinations');
 assert.doesNotMatch(bulkMoveSrc, /movePreviewPath\s*=\s*\[[^]*\]\.filter\(Boolean\)/, 'BulkMoveModal no longer silently drops gaps');
 
 const bulkProductsSrc = readSrc('api/bulk-products.js');
+assert.match(bulkProductsSrc, /isVirtualMotarroPath/, 'bulk-products blocks virtual Mottaro moves');
 assert.match(bulkProductsSrc, /409[^]*Destination category changed/, 'bulk-products returns 409 on stale destination');
 console.log('✓ Item 5 UI polish (labels + move gap 409)');
 

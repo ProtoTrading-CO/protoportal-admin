@@ -29,6 +29,7 @@ import {
 import { fuzzyFilter } from '../lib/fuzzySearch';
 import { LEGACY_NAV_ALIASES, sortOrderCategoryKey, sortOrderLookupKeys } from '../lib/taxonomy';
 import { childrenOf, findNodePath, subcategoryOptions } from '../lib/taxonomyTreeUtils';
+import { primaryMainCategories, isVirtualMotarroPath, VIRTUAL_MOTTARO_PATH_MESSAGE } from '../lib/taxonomyAdmin';
 import { queryClient } from '../lib/queryClient';
 import {
   applySortOrdersToProducts,
@@ -74,7 +75,7 @@ const ReorderPanel = forwardRef(function ReorderPanel({
   onRefreshCategoryCounts,
 }, ref) {
   const mainCategories = useMemo(
-    () => taxonomyTree.map((item) => ({ id: item.id, label: item.label })),
+    () => primaryMainCategories(taxonomyTree).map((item) => ({ id: item.id, label: item.label })),
     [taxonomyTree],
   );
   const firstMainCategoryId = mainCategories[0]?.id || '';
@@ -328,6 +329,10 @@ const ReorderPanel = forwardRef(function ReorderPanel({
     const finalSubId = moveChild4Id || moveChild3Id || moveChild2Id || moveChild1Id;
     if (!selectedIds.size || categoryPathIds.length < 2) {
       toast('Choose a main category and at least one subcategory', 'error');
+      return;
+    }
+    if (isVirtualMotarroPath(categoryPathIds)) {
+      toast(VIRTUAL_MOTTARO_PATH_MESSAGE, 'error');
       return;
     }
     const destinationLabel = resolvePathLabels(taxonomyTree, categoryPathIds).join(' › ');
@@ -604,6 +609,9 @@ const ReorderPanel = forwardRef(function ReorderPanel({
                 <button type="button" className="adm-modal-close" onClick={() => setMoveModalOpen(false)} aria-label="Close"><X size={18} /></button>
               </div>
               <p className="adm-modal-note">Choose the destination category for these products.</p>
+              <p className="adm-modal-note" style={{ fontSize: 12, color: '#64748b' }}>
+                Mottaro is a virtual browse category only — pick Arts &amp; Crafts or Stationery.
+              </p>
               <p className="adm-modal-note" style={{ fontWeight: 700, color: '#334155' }}>
                 Destination: {movePreviewLabel}
               </p>

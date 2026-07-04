@@ -4,6 +4,7 @@ import { queryClient } from './queryClient';
 import { queryKeys } from './queryKeys';
 import { readApiJson } from './apiError.js';
 import { enrichMotarroCategoryFields } from '../../lib/mottaro-category.mjs';
+import { isVirtualMotarroPath, VIRTUAL_MOTTARO_PATH_MESSAGE } from './taxonomyAdmin';
 
 function categoryMainIdMatches(productMainId, targetMainId) {
   if (!targetMainId || !productMainId) return false;
@@ -480,6 +481,9 @@ export function setLiveTaxonomyTree(tree) {
 }
 
 function pathToWriteFields(categoryPath = []) {
+  if (isVirtualMotarroPath(categoryPath)) {
+    throw new Error(VIRTUAL_MOTTARO_PATH_MESSAGE);
+  }
   const label = (slug) => slugToLabelFromTree(slug, _liveTaxonomyTree);
   const category = label(categoryPath[0]) || '';
   const subs = categoryPath.slice(1).map((slug) => label(slug)).filter(Boolean);
