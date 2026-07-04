@@ -2,6 +2,11 @@ import { requireAdminKey } from './_admin-auth.js';
 import { createClient } from '@supabase/supabase-js';
 import { resolveProductLoaderMatch } from './_product-loader-lookup.js';
 import { ensureProductFromCatalogueRow } from './_ensure-product.js';
+import { VIRTUAL_MOTTARO_PATH_ERROR } from './_mottaro-category.js';
+
+function normalizeLabel(value) {
+  return String(value || '').trim().toLowerCase();
+}
 
 function getStockAdminClient() {
   return createClient(
@@ -59,6 +64,9 @@ export default async function handler(req, res) {
   if (subcategory_three !== undefined) patch.subcategory_three = subcategory_three ? String(subcategory_three).trim() : null;
   if (subcategory_four !== undefined) patch.subcategory_four = subcategory_four ? String(subcategory_four).trim() : null;
   if (nextSku && nextSku !== sku) patch.sku = nextSku;
+  if (patch.category && normalizeLabel(patch.category) === 'mottaro') {
+    return res.status(400).json({ error: VIRTUAL_MOTTARO_PATH_ERROR });
+  }
   if (!Object.keys(patch).length) return res.status(200).json({ ok: true });
 
   patch.updated_at = new Date().toISOString();

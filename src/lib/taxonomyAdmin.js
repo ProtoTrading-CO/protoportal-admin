@@ -128,3 +128,15 @@ export async function replaceFullTaxonomy(categories) {
 }
 
 export { labelToSlug, bundledCategories };
+
+/** Main categories usable as DB write targets (excludes virtual Mottaro browse tree). */
+export function primaryMainCategories(tree) {
+  return (tree || []).filter((c) => c.id !== 'mottaro');
+}
+
+export function isVirtualMotarroPath(pathIds) {
+  return Array.isArray(pathIds) && pathIds.length > 0 && pathIds[0] === 'mottaro';
+}
+
+export const VIRTUAL_MOTTARO_PATH_MESSAGE =
+  'Mottaro is a virtual browse category (products appear when the title contains MOTARRO/MOTTARO). Choose Arts & Crafts or Stationery instead.';
