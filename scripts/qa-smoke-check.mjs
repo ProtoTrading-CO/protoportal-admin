@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { orderMatchesTab, isOrderConfirmationSent } from '../src/lib/orderStatus.js';
 import { parseOrderTab, parsePositiveInt, parseBusinessTypeFilter } from '../api/_admin-query-params.js';
 import { injectMotarroIntoTree } from '../lib/mottaro-category.mjs';
-import { BULK_CHUNK_SIZE, runInChunks } from '../lib/bulk-chunk.mjs';
+import { BULK_CHUNK_SIZE, MOVE_UPDATE_CHUNK_SIZE, runInChunks } from '../lib/bulk-chunk.mjs';
 import { codeLookupCandidates, firstCodeToken } from '../lib/code-normalize.mjs';
 import { catalogueDisplayTitle, catalogueDescription, loaderCodeLabel } from '../lib/product-loader-display.mjs';
 import { parseNutstoreFilename } from '../api/_nutstore-filename.js';
@@ -61,11 +61,15 @@ const bulkSrc = readSrc('api/bulk-products.js');
 assert.match(bulkSrc, /bulkDeleteProducts/, 'batched delete helper present');
 assert.match(bulkSrc, /bulkMoveProducts/, 'batched move helper present');
 assert.match(bulkSrc, /runInChunks/, 'chunked archive/unarchive');
+assert.match(bulkSrc, /chunkedInUpdate/, 'bulkMoveProducts chunks UPDATE batches');
+assert.match(bulkSrc, /chunkedInDelete/, 'bulkDeleteProducts chunks DELETE batches');
+assert.match(bulkSrc, /MOVE_UPDATE_CHUNK_SIZE/, 'bulk move/delete use MOVE_UPDATE_CHUNK_SIZE');
 
 let chunkSum = 0;
 await runInChunks([1, 2, 3, 4, 5], 2, async (n) => { chunkSum += n; return n; });
 assert.equal(chunkSum, 15, 'runInChunks runs all items');
 assert.equal(BULK_CHUNK_SIZE, 25, 'chunk size is 25');
+assert.equal(MOVE_UPDATE_CHUNK_SIZE, 100, 'move update chunk size is 100');
 console.log('✓ Item 1 bulk-products batched + chunked');
 
 const taxonomyUtilsSrc = readSrc('api/_taxonomy-utils.js');

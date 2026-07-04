@@ -40,6 +40,8 @@ import {
   sortMetaForPath,
 } from '../lib/sortOrderStore';
 
+const LARGE_BULK_MOVE_THRESHOLD = 100;
+
 /** Merge a reordered visible slice back into the full product list (arrow-key reorder). */
 function mergeVisibleReorder(prev, currentVisible, nextVisible) {
   if (nextVisible.length === prev.length) return nextVisible;
@@ -334,6 +336,9 @@ const ReorderPanel = forwardRef(function ReorderPanel({
     if (!window.confirm(`Move ${selectedIds.size} product(s) to:\n${destinationLabel}?`)) return;
     setSaving('bulk-move');
     const count = selectedIds.size;
+    if (count > LARGE_BULK_MOVE_THRESHOLD) {
+      toast(`Moving ${count} products…`, 'info');
+    }
     try {
       await bulkMoveProducts({
         skus: [...selectedIds],
