@@ -128,6 +128,7 @@ export function adaptCatalogRow(row, tree, { archived = false } = {}) {
     changedSlots: row._changedSlots || null,
     stockReady: row._stockReady ?? null,
     stockError: row._stockError ?? null,
+    stockLinked: row.stockLinked !== false,
   };
   return enrichMotarroCategoryFields(base, row, tree, categoryPath);
 }

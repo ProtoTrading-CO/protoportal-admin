@@ -218,6 +218,7 @@ export default async function handler(req, res) {
   const search = String(req.query.search || '').trim();
   const categoryPath = parseCategoryPath(req.query.categoryPath);
   const sort = String(req.query.sort || 'title').trim();
+  const onlyInStock = req.query.onlyInStock === 'true' || req.query.onlyInStock === '1';
 
   try {
     const sb = getStockClient();
@@ -227,7 +228,8 @@ export default async function handler(req, res) {
     let stockAlreadyEnriched = false;
     if (status === 'live') {
       const term = safeSearchTerm(search);
-      if (isMotarroBrowsePath(categoryPath) || term) {
+      const useFullScan = onlyInStock || isMotarroBrowsePath(categoryPath) || term;
+      if (useFullScan) {
         let rows;
         if (isMotarroBrowsePath(categoryPath)) {
           rows = await fetchAllMotarroRows(sb, { search, categoryPath, tree, sort });
@@ -235,15 +237,16 @@ export default async function handler(req, res) {
           rows = await fetchAllLiveRows(sb, { search, categoryPath, tree, sort });
         }
         rows = await enrichRowsWithProductStock(sb, rows);
-        rows = rows.filter(isPublishableOnWebsite);
+        if (onlyInStock) {
+          rows = rows.filter(isPublishableOnWebsite);
+        }
         rows = applySearchFilter(rows, search);
         const pageSlice = paginateRows(rows, page, pageSize);
         result = { ...pageSlice, archived: false };
         stockAlreadyEnriched = true;
       } else {
         result = await queryLivePaginated(sb, { search, categoryPath, tree, page, pageSize, sort });
-        let rows = await enrichRowsWithProductStock(sb, result.rows);
-        rows = rows.filter(isPublishableOnWebsite);
+        const rows = await enrichRowsWithProductStock(sb, result.rows);
         result = { ...result, rows };
         stockAlreadyEnriched = true;
       }

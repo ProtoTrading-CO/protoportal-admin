@@ -634,6 +634,8 @@ export async function fetchReorderProducts({
   mainCategory,
   subcategoryId = null,
 } = {}) {
+  // Reads _adminCache populated by stock-actions listLive (all website_stock rows).
+  // Must match /api/catalog?status=live&onlyInStock=false SKU set — see qa-smoke-check.
   let products = await getAllCachedAdmin();
 
   if (mainCategory && mainCategory !== 'all') {
