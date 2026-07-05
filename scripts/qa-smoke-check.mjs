@@ -400,6 +400,26 @@ assert.match(sidebarSrc, /banner: \(\) => import\('\.\/BannerPanel'\)/, 'sidebar
 assert.match(sidebarSrc, /specials: \(\) => import\('\.\/SpecialsPanel'\)/, 'sidebar prefetches SpecialsPanel on hover');
 console.log('✓ AdminPage split — BannerPanel + SpecialsPanel extracted, lazy, prefetched');
 
+// Featured products tab
+const featuredApiSrc = readSrc('api/featured-products.js');
+assert.match(featuredApiSrc, /featured-products\.json/, 'featured API persists to featured-products.json');
+assert.match(featuredApiSrc, /MAX_ITEMS = 100/, 'featured API hard cap is 100');
+
+const featuredLibSrc = readSrc('src/lib/featuredProducts.js');
+assert.match(featuredLibSrc, /FEATURED_SOFT_CAP = 60/, 'featured soft cap is 60');
+assert.match(featuredLibSrc, /FEATURED_HARD_CAP = 100/, 'featured hard cap is 100');
+
+const featuredPanelSrc = readSrc('src/components/FeaturedPanel.jsx');
+assert.match(featuredPanelSrc, /export default function FeaturedPanel/, 'FeaturedPanel default export');
+assert.match(featuredPanelSrc, /SectionErrorBoundary name="featured"/, 'FeaturedPanel wrapped in SectionErrorBoundary');
+assert.doesNotMatch(featuredPanelSrc, /window\.__featured/, 'FeaturedPanel drag avoids window globals');
+
+assert.match(sidebarSrc, /id: 'featured'/, 'sidebar has Featured nav item');
+assert.match(sidebarSrc, /featured: \(\) => import\('\.\/FeaturedPanel'\)/, 'sidebar prefetches FeaturedPanel on hover');
+assert.match(adminPageSrc, /const FeaturedPanel = lazy\(/, 'FeaturedPanel is lazy in AdminPage');
+assert.match(adminPageSrc, /activeSection === 'featured'/, 'AdminPage renders Featured section');
+console.log('✓ Featured products tab (API, panel, sidebar, lazy load)');
+
 // PricingPanel extraction
 assert.match(adminPageSrc, /const PricingPanel = lazy\(/, 'PricingPanel is lazy');
 assert.doesNotMatch(adminPageSrc, /const applyPricing = async/, 'applyPricing moved into PricingPanel');
