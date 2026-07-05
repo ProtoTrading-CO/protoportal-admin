@@ -429,4 +429,19 @@ assert.match(taxonomyModals, /export default function TaxonomyModals/, 'Taxonomy
 assert.match(sidebarSrc, /reorder: \(\) => import\('\.\/ReorderPanel'\)/, 'sidebar prefetches ReorderPanel on hover');
 console.log('✓ ReorderPanel + TaxonomyModals extracted');
 
+// Live product visibility — Product Manager default matches Reorder Grid + dashboard count
+assert.match(catalogSrc, /onlyInStock/, 'catalog API supports onlyInStock query param');
+assert.match(catalogSrc, /useFullScan = onlyInStock/, 'onlyInStock uses fetch-all-enrich-filter path');
+assert.match(catalogSrc, /if \(onlyInStock\) \{\s*\n\s*rows = rows\.filter\(isPublishableOnWebsite\)/, 'stock filter only when onlyInStock=true');
+assert.match(
+  catalogSrc,
+  /result = await queryLivePaginated[\s\S]*?const rows = await enrichRowsWithProductStock\(sb, result\.rows\);\n        result = \{ \.\.\.result, rows \};/,
+  'default paginated live path enriches without stock filter',
+);
+assert.match(pmEngineSrc, /NeedsSohPriceBadge/, 'Needs SOH/price badge for unlinked zero-stock live rows');
+assert.match(pmEngineSrc, /Show only in stock/, 'Product Manager only-in-stock toggle');
+assert.match(readSrc('src/lib/products.js'), /onlyInStock=false/, 'fetchReorderProducts documents catalog parity');
+assert.match(readSrc('api/_catalog-adapt.js'), /stockLinked/, 'catalog rows expose stockLinked for badge');
+console.log('✓ Live product visibility policy (PM default = Reorder Grid)');
+
 console.log('\nAll smoke checks passed.');

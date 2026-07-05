@@ -37,6 +37,16 @@ import { bulkMoveProducts, invalidateAdminCache, updateProduct } from '../lib/pr
 import { formatWebsitePrice } from '../lib/pricing';
 import { childrenOfTree, subcategoryOptionsFromTree } from '../lib/taxonomyAdmin';
 
+const ONLY_IN_STOCK_KEY = 'pm_only_in_stock';
+
+function readOnlyInStockPref() {
+  try {
+    return sessionStorage.getItem(ONLY_IN_STOCK_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
 const STATUS_META = {
   live: { label: 'Live', icon: PackagePlus },
   archived: { label: 'Archived', icon: Archive },
@@ -117,6 +127,27 @@ function NutstoreArchiveBadge({ archivedBy }) {
   );
 }
 
+function NeedsSohPriceBadge({ item }) {
+  const soh = item.stockOnHand ?? item.stockQty ?? 0;
+  if (soh !== 0 || (item.price ?? 0) !== 0 || item.stockLinked !== false) return null;
+  return (
+    <span
+      title="No Positill match yet — set price and stock on hand"
+      style={{
+        fontSize: 10,
+        fontWeight: 700,
+        color: '#92400e',
+        background: '#fef3c7',
+        borderRadius: 4,
+        padding: '1px 6px',
+        whiteSpace: 'nowrap',
+      }}
+    >
+      Needs SOH/price
+    </span>
+  );
+}
+
 function CatalogSkeleton() {
   return (
     <div className="pm-skeleton">
@@ -171,6 +202,7 @@ function PmMobileProductCard({
             <span className="pm-mobile-card-badge" style={{ background: '#0f766e', color: '#fff' }}>New arrival</span>
           )}
           <NutstoreArchiveBadge archivedBy={item.archivedBy} />
+          <NeedsSohPriceBadge item={item} />
           <MultiCategoryBadge item={item} tree={tree} />
           <div className="adm-muted pm-mobile-card-meta">
             <span>BC: <CodeEllipsis value={item.barcode || item.code} /></span>
@@ -343,6 +375,7 @@ export default function ProductManagerEngine({
   const [page, setPage] = useState(1);
   const [pageSize] = useState(50);
   const [searchInput, setSearchInput] = useState('');
+  const [onlyInStock, setOnlyInStock] = useState(() => readOnlyInStockPref());
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [categoryPath, setCategoryPath] = useState([]);
   const [selected, setSelected] = useState(new Set());
@@ -419,7 +452,14 @@ export default function ProductManagerEngine({
     selectedRowsRef.current = new Map();
     lastSelectIdxRef.current = null;
     setSelectAllView(false);
-  }, [status, debouncedSearch, categoryPath.join('/'), archiveStockView, archiveSourceFilter]);
+  }, [status, debouncedSearch, categoryPath.join('/'), archiveStockView, archiveSourceFilter, onlyInStock]);
+
+  const handleOnlyInStockChange = useCallback((next) => {
+    setOnlyInStock(next);
+    try {
+      sessionStorage.setItem(ONLY_IN_STOCK_KEY, next ? '1' : '0');
+    } catch { /* ignore */ }
+  }, []);
 
   const handlePageChange = useCallback((nextPage) => {
     setPage(nextPage);
@@ -435,7 +475,8 @@ export default function ProductManagerEngine({
     categoryPath,
     stockFilter: status === 'archived' ? archiveStockView : undefined,
     archivedSource: status === 'archived' && archiveStockView === 'archived' ? archiveSourceFilter : undefined,
-  }), [status, page, pageSize, debouncedSearch, categoryPath, archiveStockView, archiveSourceFilter]);
+    onlyInStock: status === 'live' && onlyInStock,
+  }), [status, page, pageSize, debouncedSearch, categoryPath, archiveStockView, archiveSourceFilter, onlyInStock]);
 
   const catalogQueryEnabled = status !== 'approval';
 
@@ -494,7 +535,7 @@ export default function ProductManagerEngine({
     setReorderLoading(true);
     setCatalogChangedWhileDirty(false);
     catalogTotalWhileDirtyRef.current = data?.total ?? null;
-    fetchAllCatalogRows({ status: 'live', categoryPath, search: '' })
+    fetchAllCatalogRows({ status: 'live', categoryPath, search: '', onlyInStock: false })
       .then((allRows) => {
         if (cancelled) return;
         setReorderExpectedTotal(allRows.length);
@@ -849,7 +890,13 @@ export default function ProductManagerEngine({
       await mutations.unarchive.mutateAsync(makeLiveItem.sku);
       queryClient.invalidateQueries({ queryKey: ['catalog'] });
       onRefreshStats?.();
-      onShowToast?.(`"${name}" is now live on the website`, 'success');
+      const zeroStock = (makeLiveItem.stockOnHand ?? makeLiveItem.stockQty ?? 0) === 0;
+      onShowToast?.(
+        zeroStock
+          ? `"${name}" is live with 0 stock — set price and stock on hand to complete.`
+          : `"${name}" is now live on the website`,
+        'success',
+      );
       setMakeLiveItem(null);
     } catch (err) {
       onShowToast?.(err.message || 'Make live failed', 'error');
@@ -1144,6 +1191,17 @@ export default function ProductManagerEngine({
                   onChange={(e) => setSearchInput(e.target.value)}
                 />
               </label>
+              {status === 'live' && (
+                <label className="adm-filter-chip" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={onlyInStock}
+                    onChange={(e) => handleOnlyInStockChange(e.target.checked)}
+                    style={{ accentColor: '#8B1A1A' }}
+                  />
+                  Show only in stock
+                </label>
+              )}
               {rows.length > 0 && status !== 'approval' && !reorderMode && (
                 <div className="pm-select-toolbar" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', width: '100%' }}>
                   <button
@@ -1434,6 +1492,7 @@ export default function ProductManagerEngine({
                             <span style={{ fontSize: 10, fontWeight: 700, color: '#fff', background: '#0f766e', borderRadius: 4, padding: '1px 5px' }}>New arrival</span>
                           )}
                           <NutstoreArchiveBadge archivedBy={item.archivedBy} />
+                          <NeedsSohPriceBadge item={item} />
                           <MultiCategoryBadge item={item} tree={tree} />
                         </div>
                         <div className="adm-muted" style={{ fontSize: 11 }}>
