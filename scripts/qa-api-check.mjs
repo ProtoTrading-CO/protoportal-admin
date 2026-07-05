@@ -113,6 +113,9 @@ record('Customer Unspecified filter', unspecified.status === 200, `rows=${unspec
 const popup = await get('/api/popup-special');
 record('Popup special GET', popup.status === 200, `active=${popup.json?.active}`);
 
+const featured = await get('/api/featured-products');
+record('Featured products GET', featured.status === 200 && Array.isArray(featured.json?.items), `count=${featured.json?.items?.length ?? 0}`);
+
 const failed = results.filter((r) => !r.pass);
 console.log(`\n${results.length - failed.length}/${results.length} passed`);
 if (failed.length) process.exit(1);

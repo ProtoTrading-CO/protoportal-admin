@@ -114,6 +114,7 @@ const ProductLoaderPanel = lazy(() => import('../components/ProductLoaderPanel')
 const WhatsappPanel = lazy(() => import('../components/WhatsappPanel'));
 const EmailAnalyticsPanel = lazy(() => import('../components/EmailAnalyticsPanel'));
 const BannerPanel = lazy(() => import('../components/BannerPanel'));
+const FeaturedPanel = lazy(() => import('../components/FeaturedPanel'));
 const SpecialsPanel = lazy(() => import('../components/SpecialsPanel'));
 const PricingPanel = lazy(() => import('../components/PricingPanel'));
 const ReorderPanel = lazy(() => import('../components/ReorderPanel'));
@@ -1970,6 +1971,16 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
             )}
 
 
+
+            {/* FEATURED */}
+            {activeSection === 'featured' && (
+              <Suspense fallback={<SectionSuspenseFallback label="Loading Featured…" />}>
+                <FeaturedPanel
+                  taxonomyTree={taxonomyTree}
+                  onShowToast={showToast}
+                />
+              </Suspense>
+            )}
 
             {/* SPECIALS */}
             {activeSection === 'specials' && (

@@ -9,6 +9,7 @@ export const queryKeys = {
   sortOrder: (categoryKey) => ['sort-order', categoryKey],
   banner: () => ['banner'],
   specials: () => ['specials'],
+  featuredProducts: () => ['featured-products'],
   orders: (params) => ['orders', params],
   customers: (params) => ['customers', params],
 };
