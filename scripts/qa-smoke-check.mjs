@@ -443,6 +443,8 @@ assert.match(
   'default paginated live path enriches without stock filter',
 );
 assert.match(pmEngineSrc, /NeedsSohPriceBadge/, 'Needs SOH/price badge for unlinked zero-stock live rows');
+assert.match(pmEngineSrc, /OutOfStockLinkedBadge/, 'Out of stock badge for ERP-linked zero-stock rows');
+assert.match(pmEngineSrc, /soh !== 0 \|\| item\.stockLinked !== true/, 'OOS badge when zero SOH and stockLinked true');
 assert.match(pmEngineSrc, /Show only in stock/, 'Product Manager only-in-stock toggle');
 assert.match(readSrc('src/lib/products.js'), /onlyInStock=false/, 'fetchReorderProducts documents catalog parity');
 assert.match(readSrc('api/_catalog-adapt.js'), /stockLinked/, 'catalog rows expose stockLinked for badge');

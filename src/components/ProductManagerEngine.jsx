@@ -150,6 +150,28 @@ function NeedsSohPriceBadge({ item }) {
   );
 }
 
+/** ERP-linked but Positill reports 0 SOH — waiting for stock, not missing data. */
+function OutOfStockLinkedBadge({ item }) {
+  const soh = item.stockOnHand ?? item.stockQty ?? 0;
+  if (soh !== 0 || item.stockLinked !== true) return null;
+  return (
+    <span
+      title="Linked to Positill — waiting for stock to arrive"
+      style={{
+        fontSize: 10,
+        fontWeight: 700,
+        color: '#475569',
+        background: '#f1f5f9',
+        borderRadius: 4,
+        padding: '1px 6px',
+        whiteSpace: 'nowrap',
+      }}
+    >
+      Out of stock
+    </span>
+  );
+}
+
 function CatalogSkeleton() {
   return (
     <div className="pm-skeleton">
@@ -205,6 +227,7 @@ function PmMobileProductCard({
           )}
           <NutstoreArchiveBadge archivedBy={item.archivedBy} />
           <NeedsSohPriceBadge item={item} />
+          <OutOfStockLinkedBadge item={item} />
           <MultiCategoryBadge item={item} tree={tree} />
           <div className="adm-muted pm-mobile-card-meta">
             <span>BC: <CodeEllipsis value={item.barcode || item.code} /></span>
@@ -1498,6 +1521,7 @@ export default function ProductManagerEngine({
                           )}
                           <NutstoreArchiveBadge archivedBy={item.archivedBy} />
                           <NeedsSohPriceBadge item={item} />
+                          <OutOfStockLinkedBadge item={item} />
                           <MultiCategoryBadge item={item} tree={tree} />
                         </div>
                         <div className="adm-muted" style={{ fontSize: 11 }}>
