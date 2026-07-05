@@ -1,13 +1,13 @@
 import { requireTradeRegisterOrAdmin } from './_admin-auth.js';
 import { sendOutgoing } from './_outgoing-email.js';
-import { buildTradeApplicationVars } from '../lib/outgoing-emails.mjs';
+import { buildCustomerPasswordResetVars } from '../lib/outgoing-emails.mjs';
 
 /**
- * Send trade-application acknowledgment email (Brevo).
- * Called by register.proto.co.za / site.proto.co.za after a trade signup.
+ * Send trade customer password reset email (Brevo).
+ * Called by register.proto.co.za / site.proto.co.za after generating a reset link.
  *
- * POST { email, name?, businessName? }
- * Auth: x-trade-register-secret (TRADE_REGISTER_SECRET or ORDER_NOTIFY_SECRET) or admin JWT
+ * POST { email, resetLink, name? }
+ * Auth: x-trade-register-secret or admin JWT
  */
 export default async function handler(req, res) {
   if (!(await requireTradeRegisterOrAdmin(req, res))) return;
@@ -15,11 +15,14 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
 
   const email = String(req.body?.email || '').trim().toLowerCase();
+  const resetLink = String(req.body?.resetLink || req.body?.reset_link || '').trim();
   const name = String(req.body?.name || '').trim();
-  const businessName = String(req.body?.businessName || req.body?.business_name || '').trim();
 
   if (!email || !email.includes('@')) {
     return res.status(400).json({ error: 'Valid email is required' });
+  }
+  if (!resetLink) {
+    return res.status(400).json({ error: 'resetLink is required' });
   }
 
   if (!process.env.BREVO_API_KEY) {
@@ -27,14 +30,14 @@ export default async function handler(req, res) {
   }
 
   try {
-    const vars = buildTradeApplicationVars({ email, name, businessName });
-    await sendOutgoing('trade_application_received', {
+    const vars = buildCustomerPasswordResetVars({ email, name, resetLink });
+    await sendOutgoing('customer_password_reset', {
       to: { email, name: vars.name || email },
       vars,
     });
     return res.status(200).json({ ok: true, sent: true, email });
   } catch (err) {
-    console.error('trade-application-received:', err?.message || err);
-    return res.status(500).json({ error: err.message || 'Failed to send acknowledgment email' });
+    console.error('customer-password-reset-email:', err?.message || err);
+    return res.status(500).json({ error: err.message || 'Failed to send password reset email' });
   }
 }

@@ -45,6 +45,12 @@
     "api/apply-category-moves.js": {
       "maxDuration": 300,
       "includeFiles": "data/category-move-*.xlsx"
+    },
+    "api/run-scheduled-broadcasts.js": {
+      "maxDuration": 300
+    },
+    "api/customer-email-broadcast.js": {
+      "maxDuration": 300
     }
   },
   "crons": [

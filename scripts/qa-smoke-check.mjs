@@ -346,6 +346,7 @@ assert.match(tradeBodies.introText, /within 24 hours/i, 'trade application email
 assert.equal(tradeApplicationGreetingName({ name: 'Jane', email: 'x@y.z' }), 'Jane');
 const tradeAppApiSrc = readSrc('api/trade-application-received.js');
 assert.match(tradeAppApiSrc, /requireTradeRegisterOrAdmin/, 'trade-application-received uses register secret auth');
+assert.match(tradeAppApiSrc, /sendOutgoing\('trade_application_received'/, 'trade-application-received uses outgoing registry');
 assert.match(readSrc('api/register-account.js'), /customer_code:\s*null/, 'register-account never assigns customer_code');
 assert.equal(
   spawnSync('node', ['--check', join(REPO_ROOT, 'api/trade-application-received.js')], { encoding: 'utf8' }).status,
@@ -353,6 +354,48 @@ assert.equal(
   'trade-application-received.js passes node --check',
 );
 console.log('✓ Trade application acknowledgment email');
+
+// Outgoing transactional emails
+const brevoEmailSrc = readSrc('api/_brevo-email.js');
+assert.match(brevoEmailSrc, /PROTO_URLS\.website/, 'broadcast footer uses proto.co.za website URL');
+assert.match(readSrc('api/admin-customers.js'), /sendOutgoing\('trade_application_approved'/, 'approval sends outgoing email');
+assert.match(readSrc('api/_admin-password-reset.js'), /sendOutgoing\('admin_password_reset'/, 'admin reset uses outgoing registry');
+assert.match(readSrc('api/outgoing-emails.js'), /isOutgoingSlug/, 'outgoing-emails API validates slug allowlist');
+assert.match(sidebarSrc, /id: 'outgoing'/, 'sidebar includes Outgoing section');
+assert.match(adminPageSrc, /const OutgoingPanel = lazy\(/, 'OutgoingPanel is lazy-loaded');
+assert.match(readSrc('api/outgoing-emails.js'), /\[TEST\]/, 'outgoing test sends use [TEST] prefix');
+assert.match(readSrc('api/customer-password-reset-email.js'), /customer_password_reset/, 'customer password reset API wired');
+assert.match(readSrc('api/send-order-email.js'), /order_confirmation_customer/, 'order confirmation uses outgoing template');
+assert.match(readSrc('lib/outgoing-emails.mjs'), /customer_password_reset/, 'registry includes customer password reset');
+assert.match(readSrc('lib/outgoing-emails.mjs'), /order_confirmation_customer/, 'registry includes order confirmation');
+assert.match(readSrc('src/components/OutgoingPanel.jsx'), /useDebouncedValue/, 'OutgoingPanel debounces preview');
+assert.match(readSrc('src/hooks/useDebouncedValue.js'), /export default function useDebouncedValue/, 'debounce hook exists');
+assert.equal(
+  spawnSync('node', ['--check', join(REPO_ROOT, 'api/outgoing-emails.js')], { encoding: 'utf8' }).status,
+  0,
+  'outgoing-emails.js passes node --check',
+);
+
+// Outgoing hardening — cache, revert, conflict, send fallback
+const outgoingCoreSrc = readSrc('api/_outgoing-email.js');
+assert.match(outgoingCoreSrc, /invalidateOutgoingCache/, 'outgoing cache invalidation on save');
+assert.match(outgoingCoreSrc, /deleteOutgoingOverride/, 'outgoing revert removes stored override');
+assert.match(outgoingCoreSrc, /isOutgoingConflictError/, 'outgoing conflict helper exists');
+assert.match(readSrc('api/outgoing-emails.js'), /req\.method === 'DELETE'/, 'outgoing-emails supports DELETE revert');
+assert.match(readSrc('api/outgoing-emails.js'), /409/, 'outgoing save maps concurrent conflict to 409');
+assert.match(readSrc('src/lib/outgoingEmails.js'), /revertOutgoingTemplate/, 'client revert API helper');
+assert.match(readSrc('src/components/OutgoingPanel.jsx'), /adm-outgoing-panel/, 'Outgoing panel uses full-width layout class');
+assert.match(readSrc('src/components/OutgoingPanel.jsx'), /revertOutgoingTemplate/, 'OutgoingPanel calls revert API');
+assert.match(readSrc('src/components/OutgoingPanel.jsx'), /Discard unsaved changes/, 'OutgoingPanel warns on unsaved switch');
+assert.match(readSrc('api/send-order-email.js'), /template load failed, using defaults/, 'order send falls back to code defaults');
+assert.equal(vercelJson.functions?.['api/run-scheduled-broadcasts.js']?.maxDuration, 300, 'scheduled WhatsApp cron has 300s timeout');
+
+const { mergeOutgoingTemplate, isOutgoingConflictError } = await import('../api/_outgoing-email.js');
+const tradeDefaults = mergeOutgoingTemplate('trade_application_received', {});
+assert.ok(tradeDefaults.subject.toLowerCase().includes('trade'), 'mergeOutgoingTemplate applies code defaults');
+assert.equal(isOutgoingConflictError(new Error('Concurrent update conflict — try again shortly')), true);
+
+console.log('✓ Outgoing transactional email registry + panel');
 
 // Bundle-perf follow-ups
 const orderDocsSrc = readSrc('src/lib/orderDocuments.js');
