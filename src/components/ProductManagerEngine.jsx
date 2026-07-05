@@ -63,6 +63,8 @@ const ROW_COLUMNS = {
 
 const STOCK_STATUSES = new Set(['live', 'archived']);
 
+const LARGE_BULK_MOVE_THRESHOLD = 100;
+
 function MultiCategoryBadge({ item, tree }) {
   if (!item?.isMultiCategory) return null;
   const primary = [item.categoryLabel, ...(item.subcategoryLabels || [])].filter(Boolean).join(' › ');
@@ -657,6 +659,9 @@ export default function ProductManagerEngine({
     }
     if (!window.confirm(`Move ${skus.length} product(s) to:\n${destinationLabel}?`)) return;
     setMoveSaving(true);
+    if (skus.length > LARGE_BULK_MOVE_THRESHOLD) {
+      onShowToast?.(`Moving ${skus.length} products…`, 'info');
+    }
     try {
       await bulkMoveProducts({ skus, categoryId, subcategoryId, categoryPathIds });
       setMoveModalOpen(false);
