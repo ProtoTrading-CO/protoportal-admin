@@ -1886,7 +1886,8 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
               </div>
             )}
 
-            <div style={{ display: activeSection === 'catalogue' ? 'block' : 'none' }}>
+            <SectionErrorBoundary name="catalogue" title="Product Manager crashed" resetKey={activeSection}>
+              <div style={{ display: activeSection === 'catalogue' ? 'block' : 'none' }}>
               <ProductManagerEngine
                 taxonomyTree={taxonomyTree}
                 onShowToast={showToast}
@@ -1907,15 +1908,19 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                   window.scrollTo({ top: 0, behavior: 'instant' });
                 }}
               />
-            </div>
+              </div>
+            </SectionErrorBoundary>
 
             {activeSection === 'analytics' && (
-              <Suspense fallback={<LazySectionFallback label="Loading Analytics…" />}>
-                <AnalyticsHub />
-              </Suspense>
+              <SectionErrorBoundary name="analytics" title="Analytics crashed" resetKey={activeSection}>
+                <Suspense fallback={<LazySectionFallback label="Loading Analytics…" />}>
+                  <AnalyticsHub />
+                </Suspense>
+              </SectionErrorBoundary>
             )}
 
             {/* Apollo — keep mounted after first open so chat survives tab switches. */}
+            <SectionErrorBoundary name="apollo" title="Apollo crashed" resetKey={activeSection}>
             {apolloEverActive && (
               <div style={{ display: activeSection === 'apollo' ? 'block' : 'none' }}>
                 <Suspense fallback={<LazySectionFallback label="Loading Apollo…" />}>
@@ -1939,15 +1944,19 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                 </Suspense>
               </div>
             )}
+            </SectionErrorBoundary>
 
             {activeSection === 'cost-tracking' && (
-              <Suspense fallback={<LazySectionFallback label="Loading Cost Tracking…" />}>
-                <CostTrackingPanel onShowToast={showToast} />
-              </Suspense>
+              <SectionErrorBoundary name="cost-tracking" title="Cost Tracking crashed" resetKey={activeSection}>
+                <Suspense fallback={<LazySectionFallback label="Loading Cost Tracking…" />}>
+                  <CostTrackingPanel onShowToast={showToast} />
+                </Suspense>
+              </SectionErrorBoundary>
             )}
 
             {activeSection === 'product-loader' && (
-              <Suspense fallback={<LazySectionFallback label="Loading Product Loader…" />}>
+              <SectionErrorBoundary name="product-loader" title="Product Loader crashed" resetKey={activeSection}>
+                <Suspense fallback={<LazySectionFallback label="Loading Product Loader…" />}>
                 <ProductLoaderPanel
                   taxonomyTree={taxonomyTree}
                   onShowToast={showToast}
@@ -1967,37 +1976,43 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                     setActiveSection('apollo');
                   }}
                 />
-              </Suspense>
+                </Suspense>
+              </SectionErrorBoundary>
             )}
 
 
 
             {/* FEATURED */}
             {activeSection === 'featured' && (
-              <Suspense fallback={<SectionSuspenseFallback label="Loading Featured…" />}>
-                <FeaturedPanel
-                  taxonomyTree={taxonomyTree}
-                  onShowToast={showToast}
-                />
-              </Suspense>
+              <SectionErrorBoundary name="featured" title="Featured crashed" resetKey={activeSection}>
+                <Suspense fallback={<SectionSuspenseFallback label="Loading Featured…" />}>
+                  <FeaturedPanel
+                    taxonomyTree={taxonomyTree}
+                    onShowToast={showToast}
+                  />
+                </Suspense>
+              </SectionErrorBoundary>
             )}
 
             {/* SPECIALS */}
             {activeSection === 'specials' && (
-              <Suspense fallback={<SectionSuspenseFallback label="Loading Specials…" />}>
-                <SpecialsPanel
-                  specials={specials}
-                  onSpecialsChange={setSpecials}
-                  onShowToast={showToast}
-                />
-              </Suspense>
+              <SectionErrorBoundary name="specials" title="Specials crashed" resetKey={activeSection}>
+                <Suspense fallback={<SectionSuspenseFallback label="Loading Specials…" />}>
+                  <SpecialsPanel
+                    specials={specials}
+                    onSpecialsChange={setSpecials}
+                    onShowToast={showToast}
+                  />
+                </Suspense>
+              </SectionErrorBoundary>
             )}
 
 
 
             {/* REORDER */}
             {activeSection === 'reorder' && (
-              <Suspense fallback={<SectionSuspenseFallback label="Loading Reorder Grid…" />}>
+              <SectionErrorBoundary name="reorder" title="Reorder Grid crashed" resetKey={activeSection}>
+                <Suspense fallback={<SectionSuspenseFallback label="Loading Reorder Grid…" />}>
                 <ReorderPanel
                   ref={reorderPanelRef}
                   isActive={activeSection === 'reorder'}
@@ -2012,11 +2027,13 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                   onRefreshStats={refreshDashboardStats}
                   onRefreshCategoryCounts={reloadTaxonomy}
                 />
-              </Suspense>
+                </Suspense>
+              </SectionErrorBoundary>
             )}
 
             {/* CUSTOMERS */}
             {activeSection === 'customers' && (
+              <SectionErrorBoundary name="customers" title="Customer Management crashed" resetKey={activeSection}>
               <div className="adm-panel">
                 <div className="adm-section-head">
                   <div>
@@ -2215,22 +2232,26 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                 )}
                 <Pager page={customerPage} totalPages={customerPages} onChange={setCustomerPage} />
               </div>
+              </SectionErrorBoundary>
             )}
 
             {/* PRICING */}
             {activeSection === 'pricing' && (
-              <Suspense fallback={<SectionSuspenseFallback label="Loading Pricing…" />}>
-                <PricingPanel
-                  taxonomyTree={taxonomyTree}
-                  specials={specials}
-                  onSpecialsChange={setSpecials}
-                  onShowToast={showToast}
-                />
-              </Suspense>
+              <SectionErrorBoundary name="pricing" title="Pricing crashed" resetKey={activeSection}>
+                <Suspense fallback={<SectionSuspenseFallback label="Loading Pricing…" />}>
+                  <PricingPanel
+                    taxonomyTree={taxonomyTree}
+                    specials={specials}
+                    onSpecialsChange={setSpecials}
+                    onShowToast={showToast}
+                  />
+                </Suspense>
+              </SectionErrorBoundary>
             )}
 
             {/* ORDERS */}
             {activeSection === 'orders' && (
+              <SectionErrorBoundary name="orders" title="Order Requests crashed" resetKey={activeSection}>
               <div className="adm-panel">
                 <div className="adm-section-head">
                   <div>
@@ -2422,10 +2443,12 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                 </>
                 )}
               </div>
+              </SectionErrorBoundary>
             )}
 
             {/* WHATSAPP */}
             {activeSection === 'crm' && (
+              <SectionErrorBoundary name="crm" title="WhatsApp crashed" resetKey={activeSection}>
               <div className="adm-panel">
                 <div className="adm-section-head">
                   <div>
@@ -2463,13 +2486,16 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                   />
                 </Suspense>
               </div>
+              </SectionErrorBoundary>
             )}
 
             {/* BANNER EDITOR */}
             {activeSection === 'banner' && (
-              <Suspense fallback={<SectionSuspenseFallback label="Loading Banner Editor…" />}>
-                <BannerPanel onShowToast={showToast} />
-              </Suspense>
+              <SectionErrorBoundary name="banner" title="Banner Editor crashed" resetKey={activeSection}>
+                <Suspense fallback={<SectionSuspenseFallback label="Loading Banner Editor…" />}>
+                  <BannerPanel onShowToast={showToast} />
+                </Suspense>
+              </SectionErrorBoundary>
             )}
 
             {/* POPUP SPECIALS — merged into Specials tab */}
