@@ -316,14 +316,14 @@ console.log('✓ Item 5 UI polish (labels + move gap 409)');
 
 // Perf — heavy section panels are lazy-loaded so the initial AdminPage chunk
 // only ships Product Manager. Assert we don't accidentally re-add eager imports.
-assert.match(adminPageSrc, /const AnalyticsHub = lazy\(/, 'AnalyticsHub is lazy');
-assert.match(adminPageSrc, /const ApolloPanel = lazy\(/, 'ApolloPanel is lazy');
-assert.match(adminPageSrc, /const CostTrackingPanel = lazy\(/, 'CostTrackingPanel is lazy');
-assert.match(adminPageSrc, /const ProductLoaderPanel = lazy\(/, 'ProductLoaderPanel is lazy');
-assert.match(adminPageSrc, /const WhatsappPanel = lazy\(/, 'WhatsappPanel is lazy');
-assert.match(adminPageSrc, /const CustomerEmailModal = lazy\(/, 'CustomerEmailModal is lazy');
-assert.match(adminPageSrc, /const CrmContactsModal = lazy\(/, 'CrmContactsModal is lazy');
-assert.match(adminPageSrc, /const FulfillmentSettingsModal = lazy\(/, 'FulfillmentSettingsModal is lazy');
+assert.match(adminPageSrc, /const AnalyticsHub = lazyRetry\(/, 'AnalyticsHub is lazy');
+assert.match(adminPageSrc, /const ApolloPanel = lazyRetry\(/, 'ApolloPanel is lazy');
+assert.match(adminPageSrc, /const CostTrackingPanel = lazyRetry\(/, 'CostTrackingPanel is lazy');
+assert.match(adminPageSrc, /const ProductLoaderPanel = lazyRetry\(/, 'ProductLoaderPanel is lazy');
+assert.match(adminPageSrc, /const WhatsappPanel = lazyRetry\(/, 'WhatsappPanel is lazy');
+assert.match(adminPageSrc, /const CustomerEmailModal = lazyRetry\(/, 'CustomerEmailModal is lazy');
+assert.match(adminPageSrc, /const CrmContactsModal = lazyRetry\(/, 'CrmContactsModal is lazy');
+assert.match(adminPageSrc, /const FulfillmentSettingsModal = lazyRetry\(/, 'FulfillmentSettingsModal is lazy');
 assert.doesNotMatch(adminPageSrc, /^import AnalyticsHub /m, 'no eager AnalyticsHub import');
 assert.doesNotMatch(adminPageSrc, /^import ApolloPanel /m, 'no eager ApolloPanel import');
 assert.doesNotMatch(adminPageSrc, /^import ProductLoaderPanel /m, 'no eager ProductLoaderPanel import');
@@ -379,8 +379,8 @@ assert.match(taxonomySrc, /Cache-Control', 's-maxage=60, stale-while-revalidate=
 console.log('✓ Bundle + perf follow-ups (jspdf lazy, catalog parallel, counts SWR)');
 
 // Section split — Banner + Specials extracted to their own lazy panels
-assert.match(adminPageSrc, /const BannerPanel = lazy\(/, 'BannerPanel is lazy');
-assert.match(adminPageSrc, /const SpecialsPanel = lazy\(/, 'SpecialsPanel is lazy');
+assert.match(adminPageSrc, /const BannerPanel = lazyRetry\(/, 'BannerPanel is lazy');
+assert.match(adminPageSrc, /const SpecialsPanel = lazyRetry\(/, 'SpecialsPanel is lazy');
 assert.doesNotMatch(adminPageSrc, /^import BannerPanel /m, 'BannerPanel not eagerly imported');
 assert.doesNotMatch(adminPageSrc, /^import SpecialsPanel /m, 'SpecialsPanel not eagerly imported');
 assert.doesNotMatch(adminPageSrc, /const loadBannerEditor = async/, 'loadBannerEditor moved into BannerPanel');
@@ -416,12 +416,12 @@ assert.doesNotMatch(featuredPanelSrc, /window\.__featured/, 'FeaturedPanel drag 
 
 assert.match(sidebarSrc, /id: 'featured'/, 'sidebar has Featured nav item');
 assert.match(sidebarSrc, /featured: \(\) => import\('\.\/FeaturedPanel'\)/, 'sidebar prefetches FeaturedPanel on hover');
-assert.match(adminPageSrc, /const FeaturedPanel = lazy\(/, 'FeaturedPanel is lazy in AdminPage');
+assert.match(adminPageSrc, /const FeaturedPanel = lazyRetry\(/, 'FeaturedPanel is lazy in AdminPage');
 assert.match(adminPageSrc, /activeSection === 'featured'/, 'AdminPage renders Featured section');
 console.log('✓ Featured products tab (API, panel, sidebar, lazy load)');
 
 // PricingPanel extraction
-assert.match(adminPageSrc, /const PricingPanel = lazy\(/, 'PricingPanel is lazy');
+assert.match(adminPageSrc, /const PricingPanel = lazyRetry\(/, 'PricingPanel is lazy');
 assert.doesNotMatch(adminPageSrc, /const applyPricing = async/, 'applyPricing moved into PricingPanel');
 assert.doesNotMatch(adminPageSrc, /const toggleSelectAllPricing = /, 'toggleSelectAllPricing moved into PricingPanel');
 assert.doesNotMatch(adminPageSrc, /const loadCategoryWorkingSet = async/, 'loadCategoryWorkingSet dispatcher removed');
@@ -436,7 +436,7 @@ assert.match(sidebarSrc, /pricing: \(\) => import\('\.\/PricingPanel'\)/, 'sideb
 console.log('✓ PricingPanel extracted, lazy, prefetched');
 
 // ReorderPanel + TaxonomyModals extraction
-assert.match(adminPageSrc, /const ReorderPanel = lazy\(/, 'ReorderPanel is lazy');
+assert.match(adminPageSrc, /const ReorderPanel = lazyRetry\(/, 'ReorderPanel is lazy');
 assert.doesNotMatch(adminPageSrc, /const \[reorderCategoryPath,/, 'reorder state moved out of AdminPage');
 assert.doesNotMatch(adminPageSrc, /const \[moveModalOpen,/, 'reorder move modal state moved out of AdminPage');
 assert.doesNotMatch(adminPageSrc, /import ReorderGrid from/, 'ReorderGrid only imported by ReorderPanel');
@@ -473,5 +473,12 @@ console.log('✓ Live product visibility policy (PM default = Reorder Grid)');
 const boundaryCount = (adminPageSrc.match(/<SectionErrorBoundary/g) || []).length;
 assert.ok(boundaryCount >= 13, `AdminPage should wrap all sections in SectionErrorBoundary (found ${boundaryCount})`);
 console.log('✓ AdminPage section error boundaries');
+
+const lazyRetrySrc = readSrc('src/lib/lazyRetry.js');
+assert.match(lazyRetrySrc, /isChunkLoadError/, 'chunk load error detector present');
+assert.match(lazyRetrySrc, /vite:preloadError/, 'vite preload error handler installed');
+assert.match(readSrc('vite.config.js'), /manualChunks/, 'vite manualChunks splits vendor deps');
+assert.match(adminPageSrc, /lazyRetry/, 'AdminPage uses lazyRetry for section panels');
+console.log('✓ Lazy chunk load recovery (lazyRetry + vite manualChunks)');
 
 console.log('\nAll smoke checks passed.');

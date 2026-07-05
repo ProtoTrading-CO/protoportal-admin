@@ -1,8 +1,9 @@
-import { lazy, Suspense, useState } from 'react';
+import { Suspense, useState } from 'react';
 import { Loader2 } from 'lucide-react';
+import { lazyRetry } from '../lib/lazyRetry';
 
-const OrderAnalyticsDashboard = lazy(() => import('./OrderAnalyticsDashboard'));
-const SearchAnalyticsDashboard = lazy(() => import('./SearchAnalyticsDashboard'));
+const OrderAnalyticsDashboard = lazyRetry(() => import('./OrderAnalyticsDashboard'));
+const SearchAnalyticsDashboard = lazyRetry(() => import('./SearchAnalyticsDashboard'));
 
 export default function AnalyticsHub() {
   const [view, setView] = useState('orders');

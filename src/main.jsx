@@ -3,6 +3,10 @@ import { createRoot } from 'react-dom/client';
 import { Analytics } from '@vercel/analytics/react';
 import './index.css';
 import Root from './Root.jsx';
+import { clearChunkReloadGuard, installChunkLoadRecovery } from './lib/lazyRetry';
+
+installChunkLoadRecovery();
+clearChunkReloadGuard();
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>

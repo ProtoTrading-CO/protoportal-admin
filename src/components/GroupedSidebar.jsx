@@ -17,6 +17,7 @@ import {
 import { queryClient } from '../lib/queryClient';
 import { queryKeys } from '../lib/queryKeys';
 import { buildCatalogParams } from '../hooks/useCatalog';
+import { importWithRetry } from '../lib/lazyRetry';
 
 const NAV_ITEMS = [
   { id: 'orders', label: 'Order Requests', icon: ShoppingBag },
@@ -69,7 +70,7 @@ function prefetchSection(sectionId) {
     });
   }
   const chunkLoader = CHUNK_PREFETCH[sectionId];
-  if (chunkLoader) chunkLoader().catch(() => { /* prefetch is best-effort */ });
+  if (chunkLoader) importWithRetry(chunkLoader).catch(() => { /* prefetch is best-effort */ });
 }
 
 export default function GroupedSidebar({

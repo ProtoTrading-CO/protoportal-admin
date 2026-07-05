@@ -1,5 +1,6 @@
-import { useEffect, useState, lazy, Suspense } from 'react';
+import { useEffect, useState, Suspense } from 'react';
 import { installAuthFetch } from './lib/adminKey';
+import { lazyRetry } from './lib/lazyRetry';
 import {
   getVerifiedSession,
   isAllowedAdminEmail,
@@ -13,8 +14,8 @@ import QueryProvider from './components/QueryProvider';
 import AdminLoginPage from './components/AdminLoginPage';
 import AdminResetPasswordPage from './components/AdminResetPasswordPage';
 
-const AdminPage = lazy(() => import('./pages/AdminPage'));
-const FulfillmentPage = lazy(() => import('./pages/FulfillmentPage'));
+const AdminPage = lazyRetry(() => import('./pages/AdminPage'));
+const FulfillmentPage = lazyRetry(() => import('./pages/FulfillmentPage'));
 
 installAuthFetch();
 

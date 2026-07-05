@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Archive,
   ArchiveRestore,
@@ -103,21 +103,22 @@ import { useDashboardStats } from '../hooks/useDashboardStats';
 import { queryClient } from '../lib/queryClient';
 import { queryKeys } from '../lib/queryKeys';
 import { dispatchAdminRefresh } from '../lib/adminRefresh';
+import { lazyRetry } from '../lib/lazyRetry';
 
 // Section panels — lazy-loaded so the initial admin bundle only ships the
 // default section (Product Manager). Each lazy chunk is fetched on demand
 // when the admin clicks a nav item.
-const AnalyticsHub = lazy(() => import('../components/AnalyticsHub'));
-const ApolloPanel = lazy(() => import('../components/ApolloPanel'));
-const CostTrackingPanel = lazy(() => import('../components/CostTrackingPanel'));
-const ProductLoaderPanel = lazy(() => import('../components/ProductLoaderPanel'));
-const WhatsappPanel = lazy(() => import('../components/WhatsappPanel'));
-const EmailAnalyticsPanel = lazy(() => import('../components/EmailAnalyticsPanel'));
-const BannerPanel = lazy(() => import('../components/BannerPanel'));
-const FeaturedPanel = lazy(() => import('../components/FeaturedPanel'));
-const SpecialsPanel = lazy(() => import('../components/SpecialsPanel'));
-const PricingPanel = lazy(() => import('../components/PricingPanel'));
-const ReorderPanel = lazy(() => import('../components/ReorderPanel'));
+const AnalyticsHub = lazyRetry(() => import('../components/AnalyticsHub'));
+const ApolloPanel = lazyRetry(() => import('../components/ApolloPanel'));
+const CostTrackingPanel = lazyRetry(() => import('../components/CostTrackingPanel'));
+const ProductLoaderPanel = lazyRetry(() => import('../components/ProductLoaderPanel'));
+const WhatsappPanel = lazyRetry(() => import('../components/WhatsappPanel'));
+const EmailAnalyticsPanel = lazyRetry(() => import('../components/EmailAnalyticsPanel'));
+const BannerPanel = lazyRetry(() => import('../components/BannerPanel'));
+const FeaturedPanel = lazyRetry(() => import('../components/FeaturedPanel'));
+const SpecialsPanel = lazyRetry(() => import('../components/SpecialsPanel'));
+const PricingPanel = lazyRetry(() => import('../components/PricingPanel'));
+const ReorderPanel = lazyRetry(() => import('../components/ReorderPanel'));
 
 function SectionSuspenseFallback({ label = 'Loading…' }) {
   return (
@@ -128,9 +129,9 @@ function SectionSuspenseFallback({ label = 'Loading…' }) {
 }
 
 // Modal-only — chunk downloads the first time the admin opens the dialog.
-const CustomerEmailModal = lazy(() => import('../components/CustomerEmailModal'));
-const CrmContactsModal = lazy(() => import('../components/CrmContactsModal'));
-const FulfillmentSettingsModal = lazy(() => import('../components/FulfillmentSettingsModal'));
+const CustomerEmailModal = lazyRetry(() => import('../components/CustomerEmailModal'));
+const CrmContactsModal = lazyRetry(() => import('../components/CrmContactsModal'));
+const FulfillmentSettingsModal = lazyRetry(() => import('../components/FulfillmentSettingsModal'));
 import categories from '../data/categories.json';
 
 // Legacy flat nav removed — see GroupedSidebar.jsx
