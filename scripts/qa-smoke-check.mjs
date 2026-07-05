@@ -470,4 +470,8 @@ assert.match(readSrc('src/lib/products.js'), /onlyInStock=false/, 'fetchReorderP
 assert.match(readSrc('api/_catalog-adapt.js'), /stockLinked/, 'catalog rows expose stockLinked for badge');
 console.log('✓ Live product visibility policy (PM default = Reorder Grid)');
 
+const boundaryCount = (adminPageSrc.match(/<SectionErrorBoundary/g) || []).length;
+assert.ok(boundaryCount >= 13, `AdminPage should wrap all sections in SectionErrorBoundary (found ${boundaryCount})`);
+console.log('✓ AdminPage section error boundaries');
+
 console.log('\nAll smoke checks passed.');
