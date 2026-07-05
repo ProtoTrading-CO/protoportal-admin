@@ -8351,6 +8351,7 @@ html, body { background: #f5f5f5; color: #111827; }
 .adm-email-split {
   display: grid;
   gap: 12px;
+  min-height: 420px;
 }
 
 .adm-email-split--split {
@@ -8364,19 +8365,16 @@ html, body { background: #f5f5f5; color: #111827; }
   display: flex;
   flex-direction: column;
   gap: 8px;
-}
-
-.adm-email-split__pane-label {
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: #6b7280;
+  min-height: 420px;
 }
 
 .adm-email-split__editor .adm-email-modal__textarea--html {
   flex: 1;
-  min-height: 280px;
+  height: 380px;
+  min-height: 380px;
+  max-height: 380px;
+  resize: none;
+  overflow: auto;
 }
 
 .adm-email-modal__textarea {
@@ -8399,12 +8397,16 @@ html, body { background: #f5f5f5; color: #111827; }
   background: #fafafa;
   display: flex;
   flex-direction: column;
-  min-height: 280px;
+  height: 380px;
+  min-height: 380px;
+  max-height: 380px;
 }
 
 .adm-email-preview--full {
   flex: 1;
-  min-height: 320px;
+  height: 380px;
+  min-height: 380px;
+  max-height: 380px;
 }
 
 .adm-email-preview__chrome {
@@ -8464,7 +8466,8 @@ html, body { background: #f5f5f5; color: #111827; }
 .adm-email-preview__iframe {
   width: 100%;
   flex: 1;
-  min-height: 280px;
+  min-height: 0;
+  height: 100%;
   border: none;
   background: #fff;
   display: block;
