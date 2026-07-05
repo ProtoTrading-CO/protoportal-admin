@@ -112,6 +112,7 @@ const AnalyticsHub = lazyRetry(() => import('../components/AnalyticsHub'));
 const ApolloPanel = lazyRetry(() => import('../components/ApolloPanel'));
 const CostTrackingPanel = lazyRetry(() => import('../components/CostTrackingPanel'));
 const ProductLoaderPanel = lazyRetry(() => import('../components/ProductLoaderPanel'));
+const BulkImageReplacePanel = lazyRetry(() => import('../components/BulkImageReplacePanel'));
 const WhatsappPanel = lazyRetry(() => import('../components/WhatsappPanel'));
 const EmailAnalyticsPanel = lazyRetry(() => import('../components/EmailAnalyticsPanel'));
 const BannerPanel = lazyRetry(() => import('../components/BannerPanel'));
@@ -1977,6 +1978,17 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                     setActiveSection('apollo');
                   }}
                 />
+                </Suspense>
+              </SectionErrorBoundary>
+            )}
+
+            {activeSection === 'image-replace' && (
+              <SectionErrorBoundary name="image-replace" title="Image Replace crashed" resetKey={activeSection}>
+                <Suspense fallback={<LazySectionFallback label="Loading Image Replace…" />}>
+                  <BulkImageReplacePanel
+                    taxonomyTree={taxonomyTree}
+                    onShowToast={showToast}
+                  />
                 </Suspense>
               </SectionErrorBoundary>
             )}

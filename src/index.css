@@ -2572,6 +2572,194 @@ body.adm-is-reorder-dragging .adm-reorder-card--dragging {
   white-space: nowrap;
 }
 
+/* Bulk image replace wizard */
+.bir-panel .bir-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.bir-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #64748b;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+}
+
+.bir-step--active {
+  color: #fff;
+  background: #8B1A1A;
+  border-color: #8B1A1A;
+}
+
+.bir-step--done {
+  color: #166534;
+  background: #dcfce7;
+  border-color: #bbf7d0;
+}
+
+.bir-pick-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.bir-pick-card {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px;
+  border: 1px solid #e8eaed;
+  border-radius: 10px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.bir-pick-card--selected {
+  border-color: #8B1A1A;
+  background: #fef2f2;
+}
+
+.bir-pick-card input {
+  margin-top: 4px;
+  flex-shrink: 0;
+}
+
+.bir-pick-thumb {
+  width: 48px;
+  height: 48px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.bir-pick-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.bir-pick-meta {
+  flex: 1;
+  min-width: 0;
+}
+
+.bir-pick-meta strong {
+  display: block;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bir-wizard-nav {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid #e8eaed;
+}
+
+.bir-slot-picker {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.bir-slot-option {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  border: 2px solid #e8eaed;
+  border-radius: 10px;
+  cursor: pointer;
+  background: #fff;
+}
+
+.bir-slot-option--active {
+  border-color: #8B1A1A;
+  background: #fef2f2;
+}
+
+.bir-slot-option input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.bir-review-scroll {
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid #e8eaed;
+  border-radius: 10px;
+  padding: 8px;
+}
+
+.bir-review-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.bir-review-row:last-child {
+  border-bottom: none;
+}
+
+.bir-preflight-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 16px 0;
+}
+
+.bir-stat {
+  font-size: 12px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.bir-stat--ok {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.bir-stat--warn {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.bir-stat--bad {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.bir-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  font-size: 13px;
+  color: #64748b;
+}
+
 .adm-reorder-card .adm-reorder-check-wrap,
 .adm-reorder-card .adm-reorder-edit-btn { pointer-events: auto; }
 
