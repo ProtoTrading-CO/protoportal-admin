@@ -2,7 +2,46 @@ import { requireAdminKey } from './_admin-auth.js';
 import { createClient } from '@supabase/supabase-js';
 import { labelsToDbFields, loadTaxonomy, resolveLabelsForSubcategory, resolveLabelsFromPathIds } from './_taxonomy-utils.js';
 import { restoreArchivedToLive } from './_ensure-product.js';
-import { BULK_CHUNK_SIZE, runInChunks } from '../lib/bulk-chunk.mjs';
+import { BULK_CHUNK_SIZE, MOVE_UPDATE_CHUNK_SIZE, runInChunks } from '../lib/bulk-chunk.mjs';
+
+function sliceIntoChunks(list, size) {
+  const chunks = [];
+  for (let i = 0; i < list.length; i += size) chunks.push(list.slice(i, i + size));
+  return chunks;
+}
+
+/** Chunked `.update().in('sku', …)` — one failed chunk does not fail other chunks. */
+async function chunkedInUpdate(supabase, table, skus, updatePayload) {
+  if (!skus.length) return [];
+  const chunks = sliceIntoChunks(skus, MOVE_UPDATE_CHUNK_SIZE);
+  const chunkResults = await runInChunks(chunks, 1, async (skuChunk) => {
+    const { error } = await supabase.from(table).update(updatePayload).in('sku', skuChunk);
+    return skuChunk.map((sku) => (
+      error ? { sku, ok: false, error: error.message } : { sku, ok: true }
+    ));
+  });
+  return chunkResults.flat();
+}
+
+/** Chunked `.delete().in('sku', …)` — per-chunk failure isolation. */
+async function chunkedInDelete(supabase, table, skus) {
+  if (!skus.length) return { results: [], failedSkus: new Set() };
+  const failedSkus = new Set();
+  const results = [];
+  const chunks = sliceIntoChunks(skus, MOVE_UPDATE_CHUNK_SIZE);
+  const chunkResults = await runInChunks(chunks, 1, async (skuChunk) => {
+    const { error } = await supabase.from(table).delete().in('sku', skuChunk);
+    return skuChunk.map((sku) => {
+      if (error) {
+        failedSkus.add(sku);
+        return { sku, ok: false, error: error.message };
+      }
+      return { sku, ok: true };
+    });
+  });
+  for (const row of chunkResults.flat()) results.push(row);
+  return { results, failedSkus };
+}
 
 function getStockClient() {
   return createClient(
@@ -54,21 +93,11 @@ async function bulkMoveProducts(supabase, normalizedSkus, dbFields) {
   const archList = normalizedSkus.filter((sku) => archSkus.has(sku));
 
   if (liveList.length) {
-    const { error } = await supabase.from('website_stock').update(updatePayload).in('sku', liveList);
-    if (error) {
-      for (const sku of liveList) results.push({ sku, ok: false, error: error.message });
-    } else {
-      for (const sku of liveList) results.push({ sku, ok: true });
-    }
+    results.push(...await chunkedInUpdate(supabase, 'website_stock', liveList, updatePayload));
   }
 
   if (archList.length) {
-    const { error } = await supabase.from('archived_products').update(updatePayload).in('sku', archList);
-    if (error) {
-      for (const sku of archList) results.push({ sku, ok: false, error: error.message });
-    } else {
-      for (const sku of archList) results.push({ sku, ok: true });
-    }
+    results.push(...await chunkedInUpdate(supabase, 'archived_products', archList, updatePayload));
   }
 
   for (const sku of normalizedSkus) {
@@ -88,28 +117,23 @@ async function bulkDeleteProducts(supabase, normalizedSkus) {
   const archList = normalizedSkus.filter((sku) => archSkus.has(sku));
 
   if (liveList.length) {
-    const { error } = await supabase.from('website_stock').delete().in('sku', liveList);
-    if (error) {
-      for (const sku of liveList) {
-        failedSkus.add(sku);
-        results.push({ sku, ok: false, error: error.message });
-      }
-    }
+    const liveOutcome = await chunkedInDelete(supabase, 'website_stock', liveList);
+    results.push(...liveOutcome.results);
+    for (const sku of liveOutcome.failedSkus) failedSkus.add(sku);
   }
 
   if (archList.length) {
-    const { error } = await supabase.from('archived_products').delete().in('sku', archList);
-    if (error) {
-      for (const sku of archList) {
-        if (!failedSkus.has(sku)) {
-          failedSkus.add(sku);
-          results.push({ sku, ok: false, error: error.message });
-        }
-      }
-    }
+    const archOutcome = await chunkedInDelete(supabase, 'archived_products', archList);
+    results.push(...archOutcome.results);
+    for (const sku of archOutcome.failedSkus) failedSkus.add(sku);
   }
 
-  await supabase.from('staged_product_previews').delete().in('sku', normalizedSkus).catch(() => {});
+  if (normalizedSkus.length) {
+    const previewChunks = sliceIntoChunks(normalizedSkus, MOVE_UPDATE_CHUNK_SIZE);
+    for (const chunk of previewChunks) {
+      await supabase.from('staged_product_previews').delete().in('sku', chunk).catch(() => {});
+    }
+  }
 
   for (const sku of normalizedSkus) {
     if (!found.has(sku)) {
