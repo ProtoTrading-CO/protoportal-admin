@@ -80,13 +80,14 @@ export function buildPreflightMatch(selectedProducts, slot, fileList) {
   };
 }
 
-export async function preflightSkus(skus, slot) {
+export async function preflightSkus(skus, slot, scope = 'live') {
   const res = await fetch('/api/bulk-image-replace', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       action: 'preflight',
       slot,
+      scope,
       allowedSkus: skus,
     }),
   });
@@ -105,6 +106,7 @@ async function fileToBase64Blob(file) {
 
 export async function replaceBatch({
   slot,
+  scope = 'live',
   allowedSkus,
   readyItems,
   onProgress,
@@ -134,6 +136,7 @@ export async function replaceBatch({
       body: JSON.stringify({
         action: 'replace',
         slot,
+        scope,
         allowedSkus,
         items,
       }),

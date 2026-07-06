@@ -51,6 +51,7 @@ function BulkImageReplacePanelInner({ taxonomyTree = [], onShowToast }) {
   const abortRef = useRef(false);
 
   const [step, setStep] = useState('select');
+  const [scope, setScope] = useState('live');
   const [searchInput, setSearchInput] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [categoryId, setCategoryId] = useState('');
@@ -77,13 +78,13 @@ function BulkImageReplacePanelInner({ taxonomyTree = [], onShowToast }) {
   );
 
   const catalogParams = useMemo(() => buildCatalogParams({
-    status: 'live',
+    status: scope === 'archived' ? 'archived' : 'live',
     page,
     pageSize: 50,
     search: debouncedSearch,
     categoryPath,
     onlyInStock: false,
-  }), [page, debouncedSearch, categoryPath]);
+  }), [scope, page, debouncedSearch, categoryPath]);
 
   const pickerQuery = useCatalogQuery(catalogParams, { enabled: step === 'select' });
   const pickerRows = pickerQuery.data?.rows || [];
@@ -126,6 +127,17 @@ function BulkImageReplacePanelInner({ taxonomyTree = [], onShowToast }) {
     setSelectedMap(new Map());
   }, []);
 
+  // Live and archived products live in different tables server-side, so a
+  // single run must never mix the two scopes.
+  const switchScope = useCallback((next) => {
+    setScope((prev) => {
+      if (prev === next) return prev;
+      setSelectedMap(new Map());
+      setPage(1);
+      return next;
+    });
+  }, []);
+
   const handleFolder = useCallback((fileList) => {
     const files = [...(fileList || [])];
     const match = buildPreflightMatch(selectedProducts, imageSlot, files);
@@ -149,6 +161,7 @@ function BulkImageReplacePanelInner({ taxonomyTree = [], onShowToast }) {
       const allowedSkus = selectedProducts.map((p) => p.sku);
       const results = await replaceBatch({
         slot: imageSlot,
+        scope,
         allowedSkus,
         readyItems: preflight.ready,
         onProgress: setProgress,
@@ -168,7 +181,7 @@ function BulkImageReplacePanelInner({ taxonomyTree = [], onShowToast }) {
       setRunning(false);
       setProgress(null);
     }
-  }, [preflight, imageSlot, selectedProducts, onShowToast]);
+  }, [preflight, imageSlot, scope, selectedProducts, onShowToast]);
 
   const resetWizard = useCallback(() => {
     abortRef.current = false;
@@ -189,6 +202,7 @@ function BulkImageReplacePanelInner({ taxonomyTree = [], onShowToast }) {
     try {
       const results = await replaceBatch({
         slot: imageSlot,
+        scope,
         allowedSkus: selectedProducts.map((p) => p.sku),
         readyItems: retryReady,
         onProgress: setProgress,
@@ -207,7 +221,7 @@ function BulkImageReplacePanelInner({ taxonomyTree = [], onShowToast }) {
       setRunning(false);
       setProgress(null);
     }
-  }, [runResults, preflight, imageSlot, selectedProducts, onShowToast]);
+  }, [runResults, preflight, imageSlot, scope, selectedProducts, onShowToast]);
 
   const slotsRemaining = Math.max(0, BULK_IMAGE_REPLACE_MAX - selectedProducts.length);
 
@@ -220,7 +234,7 @@ function BulkImageReplacePanelInner({ taxonomyTree = [], onShowToast }) {
             Image Replace
           </h2>
           <p className="adm-section-note">
-            Select up to {BULK_IMAGE_REPLACE_MAX} live products, pick one image slot, then upload a folder of replacement images.
+            Select up to {BULK_IMAGE_REPLACE_MAX} {scope === 'archived' ? 'archived' : 'live'} products, pick one image slot, then upload a folder of replacement images.
           </p>
         </div>
       </div>
@@ -230,6 +244,26 @@ function BulkImageReplacePanelInner({ taxonomyTree = [], onShowToast }) {
       {step === 'select' && (
         <>
           <div className="adm-toolbar pm-toolbar" style={{ marginBottom: 12 }}>
+            <div className="adm-tabbar" role="tablist" aria-label="Product scope" style={{ display: 'inline-flex', gap: 4 }}>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={scope === 'live'}
+                className={scope === 'live' ? 'adm-btn-red adm-btn--sm' : 'adm-btn-ghost adm-btn--sm'}
+                onClick={() => switchScope('live')}
+              >
+                Live products
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={scope === 'archived'}
+                className={scope === 'archived' ? 'adm-btn-red adm-btn--sm' : 'adm-btn-ghost adm-btn--sm'}
+                onClick={() => switchScope('archived')}
+              >
+                Archived products
+              </button>
+            </div>
             <label className="adm-search" style={{ flex: 1, minWidth: 200 }}>
               <Search size={15} />
               <input
