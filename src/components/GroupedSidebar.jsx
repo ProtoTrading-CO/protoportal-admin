@@ -90,7 +90,7 @@ export default function GroupedSidebar({
         const badge = item.id === 'customers' && pendingCustomerCount > 0
           ? { count: pendingCustomerCount, title: 'Pending trade applications' }
           : item.id === 'orders' && newOrdersCount > 0
-            ? { count: newOrdersCount, title: 'New orders' }
+            ? { count: newOrdersCount, title: 'Orders awaiting payment' }
             : null;
         return (
           <button

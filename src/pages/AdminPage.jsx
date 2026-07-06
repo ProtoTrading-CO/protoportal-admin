@@ -160,6 +160,20 @@ function formatRandAmount(value) {
   return randFormatter.format(amount);
 }
 
+function orderAmountExVat(order) {
+  const total = Number(order?.total_ex_vat);
+  if (Number.isFinite(total) && total > 0) return total;
+  const items = (order?.final_items?.length ? order.final_items : null)
+    || order?.original_items || order?.items || [];
+  let sum = 0;
+  for (const item of items) {
+    const qty = Number(item?.qty ?? item?.quantity ?? 0);
+    const price = Number(item?.unitPrice ?? item?.price ?? 0);
+    if (Number.isFinite(qty) && Number.isFinite(price)) sum += qty * price;
+  }
+  return sum;
+}
+
 function formatDateTime(value) {
   if (!value) return '—';
   const date = new Date(value);
@@ -705,7 +719,9 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
       setOrderTotal(data.total);
       if (data.tabCounts) {
         setOrderTabCounts(data.tabCounts);
-        if (data.tabCounts.new != null) setNewOrdersCount(data.tabCounts.new);
+        // The sidebar notification only clears once orders are marked as paid.
+        const badge = data.tabCounts.unpaid ?? data.tabCounts.new;
+        if (badge != null) setNewOrdersCount(badge);
       }
     } catch (err) {
       showToast(err.message || 'Failed to load orders', 'error');
@@ -721,8 +737,8 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   const victorCanSend = isVictorSender(activeFulfillmentUser);
 
   const orderListGridCols = orderTab === 'sent' || orderTab === 'paid'
-    ? '1.4fr 1.2fr 1fr 2fr 120px 56px'
-    : '1.6fr 1.4fr 1.2fr 1fr 160px 80px';
+    ? '1.3fr 1.1fr 0.9fr 0.8fr 2fr 120px 56px'
+    : '1.4fr 1.3fr 1.1fr 0.8fr 1fr 160px 80px';
 
   const confirmationSentIds = useMemo(() => {
     const ids = new Set(Object.keys(confirmationSent).filter((id) => confirmationSent[id]?.sentAt));
@@ -1086,7 +1102,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
           fetchOrdersPage({ tab: 'new', pageSize: 1, page: 1 }),
         ]);
         setPendingCount(requests.total || 0);
-        setNewOrdersCount(ordersData.tabCounts?.new ?? 0);
+        setNewOrdersCount(ordersData.tabCounts?.unpaid ?? ordersData.tabCounts?.new ?? 0);
       } catch { /* badges are best-effort */ }
     };
     load();
@@ -2401,7 +2417,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                 )}
                 <div className="adm-list">
                   <div className="adm-list-head" style={{ gridTemplateColumns: orderListGridCols }}>
-                    <span>Order</span><span>Customer</span><span>Date & Time</span><span>{orderTab === 'sent' ? 'Order Confirmation' : orderTab === 'paid' ? 'Payment' : 'Status'}</span><span>Actions</span><span></span>
+                    <span>Order</span><span>Customer</span><span>Date & Time</span><span>Amount</span><span>{orderTab === 'sent' ? 'Order Confirmation' : orderTab === 'paid' ? 'Payment' : 'Status'}</span><span>Actions</span><span></span>
                   </div>
                   {orderRows.map((order) => {
                     const isExpanded = expandedOrderId === order.id;
@@ -2427,6 +2443,10 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                           <div>
                             <div style={{ fontSize: 13, fontWeight: 600 }}>{dateStr}</div>
                             <div className="adm-muted" style={{ fontSize: 11 }}>{timeStr}</div>
+                          </div>
+                          <div>
+                            <div style={{ fontSize: 13, fontWeight: 700 }}>{formatRandAmount(orderAmountExVat(order))}</div>
+                            <div className="adm-muted" style={{ fontSize: 11 }}>ex VAT</div>
                           </div>
                           <div onClick={(e) => e.stopPropagation()} className="adm-presale-col">
                             {orderTab === 'sent' && isPreSale ? (

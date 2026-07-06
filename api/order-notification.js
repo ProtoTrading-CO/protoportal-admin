@@ -1,7 +1,11 @@
 import { requireAdminKey } from './_admin-auth.js';
-import { PROTO_URLS } from './_proto-urls.js';
+import { notifyNewOrder } from './_order-notify-core.js';
 
-/** Trigger team WhatsApp for an order via the main portal notification API. */
+/**
+ * Send the full new-order notification round for one order: the alert email
+ * to online@proto.co.za (once) plus team WhatsApp via the main portal
+ * notification API.
+ */
 export default async function handler(req, res) {
   if (!(await requireAdminKey(req, res))) return;
   res.setHeader('Cache-Control', 'no-store');
@@ -10,28 +14,7 @@ export default async function handler(req, res) {
   const orderId = String(req.body?.orderId || '').trim();
   if (!orderId) return res.status(400).json({ error: 'orderId is required' });
 
-  const mainUrl = PROTO_URLS.site;
-  const secret = process.env.ORDER_NOTIFY_SECRET;
-
-  if (!secret) {
-    return res.status(503).json({ error: 'ORDER_NOTIFY_SECRET is not configured on admin portal' });
-  }
-
-  try {
-    const resp = await fetch(`${mainUrl}/api/orders/notify`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-order-notify-secret': secret,
-      },
-      body: JSON.stringify({ orderId, emailSent: req.body?.emailSent !== false }),
-    });
-    const data = await resp.json().catch(() => ({}));
-    if (!resp.ok) {
-      return res.status(resp.status).json(data);
-    }
-    return res.status(200).json(data);
-  } catch (err) {
-    return res.status(500).json({ error: err.message || 'Order notification failed' });
-  }
+  const result = await notifyNewOrder(orderId);
+  const status = result.httpStatus && result.httpStatus >= 400 ? result.httpStatus : (result.error ? 500 : 200);
+  return res.status(result.error && status < 400 ? 500 : status).json(result);
 }

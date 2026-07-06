@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Loader2, MessageCircle, RefreshCw } from 'lucide-react';
 
 export default function OrderWhatsappNotify({ orderId }) {
@@ -6,6 +6,7 @@ export default function OrderWhatsappNotify({ orderId }) {
   const [loading, setLoading] = useState(true);
   const [retrying, setRetrying] = useState(false);
   const [retryMsg, setRetryMsg] = useState('');
+  const autoSentRef = useRef(false);
 
   const loadLog = () => {
     if (!orderId) return Promise.resolve();
@@ -18,8 +19,19 @@ export default function OrderWhatsappNotify({ orderId }) {
   };
 
   useEffect(() => {
+    autoSentRef.current = false;
     loadLog();
   }, [orderId]);
+
+  // A brand-new order without any delivery log: fire the notification round
+  // (team WhatsApp + alert email) automatically, once per order.
+  useEffect(() => {
+    if (loading || retrying || autoSentRef.current) return;
+    if (log && !log.found) {
+      autoSentRef.current = true;
+      void handleRetry();
+    }
+  }, [log, loading]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleRetry = async () => {
     setRetrying(true);
@@ -34,7 +46,7 @@ export default function OrderWhatsappNotify({ orderId }) {
       if (!resp.ok) {
         setRetryMsg(data.error || 'Retry failed');
       } else if (data.ok) {
-        setRetryMsg(`Sent to ${data.sent} team member(s).`);
+        setRetryMsg(`Sent to ${data.sent} team member(s)${data.emailSent ? ' and emailed online@proto.co.za' : ''}.`);
       } else {
         setRetryMsg(data.statusBlockedReason || 'Some team members did not receive WhatsApp.');
       }
@@ -58,10 +70,10 @@ export default function OrderWhatsappNotify({ orderId }) {
     return (
       <div className="oa-wa-notify oa-wa-notify--muted">
         <MessageCircle size={14} />
-        No WhatsApp delivery log for this order yet.
+        {retrying ? 'Sending order notifications (team WhatsApp + email)…' : 'No delivery log for this order yet.'}
         <button type="button" className="oa-wa-notify-retry" onClick={handleRetry} disabled={retrying}>
           {retrying ? <Loader2 size={12} className="star-spinning" /> : <RefreshCw size={12} />}
-          Send team WhatsApp
+          Send order notifications
         </button>
         {retryMsg && <p className="oa-wa-notify-msg">{retryMsg}</p>}
       </div>
@@ -83,6 +95,7 @@ export default function OrderWhatsappNotify({ orderId }) {
         <strong>Team WhatsApp</strong>
         <span className="oa-wa-notify-meta">
           {log.sent}/{log.teamSize ?? log.sent} sent · {log.failed} failed
+          {log.emailSent ? ' · email sent' : ' · email pending'}
           {log.at ? ` · ${new Date(log.at).toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : ''}
         </span>
         <button type="button" className="oa-wa-notify-retry" onClick={handleRetry} disabled={retrying} title="Resend team WhatsApp">
