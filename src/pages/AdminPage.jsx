@@ -359,6 +359,29 @@ function categoryFormFromPath(categoryPath = [], tree = categories) {
   };
 }
 
+/** Gold pill for pre-registered CSV customers who signed up (auto-approved, code allocated manually). */
+function TenThousandClubBadge({ customer }) {
+  if (!customer?.tags?.includes?.('10000 club')) return null;
+  return (
+    <span
+      title="Pre-registered customer — auto-approved at signup. Allocate their customer code manually."
+      style={{
+        fontSize: 10,
+        fontWeight: 800,
+        letterSpacing: 0.4,
+        color: '#92400e',
+        background: '#fef3c7',
+        border: '1px solid #f59e0b',
+        borderRadius: 4,
+        padding: '1px 6px',
+        whiteSpace: 'nowrap',
+      }}
+    >
+      10000 CLUB
+    </span>
+  );
+}
+
 function compactItems(items = []) {
   return items.map((item) => `${item.code}${item.name ? ` ${item.name}` : ''} × ${item.qty}`).join(', ');
 }
@@ -632,21 +655,28 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     if (!file) return;
     setImportingCustomers(true);
     try {
-      const text = await file.text();
-      const { parseCustomerCsv } = await import('../lib/customerCsvImport');
-      const { rows, errors } = parseCustomerCsv(text);
+      const { parseCustomerFile } = await import('../lib/customerCsvImport');
+      const { rows, errors } = await parseCustomerFile(file);
       if (!rows.length) {
-        showToast(errors[0] || 'No valid rows in that CSV', 'error');
+        showToast(errors[0] || 'No valid rows in that file', 'error');
         return;
       }
-      const result = await importProtoActiveCustomers(rows);
+      // Upload in chunks so large files never hit request size/time limits.
+      const CHUNK = 400;
+      let imported = 0;
+      let skipped = 0;
+      for (let i = 0; i < rows.length; i += CHUNK) {
+        const result = await importProtoActiveCustomers(rows.slice(i, i + CHUNK));
+        imported += result.imported || 0;
+        skipped += result.skipped || 0;
+      }
       showToast(
-        `Imported ${result.imported} customer(s) into Pre-registration${result.skipped ? ` — ${result.skipped} skipped (duplicates/invalid)` : ''}${errors.length ? ` — ${errors.length} row(s) had errors` : ''}`,
-        errors.length || result.skipped ? 'warning' : 'success',
+        `Imported ${imported} customer(s) into Pre-registration${skipped ? ` — ${skipped} skipped (duplicates/invalid)` : ''}${errors.length ? ` — ${errors.length} row(s) had errors` : ''}`,
+        errors.length || skipped ? 'warning' : 'success',
       );
       await loadCustomers();
     } catch (err) {
-      showToast(err.message || 'CSV import failed', 'error');
+      showToast(err.message || 'Customer import failed', 'error');
     } finally {
       setImportingCustomers(false);
     }
@@ -2151,7 +2181,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                     <input
                       ref={customerCsvRef}
                       type="file"
-                      accept=".csv,text/csv"
+                      accept=".csv,.xlsx,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
                       hidden
                       onChange={(e) => { void handleCustomerCsvUpload(e.target.files?.[0]); e.target.value = ''; }}
                     />
@@ -2295,6 +2325,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                             {person.accept_whatsapp === true && (
                               <Check size={14} color="#15803d" strokeWidth={3} aria-label="WhatsApp opted in" />
                             )}
+                            <TenThousandClubBadge customer={person} />
                           </div>
                           <div className="adm-muted" style={{ fontSize: 11 }}>{person.name}{person.business_type ? ` · ${person.business_type}` : ''}</div>
                         </div>
@@ -2353,6 +2384,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                             {person.accept_whatsapp === true && (
                               <Check size={14} color="#15803d" strokeWidth={3} aria-label="WhatsApp opted in" />
                             )}
+                            <TenThousandClubBadge customer={person} />
                           </span>
                           {(person.first_name || person.contact_name) && (
                             <div className="adm-muted" style={{ fontSize: 11 }}>
@@ -2668,7 +2700,10 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
             </div>
             <div className="adm-drawer-body">
               <div className="adm-drawer-avatar">{(profileCustomer.business_name || profileCustomer.name || '?')[0].toUpperCase()}</div>
-              <h2 className="adm-drawer-biz">{profileCustomer.business_name || profileCustomer.name}</h2>
+              <h2 className="adm-drawer-biz" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                {profileCustomer.business_name || profileCustomer.name}
+                <TenThousandClubBadge customer={profileCustomer} />
+              </h2>
 
               {profileEditing ? (
                 <div style={{ display: 'grid', gap: 12, marginTop: 4 }}>

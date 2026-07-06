@@ -36,6 +36,15 @@
     "api/approve-customers-bulk.js": {
       "maxDuration": 60
     },
+    "api/proto-active-customers.js": {
+      "maxDuration": 60
+    },
+    "api/customer-email-broadcast.js": {
+      "maxDuration": 300
+    },
+    "api/run-scheduled-emails.js": {
+      "maxDuration": 300
+    },
     "api/nutstore-batch-lookup.js": {
       "maxDuration": 30
     },

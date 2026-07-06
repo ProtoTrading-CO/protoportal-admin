@@ -1,6 +1,8 @@
 import { requireAdminKey } from './_admin-auth.js';
 import { createClient } from '@supabase/supabase-js';
 
+export const config = { api: { bodyParser: { sizeLimit: '8mb' } } };
+
 function getAdminClient() {
   return createClient(
     process.env.VITE_SUPABASE_URL,

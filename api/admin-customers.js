@@ -93,7 +93,7 @@ export default async function handler(req, res) {
       'monthly_spend', 'website',
       'country', 'province', 'city', 'accept_whatsapp', 'customer_code',
       'sales_last_12_months', 'invoice_count', 'last_purchase_date',
-      'contact_name', 'first_name',
+      'contact_name', 'first_name', 'tags',
     ]);
     const { id, ...rawPatch } = req.body || {};
     if (!id) return res.status(400).json({ error: 'id required' });

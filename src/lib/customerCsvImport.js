@@ -60,13 +60,13 @@ function normalizeHeader(raw) {
   return HEADER_ALIASES[String(raw || '').toLowerCase().replace(/[^a-z0-9]/g, '')] || null;
 }
 
-export function parseCustomerCsv(text) {
-  const table = parseCsvText(text);
-  if (!table.length) return { rows: [], errors: ['CSV file is empty'] };
+/** Parse an array-of-arrays table (first row = headers) into customer rows. */
+export function parseCustomerTable(table) {
+  if (!table?.length) return { rows: [], errors: ['File is empty'] };
 
   const headers = table[0].map(normalizeHeader);
   if (!headers.includes('email')) {
-    return { rows: [], errors: ['CSV must have an EmailAddress column (found headers: ' + table[0].join(', ') + ')'] };
+    return { rows: [], errors: ['File must have an EmailAddress column (found headers: ' + table[0].join(', ') + ')'] };
   }
 
   const rows = [];
@@ -85,4 +85,21 @@ export function parseCustomerCsv(text) {
     rows.push(record);
   }
   return { rows, errors };
+}
+
+export function parseCustomerCsv(text) {
+  return parseCustomerTable(parseCsvText(text));
+}
+
+/** Parse a customer file — .csv or .xlsx — into { rows, errors }. */
+export async function parseCustomerFile(file) {
+  if (/\.xlsx?$/i.test(file.name || '')) {
+    const XLSX = await import('xlsx');
+    const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+    const sheet = wb.Sheets[wb.SheetNames[0]];
+    if (!sheet) return { rows: [], errors: ['Workbook has no sheets'] };
+    const table = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: '' });
+    return parseCustomerTable(table);
+  }
+  return parseCustomerCsv(await file.text());
 }
