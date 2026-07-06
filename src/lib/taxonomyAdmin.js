@@ -65,8 +65,9 @@ export async function createSubcategory(parentId, label) {
   return postTaxonomy({ action: 'addSubcategory', parentId, label });
 }
 
-// Deletes a category or subcategory (and its subtree). Products are kept and
-// become uncategorised — the server reports how many were affected.
+// Deletes a category or subcategory (and its subtree). Affected products get
+// the deleted labels cleared server-side (they fall back to Uncategorised or
+// their remaining parent) — the response reports productsCleared.
 export async function deleteTaxonomyNode(id) {
   return postTaxonomy({ action: 'deleteNode', id });
 }

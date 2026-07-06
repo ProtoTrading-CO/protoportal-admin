@@ -1511,14 +1511,20 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     if (!deleteSubModal?.id) return;
     setTaxonomySaving(true);
     try {
-      await deleteTaxonomyNode(deleteSubModal.id);
+      const deleteResult = await deleteTaxonomyNode(deleteSubModal.id);
       await reloadTaxonomy();
       queryClient.invalidateQueries({ queryKey: ['catalog'] });
       reorderPanelRef.current?.onPathNodeDeleted?.(deleteSubModal.id);
       invalidateAdminCache();
       const isCat = deleteSubModal.type === 'category';
       setDeleteSubModal(null);
-      showToast(isCat ? 'Category deleted' : 'Subcategory deleted');
+      if (deleteResult?.clearError) {
+        showToast(`Deleted, but product labels were not fully cleared: ${deleteResult.clearError}`, 'error');
+      } else if (deleteResult?.productsCleared > 0) {
+        showToast(`${isCat ? 'Category' : 'Subcategory'} deleted — ${deleteResult.productsCleared} product(s) recategorised`);
+      } else {
+        showToast(isCat ? 'Category deleted' : 'Subcategory deleted');
+      }
     } catch (err) {
       if (await handleTaxonomyConflict(err)) {
         setDeleteSubModal(null);

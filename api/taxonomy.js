@@ -4,6 +4,7 @@ import {
   addCategoryNode,
   addSubcategoryNode,
   buildCategoryProductCounts,
+  clearProductsForDeletedNode,
   countProductsForNode,
   countRenameOrphans,
   deleteNodeCascade,
@@ -125,33 +126,30 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, updatedAt: saved.updatedAt });
     }
 
-    if (action === 'deleteSubcategory') {
-      const { id } = req.body;
-      if (!id) return res.status(400).json({ error: 'id required' });
-      const ctx = findNodeContext(tree, id);
-      if (!ctx) return res.status(404).json({ error: 'Subcategory not found' });
-      const productCount = await countProductsForNode(supabase, ctx);
-      if (productCount > 0) {
-        return res.status(400).json({
-          error: `Cannot delete — ${productCount} live product(s) still use this subcategory. Move or archive them first.`,
-          productCount,
-        });
-      }
-      const { tree: next } = deleteSubcategoryNode(tree, id);
-      const saved = await saveTaxonomy(next, { expectedUpdatedAt });
-      return res.status(200).json({ ok: true, id, productCount: 0, updatedAt: saved.updatedAt });
-    }
-
     if (action === 'deleteNode') {
       const { id } = req.body;
       if (!id) return res.status(400).json({ error: 'id required' });
       const ctx = findNodeContext(tree, id);
       if (!ctx) return res.status(404).json({ error: 'Category not found' });
-      let productCount = 0;
-      try { productCount = await countProductsForNode(supabase, ctx); } catch { /* best effort */ }
       const { tree: next } = deleteNodeCascade(tree, id);
       const saved = await saveTaxonomy(next, { expectedUpdatedAt });
-      return res.status(200).json({ ok: true, id, productCount, updatedAt: saved.updatedAt });
+      // Clear stored labels on affected products so they surface under
+      // Uncategorised (or their remaining parent) instead of leaving phantom
+      // category paths on the live site.
+      let productsCleared = 0;
+      let clearError = null;
+      try {
+        productsCleared = await clearProductsForDeletedNode(supabase, ctx);
+      } catch (err) {
+        clearError = err.message || 'Failed to clear product labels';
+      }
+      return res.status(200).json({
+        ok: true,
+        id,
+        productsCleared,
+        clearError,
+        updatedAt: saved.updatedAt,
+      });
     }
 
     if (action === 'countSubcategoryProducts') {

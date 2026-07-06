@@ -68,7 +68,7 @@ export default function TaxonomyModals({
             <p className="adm-modal-note">
               Remove <strong>{deleteModal.label}</strong> from the catalogue structure.
               {deleteModal.productCount > 0
-                ? ` ${deleteModal.productCount} product(s) will stay but become uncategorised.`
+                ? ` ${deleteModal.productCount} product(s) will lose this category and move to ${deleteModal.type === 'category' ? 'Uncategorised' : 'the parent category'}.`
                 : ' No products are assigned to it.'}
             </p>
             <div className="adm-modal-footer adm-modal-footer--end">

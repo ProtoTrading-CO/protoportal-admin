@@ -266,22 +266,10 @@ export function renameNodeLabel(tree, id, newLabel) {
   return { tree: [...tree], oldLabel, ctx };
 }
 
-export function deleteSubcategoryNode(tree, id) {
-  const ctx = findNodeContext(tree, id);
-  if (!ctx) throw new Error('Subcategory not found');
-  if (ctx.depth === 0) throw new Error('Main categories cannot be deleted here');
-  if (!ctx.parent) throw new Error('Parent category not found');
-  if (ctx.node.children?.length) {
-    throw new Error('Remove nested subcategories first');
-  }
-  ctx.parent.children = (ctx.parent.children || []).filter((child) => child.id !== id);
-  return { tree: [...tree], ctx };
-}
-
 /**
  * Delete a node at any depth (category or subcategory) together with its whole
- * subtree. Products are left untouched — their stored labels remain, so they
- * simply fall back to slug-of-label and show as uncategorised.
+ * subtree. Callers must also clear the affected products' stored labels via
+ * clearProductsForDeletedNode, or phantom category paths survive the delete.
  */
 export function deleteNodeCascade(tree, id) {
   const ctx = findNodeContext(tree, id);
@@ -387,6 +375,41 @@ export async function renameNodeLabelInProducts(supabase, table, ctx, oldLabel, 
     updated_at: stamp,
   });
   return { renamed: dualSkus.length + singleSkus.length };
+}
+
+/**
+ * Column patch for products under a deleted node:
+ * - depth 0: null category and every subcategory column (covers shallow rows
+ *   where subcategory_one duplicates the category label).
+ * - depth N: null column N and everything deeper; category stays intact.
+ */
+export function buildClearLabelsPatch(ctx) {
+  const patch = {};
+  if (ctx.depth === 0) patch.category = null;
+  const firstSub = ctx.depth === 0 ? 0 : ctx.depth - 1;
+  for (let i = firstSub; i < SUB_COLS.length; i += 1) {
+    patch[SUB_COLS[i]] = null;
+  }
+  return patch;
+}
+
+/**
+ * Null out stored labels on every product row (live + archived) under a
+ * deleted node, so no phantom category paths survive the delete. Uses the
+ * same tolerant matching as rename. Returns rows actually updated.
+ */
+export async function clearProductsForDeletedNode(supabase, ctx) {
+  const { filters } = buildNodeProductFilter(ctx);
+  const column = nodeScopeColumn(ctx);
+  const patch = { ...buildClearLabelsPatch(ctx), updated_at: new Date().toISOString() };
+  let cleared = 0;
+  for (const table of ['website_stock', 'archived_products']) {
+    const rows = await fetchRowsMatchingNodeScope(supabase, table, { column, filters });
+    const skus = rows.map((r) => r.sku).filter(Boolean);
+    await chunkedSkuUpdate(supabase, table, skus, patch);
+    cleared += skus.length;
+  }
+  return cleared;
 }
 
 /** Count live rows still carrying the old label under the node scope. */
