@@ -107,7 +107,8 @@ async function replaceOneItem(supabase, raw, allowedSet, slot, scope) {
     return { sku, ok: false, error: `wrong_slot_expected_${slot}_got_${fileSlot}` };
   }
   const fileSku = String(parsed.code || '').trim().toUpperCase();
-  if (fileSku && fileSku !== sku) {
+  const fileCandidates = parsed.codeCandidates || [];
+  if (fileSku && fileSku !== sku && !fileCandidates.includes(sku)) {
     return { sku, ok: false, error: 'filename_sku_mismatch' };
   }
 

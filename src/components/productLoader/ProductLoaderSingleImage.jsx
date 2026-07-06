@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import {
+  Archive,
   ExternalLink,
   ImagePlus,
   Loader2,
@@ -8,7 +9,7 @@ import {
   X,
 } from 'lucide-react';
 import { isImageFile, websiteStatusLabel } from '../../lib/parseIntakeFilename';
-import { lookupFilenames, logPublishFailure, publishLoaderImageItem } from '../../lib/productLoaderApi';
+import { archiveLoaderImageItem, lookupFilenames, logPublishFailure, publishLoaderImageItem } from '../../lib/productLoaderApi';
 import { catalogueDisplayTitle, loaderCodeLabel } from '../../lib/productLoaderDisplay.js';
 import LoaderCodeEllipsis from './LoaderCodeEllipsis.jsx';
 
@@ -45,7 +46,9 @@ export default function ProductLoaderSingleImage({
   const [preview, setPreview] = useState('');
   const [scanning, setScanning] = useState(false);
   const [processing, setProcessing] = useState(false);
+  const [archiving, setArchiving] = useState(false);
   const [error, setError] = useState('');
+  const [descriptionDraft, setDescriptionDraft] = useState('');
 
   const batchSub1Options = batchDefaultCategoryId ? childrenOf(taxonomyTree, batchDefaultCategoryId) : [];
 
@@ -56,6 +59,7 @@ export default function ProductLoaderSingleImage({
     setPreview('');
     setItem(null);
     setError('');
+    setDescriptionDraft('');
   };
 
   const handleSelect = async (fileList) => {
@@ -72,10 +76,11 @@ export default function ProductLoaderSingleImage({
       if (!row) throw new Error('Lookup failed');
       setItem({ ...row, file });
       setPreview(URL.createObjectURL(file));
+      setDescriptionDraft(catalogueDisplayTitle(row) || '');
       if (row.canPublish) {
         onShowToast?.(`Matched ${row.code}`, 'success');
       } else {
-        onShowToast?.('Could not match filename to catalogue', 'warning');
+        onShowToast?.('Could not match filename to catalogue — you can still send it to Archive', 'warning');
       }
     } catch (err) {
       setError(err.message || 'Lookup failed');
@@ -84,12 +89,27 @@ export default function ProductLoaderSingleImage({
     }
   };
 
+  const handleArchive = async () => {
+    if (!item?.code) return;
+    setArchiving(true);
+    setError('');
+    try {
+      await archiveLoaderImageItem({ ...item, descriptionOverride: descriptionDraft.trim() });
+      onShowToast?.(`Archived ${item.code} — find it in Product Manager → Archive`, 'success');
+      clear();
+    } catch (err) {
+      setError(err.message || 'Archive failed');
+    } finally {
+      setArchiving(false);
+    }
+  };
+
   const handlePublish = async () => {
     if (!item || item.group === 'not_found') return;
     setProcessing(true);
     setError('');
     try {
-      await publishLoaderImageItem(item, {
+      await publishLoaderImageItem({ ...item, descriptionOverride: descriptionDraft.trim() }, {
         taxonomyTree,
         findNode,
         defaultCategoryId: batchDefaultCategoryId,
@@ -149,7 +169,17 @@ export default function ProductLoaderSingleImage({
             )}
             <div className="pl-preview-meta">
               <span className={`pl-status-badge pl-status-badge--${status}`}>{websiteStatusLabel(status)}</span>
-              <h4>{catalogueDisplayTitle(item) || '—'}</h4>
+              <label style={{ display: 'block', margin: '6px 0 4px' }}>
+                <span className="adm-muted" style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase' }}>Description (editable)</span>
+                <input
+                  type="text"
+                  className="adm-input"
+                  value={descriptionDraft}
+                  placeholder={catalogueDisplayTitle(item) || 'Product description'}
+                  onChange={(e) => setDescriptionDraft(e.target.value)}
+                  style={{ width: '100%', fontWeight: 700 }}
+                />
+              </label>
               <dl className="pl-meta-grid">
                 <div><dt>SKU</dt><dd><LoaderCodeEllipsis value={loaderCodeLabel(item)} /></dd></div>
                 <div><dt>Department</dt><dd>{item.department || item.sqlRow?.dept || '—'}</dd></div>
@@ -160,7 +190,7 @@ export default function ProductLoaderSingleImage({
               </dl>
               {item.parseError && <p className="pl-error">Invalid filename — {item.parseError}</p>}
               {item.group === 'not_found' && !item.parseError && (
-                <p className="pl-error">Product not found in Positill or website catalogue.</p>
+                <p className="pl-error">Product not found in Positill or website catalogue — you can still send it to Archive and fix the code later.</p>
               )}
             </div>
           </div>
@@ -192,9 +222,15 @@ export default function ProductLoaderSingleImage({
 
           <div className="pl-action-row">
             {item.group !== 'not_found' && (
-              <button type="button" className="adm-btn-red" disabled={processing} onClick={() => void handlePublish()}>
+              <button type="button" className="adm-btn-red" disabled={processing || archiving} onClick={() => void handlePublish()}>
                 {processing ? <Loader2 size={14} className="spin" /> : <Upload size={14} />}
                 Publish Live
+              </button>
+            )}
+            {item.code && !item.parseError && (
+              <button type="button" className="adm-btn-ghost" disabled={processing || archiving} onClick={() => void handleArchive()}>
+                {archiving ? <Loader2 size={14} className="spin" /> : <Archive size={14} />}
+                Send to Archive
               </button>
             )}
             {item.group !== 'not_found' && item.sqlRow && (

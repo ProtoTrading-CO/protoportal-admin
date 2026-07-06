@@ -8,6 +8,7 @@ import {
   listNutstoreDirectory,
   listNutstoreImagesRecursive,
   nutstoreSetupMessage,
+  testNutstoreConnection,
 } from './_nutstore-webdav.js';
 
 function nutstoreErrorStatus(err) {
@@ -35,6 +36,30 @@ export default async function handler(req, res) {
         libraryRoot: rootPath,
         libraryLabel: 'PTR Photos',
       });
+    }
+
+    if (action === 'test') {
+      // Real PROPFIND against the library root — powers the "Connected to
+      // PTR Photos" status bar in the Product Loader.
+      try {
+        const result = await testNutstoreConnection();
+        return res.status(200).json({
+          ok: true,
+          configured: true,
+          connected: result?.ok !== false,
+          rootPath,
+          libraryLabel: result?.libraryLabel || 'PTR Photos',
+        });
+      } catch (err) {
+        return res.status(200).json({
+          ok: false,
+          configured: true,
+          connected: false,
+          rootPath,
+          libraryLabel: 'PTR Photos',
+          error: formatNutstoreError(err),
+        });
+      }
     }
 
     const path = clampToLibrary(req.query.path || rootPath);

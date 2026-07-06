@@ -180,6 +180,7 @@ export default function ProductLoaderPanel({
   const [singleImageProcessing, setSingleImageProcessing] = useState(false);
   const [singleImageError, setSingleImageError] = useState('');
   const [sqlLiveStatus, setSqlLiveStatus] = useState(null);
+  const [nutstoreStatus, setNutstoreStatus] = useState(null);
 
   const [dormantRows, setDormantRows] = useState([]);
   const [dormantEdits, setDormantEdits] = useState({});
@@ -225,6 +226,10 @@ export default function ProductLoaderPanel({
       .then((r) => r.json())
       .then((json) => { if (!cancelled) setSqlLiveStatus(json); })
       .catch(() => { if (!cancelled) setSqlLiveStatus(null); });
+    fetch('/api/nutstore-browse?action=test')
+      .then((r) => r.json())
+      .then((json) => { if (!cancelled) setNutstoreStatus(json); })
+      .catch(() => { if (!cancelled) setNutstoreStatus({ configured: false, connected: false }); });
     return () => { cancelled = true; };
   }, []);
 
@@ -978,6 +983,15 @@ export default function ProductLoaderPanel({
         <div>
           <h2 className="adm-section-title">Product Loader</h2>
           <p className="adm-section-note">Browse Nutstore or upload images — Positill fills price, description and stock. Apollo generates images separately.</p>
+          {nutstoreStatus && (
+            <p style={{ fontSize: 12, marginTop: 6, fontWeight: 700, color: nutstoreStatus.connected ? '#15803d' : nutstoreStatus.configured === false ? '#6b7280' : '#c2410c' }}>
+              {nutstoreStatus.connected
+                ? `● Connected to ${nutstoreStatus.libraryLabel || 'PTR Photos'}`
+                : nutstoreStatus.configured === false
+                  ? '● Nutstore (PTR Photos) is not configured'
+                  : `● ${nutstoreStatus.libraryLabel || 'PTR Photos'} not reachable — check Nutstore WebDAV credentials`}
+            </p>
+          )}
           {sqlLiveStatus?.bridgeConfigured && (
             <p style={{ fontSize: 12, marginTop: 6, fontWeight: 700, color: sqlLiveStatus.sqlConnectionTest ? '#15803d' : '#c2410c' }}>
               {sqlLiveStatus.sqlConnectionTest

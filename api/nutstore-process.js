@@ -144,7 +144,11 @@ function resolveCatalogTextFields(item) {
 
 function buildArchivePayload(item, { sku, imageUrl, filename, now }) {
   const { category, subcategoryOne } = resolveArchiveCategories(item);
-  const { title, description } = resolveCatalogTextFields(item);
+  const resolved = resolveCatalogTextFields(item);
+  // Unmatched codes still archive — placeholder text until a code fix
+  // re-links them to Positill (see api/update-product.js re-lookup).
+  const title = resolved.title || String(item.displayCode || '').trim() || sku;
+  const description = resolved.description || title;
   return {
     sku,
     barcode: sku,
