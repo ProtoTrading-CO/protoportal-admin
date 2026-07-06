@@ -650,4 +650,72 @@ assert.match(pmRemoveSrc, /Remove from category/, 'remove-from-category button r
 assert.match(pmRemoveSrc, /pm-bulk-group--end/, 'bulk toolbar regrouped into clustered layout');
 console.log('✓ Remove-from-category (Mottaro-only detach) + regrouped bulk toolbar');
 
+// Production hardening (post-audit) — security, promo contract, lifecycle fixes
+
+// Webhooks must fail CLOSED when WEBHOOK_SECRET is unset
+for (const f of ['api/wati-intercom.js', 'api/intercom-reply.js', 'api/brevo-email-webhook.js']) {
+  const src = readSrc(f);
+  assert.match(src, /if \(!webhookSecret \|\|/, `${f} fails closed without WEBHOOK_SECRET`);
+}
+console.log('✓ Hardening: webhooks fail closed');
+
+// Checkout promo must mirror into the portal validator file
+const promoSrc = readSrc('api/checkout-promo.js');
+assert.match(promoSrc, /promo-codes\.json/, 'checkout-promo mirrors into promo-codes.json');
+assert.match(promoSrc, /discountPct: promo\.percent/, 'promo mirror maps percent to discountPct');
+console.log('✓ Hardening: checkout promo reaches portal validator');
+
+// Rename: tree save (optimistic lock) must run BEFORE product-row writes
+const taxonomyApiSrc2 = readSrc('api/taxonomy.js');
+const renameBlock = taxonomyApiSrc2.match(/if \(action === 'rename'\)[\s\S]*?\n    \}/)?.[0] || '';
+assert.ok(
+  renameBlock.indexOf('saveTaxonomy(next') < renameBlock.indexOf('renameProductsForNode('),
+  'rename saves the tree before touching product rows',
+);
+assert.match(renameBlock, /renameError/, 'rename reports product-write failures');
+assert.match(taxonomyApiSrc2, /pruneSortOrdersForNode/, 'deleteNode prunes orphaned sort orders');
+console.log('✓ Hardening: rename ordering + sort-order pruning');
+
+// Product Manager: Uncategorised entry + deleted-node filter reset
+const pmSrc3 = readSrc('src/components/ProductManagerEngine.jsx');
+assert.equal((pmSrc3.match(/showUncategorized=/g) || []).length, 2, 'both sidebars expose Uncategorised');
+assert.match(pmSrc3, /setCategoryPath\(\[\]\);\s*\n\s*return;/, 'deleted-node path resets the category filter');
+assert.doesNotMatch(pmSrc3, /path\[0\] \|\| tree\[0\]\?\.id/, 'make-live no longer defaults to the first category');
+console.log('✓ Hardening: Uncategorised nav + deleted-node reset + make-live pick');
+
+// Single-product moves resolve labels server-side (like bulk move)
+const updateProductSrc3 = readSrc('api/update-product.js');
+assert.match(updateProductSrc3, /resolveLabelsFromPathIds\(tree, categoryPathIds\)/, 'update-product resolves ids server-side');
+assert.match(updateProductSrc3, /409[\s\S]*?Destination category changed/, 'update-product 409s on stale path');
+const productsLibSrc = readSrc('src/lib/products.js');
+assert.match(productsLibSrc, /body\.categoryPathIds = payload\.categoryPath/, 'client sends node ids, not labels');
+assert.match(readSrc('src/pages/AdminPage.jsx'), /expectedUpdatedAt: editingProduct\.updatedAt/, 'editor sends optimistic-lock stamp');
+console.log('✓ Hardening: single move is rename-safe + optimistic-locked');
+
+// Canonical availability rule: keep_live_when_oos honoured, negative live
+const { isPublishableOnWebsite: publishable } = await import('../lib/catalog-stock.mjs');
+assert.equal(publishable({ stock_qty: 0 }), false, 'zero stock hidden');
+assert.equal(publishable({ stock_qty: 0, keep_live_when_oos: true }), true, 'keep_live_when_oos overrides zero');
+assert.equal(publishable({ stock_qty: -5 }), true, 'negative stock stays live');
+assert.match(readSrc('api/_taxonomy-utils.js'), /keep_live_when_oos/, 'counts select keep_live_when_oos');
+console.log('✓ Hardening: canonical availability rule');
+
+// Misc lifecycle fixes
+assert.match(readSrc('api/stock-actions.js'), /clean\.subcategory_one = clean\.category/, 'create defaults subcategory_one');
+assert.match(readSrc('api/admin-customers.js'), /not\.\?found/, 'customer delete tolerates missing auth user');
+const plSrc = readSrc('src/components/ProductLoaderPanel.jsx');
+assert.match(plSrc, /setActiveTab\('single'\);/, 'Apollo hand-off routes to the Single tab');
+assert.doesNotMatch(plSrc, /setActiveTab\('advanced'\)/, 'no route to nonexistent advanced tab');
+assert.match(readSrc('src/components/PricingPanel.jsx'), /Promise\.allSettled/, 'pricing reports partial failures');
+assert.match(readSrc('src/pages/AdminPage.jsx'), /synced from ERP/, 'stock-on-hand field is read-only');
+console.log('✓ Hardening: lifecycle fixes');
+
+// Export all customers
+const exportCustomersSrc = readSrc('src/lib/exportCustomers.js');
+assert.match(exportCustomersSrc, /\['requests', 'regular'\]/, 'export unions requests + regular tabs');
+assert.match(exportCustomersSrc, /rows\.length < pageSize/, 'export drains pagination');
+assert.match(exportCustomersSrc, /r\.customer_code \|\| r\.account_code/, 'export maps both code columns');
+assert.match(readSrc('src/pages/AdminPage.jsx'), /Export all customers/, 'export button rendered');
+console.log('✓ Export all customers');
+
 console.log('\nAll smoke checks passed.');

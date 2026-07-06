@@ -27,8 +27,10 @@ export default async function handler(req, res) {
     return res.status(405).end();
   }
 
+  // Fail closed: campaign stats are data-integrity sensitive — require the
+  // secret to be configured, not merely matched when present.
   const webhookSecret = process.env.WEBHOOK_SECRET;
-  if (webhookSecret && String(req.query?.secret || '') !== webhookSecret) {
+  if (!webhookSecret || String(req.query?.secret || '') !== webhookSecret) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 

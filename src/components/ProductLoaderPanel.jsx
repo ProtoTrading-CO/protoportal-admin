@@ -724,7 +724,9 @@ export default function ProductLoaderPanel({
   useEffect(() => {
     const c = String(initialCode || '').trim();
     if (!c) return;
-    setActiveTab('advanced');
+    // 'advanced' is not a rendered tab — route to the Single tab, which owns
+    // the code-lookup UI, so an Apollo hand-off doesn't land on a blank panel.
+    setActiveTab('single');
     void handleLookup(c).finally(() => onInitialCodeConsumed?.());
   }, [initialCode]);
 

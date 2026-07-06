@@ -78,10 +78,13 @@ export default function PricingPanel({
     }
     setSaving(true);
     try {
-      const selected = products.filter((p) => selectedIds.includes(p.id));
-      await Promise.all(selected.map((p) => updateProduct(p.id, {
+      const allSelected = products.filter((p) => selectedIds.includes(p.id));
+      // allSettled so one failed save doesn't mask the ones that succeeded.
+      const outcomes = await Promise.allSettled(allSelected.map((p) => updateProduct(p.id, {
         price: Number(((p.price || 0) * (1 + pct / 100)).toFixed(2)),
       })));
+      const failedCount = outcomes.filter((o) => o.status === 'rejected').length;
+      const selected = allSelected.filter((_, i) => outcomes[i].status === 'fulfilled');
 
       // Add newly-repriced items to This Week's Specials (capped at 10).
       const nextSpecials = [...(specials || [])];
@@ -106,7 +109,11 @@ export default function PricingPanel({
         onSpecialsChange?.(nextSpecials);
       }
       await load(category);
-      toast(`Updated ${selected.length} product price(s) — added to This Week's Specials`);
+      if (failedCount > 0) {
+        toast(`Updated ${selected.length} price(s), ${failedCount} failed — reload and retry the rest`, 'error');
+      } else {
+        toast(`Updated ${selected.length} product price(s) — added to This Week's Specials`);
+      }
     } catch (err) {
       toast(err.message || 'Pricing update failed', 'error');
     } finally {

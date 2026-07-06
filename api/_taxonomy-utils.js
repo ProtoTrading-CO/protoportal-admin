@@ -444,7 +444,7 @@ export function resolveLabelsFromPathIds(tree, pathIds = []) {
 }
 
 // Requires migration 038 (mottaro_path) to be applied before deploy.
-const COUNT_ROW_COLS = 'category,subcategory_one,subcategory_two,subcategory_three,subcategory_four,title,available_stock,stock_qty,mottaro_path';
+const COUNT_ROW_COLS = 'category,subcategory_one,subcategory_two,subcategory_three,subcategory_four,title,available_stock,stock_qty,mottaro_path,keep_live_when_oos';
 
 /**
  * Count live products per taxonomy node (includes all descendants).

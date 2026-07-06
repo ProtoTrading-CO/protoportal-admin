@@ -98,6 +98,9 @@ export default async function handler(req, res) {
         'image_url_one', 'image_url_two', 'image_url_three', 'image_url_four',
       ]);
       const clean = Object.fromEntries(Object.entries(row).filter(([k]) => ALLOWED.has(k)));
+      // subcategory_one is NOT NULL — default to the shallow-row convention
+      // (duplicate the category) so non-UI callers can't trip the constraint.
+      if (!String(clean.subcategory_one || '').trim()) clean.subcategory_one = clean.category;
       const { error } = await supabase.from('website_stock').insert(clean);
       if (error) throw error;
       await ensureProductFromCatalogueRow(supabase, clean);

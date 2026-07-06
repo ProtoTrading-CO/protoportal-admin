@@ -1,6 +1,8 @@
 import { requireAdminKey } from './_admin-auth.js';
 import { createClient } from '@supabase/supabase-js';
+import { readSiteConfigJson, writeSiteConfigJson } from './_site-config.js';
 import {
+  labelToSlug,
   addCategoryNode,
   addSubcategoryNode,
   buildCategoryProductCounts,
@@ -23,6 +25,29 @@ function getStockClient() {
     process.env.VITE_STOCK_SUPABASE_KEY,
     { auth: { autoRefreshToken: false, persistSession: false } },
   );
+}
+
+const SORT_FILE = 'sort-orders/orders.json';
+
+/**
+ * Prune saved sort orders for a deleted node and its descendants — otherwise
+ * the orphaned skuOrder entry is silently inherited if the same slug is
+ * later recreated. Keys exist in two forms (slug path and node-id path);
+ * prune both. Best effort.
+ */
+async function pruneSortOrdersForNode(ctx, id) {
+  const slugPrefix = [...ctx.ancestors.map((a) => labelToSlug(a.label)), labelToSlug(ctx.node.label)].join('/');
+  const idPrefix = [...ctx.ancestors.map((a) => a.id), id].join('/');
+  const store = await readSiteConfigJson(SORT_FILE, null);
+  if (!store?.orders) return 0;
+  const matches = (key) => key === slugPrefix || key.startsWith(`${slugPrefix}/`)
+    || key === idPrefix || key.startsWith(`${idPrefix}/`);
+  const keys = Object.keys(store.orders).filter(matches);
+  if (!keys.length) return 0;
+  const nextOrders = { ...store.orders };
+  for (const key of keys) delete nextOrders[key];
+  await writeSiteConfigJson(SORT_FILE, { orders: nextOrders });
+  return keys.length;
 }
 
 async function renameProductsForNode(supabase, ctx, oldLabel, newLabel) {
@@ -79,8 +104,17 @@ export default async function handler(req, res) {
       const { id, label } = req.body;
       const { tree: next, oldLabel, ctx } = renameNodeLabel(tree, id, label);
       const newLabel = label.trim();
-      const productsRenamed = await renameProductsForNode(supabase, ctx, oldLabel, newLabel);
+      // Save the tree FIRST — saveTaxonomy holds the optimistic-lock check.
+      // Renaming product rows before it meant a 409 (concurrent editor) left
+      // every product on the new label while the tree kept the old node.
       const saved = await saveTaxonomy(next, { expectedUpdatedAt });
+      let renameError = null;
+      let productsRenamed = 0;
+      try {
+        productsRenamed = await renameProductsForNode(supabase, ctx, oldLabel, newLabel);
+      } catch (err) {
+        renameError = err.message || 'Failed to rename product labels';
+      }
       // Verification pass — anything still carrying the old label under this
       // scope escaped the rename and would orphan out of the tree.
       let orphansRemaining = 0;
@@ -94,6 +128,7 @@ export default async function handler(req, res) {
         updatedAt: saved.updatedAt,
         productsRenamed,
         orphansRemaining,
+        renameError,
       });
     }
 
@@ -143,6 +178,9 @@ export default async function handler(req, res) {
       } catch (err) {
         clearError = err.message || 'Failed to clear product labels';
       }
+      try {
+        await pruneSortOrdersForNode(ctx, id);
+      } catch { /* best effort — orphaned sort keys are harmless until slug reuse */ }
       return res.status(200).json({
         ok: true,
         id,
