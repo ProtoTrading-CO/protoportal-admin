@@ -46,7 +46,7 @@ async function pruneSortOrdersForNode(ctx, id) {
   if (!keys.length) return 0;
   const nextOrders = { ...store.orders };
   for (const key of keys) delete nextOrders[key];
-  await writeSiteConfigJson(SORT_FILE, { orders: nextOrders });
+  await writeSiteConfigJson(SORT_FILE, { orders: nextOrders, updatedAt: new Date().toISOString() });
   return keys.length;
 }
 
