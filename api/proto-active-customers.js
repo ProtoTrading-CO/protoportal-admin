@@ -9,9 +9,63 @@ function getAdminClient() {
   );
 }
 
-/** Paginated read + inline edit of proto active customer allowlist. */
+const IMPORT_CHUNK = 500;
+
+function normalizeImportRow(raw) {
+  const email = String(raw?.email || raw?.EmailAddress || '').trim().toLowerCase();
+  if (!email || !email.includes('@')) return null;
+  const name = String(raw?.companyName || raw?.CompanyName || raw?.name || '').trim();
+  const contactName = String(raw?.contactName || raw?.ContactName || '').trim();
+  return {
+    account_code: String(raw?.account || raw?.Account || raw?.account_code || '').trim().toUpperCase() || null,
+    name: name || email,
+    contact_name: contactName || null,
+    first_name: contactName ? contactName.split(/\s+/)[0] : null,
+    email,
+    sales_last_12_months: Number(raw?.totalSpend ?? raw?.TotalSpend ?? raw?.sales_last_12_months) || 0,
+  };
+}
+
+/** Paginated read + inline edit + CSV import of proto active customer allowlist. */
 export default async function handler(req, res) {
   if (!(await requireAdminKey(req, res))) return;
+
+  if (req.method === 'POST') {
+    const { action, rows } = req.body || {};
+    if (action !== 'import') return res.status(400).json({ error: 'action must be import' });
+    if (!Array.isArray(rows) || !rows.length) return res.status(400).json({ error: 'rows[] required' });
+
+    const seen = new Set();
+    const cleaned = [];
+    let skipped = 0;
+    for (const raw of rows) {
+      const row = normalizeImportRow(raw);
+      if (!row || seen.has(row.email)) {
+        skipped += 1;
+        continue;
+      }
+      seen.add(row.email);
+      cleaned.push(row);
+    }
+    if (!cleaned.length) return res.status(400).json({ error: 'No valid rows (need EmailAddress on each row)' });
+
+    try {
+      const sb = getAdminClient();
+      let imported = 0;
+      for (let i = 0; i < cleaned.length; i += IMPORT_CHUNK) {
+        const chunk = cleaned.slice(i, i + IMPORT_CHUNK);
+        const { error } = await sb
+          .from('proto_active_customers')
+          .upsert(chunk, { onConflict: 'email' });
+        if (error) throw error;
+        imported += chunk.length;
+      }
+      return res.status(200).json({ ok: true, imported, skipped });
+    } catch (err) {
+      console.error('proto-active-customers POST import:', err?.message || err);
+      return res.status(500).json({ error: err.message || 'Import failed' });
+    }
+  }
 
   if (req.method === 'PATCH') {
     const { id, contact_name, first_name, name, email, account_code, sales_last_12_months, invoice_count, last_purchase_date } = req.body || {};
@@ -49,7 +103,25 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'DELETE') {
-    const { id } = req.body || {};
+    const { id, all, confirm } = req.body || {};
+    if (all) {
+      if (confirm !== 'DELETE ALL CUSTOMERS') {
+        return res.status(400).json({ error: 'confirm must be DELETE ALL CUSTOMERS' });
+      }
+      try {
+        const sb = getAdminClient();
+        const { count, error: countError } = await sb
+          .from('proto_active_customers')
+          .select('*', { count: 'exact', head: true });
+        if (countError) throw countError;
+        const { error } = await sb.from('proto_active_customers').delete().not('id', 'is', null);
+        if (error) throw error;
+        return res.status(200).json({ ok: true, deleted: count || 0 });
+      } catch (err) {
+        console.error('proto-active-customers DELETE all:', err?.message || err);
+        return res.status(500).json({ error: err.message || 'Delete all failed' });
+      }
+    }
     if (!id) return res.status(400).json({ error: 'id required' });
     try {
       const sb = getAdminClient();

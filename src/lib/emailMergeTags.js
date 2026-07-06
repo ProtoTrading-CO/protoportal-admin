@@ -76,13 +76,14 @@ export function buildEmailTextContent({ introText = '', htmlBlock = '' }, vars =
   return parts.join('\n\n').trim();
 }
 
-export function wrapBroadcastHtml({ subject, bodyHtml, siteUrl = 'https://site.proto.co.za', registerUrl = 'https://register.proto.co.za' }) {
+export function wrapBroadcastHtml({ subject, bodyHtml, siteUrl = 'https://site.proto.co.za' }) {
   const safeBody = bodyHtml || '<p style="color:#9ca3af;">Your message will appear here.</p>';
-  const siteLabel = siteUrl.replace(/^https?:\/\//, '');
-  const registerLabel = registerUrl.replace(/^https?:\/\//, '');
+  // Keep in sync with api/_brevo-email.js wrapBroadcastHtml (the sent version).
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escapeHtml(subject || 'Email preview')}</title></head><body style="font-family:Arial,sans-serif;line-height:1.5;color:#111827;max-width:640px;margin:0 auto;padding:24px;">
   ${safeBody}
   <hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0;" />
-  <p style="font-size:12px;color:#6b7280;margin:0;">Proto Trading · <a href="${siteUrl}">${siteLabel}</a> · <a href="${registerUrl}">${registerLabel}</a></p>
+  <div style="text-align:center;margin:0;">
+    <a href="${siteUrl}" style="display:inline-block;background:#c40000;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:6px;font-weight:bold;font-size:14px;">Shop Proto Trading</a>
+  </div>
 </body></html>`;
 }

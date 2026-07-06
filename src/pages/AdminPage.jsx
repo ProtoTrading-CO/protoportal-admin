@@ -78,7 +78,7 @@ import {
   replaceFullTaxonomy,
   subcategoryOptionsFromTree,
 } from '../lib/taxonomyAdmin';
-import { approveCustomer, deleteCustomer, fetchCustomersPage, fetchProtoActiveCustomersPage, updateProtoActiveCustomer, updateCustomerAdmin, deleteProtoActiveCustomer, sendCustomerEmailBroadcast, fetchCrmContactsPage } from '../lib/customers';
+import { approveCustomer, deleteCustomer, fetchCustomersPage, fetchProtoActiveCustomersPage, updateProtoActiveCustomer, updateCustomerAdmin, deleteProtoActiveCustomer, deleteAllProtoActiveCustomers, importProtoActiveCustomers, sendCustomerEmailBroadcast, fetchCrmContactsPage } from '../lib/customers';
 import { BUSINESS_TYPES } from '../lib/businessTypes';
 import { supabase } from '../lib/supabase';
 import { buildOrderNoteSections, createEmailOrderItems, generateOrderPdfBase64, buildEmailItemsFromOrder, base64ToBlob, resolveCustomerOrderPricing, deriveAutoNotesFromItems } from '../lib/orderDocuments';
@@ -643,6 +643,48 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
       showToast(err.message || 'Save failed', 'error');
     } finally {
       setProtoNameSaving(null);
+    }
+  };
+
+  const [importingCustomers, setImportingCustomers] = useState(false);
+  const customerCsvRef = useRef(null);
+
+  const handleCustomerCsvUpload = async (file) => {
+    if (!file) return;
+    setImportingCustomers(true);
+    try {
+      const text = await file.text();
+      const { parseCustomerCsv } = await import('../lib/customerCsvImport');
+      const { rows, errors } = parseCustomerCsv(text);
+      if (!rows.length) {
+        showToast(errors[0] || 'No valid rows in that CSV', 'error');
+        return;
+      }
+      const result = await importProtoActiveCustomers(rows);
+      showToast(
+        `Imported ${result.imported} customer(s) into Pre-registration${result.skipped ? ` — ${result.skipped} skipped (duplicates/invalid)` : ''}${errors.length ? ` — ${errors.length} row(s) had errors` : ''}`,
+        errors.length || result.skipped ? 'warning' : 'success',
+      );
+      await loadCustomers();
+    } catch (err) {
+      showToast(err.message || 'CSV import failed', 'error');
+    } finally {
+      setImportingCustomers(false);
+    }
+  };
+
+  const handleDeleteAllProtoActive = async () => {
+    const typed = window.prompt('This deletes EVERY pre-registration customer. Type DELETE ALL to confirm:');
+    if (typed !== 'DELETE ALL') return;
+    setSaving('del-all-proto');
+    try {
+      const result = await deleteAllProtoActiveCustomers();
+      showToast(`Deleted ${result.deleted} pre-registration customer(s)`);
+      await loadCustomers();
+    } catch (err) {
+      showToast(err.message || 'Delete all failed', 'error');
+    } finally {
+      setSaving('');
     }
   };
 
@@ -2098,6 +2140,35 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                     </p>
                   </div>
                   <div className="adm-customer-actions">
+                    <input
+                      ref={customerCsvRef}
+                      type="file"
+                      accept=".csv,text/csv"
+                      hidden
+                      onChange={(e) => { void handleCustomerCsvUpload(e.target.files?.[0]); e.target.value = ''; }}
+                    />
+                    <button
+                      type="button"
+                      className="adm-btn-ghost"
+                      disabled={importingCustomers}
+                      onClick={() => customerCsvRef.current?.click()}
+                      title="Upload CSV (Account, CompanyName, ContactName, EmailAddress, TotalSpend) into Pre-registration"
+                    >
+                      {importingCustomers
+                        ? <><Loader2 size={14} className="spin" /> Importing…</>
+                        : <><Upload size={14} /> Upload CSV</>}
+                    </button>
+                    <button
+                      type="button"
+                      className="adm-btn-ghost"
+                      style={{ color: '#c40000' }}
+                      disabled={saving === 'del-all-proto'}
+                      onClick={() => void handleDeleteAllProtoActive()}
+                      title="Delete all pre-registration customers"
+                    >
+                      {saving === 'del-all-proto' ? <Loader2 size={14} className="spin" /> : <Trash2 size={14} />}
+                      Delete all
+                    </button>
                     <button
                       type="button"
                       className="adm-btn-ghost"
