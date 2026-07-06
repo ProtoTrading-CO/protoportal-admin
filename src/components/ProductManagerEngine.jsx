@@ -415,6 +415,7 @@ export default function ProductManagerEngine({
   categoryProductCounts = {},
   initialStatus = 'live',
   statuses = CATALOG_STATUSES,
+  showCategorySidebar = true,
   title = 'Product Manager',
   note = 'In-stock products are live on the site. Use ✨ to add products to New Arrivals on the trade homepage.',
 }) {
@@ -1183,7 +1184,8 @@ export default function ProductManagerEngine({
       )}
 
       {(
-        <div className="adm-panel-split">
+        <div className={`adm-panel-split${showCategorySidebar ? '' : ' adm-panel-split--no-sidebar'}`}>
+          {showCategorySidebar && (
           <aside className={`adm-panel-sidebar adm-reorder-tree-sidebar${isMobile ? ' adm-panel-sidebar--desktop-only' : ''}`}>
             <div className="adm-reorder-cat-heading">
               <span>Categories</span>
@@ -1222,8 +1224,9 @@ export default function ProductManagerEngine({
               showUncategorized={(effectiveCategoryCounts.__uncategorized__ || 0) > 0}
             />
           </aside>
+          )}
           <div className="adm-panel-main">
-            {isMobile && (
+            {isMobile && showCategorySidebar && (
               <div className="pm-mobile-cat-bar">
                 <button
                   type="button"
@@ -1681,7 +1684,7 @@ export default function ProductManagerEngine({
         </div>
       )}
 
-      {isMobile && categoryDrawerOpen && (
+      {isMobile && showCategorySidebar && categoryDrawerOpen && (
         <>
           <button
             type="button"

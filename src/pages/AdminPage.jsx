@@ -437,6 +437,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     if (activeSection === 'apollo') setApolloEverActive(true);
   }, [activeSection]);
   const [productLoaderCode, setProductLoaderCode] = useState('');
+  const [siteContentTab, setSiteContentTab] = useState('featured');
   const { data: dashStats } = useDashboardStats();
   const [loading, setLoading] = useState(false);
   const [loadingProgress, setLoadingProgress] = useState(null);
@@ -516,7 +517,6 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   const [orderTabCounts, setOrderTabCounts] = useState(null);
   const [orderSearchDebounced, setOrderSearchDebounced] = useState('');
   const [focusOrderId, setFocusOrderId] = useState('');
-  const [orderSubView, setOrderSubView] = useState('list');
   const [orderSearch, setOrderSearch] = useState('');
   const [fulfillmentSettingsOpen, setFulfillmentSettingsOpen] = useState(false);
   const [fulfillmentUsers, setFulfillmentUsers] = useState([]);
@@ -1357,7 +1357,6 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
       return reloadTaxonomy();
     }
     if (activeSection === 'orders') {
-      if (orderSubView === 'analytics') dispatchAdminRefresh('analytics');
       return loadOrders();
     }
     if (activeSection === 'catalogue') {
@@ -2009,6 +2008,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                   onRefreshStats={refreshDashboardStats}
                   initialStatus="archived"
                   statuses={['archived']}
+                  showCategorySidebar={false}
                   title="Archive"
                   note="Archived products — set them live from here or fix codes/images before publishing."
                   onEditProduct={(item) => openEditProduct(item)}
@@ -2070,27 +2070,37 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
 
 
             {/* FEATURED */}
-            {activeSection === 'featured' && (
-              <SectionErrorBoundary name="featured" title="Featured crashed" resetKey={activeSection}>
-                <Suspense fallback={<SectionSuspenseFallback label="Loading Featured…" />}>
-                  <FeaturedPanel
-                    taxonomyTree={taxonomyTree}
-                    onShowToast={showToast}
-                  />
-                </Suspense>
-              </SectionErrorBoundary>
-            )}
-
-            {/* SPECIALS */}
-            {activeSection === 'specials' && (
-              <SectionErrorBoundary name="specials" title="Specials crashed" resetKey={activeSection}>
-                <Suspense fallback={<SectionSuspenseFallback label="Loading Specials…" />}>
-                  <SpecialsPanel
-                    specials={specials}
-                    onSpecialsChange={setSpecials}
-                    onShowToast={showToast}
-                  />
-                </Suspense>
+            {/* SITE CONTENT — Featured, Specials and Banner Editor in one tab */}
+            {activeSection === 'site-content' && (
+              <SectionErrorBoundary name="site-content" title="Site Content crashed" resetKey={activeSection}>
+                <div className="adm-panel">
+                  <div className="adm-section-head">
+                    <div>
+                      <h2 className="adm-section-title">Site Content</h2>
+                      <p className="adm-section-note">Featured products, weekly specials and the homepage banner — everything shown on the trade portal homepage.</p>
+                    </div>
+                  </div>
+                  <div className="adm-customer-tabs" style={{ marginBottom: 16 }}>
+                    <button type="button" onClick={() => setSiteContentTab('featured')} className={`adm-tab${siteContentTab === 'featured' ? ' adm-tab--active' : ''}`}>Featured</button>
+                    <button type="button" onClick={() => setSiteContentTab('specials')} className={`adm-tab${siteContentTab === 'specials' ? ' adm-tab--active' : ''}`}>Specials</button>
+                    <button type="button" onClick={() => setSiteContentTab('banner')} className={`adm-tab${siteContentTab === 'banner' ? ' adm-tab--active' : ''}`}>Banner Editor</button>
+                  </div>
+                  {siteContentTab === 'featured' && (
+                    <Suspense fallback={<SectionSuspenseFallback label="Loading Featured…" />}>
+                      <FeaturedPanel taxonomyTree={taxonomyTree} onShowToast={showToast} />
+                    </Suspense>
+                  )}
+                  {siteContentTab === 'specials' && (
+                    <Suspense fallback={<SectionSuspenseFallback label="Loading Specials…" />}>
+                      <SpecialsPanel specials={specials} onSpecialsChange={setSpecials} onShowToast={showToast} />
+                    </Suspense>
+                  )}
+                  {siteContentTab === 'banner' && (
+                    <Suspense fallback={<SectionSuspenseFallback label="Loading Banner Editor…" />}>
+                      <BannerPanel onShowToast={showToast} />
+                    </Suspense>
+                  )}
+                </div>
               </SectionErrorBoundary>
             )}
 
@@ -2393,49 +2403,26 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                   <div>
                     <h2 className="adm-section-title">Order Requests</h2>
                     <p className="adm-section-note">
-                      {orderSubView === 'analytics'
-                        ? 'Sales and engagement metrics for the selected time period.'
-                        : 'Paginated order list with server-side search and tab filters. Click a row to expand details.'}
+                      Paginated order list with server-side search and tab filters. Click a row to expand details.
                     </p>
                   </div>
-                  {orderSubView === 'list' && (
-                    <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-                      <button
-                        type="button"
-                        className="adm-btn-ghost"
-                        onClick={() => setFulfillmentSettingsOpen(true)}
-                        title="Fulfillment team settings"
-                        style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px' }}
-                      >
-                        <User size={16} /> Team
-                      </button>
-                      <button
-                        type="button"
-                        className="adm-btn-ghost"
-                        onClick={() => void clearAllOrders()}
-                        disabled={loading || saving === 'clear-all-orders'}
-                        style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px', color: '#c40000' }}
-                        title="Delete all orders"
-                      >
-                        {saving === 'clear-all-orders' ? <Loader2 size={15} className="spin" /> : <Trash2 size={15} />}
-                        Clear all
-                      </button>
-                      <label className="adm-search"><Search size={15} /><input value={orderSearch} onChange={(e) => setOrderSearch(e.target.value)} placeholder="Search orders" className="adm-search-input" /></label>
-                    </div>
-                  )}
+                  <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      className="adm-btn-ghost"
+                      onClick={() => void clearAllOrders()}
+                      disabled={loading || saving === 'clear-all-orders'}
+                      style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px', color: '#c40000' }}
+                      title="Delete all orders"
+                    >
+                      {saving === 'clear-all-orders' ? <Loader2 size={15} className="spin" /> : <Trash2 size={15} />}
+                      Clear all
+                    </button>
+                    <label className="adm-search"><Search size={15} /><input value={orderSearch} onChange={(e) => setOrderSearch(e.target.value)} placeholder="Search orders" className="adm-search-input" /></label>
+                  </div>
                 </div>
 
-                <div className="adm-customer-tabs" style={{ marginBottom: 16 }}>
-                  <button type="button" onClick={() => setOrderSubView('list')} className={`adm-tab${orderSubView === 'list' ? ' adm-tab--active' : ''}`}>Orders</button>
-                  <button type="button" onClick={() => setOrderSubView('analytics')} className={`adm-tab${orderSubView === 'analytics' ? ' adm-tab--active' : ''}`}>
-                    <BarChart2 size={14} style={{ marginRight: 6, verticalAlign: -2 }} />
-                    Analytics
-                  </button>
-                </div>
-
-                {orderSubView === 'analytics' ? (
-                  <AnalyticsHub />
-                ) : (
+                {(
                 <>
                 <div className="adm-order-tabs">
                   {[
@@ -2577,7 +2564,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                     </div>
                   )}
                 </div>
-                {orderSubView === 'list' && orderPages > 1 && (
+                {orderPages > 1 && (
                   <Pager page={orderPage} totalPages={orderPages} onChange={setOrderPage} />
                 )}
                 </>
@@ -2629,16 +2616,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
               </SectionErrorBoundary>
             )}
 
-            {/* BANNER EDITOR */}
-            {activeSection === 'banner' && (
-              <SectionErrorBoundary name="banner" title="Banner Editor crashed" resetKey={activeSection}>
-                <Suspense fallback={<SectionSuspenseFallback label="Loading Banner Editor…" />}>
-                  <BannerPanel onShowToast={showToast} />
-                </Suspense>
-              </SectionErrorBoundary>
-            )}
-
-            {/* POPUP SPECIALS — merged into Specials tab */}
+            {/* BANNER EDITOR + POPUP SPECIALS — merged into the Site Content tab */}
 
 
           </main>

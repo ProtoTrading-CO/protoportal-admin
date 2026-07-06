@@ -1,6 +1,6 @@
 ---
 name: protoportal-admin
-description: Expert guide for the standalone Proto Admin Portal (protoportal-admin.vercel.app). Use whenever the user mentions admin portal, admin dashboard, Product Manager, Reorder Grid, New Products, dormant products, WhatsApp CRM, Banner Editor, Popup Specials, Analytics, Pricing & Returns, or any fix/feature for protoportal-admin — even if they don't say "admin" explicitly. NEVER use the deprecated embedded AdminPage in protoportal-main for admin work.
+description: Expert guide for the standalone Proto Admin Portal (admin.proto.co.za). Use whenever the user mentions admin portal, admin dashboard, Product Manager, Archive, Reorder Grid, Product Loader, WhatsApp CRM, Site Content (Featured/Specials/Banner), Analytics, Pricing, or any fix/feature for protoportal-admin — even if they don't say "admin" explicitly. NEVER use the deprecated embedded AdminPage in protoportal-main for admin work.
 ---
 
 # Proto Admin Portal (standalone)
@@ -9,7 +9,7 @@ description: Expert guide for the standalone Proto Admin Portal (protoportal-adm
 
 | App | Repository | Production URL |
 |-----|------------|----------------|
-| **Admin portal (this skill)** | https://github.com/danieljoffeinfo-web/protoportal-admin | https://protoportal-admin.vercel.app |
+| **Admin portal (this skill)** | https://github.com/danieljoffeinfo-web/protoportal-admin | https://admin.proto.co.za |
 | Main trade portal | https://github.com/danieljoffeinfo-web/Proto-Website- | https://protoportal-main.vercel.app |
 
 The old embedded admin inside protoportal-main is **deprecated**. Never restore, reference, or deploy it.
@@ -43,24 +43,27 @@ npm run build
 - `Root.jsx`: `/fulfillment` → `FulfillmentPage`; else → `AdminGate` (login or `AdminPage`)
 - "Portal" button links to protoportal-main.vercel.app
 
-## Admin sections (`AdminPage.jsx`)
+## Admin sections (`AdminPage.jsx` / `GroupedSidebar.jsx` NAV_ITEMS)
 
 | ID | Label |
 |----|-------|
-| `new-products` | New Products (dormant upload, cost tracker) |
-| `products` | Product Manager |
-| `specials` | This Week's Specials |
-| `archive` | Archive |
-| `reorder` | Reorder Grid (`ReorderGrid.jsx`) |
-| `customers` | Customer Management |
+| `orders` | Order Requests (workflow tabs, Rand amounts, notify gate) |
+| `product-loader` | Product Loader (Nutstore PTR Photos, single/folder upload) |
+| `image-replace` | Image Replace (live + archived scope) |
+| `apollo` | Apollo — conversational analyst chat only (NO image gen) |
+| `catalogue` | Product Manager (live products only) |
+| `archive` | Archive (archived products, no category sidebar) |
+| `reorder` | Reorder Grid (`ReorderPanel.jsx` + `ReorderGrid.jsx`) |
+| `customers` | Customer Management (requests / pre-registration / approved / email analytics / scheduled emails) |
+| `site-content` | Site Content — Featured + Specials + Banner Editor sub-tabs |
 | `crm` | WhatsApp |
-| `banner` | Banner Editor |
-| `popup-specials` | Popup Specials |
 | `analytics` | Analytics |
-| `pricing` | Pricing & Returns |
-| `orders` | Order Requests |
+| `pricing` | Pricing |
+| `team` | Team (opens fulfillment team modal, no section) |
 
-Default section: `new-products` (not `products`).
+Removed (never reintroduce): Apollo image generation, Cost Tracking,
+product approval tab, reorder mode inside Product Manager, recycle-bin
+buttons, product-type dropdown.
 
 ## Data layer
 
@@ -82,4 +85,5 @@ Taxonomy tree loaded dynamically (`taxonomyTree`), not only static JSON.
 1. Editing `protoportal-main/src/pages/AdminPage.jsx` — wrong app, fewer features, deprecated
 2. Assuming login/session exists
 3. Deploying main repo to admin Vercel alias
-4. Using outdated mental model (embedded 6-section admin vs this 12-section app)
+4. Using an outdated mental model (embedded 6-section admin vs this multi-section app)
+5. Reintroducing removed features (Apollo image gen, Cost Tracking, approval tab, recycle bin)

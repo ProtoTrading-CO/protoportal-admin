@@ -3,7 +3,7 @@
 Standalone admin app for Proto Trading. **Not** the main trade portal.
 
 - **Repo:** https://github.com/danieljoffeinfo-web/protoportal-admin
-- **Production:** https://protoportal-admin.vercel.app
+- **Production:** https://admin.proto.co.za (Vercel project `protoportal-admin`)
 - **Main portal (separate):** https://github.com/danieljoffeinfo-web/Proto-Website-
 
 ## Stack
@@ -20,9 +20,21 @@ npm run build
 
 ## Structure
 - `src/pages/AdminPage.jsx` — all admin sections
-- `src/components/` — ReorderGrid, BroadcastCalendar, etc.
+- `src/components/` — ProductManagerEngine, ReorderGrid, etc.
 - `src/lib/` — products, taxonomy, customers, orders
 - `api/` — serverless backend
+
+## Sections (nav ids)
+`orders` (Order Requests) · `product-loader` · `image-replace` · `apollo`
+(conversational analyst — **no image gen**) · `catalogue` (Product Manager,
+live only) · `archive` (archived products, no category sidebar) · `reorder`
+(Reorder Grid) · `customers` (incl. Scheduled emails + Email Analytics tabs)
+· `site-content` (Featured + Specials + Banner Editor) · `crm` (WhatsApp) ·
+`analytics` · `pricing` · `team` (opens fulfillment team modal).
+
+Removed features — do NOT reintroduce: Apollo image generation, Cost
+Tracking, product approval tab, reorder mode inside Product Manager,
+recycle-bin buttons, product-type dropdown in the edit modal.
 
 ## Auth
 
