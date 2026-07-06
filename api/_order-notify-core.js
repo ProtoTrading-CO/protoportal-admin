@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { PROTO_URLS } from './_proto-urls.js';
 import { sendBrevoTransactional } from './_brevo-email.js';
-import { readOrderNotifyLog } from './_site-config.js';
+import { readOrderNotifyLog, writeOrderNotifyLog } from './_site-config.js';
 
 export const NEW_ORDER_ALERT_EMAIL = process.env.NEW_ORDER_ALERT_EMAIL || 'online@proto.co.za';
 
@@ -91,7 +91,10 @@ export function isOrderNotifyComplete(log) {
   const whatsappOk = !!log.statusAdvanced
     || sentToWholeTeam
     || !!log.skippedNoToken
-    || !!log.skippedNoTeam;
+    || !!log.skippedNoTeam
+    // WhatsApp isn't wired up on this install (no ORDER_NOTIFY_SECRET) — the
+    // alert email alone is enough to release the order.
+    || !!log.whatsappNotConfigured;
   if (!emailOk) {
     return { ok: false, reason: `The new-order email to ${NEW_ORDER_ALERT_EMAIL} has not been sent yet` };
   }
@@ -130,7 +133,27 @@ export async function notifyNewOrder(orderId) {
 
   const secret = process.env.ORDER_NOTIFY_SECRET;
   if (!secret) {
-    return { ok: false, emailSent, emailError, error: 'ORDER_NOTIFY_SECRET is not configured on admin portal' };
+    // No team-WhatsApp link configured. Record an email-only round so the
+    // order can still leave "New" on the strength of the alert email, and the
+    // dashboard shows an honest status instead of an empty log.
+    await writeOrderNotifyLog(orderId, {
+      found: true,
+      emailSent,
+      emailError,
+      alertEmail: NEW_ORDER_ALERT_EMAIL,
+      whatsappNotConfigured: true,
+      sent: 0,
+      failed: 0,
+      teamSize: 0,
+      at: new Date().toISOString(),
+    }).catch(() => {});
+    return {
+      ok: emailSent,
+      emailSent,
+      emailError,
+      whatsappNotConfigured: true,
+      error: emailSent ? null : (emailError || 'email_failed'),
+    };
   }
 
   try {

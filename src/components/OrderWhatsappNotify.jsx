@@ -85,6 +85,30 @@ export default function OrderWhatsappNotify({ orderId, orderStatus = '' }) {
     );
   }
 
+  // WhatsApp not wired up on this install — the alert email carries the order.
+  if (log.whatsappNotConfigured) {
+    return (
+      <div className={`oa-wa-notify${log.emailSent ? ' oa-wa-notify--ok' : ' oa-wa-notify--err'}`}>
+        <div className="oa-wa-notify-head">
+          {log.emailSent ? <CheckCircle2 size={15} /> : <AlertTriangle size={15} />}
+          <strong>Order notification</strong>
+          <span className="oa-wa-notify-meta">
+            {log.emailSent ? `Emailed to ${log.alertEmail || 'online@proto.co.za'}` : 'Email pending'}
+            {log.at ? ` · ${new Date(log.at).toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : ''}
+          </span>
+          <button type="button" className="oa-wa-notify-retry" onClick={handleRetry} disabled={retrying} title="Resend order email">
+            {retrying ? <Loader2 size={12} className="star-spinning" /> : <RefreshCw size={12} />}
+          </button>
+        </div>
+        <p className="oa-wa-notify-msg">
+          Team WhatsApp is not set up on this portal, so new orders are announced by email only.
+          {log.emailSent ? '' : ' The email has not gone out yet — retry above.'}
+        </p>
+        {retryMsg && <p className="oa-wa-notify-msg">{retryMsg}</p>}
+      </div>
+    );
+  }
+
   const allFailed = log.failed > 0 && log.sent === 0;
   const partial = log.failed > 0 && log.sent > 0;
   const allOk = log.sent > 0 && log.failed === 0 && log.ok;
