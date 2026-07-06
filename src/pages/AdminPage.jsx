@@ -1428,13 +1428,17 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     if (!editTaxonomyModal?.label?.trim()) return;
     setTaxonomySaving(true);
     try {
-      await renameTaxonomyNode(editTaxonomyModal.id, editTaxonomyModal.label.trim());
+      const renameResult = await renameTaxonomyNode(editTaxonomyModal.id, editTaxonomyModal.label.trim());
       await reloadTaxonomy();
       invalidateAdminCache();
       queryClient.invalidateQueries({ queryKey: ['catalog'] });
       await reorderPanelRef.current?.refresh?.();
       setEditTaxonomyModal(null);
-      showToast('Category updated');
+      if (renameResult?.orphansRemaining > 0) {
+        showToast(`Category renamed, but ${renameResult.orphansRemaining} product(s) kept the old label — check Uncategorised`, 'error');
+      } else {
+        showToast('Category updated');
+      }
     } catch (err) {
       if (await handleTaxonomyConflict(err)) {
         setEditTaxonomyModal(null);

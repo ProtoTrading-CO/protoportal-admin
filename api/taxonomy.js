@@ -4,14 +4,14 @@ import {
   addCategoryNode,
   addSubcategoryNode,
   buildCategoryProductCounts,
-  buildRenameFilter,
   countProductsForNode,
+  countRenameOrphans,
   deleteNodeCascade,
-  deleteSubcategoryNode,
   findNodeContext,
   loadTaxonomy,
   readTaxonomyStore,
   renameNodeLabel,
+  renameNodeLabelInProducts,
   resolveLabelsFromPathIds,
   saveTaxonomy,
 } from './_taxonomy-utils.js';
@@ -24,19 +24,13 @@ function getStockClient() {
   );
 }
 
-async function applyRenameToTable(supabase, table, ctx, oldLabel, newLabel) {
-  const { column, filters } = buildRenameFilter(ctx, oldLabel);
-  let q = supabase.from(table).update({ [column]: newLabel, updated_at: new Date().toISOString() });
-  for (const [key, val] of Object.entries(filters)) {
-    if (val != null) q = q.eq(key, val);
-  }
-  const { error } = await q;
-  if (error) throw error;
-}
-
 async function renameProductsForNode(supabase, ctx, oldLabel, newLabel) {
-  await applyRenameToTable(supabase, 'website_stock', ctx, oldLabel, newLabel);
-  await applyRenameToTable(supabase, 'archived_products', ctx, oldLabel, newLabel);
+  let renamed = 0;
+  for (const table of ['website_stock', 'archived_products']) {
+    const result = await renameNodeLabelInProducts(supabase, table, ctx, oldLabel, newLabel);
+    renamed += result.renamed;
+  }
+  return renamed;
 }
 
 function taxonomyConflictResponse(res, err) {
@@ -83,9 +77,23 @@ export default async function handler(req, res) {
     if (action === 'rename') {
       const { id, label } = req.body;
       const { tree: next, oldLabel, ctx } = renameNodeLabel(tree, id, label);
-      await renameProductsForNode(supabase, ctx, oldLabel, label.trim());
+      const newLabel = label.trim();
+      const productsRenamed = await renameProductsForNode(supabase, ctx, oldLabel, newLabel);
       const saved = await saveTaxonomy(next, { expectedUpdatedAt });
-      return res.status(200).json({ ok: true, id, label: label.trim(), updatedAt: saved.updatedAt });
+      // Verification pass — anything still carrying the old label under this
+      // scope escaped the rename and would orphan out of the tree.
+      let orphansRemaining = 0;
+      try {
+        orphansRemaining = await countRenameOrphans(supabase, ctx, oldLabel, newLabel);
+      } catch { /* best effort — rename itself already succeeded */ }
+      return res.status(200).json({
+        ok: true,
+        id,
+        label: newLabel,
+        updatedAt: saved.updatedAt,
+        productsRenamed,
+        orphansRemaining,
+      });
     }
 
     if (action === 'addCategory') {

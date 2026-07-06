@@ -3,6 +3,12 @@ import { join } from 'path';
 import { readSiteConfigJson, writeSiteConfigJson } from './_site-config.js';
 import { isPublishableOnWebsite } from '../lib/catalog-stock.mjs';
 import { isMotarroProduct, inferMotarroPathFromRow, injectMotarroIntoTree } from './_mottaro-category.js';
+import {
+  escapeIlikePattern,
+  matchesTaxonomyLabel,
+  normalizeLabel,
+  rowMatchesLabelScope,
+} from '../lib/taxonomy-match.mjs';
 
 const TAXONOMY_FILE = 'taxonomy/categories.json';
 const BUNDLED_PATH = join(process.cwd(), 'src/data/categories.json');
@@ -154,10 +160,6 @@ export function labelsToDbFields(labels) {
   };
 }
 
-function normalizeLabel(label) {
-  return String(label || '').trim().toLowerCase();
-}
-
 /**
  * Resolve the current taxonomy ids for a product row's labels.
  * Taxonomy node ids stay stable across rename, but the labels stored in the
@@ -306,15 +308,93 @@ export function buildNodeProductFilter(ctx) {
   return { filters };
 }
 
+const SCOPE_FETCH_COLS = 'sku,category,subcategory_one,subcategory_two,subcategory_three,subcategory_four';
+
+/**
+ * Fetch rows belonging to a node scope with whitespace/case-tolerant matching.
+ * Pass 1 narrows server-side with a contains-ilike on the deepest column
+ * (catches padded values like " Fasteners"); pass 2 verifies the full
+ * ancestor scope in JS with the shared normalized matcher.
+ */
+export async function fetchRowsMatchingNodeScope(supabase, table, { column, filters }) {
+  const label = String(filters[column] ?? '').trim();
+  if (!label) return [];
+  const pattern = `%${escapeIlikePattern(label)}%`;
+  const rows = [];
+  let from = 0;
+  const PAGE = 1000;
+  while (true) {
+    const { data, error } = await supabase
+      .from(table)
+      .select(SCOPE_FETCH_COLS)
+      .ilike(column, pattern)
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+    const batch = data || [];
+    for (const row of batch) {
+      if (rowMatchesLabelScope(row, filters)) rows.push(row);
+    }
+    if (batch.length < PAGE) break;
+    from += PAGE;
+  }
+  return rows;
+}
+
+/** Deepest column of a node scope — the column that names the node itself. */
+export function nodeScopeColumn(ctx) {
+  return ctx.depth === 0 ? 'category' : SUB_COLS[ctx.depth - 1];
+}
+
 export async function countProductsForNode(supabase, ctx) {
   const { filters } = buildNodeProductFilter(ctx);
-  let q = supabase.from('website_stock').select('sku', { count: 'exact', head: true });
-  for (const [key, val] of Object.entries(filters)) {
-    if (val != null) q = q.eq(key, val);
+  const rows = await fetchRowsMatchingNodeScope(supabase, 'website_stock', {
+    column: nodeScopeColumn(ctx),
+    filters,
+  });
+  return rows.length;
+}
+
+const PRODUCT_UPDATE_CHUNK = 200;
+
+async function chunkedSkuUpdate(supabase, table, skus, patch) {
+  for (let i = 0; i < skus.length; i += PRODUCT_UPDATE_CHUNK) {
+    const { error } = await supabase
+      .from(table)
+      .update(patch)
+      .in('sku', skus.slice(i, i + PRODUCT_UPDATE_CHUNK));
+    if (error) throw error;
   }
-  const { count, error } = await q;
-  if (error) throw error;
-  return count || 0;
+}
+
+/**
+ * Rename a node's label on every product row in one table, tolerant of
+ * whitespace/case drift in stored labels. Shallow rows duplicate the main
+ * category label into subcategory_one, so a depth-0 rename must update both
+ * columns or the row orphans at depth 1.
+ */
+export async function renameNodeLabelInProducts(supabase, table, ctx, oldLabel, newLabel) {
+  const { column, filters } = buildRenameFilter(ctx, oldLabel);
+  const rows = await fetchRowsMatchingNodeScope(supabase, table, { column, filters });
+  if (!rows.length) return { renamed: 0 };
+  const stamp = new Date().toISOString();
+  const needsSubOne = (row) => ctx.depth === 0 && matchesTaxonomyLabel(row.subcategory_one, oldLabel);
+  const dualSkus = rows.filter((r) => needsSubOne(r)).map((r) => r.sku).filter(Boolean);
+  const singleSkus = rows.filter((r) => !needsSubOne(r)).map((r) => r.sku).filter(Boolean);
+  await chunkedSkuUpdate(supabase, table, singleSkus, { [column]: newLabel, updated_at: stamp });
+  await chunkedSkuUpdate(supabase, table, dualSkus, {
+    [column]: newLabel,
+    subcategory_one: newLabel,
+    updated_at: stamp,
+  });
+  return { renamed: dualSkus.length + singleSkus.length };
+}
+
+/** Count live rows still carrying the old label under the node scope. */
+export async function countRenameOrphans(supabase, ctx, oldLabel, newLabel) {
+  if (normalizeLabel(oldLabel) === normalizeLabel(newLabel)) return 0;
+  const { column, filters } = buildRenameFilter(ctx, oldLabel);
+  const remaining = await fetchRowsMatchingNodeScope(supabase, 'website_stock', { column, filters });
+  return remaining.length;
 }
 
 /** Resolve taxonomy labels from an id path (main + subcategory ids). */
