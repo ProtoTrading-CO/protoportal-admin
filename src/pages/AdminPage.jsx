@@ -14,6 +14,7 @@ import {
   ClipboardList,
   Clock,
   DollarSign,
+  Download,
   Eye,
   FileDown,
   Home,
@@ -597,6 +598,21 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
       setCustomerRows([]);
       setCustomerTotal(0);
     } finally { setLoading(false); }
+  };
+
+  const [exportingCustomers, setExportingCustomers] = useState(false);
+  const handleExportAllCustomers = async () => {
+    if (exportingCustomers) return;
+    setExportingCustomers(true);
+    try {
+      const { exportAllCustomersXlsx } = await import('../lib/exportCustomers');
+      const counts = await exportAllCustomersXlsx();
+      showToast(`Exported ${counts.portal} portal customer(s) and ${counts.preRegistration} pre-registration contact(s)`);
+    } catch (err) {
+      showToast(err.message || 'Customer export failed', 'error');
+    } finally {
+      setExportingCustomers(false);
+    }
   };
 
   const saveProtoActiveName = async (row, field, value) => {
@@ -1324,8 +1340,8 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
       imageThree: productForm.imageThree.trim(),
       imageFour: productForm.imageFour.trim(),
       price: Number(productForm.price || 0),
-      stockOnHand: Number(productForm.stockOnHand || 0),
       ...(categoryPath.length ? { categoryPath } : {}),
+      ...(editingProduct?.updatedAt ? { expectedUpdatedAt: editingProduct.updatedAt } : {}),
       ...typePatch(productForm.productType, editingProduct || {}),
     };
     setSaving(editingProduct?.id || 'new-product');
@@ -2066,6 +2082,16 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                     </p>
                   </div>
                   <div className="adm-customer-actions">
+                    <button
+                      type="button"
+                      className="adm-btn-ghost"
+                      disabled={exportingCustomers}
+                      onClick={() => void handleExportAllCustomers()}
+                    >
+                      {exportingCustomers
+                        ? <><Loader2 size={14} className="spin" /> Exporting…</>
+                        : <><Download size={14} /> Export all customers</>}
+                    </button>
                     <button type="button" className="adm-btn-red" onClick={() => setCustomerEmailOpen(true)}>
                       <Mail size={14} /> Send email
                     </button>
@@ -3209,7 +3235,8 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                 </AdminField>
               ))}
               <AdminField label="Price"><input type="text" inputMode="decimal" value={productForm.price} onChange={(e) => setProductForm((p) => ({ ...p, price: e.target.value }))} className="adm-field-input" /></AdminField>
-              <AdminField label="Stock on hand"><input type="text" inputMode="numeric" value={productForm.stockOnHand} onChange={(e) => setProductForm((p) => ({ ...p, stockOnHand: e.target.value }))} className="adm-field-input" /></AdminField>
+              {/* SOH comes from the ERP sync — an editable field here silently discarded input. */}
+              <AdminField label="Stock on hand (synced from ERP)"><input type="text" value={productForm.stockOnHand} readOnly disabled className="adm-field-input" title="Stock on hand is synced from the ERP and cannot be edited here" /></AdminField>
               {/*
                 Cascading category pickers — Main → Child 1 → Child 2 → Child 3 → Child 4.
                 Hidden for archived products — category is chosen at Make live instead.

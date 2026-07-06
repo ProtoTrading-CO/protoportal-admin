@@ -88,10 +88,11 @@ export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   if (req.method !== 'POST') return res.status(405).end();
 
-  // When WEBHOOK_SECRET is set, require ?secret=... on the webhook URL
-  // (configure the same value in the WATI dashboard webhook URL).
+  // Fail closed: this webhook sends outbound WhatsApp and mutates contact
+  // state, so it must never run without WEBHOOK_SECRET configured. Configure
+  // the same value as ?secret=... in the WATI dashboard webhook URL.
   const webhookSecret = process.env.WEBHOOK_SECRET;
-  if (webhookSecret && String(req.query?.secret || '') !== webhookSecret) {
+  if (!webhookSecret || String(req.query?.secret || '') !== webhookSecret) {
     return res.status(401).json({ error: 'Unauthorised' });
   }
 

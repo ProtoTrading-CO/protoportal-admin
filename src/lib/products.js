@@ -539,10 +539,14 @@ export async function updateProduct(sku, payload) {
   if (payload.packDescription !== undefined) body.packDescription = payload.packDescription;
   if (payload.name !== undefined) body.title = payload.name;
   if (payload.price !== undefined) body.price = Number(payload.price) || 0;
-  if (payload.categoryPath?.length) Object.assign(body, pathToWriteFields(payload.categoryPath));
+  // Send node ids, not client-resolved labels — the server resolves them
+  // against the live taxonomy (and 409s on a stale path), so a concurrent
+  // category rename can't make this move write outdated labels.
+  if (payload.categoryPath?.length) body.categoryPathIds = payload.categoryPath;
+  if (payload.expectedUpdatedAt !== undefined) body.expectedUpdatedAt = payload.expectedUpdatedAt;
   if (payload.newWebsiteSku !== undefined) body.newWebsiteSku = String(payload.newWebsiteSku).trim();
 
-  if (Object.keys(body).length <= 1) {
+  if (Object.keys(body).length <= 1 || (Object.keys(body).length === 2 && body.expectedUpdatedAt !== undefined)) {
     invalidateAdminCache();
     return;
   }

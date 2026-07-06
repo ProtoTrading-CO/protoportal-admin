@@ -197,7 +197,9 @@ export default async function handler(req, res) {
     }
 
     const { error: authError } = await supabase.auth.admin.deleteUser(id);
-    if (authError) {
+    // A customers row without a matching auth user (imported/legacy rows)
+    // must still be deletable — treat "user not found" as already deleted.
+    if (authError && !/not.?found/i.test(authError.message || '')) {
       return res.status(400).json({ error: authError.message || 'Failed to delete auth user' });
     }
 

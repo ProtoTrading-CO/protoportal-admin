@@ -2,6 +2,11 @@ import { requireAdminKey } from './_admin-auth.js';
 import { readSiteConfigJson, writeSiteConfigJson } from './_site-config.js';
 
 const FILE = 'checkout-promo.json';
+// The portal validates checkout codes against promo-codes.json
+// (Proto-Website- api/_promo-codes.js: { codes: [{ code, discountPct,
+// active, label }] }) — every save must mirror into that file or codes
+// are rejected at checkout.
+const PORTAL_PROMO_FILE = 'promo-codes.json';
 const DEFAULTS = {
   active: true,
   code: 'PROTO75',
@@ -25,12 +30,23 @@ export default async function handler(req, res) {
     if (!(await requireAdminKey(req, res))) return;
     try {
       const body = req.body || {};
-      const saved = await writeSiteConfigJson(FILE, {
+      const promo = {
         active: Boolean(body.active),
         code: String(body.code || DEFAULTS.code).trim().toUpperCase(),
         percent: Math.min(50, Math.max(0, Number(body.percent) || DEFAULTS.percent)),
         label: String(body.label || DEFAULTS.label).trim(),
         updatedAt: new Date().toISOString(),
+      };
+      const saved = await writeSiteConfigJson(FILE, promo);
+      // Mirror into the portal's validator file so the code actually works
+      // at checkout — checkout-promo.json alone is never read by the portal.
+      await writeSiteConfigJson(PORTAL_PROMO_FILE, {
+        codes: [{
+          code: promo.code,
+          discountPct: promo.percent,
+          active: promo.active,
+          label: promo.label,
+        }],
       });
       return res.status(200).json({ ok: true, ...saved });
     } catch (err) {

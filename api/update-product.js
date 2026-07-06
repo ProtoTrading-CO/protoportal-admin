@@ -2,7 +2,7 @@ import { requireAdminKey } from './_admin-auth.js';
 import { createClient } from '@supabase/supabase-js';
 import { resolveProductLoaderMatch } from './_product-loader-lookup.js';
 import { ensureProductFromCatalogueRow } from './_ensure-product.js';
-import { loadTaxonomy } from './_taxonomy-utils.js';
+import { labelsToDbFields, loadTaxonomy, resolveLabelsFromPathIds } from './_taxonomy-utils.js';
 import { deriveMotarroPathFromLabels, isMotarroProduct, motarroPathSnapshot } from './_mottaro-category.js';
 
 const CATEGORY_COLS = ['category', 'subcategory_one', 'subcategory_two', 'subcategory_three', 'subcategory_four'];
@@ -79,6 +79,22 @@ export default async function handler(req, res) {
   if (subcategory_two !== undefined) patch.subcategory_two = subcategory_two ? String(subcategory_two).trim() : null;
   if (subcategory_three !== undefined) patch.subcategory_three = subcategory_three ? String(subcategory_three).trim() : null;
   if (subcategory_four !== undefined) patch.subcategory_four = subcategory_four ? String(subcategory_four).trim() : null;
+  // Preferred category input: taxonomy node ids, resolved server-side against
+  // the live tree (mirrors bulk move) so a stale client can't write outdated
+  // labels. Raw label fields above remain supported for legacy callers.
+  const categoryPathIds = req.body?.categoryPathIds;
+  if (Array.isArray(categoryPathIds) && categoryPathIds.length) {
+    try {
+      const tree = await loadTaxonomy();
+      const labels = resolveLabelsFromPathIds(tree, categoryPathIds);
+      Object.assign(patch, labelsToDbFields(labels));
+    } catch (err) {
+      return res.status(409).json({
+        error: 'Destination category changed — reload categories and reselect.',
+        detail: err.message || 'Invalid category path',
+      });
+    }
+  }
   if (nextSku && nextSku !== sku) patch.sku = nextSku;
   if (!Object.keys(patch).length) return res.status(200).json({ ok: true });
 

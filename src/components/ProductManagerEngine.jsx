@@ -345,10 +345,12 @@ function withCurrentOption(options, currentId) {
   return [{ id: currentId, label: `${currentId} (missing)` }, ...options];
 }
 
-function productCategoryRowFromItem(item, tree) {
+function productCategoryRowFromItem(item) {
+  // No default to the first tree node — an uncategorised product must force
+  // an explicit category pick, not silently go live under e.g. Arts & Crafts.
   const path = item.categoryPath || [];
   return {
-    categoryId: path[0] || tree[0]?.id || '',
+    categoryId: path[0] || '',
     childOneId: path[1] || '',
     childTwoId: path[2] || '',
     childThreeId: path[3] || '',
@@ -539,6 +541,23 @@ export default function ProductManagerEngine({
   const categoryKey = categoryPath.length
     ? sortOrderCategoryKey(categoryPath, tree)
     : '__all__';
+
+  // If the selected category node was deleted from the taxonomy, reset the
+  // filter — an unresolvable path applies no server filter and would
+  // silently show ALL products as if they belonged to the deleted category.
+  useEffect(() => {
+    if (!categoryPath.length || !tree.length) return;
+    if (categoryPath[0] === '__uncategorized__') return;
+    let nodes = tree;
+    for (const id of categoryPath) {
+      const node = (nodes || []).find((n) => n.id === id);
+      if (!node) {
+        setCategoryPath([]);
+        return;
+      }
+      nodes = node.children || [];
+    }
+  }, [tree, categoryPath]);
 
   useEffect(() => {
     for (const row of rows) {
@@ -977,7 +996,7 @@ export default function ProductManagerEngine({
 
   const makeLive = (item) => {
     setMakeLiveItem(item);
-    setMakeLiveCategory(productCategoryRowFromItem(item, tree));
+    setMakeLiveCategory(productCategoryRowFromItem(item));
   };
 
   const confirmMakeLive = async () => {
@@ -1210,6 +1229,7 @@ export default function ProductManagerEngine({
               onAddChild={onAddSubcategory}
               onReorder={onCategoryReorder}
               productCounts={effectiveCategoryCounts}
+              showUncategorized={(effectiveCategoryCounts.__uncategorized__ || 0) > 0}
             />
           </aside>
           <div className="adm-panel-main">
@@ -1810,6 +1830,7 @@ export default function ProductManagerEngine({
               isActive={categoryDrawerOpen}
               onStackNavChange={handleCategoryStackNavChange}
               productCounts={effectiveCategoryCounts}
+              showUncategorized={(effectiveCategoryCounts.__uncategorized__ || 0) > 0}
             />
           </div>
         </>
@@ -1879,6 +1900,7 @@ export default function ProductManagerEngine({
                   className="adm-field-input"
                   disabled={makeLiveSaving}
                 >
+                  <option value="" disabled>— Pick a category —</option>
                   {tree.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
                 </select>
               </label>
