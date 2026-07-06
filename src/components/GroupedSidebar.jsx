@@ -1,4 +1,5 @@
 import {
+  Archive,
   BarChart2,
   Bot,
   DollarSign,
@@ -27,6 +28,7 @@ const NAV_ITEMS = [
   { id: 'apollo', label: 'Apollo', icon: Bot },
   { id: 'cost-tracking', label: 'Cost Tracking', icon: DollarSign },
   { id: 'catalogue', label: 'Product Manager', icon: PackagePlus },
+  { id: 'archive', label: 'Archive', icon: Archive },
   { id: 'reorder', label: 'Reorder Grid', icon: Grip },
   { id: 'customers', label: 'Customer Management', icon: Users },
   { id: 'featured', label: 'Featured', icon: Sparkles },

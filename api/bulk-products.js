@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { labelsToDbFields, loadTaxonomy, resolveLabelsForSubcategory, resolveLabelsFromPathIds } from './_taxonomy-utils.js';
 import { deriveMotarroPathFromLabels, isMotarroProduct, motarroPathSnapshot } from './_mottaro-category.js';
 import { restoreArchivedToLive } from './_ensure-product.js';
+import { buildMoveTagPatch, tableHasMoveTagColumns } from './_move-tag.js';
 import { BULK_CHUNK_SIZE, MOVE_UPDATE_CHUNK_SIZE, runInChunks } from '../lib/bulk-chunk.mjs';
 
 function sliceIntoChunks(list, size) {
@@ -58,9 +59,10 @@ async function resolveSkuTables(supabase, skus) {
   const CHUNK = 200;
   for (let i = 0; i < skus.length; i += CHUNK) {
     const chunk = skus.slice(i, i + CHUNK);
+    const SELECT = 'sku,title,category,subcategory_one,subcategory_two,subcategory_three,subcategory_four';
     const [{ data: live }, { data: arch }] = await Promise.all([
-      supabase.from('website_stock').select('sku,title').in('sku', chunk),
-      supabase.from('archived_products').select('sku,title').in('sku', chunk),
+      supabase.from('website_stock').select(SELECT).in('sku', chunk),
+      supabase.from('archived_products').select(SELECT).in('sku', chunk),
     ]);
     for (const row of live || []) liveSkus.set(row.sku, row);
     for (const row of arch || []) archSkus.set(row.sku, row);
@@ -85,7 +87,7 @@ async function unarchiveProduct(supabase, sku) {
   }
 }
 
-async function bulkMoveProducts(supabase, normalizedSkus, dbFields, { mottaroSnapshot = null } = {}) {
+async function bulkMoveProducts(supabase, normalizedSkus, dbFields, { mottaroSnapshot = null, destinationLabel = '' } = {}) {
   const stamp = new Date().toISOString();
   const updatePayload = { ...dbFields, updated_at: stamp };
   // Mottaro rows also get their virtual position snapshotted so later
@@ -103,13 +105,19 @@ async function bulkMoveProducts(supabase, normalizedSkus, dbFields, { mottaroSna
     const mottaroSet = new Set(
       mottaroSnapshot ? list.filter((sku) => isMotarroProduct(tableRows.get(sku))) : [],
     );
-    const mottaroList = [...mottaroSet];
-    const plainList = mottaroSet.size ? list.filter((sku) => !mottaroSet.has(sku)) : list;
-    if (plainList.length) {
-      results.push(...await chunkedInUpdate(supabase, table, plainList, updatePayload));
+    // 48h "moved" tag — batch skus by their current path so each group gets
+    // the right moved_from label without per-row updates.
+    const canTag = destinationLabel && await tableHasMoveTagColumns(supabase, table);
+    const groups = new Map();
+    for (const sku of list) {
+      const base = mottaroSet.has(sku) ? mottaroPayload : updatePayload;
+      const tag = canTag ? buildMoveTagPatch(tableRows.get(sku), destinationLabel, stamp) : null;
+      const key = `${mottaroSet.has(sku) ? 'm' : 'p'}|${tag ? tag.moved_from : ''}`;
+      if (!groups.has(key)) groups.set(key, { payload: tag ? { ...base, ...tag } : base, skus: [] });
+      groups.get(key).skus.push(sku);
     }
-    if (mottaroList.length) {
-      results.push(...await chunkedInUpdate(supabase, table, mottaroList, mottaroPayload));
+    for (const { payload, skus: groupSkus } of groups.values()) {
+      results.push(...await chunkedInUpdate(supabase, table, groupSkus, payload));
     }
   }
 
@@ -275,7 +283,7 @@ export default async function handler(req, res) {
       const dbFields = labelsToDbFields(labels);
       const destinationPath = labels.join(' › ');
       const mottaroSnapshot = motarroPathSnapshot(deriveMotarroPathFromLabels(labels, tree));
-      const results = await bulkMoveProducts(supabase, normalizedSkus, dbFields, { mottaroSnapshot });
+      const results = await bulkMoveProducts(supabase, normalizedSkus, dbFields, { mottaroSnapshot, destinationLabel: destinationPath });
       const failed = results.filter((r) => !r.ok);
       return res.status(failed.length ? 207 : 200).json({
         ok: failed.length === 0,
