@@ -20,6 +20,7 @@ import {
   buildTradeApplicationEmailBodies,
   tradeApplicationGreetingName,
 } from '../lib/trade-application-email.mjs';
+import { parseIntakeFilename } from '../src/lib/parseIntakeFilename.js';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const readSrc = (relPath) => readFileSync(join(REPO_ROOT, relPath), 'utf8');
@@ -471,7 +472,7 @@ assert.match(readSrc('api/_catalog-adapt.js'), /stockLinked/, 'catalog rows expo
 console.log('✓ Live product visibility policy (PM default = Reorder Grid)');
 
 const boundaryCount = (adminPageSrc.match(/<SectionErrorBoundary/g) || []).length;
-assert.ok(boundaryCount >= 13, `AdminPage should wrap all sections in SectionErrorBoundary (found ${boundaryCount})`);
+assert.ok(boundaryCount >= 14, `AdminPage should wrap all sections in SectionErrorBoundary (found ${boundaryCount})`);
 console.log('✓ AdminPage section error boundaries');
 
 const lazyRetrySrc = readSrc('src/lib/lazyRetry.js');
@@ -480,5 +481,20 @@ assert.match(lazyRetrySrc, /vite:preloadError/, 'vite preload error handler inst
 assert.match(readSrc('vite.config.js'), /manualChunks/, 'vite manualChunks splits vendor deps');
 assert.match(adminPageSrc, /lazyRetry/, 'AdminPage uses lazyRetry for section panels');
 console.log('✓ Lazy chunk load recovery (lazyRetry + vite manualChunks)');
+
+// Bulk image replace tab
+assert.match(readSrc('src/lib/bulkImageReplace.js'), /BULK_IMAGE_REPLACE_MAX = 500/, 'bulk image replace cap is 500');
+const birSlot1 = parseIntakeFilename('BASHEWS.jpg');
+assert.equal(birSlot1.sourceSku, 'BASHEWS');
+assert.equal(birSlot1.imageNumber, 1);
+const birSlot2 = parseIntakeFilename('BASHEWS-2.jpg');
+assert.equal(birSlot2.imageNumber, 2);
+assert.equal(birSlot2.sourceSku, 'BASHEWS');
+assert.match(readSrc('api/bulk-image-replace.js'), /BULK_IMAGE_REPLACE_MAX/, 'bulk image replace API enforces cap');
+assert.match(readSrc('src/components/BulkImageReplacePanel.jsx'), /export default function BulkImageReplacePanel/, 'BulkImageReplacePanel export');
+assert.match(sidebarSrc, /id: 'image-replace'/, 'sidebar has Image Replace nav');
+assert.match(adminPageSrc, /BulkImageReplacePanel/, 'AdminPage lazy-loads BulkImageReplacePanel');
+assert.doesNotMatch(readSrc('src/components/ProductLoaderPanel.jsx'), /image-replace/, 'Image Replace removed from Product Loader');
+console.log('✓ Bulk image replace tab (wizard, API, 500 cap)');
 
 console.log('\nAll smoke checks passed.');

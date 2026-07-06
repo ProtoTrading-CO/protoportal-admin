@@ -3,6 +3,7 @@ import {
   Bot,
   DollarSign,
   Grip,
+  ImagePlus,
   Layout,
   MessageCircle,
   PackagePlus,
@@ -22,6 +23,7 @@ import { importWithRetry } from '../lib/lazyRetry';
 const NAV_ITEMS = [
   { id: 'orders', label: 'Order Requests', icon: ShoppingBag },
   { id: 'product-loader', label: 'Product Loader', icon: ScanLine },
+  { id: 'image-replace', label: 'Image Replace', icon: ImagePlus },
   { id: 'apollo', label: 'Apollo', icon: Bot },
   { id: 'cost-tracking', label: 'Cost Tracking', icon: DollarSign },
   { id: 'catalogue', label: 'Product Manager', icon: PackagePlus },
@@ -41,6 +43,7 @@ const CHUNK_PREFETCH = {
   apollo: () => import('./ApolloPanel'),
   'cost-tracking': () => import('./CostTrackingPanel'),
   'product-loader': () => import('./ProductLoaderPanel'),
+  'image-replace': () => import('./BulkImageReplacePanel'),
   crm: () => import('./WhatsappPanel'),
   banner: () => import('./BannerPanel'),
   featured: () => import('./FeaturedPanel'),

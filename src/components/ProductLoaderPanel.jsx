@@ -20,7 +20,6 @@ import ProductLoaderSingleImage from './productLoader/ProductLoaderSingleImage';
 import ProductLoaderFolder from './productLoader/ProductLoaderFolder';
 import ProductLoaderPublishHistory from './productLoader/ProductLoaderPublishHistory';
 import ProductLoaderPublishSuccess from './productLoader/ProductLoaderPublishSuccess';
-import ProductLoaderImageReplace from './productLoader/ProductLoaderImageReplace';
 import { ADMIN_REFRESH_EVENT } from '../lib/adminRefresh';
 import { catalogueDisplayTitle, catalogueDescription } from '../lib/productLoaderDisplay.js';
 
@@ -29,7 +28,6 @@ const LOADER_TABS = [
   { id: 'single', label: 'Single Image' },
   { id: 'folder', label: 'Local Folder' },
   { id: 'history', label: 'Publish History' },
-  { id: 'image-replace', label: 'Image Replace' },
 ];
 
 // Maps Gemini's category labels to taxonomy IDs
@@ -1050,10 +1048,6 @@ export default function ProductLoaderPanel({
           onShowToast={onShowToast}
           onRerun={(sku) => openAdvanced(sku)}
         />
-      )}
-
-      {activeTab === 'image-replace' && (
-        <ProductLoaderImageReplace onShowToast={onShowToast} />
       )}
 
 
