@@ -334,8 +334,12 @@ export function resolveLabelsFromPathIds(tree, pathIds = []) {
 
 const COUNT_ROW_COLS = 'category,subcategory_one,subcategory_two,subcategory_three,subcategory_four,title,available_stock,stock_qty';
 
-/** Count live products per taxonomy node (includes all descendants). */
-export async function buildCategoryProductCounts(supabase, tree) {
+/**
+ * Count live products per taxonomy node (includes all descendants).
+ * Default counts every live row so badges match the Product Manager's default
+ * view; pass onlyInStock=true to mirror the "Show only in stock" toggle.
+ */
+export async function buildCategoryProductCounts(supabase, tree, { onlyInStock = false } = {}) {
   const counts = { __uncategorized__: 0, __all__: 0 };
   let mottaroLive = 0;
   let from = 0;
@@ -349,7 +353,7 @@ export async function buildCategoryProductCounts(supabase, tree) {
     if (error) throw error;
     const batch = data || [];
     for (const row of batch) {
-      if (!isPublishableOnWebsite(row)) continue;
+      if (onlyInStock && !isPublishableOnWebsite(row)) continue;
       counts.__all__ += 1;
 
       const isMottaro = isMotarroProduct(row);

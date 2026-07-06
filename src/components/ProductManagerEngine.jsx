@@ -35,7 +35,7 @@ import { persistSortOrder, fetchSortOrderStore, sortMetaForPath, formatSortSaved
 import { exportProductsCatalogXlsx, exportAllProductsCatalogXlsx, exportSelectedProductsXlsx } from '../lib/exportLiveProducts';
 import { bulkMoveProducts, invalidateAdminCache, updateProduct } from '../lib/products';
 import { formatWebsitePrice } from '../lib/pricing';
-import { childrenOfTree, subcategoryOptionsFromTree } from '../lib/taxonomyAdmin';
+import { childrenOfTree, fetchCategoryProductCounts, subcategoryOptionsFromTree } from '../lib/taxonomyAdmin';
 
 const ONLY_IN_STOCK_KEY = 'pm_only_in_stock';
 
@@ -485,6 +485,25 @@ export default function ProductManagerEngine({
       sessionStorage.setItem(ONLY_IN_STOCK_KEY, next ? '1' : '0');
     } catch { /* ignore */ }
   }, []);
+
+  // Category badges must match what the list shows: when the stock toggle is
+  // on, load stock-filtered counts; otherwise the parent-supplied counts
+  // (all live rows) already match the default view.
+  const [inStockCounts, setInStockCounts] = useState(null);
+  useEffect(() => {
+    if (!(status === 'live' && onlyInStock)) {
+      setInStockCounts(null);
+      return undefined;
+    }
+    let cancelled = false;
+    fetchCategoryProductCounts({ onlyInStock: true })
+      .then((counts) => { if (!cancelled) setInStockCounts(counts); })
+      .catch(() => { /* keep unfiltered counts as fallback */ });
+    return () => { cancelled = true; };
+  }, [status, onlyInStock]);
+  const effectiveCategoryCounts = status === 'live' && onlyInStock && inStockCounts
+    ? inStockCounts
+    : categoryProductCounts;
 
   const handlePageChange = useCallback((nextPage) => {
     setPage(nextPage);
@@ -1127,7 +1146,7 @@ export default function ProductManagerEngine({
               onDeleteNode={onDeleteNode}
               onAddChild={onAddSubcategory}
               onReorder={onCategoryReorder}
-              productCounts={categoryProductCounts}
+              productCounts={effectiveCategoryCounts}
             />
           </aside>
           <div className="adm-panel-main">
@@ -1723,7 +1742,7 @@ export default function ProductManagerEngine({
               className="pm-cat-drawer-sidebar"
               isActive={categoryDrawerOpen}
               onStackNavChange={handleCategoryStackNavChange}
-              productCounts={categoryProductCounts}
+              productCounts={effectiveCategoryCounts}
             />
           </div>
         </>

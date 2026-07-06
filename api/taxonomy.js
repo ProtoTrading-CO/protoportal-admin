@@ -54,9 +54,11 @@ export default async function handler(req, res) {
       const store = await readTaxonomyStore();
       const categories = await loadTaxonomy();
       if (req.query.counts === '1') {
-        const counts = await buildCategoryProductCounts(getStockClient(), categories);
+        const onlyInStock = req.query.onlyInStock === '1' || req.query.onlyInStock === 'true';
+        const counts = await buildCategoryProductCounts(getStockClient(), categories, { onlyInStock });
         // Category counts require a full-table scan; serve from the edge for
         // 60s and revalidate in the background for the next 5 minutes.
+        // onlyInStock is part of the URL, so each mode gets its own cache entry.
         res.setHeader('Cache-Control', 's-maxage=60, stale-while-revalidate=300');
         return res.status(200).json({ categories, counts, updatedAt: store.updatedAt });
       }
