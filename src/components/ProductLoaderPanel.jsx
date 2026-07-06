@@ -157,7 +157,6 @@ export default function ProductLoaderPanel({
   onShowToast,
   initialCode = '',
   onInitialCodeConsumed,
-  onGoToApollo,
   mainSiteUrl = 'https://site.proto.co.za',
 }) {
   const [activeTab, setActiveTab] = useState('nutstore');
@@ -623,46 +622,7 @@ export default function ProductLoaderPanel({
     }
   };
 
-  const sendDormantToImageGen = async (row) => {
-    const sku = row.sku;
-    setCode(sku);
-    setLookupData(null);
-    setLookupError('');
-    resetLookupDependents();
 
-    const edit = dormantEdits[sku] || idsFromRowLabels(taxonomyTree, row);
-    setCategoryId(edit.categoryId || '');
-    setSub1Id(edit.sub1Id || '');
-    setSub2Id(edit.sub2Id || '');
-    setSub3Id(edit.sub3Id || '');
-    setSub4Id(edit.sub4Id || '');
-    setCategorySource('existing');
-
-    setLookingUp(true);
-    try {
-      const res = await fetch(`/api/product-loader-lookup?code=${encodeURIComponent(sku)}`);
-      const json = await readApiJson(res, { fallback: 'Lookup failed' });
-      setLookupData(json);
-      setMatchedBy(json.matchedBy || null);
-      if (json.resolvedCode) setCode(json.resolvedCode);
-      if (json.websiteRow) {
-        const ws = json.websiteRow;
-        if (!edit.categoryId) {
-          setCategoryId(taxonomyTree.find((c) => c.label === ws.category)?.id || '');
-        }
-        if (json.existingImages.length) {
-          setImageUrl(json.existingImages[0]);
-          setImageSource('existing');
-        }
-      }
-      singleProductRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      onShowToast?.(`${sku} ready — upload or generate an image below`, 'success');
-    } catch (err) {
-      setLookupError(err.message || 'Lookup failed');
-    } finally {
-      setLookingUp(false);
-    }
-  };
 
   const resolveLookupCode = (codeOverride) => {
     if (typeof codeOverride === 'string' || typeof codeOverride === 'number') {
@@ -971,11 +931,6 @@ export default function ProductLoaderPanel({
     onShowToast?.(`Open Single Image tab and upload an image for ${code}`, 'success');
   };
 
-  const handleSendToApollo = (products) => {
-    if (!products?.length) return;
-    onGoToApollo?.(products);
-  };
-
   return (
     <div className="adm-panel" style={{ maxWidth: 1100 }}>
       {/* Header */}
@@ -1040,7 +995,6 @@ export default function ProductLoaderPanel({
           setBatchOverwrite={setBatchOverwrite}
           onShowToast={onShowToast}
           onPublished={(result) => setPublishSuccess(result)}
-          onSendToApollo={handleSendToApollo}
           mainSiteUrl={mainSiteUrl}
         />
       )}
@@ -1055,7 +1009,6 @@ export default function ProductLoaderPanel({
           batchOverwrite={batchOverwrite}
           setBatchOverwrite={setBatchOverwrite}
           onShowToast={onShowToast}
-          onSendToApollo={handleSendToApollo}
         />
       )}
 
@@ -1071,7 +1024,6 @@ export default function ProductLoaderPanel({
         <ProductLoaderPublishSuccess
           result={publishSuccess}
           mainSiteUrl={mainSiteUrl}
-          onGenerateApollo={(sku) => onGoToApollo?.(sku)}
           onUploadNext={() => { setPublishSuccess(null); setActiveTab("single"); }}
           onDone={() => setPublishSuccess(null)}
         />

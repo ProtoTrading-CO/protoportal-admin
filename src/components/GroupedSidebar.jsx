@@ -2,7 +2,6 @@ import {
   Archive,
   BarChart2,
   Bot,
-  DollarSign,
   Grip,
   ImagePlus,
   Layout,
@@ -26,7 +25,6 @@ const NAV_ITEMS = [
   { id: 'product-loader', label: 'Product Loader', icon: ScanLine },
   { id: 'image-replace', label: 'Image Replace', icon: ImagePlus },
   { id: 'apollo', label: 'Apollo', icon: Bot },
-  { id: 'cost-tracking', label: 'Cost Tracking', icon: DollarSign },
   { id: 'catalogue', label: 'Product Manager', icon: PackagePlus },
   { id: 'archive', label: 'Archive', icon: Archive },
   { id: 'reorder', label: 'Reorder Grid', icon: Grip },
@@ -43,7 +41,6 @@ const NAV_ITEMS = [
 const CHUNK_PREFETCH = {
   analytics: () => import('./AnalyticsHub'),
   apollo: () => import('./ApolloPanel'),
-  'cost-tracking': () => import('./CostTrackingPanel'),
   'product-loader': () => import('./ProductLoaderPanel'),
   'image-replace': () => import('./BulkImageReplacePanel'),
   crm: () => import('./WhatsappPanel'),

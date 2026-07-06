@@ -1,9 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { loadJsPDF } from '../lib/lazyJspdf';
-import { Bot, CheckCircle, FileDown, Loader2, PackagePlus, Send, Sparkles, Square, User, Users, Wrench } from 'lucide-react';
-import ApolloImageWizard from './ApolloImageWizard';
-import { getActiveImageBatch, subscribeImageBatch } from '../lib/imageBatchTracker';
-import { getImageGenOperator } from '../lib/imageGenSession';
+import { Bot, FileDown, Loader2, Send, Sparkles, User, Wrench } from 'lucide-react';
 
 const STARTERS = [
   'Create a report of my best performing products',
@@ -132,8 +129,8 @@ function ApolloWelcome({ onStarter, busy }) {
       <div className="apollo-welcome-copy">
         <h3>Hi, I'm <span className="apollo-welcome-name">Apollo</span></h3>
         <p>
-          Ask in plain English — routed through live data (products, customers, orders, searches)
-          and **Positill + Nutstore** for code lookups and go-live prep. Type <strong>/image</strong> for the image wizard.
+          Your conversational analyst — ask in plain English and I answer from live data
+          (products, customers, orders, searches) plus Positill for code lookups.
         </p>
       </div>
       <div className="apollo-welcome-starters">
@@ -151,25 +148,9 @@ function ApolloWelcome({ onStarter, busy }) {
   );
 }
 
-function ImageFixProgress({ progress }) {
-  if (!progress) return null;
-  const pct = progress.total ? Math.round(((progress.index + (progress.status === 'done' || progress.status === 'error' ? 1 : 0)) / progress.total) * 100) : 0;
-  return (
-    <div className="apollo-batch-progress">
-      <div className="apollo-batch-progress-head">
-        <Loader2 size={14} className="spin" />
-        <span>Fixing images — {progress.done + progress.failed}/{progress.total}</span>
-      </div>
-      <div className="apollo-batch-progress-bar"><div style={{ width: `${pct}%` }} /></div>
-      <p className="apollo-batch-progress-item">{progress.title || progress.sku}</p>
-    </div>
-  );
-}
-
-function ChatMessage({ msg, isLastAssistant, onExportPdf, onFix, fixBusy, onOpenProductLoader }) {
+function ChatMessage({ msg, isLastAssistant, onExportPdf, onFix, fixBusy }) {
   const isUser = msg.role === 'user';
   const showFix = isLastAssistant && !isUser && msg.source !== 'live-index';
-  const batchAction = msg.batchAction;
   return (
     <div className={`apollo-msg-row apollo-msg-row--${msg.role}`}>
       <div className={`apollo-avatar apollo-avatar--${msg.role}`} aria-hidden="true">
@@ -189,10 +170,6 @@ function ChatMessage({ msg, isLastAssistant, onExportPdf, onFix, fixBusy, onOpen
         </div>
         <div className={`apollo-msg-body apollo-msg-body--${msg.role}`}>
           {isUser ? <p>{msg.content}</p> : <MessageBody content={msg.content} />}
-          {!isUser && msg.batchProgress && <ImageFixProgress progress={msg.batchProgress} />}
-          {!isUser && msg.batchComplete && (
-            <p className="apollo-batch-done">{renderInline(msg.batchComplete)}</p>
-          )}
         </div>
         {showFix && (
           <div className="apollo-msg-actions">
@@ -204,18 +181,7 @@ function ChatMessage({ msg, isLastAssistant, onExportPdf, onFix, fixBusy, onOpen
             </button>
           </div>
         )}
-        {batchAction?.type === 'open_product_loader' && batchAction.code && (
-          <div className="apollo-msg-actions">
-            <button
-              type="button"
-              className="apollo-action-btn"
-              onClick={() => onOpenProductLoader?.(batchAction.code)}
-            >
-              <PackagePlus size={13} /> Open in Product Loader — {batchAction.code}
-            </button>
-          </div>
-        )}
-        {isLastAssistant && !isUser && !showFix && !batchAction?.code && (
+        {isLastAssistant && !isUser && !showFix && (
           <div className="apollo-msg-actions">
             <button type="button" className="apollo-action-btn apollo-action-btn--ghost" onClick={() => onExportPdf(msg.content)}>
               <FileDown size={13} /> Export PDF
@@ -289,73 +255,7 @@ function loadApolloMessages() {
   }
 }
 
-function ImageBatchBanner({ batch, onOpenApproval, onBackToWizard, onStop }) {
-  if (!batch) return null;
-  const processed = (batch.done || 0) + (batch.failed || 0);
-  const pct = batch.total ? Math.round((processed / batch.total) * 100) : 0;
-
-  if (batch.status === 'running') {
-    return (
-      <div className="apollo-batch-banner apollo-batch-banner--running" role="status">
-        <Loader2 size={16} className="spin" />
-        <div className="apollo-batch-banner-copy">
-          <strong>Image batch running in the background</strong>
-          <span>
-            {processed}/{batch.total} images
-            {batch.currentLabel ? ` · ${batch.currentLabel}` : ''}
-            — chat with Apollo below while you wait
-          </span>
-          <div className="apollo-batch-banner-bar"><div style={{ width: `${pct}%` }} /></div>
-        </div>
-        <div className="apollo-batch-banner-actions">
-          <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={onBackToWizard}>View batch</button>
-          <button type="button" className="adm-btn-red adm-btn--sm" onClick={onOpenApproval}>Approval</button>
-          {onStop && (
-            <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={onStop} title="Stop image generation">
-              <Square size={12} fill="currentColor" /> Stop
-            </button>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  if (batch.status === 'complete') {
-    return (
-      <div className="apollo-batch-banner apollo-batch-banner--done" role="status">
-        <CheckCircle size={16} />
-        <div className="apollo-batch-banner-copy">
-          <strong>Image batch complete</strong>
-          <span>{batch.done} staged{batch.failed ? ` · ${batch.failed} failed` : ''} — review in Approval or continue the wizard.</span>
-        </div>
-        <div className="apollo-batch-banner-actions">
-          <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={onBackToWizard}>View batch</button>
-          <button type="button" className="adm-btn-red adm-btn--sm" onClick={onOpenApproval}>Approval</button>
-        </div>
-      </div>
-    );
-  }
-
-  return null;
-}
-
-function RemoteBatchNotice({ batches, lockCount }) {
-  if (!batches?.length) return null;
-  return (
-    <div className="apollo-remote-notice" role="status">
-      <Users size={16} />
-      <div>
-        <strong>{batches.length === 1 ? 'Another user is generating images' : `${batches.length} other image batches running`}</strong>
-        <span>
-          {batches.map((b) => b.operator || 'Someone').join(', ')} — overlapping SKUs will queue automatically.
-          {lockCount > 0 ? ` ${lockCount} slot lock${lockCount === 1 ? '' : 's'} active.` : ''}
-        </span>
-      </div>
-    </div>
-  );
-}
-
-export default function ApolloPanel({ isActive = true, taxonomyTree, onShowToast, onGoToApproval, onGoToProductLoader, onRefreshCatalog, imageFixRequest, onImageFixRequestHandled }) {
+export default function ApolloPanel({ onShowToast }) {
   const [messages, setMessages] = useState(loadApolloMessages);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
@@ -363,61 +263,7 @@ export default function ApolloPanel({ isActive = true, taxonomyTree, onShowToast
   const [indexStatus, setIndexStatus] = useState(null);
   const [indexError, setIndexError] = useState('');
   const [rebuildingIndex, setRebuildingIndex] = useState(false);
-  const [wizardOpen, setWizardOpen] = useState(false);
-  const [wizardBackground, setWizardBackground] = useState(false);
-  const [wizardPrefill, setWizardPrefill] = useState(null);
-  const [wizardKey, setWizardKey] = useState('default');
-  const [imageBatch, setImageBatch] = useState(() => getActiveImageBatch());
-  const [remoteActive, setRemoteActive] = useState({ batches: [], locks: [] });
   const scrollRef = useRef(null);
-  const wizardStopRef = useRef(null);
-
-  useEffect(() => subscribeImageBatch(setImageBatch), []);
-
-  useEffect(() => {
-    if (!imageFixRequest?.products?.length) return;
-    setWizardPrefill(imageFixRequest.products);
-    setWizardKey(String(imageFixRequest.id || Date.now()));
-    setWizardOpen(true);
-    setWizardBackground(false);
-    const count = imageFixRequest.products.length;
-    const preview = imageFixRequest.products
-      .slice(0, 4)
-      .map((p) => p.title || p.name || p.sku)
-      .join(', ');
-    const suffix = count > 4 ? ` and ${count - 4} more` : '';
-    setMessages((prev) => [
-      ...prev,
-      { role: 'user', content: `Image fix for ${count} product${count === 1 ? '' : 's'}: ${preview}${suffix}.` },
-    ]);
-    onImageFixRequestHandled?.();
-  }, [imageFixRequest?.id]);
-
-  useEffect(() => {
-    if (!isActive) return undefined;
-    const poll = () => {
-      if (document.visibilityState !== 'visible') return;
-      void fetch('/api/image-gen-costs?days=1&limit=5')
-        .then((r) => r.json())
-        .then((json) => {
-          const me = getImageGenOperator();
-          const others = (json.active?.batches || []).filter((b) => {
-            if (!b.operator || b.operator === me) return false;
-            const done = Number(b?.done || 0);
-            const total = Number(b?.total || 0);
-            const failed = Number(b?.failed || 0);
-            const pending = total > 0 && done + failed < total;
-            const fresh = Date.now() - new Date(b?.created_at || 0).getTime() < 20 * 60 * 1000;
-            return pending && fresh;
-          });
-          setRemoteActive({ batches: others, locks: json.active?.locks?.length || 0 });
-        })
-        .catch(() => {});
-    };
-    poll();
-    const timer = setInterval(poll, 15000);
-    return () => clearInterval(timer);
-  }, [isActive]);
 
   const loadIndexStatus = useCallback(async (refresh = false) => {
     setIndexError('');
@@ -466,13 +312,6 @@ export default function ApolloPanel({ isActive = true, taxonomyTree, onShowToast
     if (!trimmed && !fix) return;
     if (busy) return;
 
-    if (!fix && /^\/image\s*$/i.test(trimmed)) {
-      setInput('');
-      setWizardOpen(true);
-      setWizardBackground(false);
-      return;
-    }
-
     setError('');
     setBusy(true);
 
@@ -520,7 +359,6 @@ export default function ApolloPanel({ isActive = true, taxonomyTree, onShowToast
         content: replyText,
         source: json.source,
         intent: json.intent,
-        batchAction: json.batchAction || null,
       };
 
       setMessages((prev) => (
@@ -539,39 +377,11 @@ export default function ApolloPanel({ isActive = true, taxonomyTree, onShowToast
   }, [send]);
 
   const lastAssistantIdx = messages.reduce((acc, m, i) => (m.role === 'assistant' ? i : acc), -1);
-  const showWelcome = messages.length === 0 && (!wizardOpen || wizardBackground);
-  const showChat = !wizardOpen || wizardBackground;
+  const showWelcome = messages.length === 0;
 
   return (
     <div className="apollo-panel">
-      {wizardOpen && (
-        <div className="apollo-wizard-layer" style={{ display: wizardBackground ? 'none' : 'block' }}>
-          <ApolloImageWizard
-            key={wizardKey}
-            taxonomyTree={taxonomyTree}
-            prefillProducts={wizardPrefill}
-            onExit={() => { setWizardOpen(false); setWizardBackground(false); setWizardPrefill(null); }}
-            onRunInBackground={() => setWizardBackground(true)}
-            onShowToast={onShowToast}
-            onGoToApproval={() => { setWizardBackground(true); onGoToApproval?.(); }}
-            onRefreshCatalog={onRefreshCatalog}
-            stopRef={wizardStopRef}
-          />
-        </div>
-      )}
-
-      {wizardBackground && (
-        <ImageBatchBanner
-          batch={imageBatch}
-          onOpenApproval={onGoToApproval}
-          onBackToWizard={() => setWizardBackground(false)}
-          onStop={() => wizardStopRef.current?.()}
-        />
-      )}
-
-      <RemoteBatchNotice batches={remoteActive.batches} lockCount={remoteActive.locks} />
-
-      {showChat && (
+      {(
         <>
           <div className="apollo-head">
             <div className="apollo-head-brand">
@@ -600,11 +410,6 @@ export default function ApolloPanel({ isActive = true, taxonomyTree, onShowToast
                 {rebuildingIndex ? <Loader2 size={13} className="spin" /> : <Sparkles size={13} />}
                 {rebuildingIndex ? 'Rebuilding…' : 'Rebuild index'}
               </button>
-              {wizardOpen && wizardBackground && (
-                <button type="button" className="apollo-action-btn apollo-action-btn--ghost" onClick={() => setWizardBackground(false)}>
-                  Image batch
-                </button>
-              )}
               {messages.length > 0 && (
                 <button type="button" className="apollo-action-btn apollo-action-btn--ghost" onClick={clearChat} disabled={busy}>
                   Clear chat
@@ -624,7 +429,6 @@ export default function ApolloPanel({ isActive = true, taxonomyTree, onShowToast
                   onExportPdf={exportMessagePdf}
                   onFix={fixLastReply}
                   fixBusy={busy}
-                  onOpenProductLoader={onGoToProductLoader}
                 />
               ))}
               {busy && (
@@ -672,7 +476,7 @@ export default function ApolloPanel({ isActive = true, taxonomyTree, onShowToast
                       void send(input);
                     }
                   }}
-                  placeholder="Ask Apollo anything — orders, stock, customers…  (/image for image gen)"
+                  placeholder="Ask Apollo anything — orders, stock, customers, sales…"
                   disabled={busy}
                 />
                 <button type="submit" className="apollo-send-btn" disabled={busy || !input.trim()} aria-label="Send">

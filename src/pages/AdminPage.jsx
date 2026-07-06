@@ -110,7 +110,6 @@ import { lazyRetry } from '../lib/lazyRetry';
 // when the admin clicks a nav item.
 const AnalyticsHub = lazyRetry(() => import('../components/AnalyticsHub'));
 const ApolloPanel = lazyRetry(() => import('../components/ApolloPanel'));
-const CostTrackingPanel = lazyRetry(() => import('../components/CostTrackingPanel'));
 const ProductLoaderPanel = lazyRetry(() => import('../components/ProductLoaderPanel'));
 const BulkImageReplacePanel = lazyRetry(() => import('../components/BulkImageReplacePanel'));
 const WhatsappPanel = lazyRetry(() => import('../components/WhatsappPanel'));
@@ -437,7 +436,6 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   useEffect(() => {
     if (activeSection === 'apollo') setApolloEverActive(true);
   }, [activeSection]);
-  const [imageFixRequest, setImageFixRequest] = useState(null);
   const [productLoaderCode, setProductLoaderCode] = useState('');
   const { data: dashStats } = useDashboardStats();
   const [loading, setLoading] = useState(false);
@@ -1998,11 +1996,6 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                 onRefreshTaxonomy={reloadTaxonomy}
                 onCategoryReorder={handleCategoryReorder}
                 categoryProductCounts={categoryProductCounts}
-                onImageFix={(products) => {
-                  setImageFixRequest({ id: Date.now(), products });
-                  setActiveSection('apollo');
-                  window.scrollTo({ top: 0, behavior: 'instant' });
-                }}
               />
               </div>
             </SectionErrorBoundary>
@@ -2027,11 +2020,6 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                   onRefreshTaxonomy={reloadTaxonomy}
                   onCategoryReorder={handleCategoryReorder}
                   categoryProductCounts={categoryProductCounts}
-                  onImageFix={(products) => {
-                    setImageFixRequest({ id: Date.now(), products });
-                    setActiveSection('apollo');
-                    window.scrollTo({ top: 0, behavior: 'instant' });
-                  }}
                 />
               </SectionErrorBoundary>
             )}
@@ -2049,35 +2037,11 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
             {apolloEverActive && (
               <div style={{ display: activeSection === 'apollo' ? 'block' : 'none' }}>
                 <Suspense fallback={<LazySectionFallback label="Loading Apollo…" />}>
-                  <ApolloPanel
-                    isActive={activeSection === 'apollo'}
-                    taxonomyTree={taxonomyTree}
-                    onShowToast={showToast}
-                    onGoToApproval={() => { setActiveSection('catalogue'); window.scrollTo({ top: 0, behavior: 'instant' }); }}
-                    onGoToProductLoader={(code) => {
-                      setProductLoaderCode(String(code || '').trim());
-                      setActiveSection('product-loader');
-                    }}
-                    onRefreshCatalog={() => {
-                      window.dispatchEvent(new CustomEvent('proto-approval-refresh'));
-                      queryClient.invalidateQueries({ queryKey: queryKeys.dashboardStats() });
-                      refreshDashboardStats();
-                    }}
-                    imageFixRequest={imageFixRequest}
-                    onImageFixRequestHandled={() => setImageFixRequest(null)}
-                  />
+                  <ApolloPanel onShowToast={showToast} />
                 </Suspense>
               </div>
             )}
             </SectionErrorBoundary>
-
-            {activeSection === 'cost-tracking' && (
-              <SectionErrorBoundary name="cost-tracking" title="Cost Tracking crashed" resetKey={activeSection}>
-                <Suspense fallback={<LazySectionFallback label="Loading Cost Tracking…" />}>
-                  <CostTrackingPanel onShowToast={showToast} />
-                </Suspense>
-              </SectionErrorBoundary>
-            )}
 
             {activeSection === 'product-loader' && (
               <SectionErrorBoundary name="product-loader" title="Product Loader crashed" resetKey={activeSection}>
@@ -2087,19 +2051,6 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                   onShowToast={showToast}
                   initialCode={productLoaderCode}
                   onInitialCodeConsumed={() => setProductLoaderCode('')}
-                  onGoToApollo={(productsOrSku) => {
-                    const products = Array.isArray(productsOrSku)
-                      ? productsOrSku
-                      : [{
-                        id: String(productsOrSku || ''),
-                        sku: String(productsOrSku || ''),
-                        name: String(productsOrSku || ''),
-                        title: String(productsOrSku || ''),
-                      }];
-                    if (!products[0]?.sku) return;
-                    setImageFixRequest({ id: Date.now(), products });
-                    setActiveSection('apollo');
-                  }}
                 />
                 </Suspense>
               </SectionErrorBoundary>

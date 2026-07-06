@@ -3,7 +3,6 @@ import { getTaxonomySubcategoryLabels } from './_subcategory-match.js';
 /** Regex hints only — never used as final routing without AI confirmation. */
 
 const INTENTS = [
-  { id: 'batch_fix_images', weight: 14, patterns: [/fix (the )?images/i, /fix all.*images/i, /image fixer/i, /image gen/i, /new products engine/i, /through gemini/i, /gemini new products/i, /put them through/i, /reprocess.*images/i, /white background/i, /remove (the )?background/i, /resize.*800/i, /800\s*[x×]\s*800/i, /products with (the )?(following )?codes/i, /\bshadow/i, /generative/i, /canvas/i, /monttaro/i, /mottaro/i, /motarro/i, /painting on/i, /subcategory/i] },
   { id: 'order_top_items', weight: 12, patterns: [/best performing/i, /performing products/i, /ordered the most/i, /top selling/i, /most ordered/i, /based on orders/i, /popular products/i, /barograph/i, /bar chart/i] },
   { id: 'product_count', weight: 10, patterns: [/^how many products/i, /product count/i, /total products/i, /catalogue size/i, /number of products/i] },
   { id: 'product_negative_stock', weight: 12, patterns: [/negative stock/i, /below zero/i, /stock.*negative/i, /negative.*stock/i] },
@@ -24,7 +23,7 @@ const VALID_INTENTS = new Set([
   'order_top_items', 'product_count', 'product_negative_stock', 'product_low_stock',
   'product_high_stock', 'product_by_category', 'product_search', 'customer_list',
   'customer_pending', 'customer_search', 'order_summary', 'search_top',
-  'search_zero', 'search_to_orders', 'batch_fix_images', 'freeform',
+  'search_zero', 'search_to_orders', 'freeform',
 ]);
 
 export function parseIntentHint(query) {

@@ -11,7 +11,6 @@ import {
 import { exportBatchReportCsv, isImageFile } from '../../lib/parseIntakeFilename';
 import { archiveLoaderImageItem, lookupFilenames, logPublishFailure, publishLoaderImageItem } from '../../lib/productLoaderApi';
 import { catalogueDisplayTitle, loaderCodeLabel } from '../../lib/productLoaderDisplay.js';
-import ProductLoaderApolloSend from './ProductLoaderApolloSend';
 import LoaderCodeEllipsis from './LoaderCodeEllipsis.jsx';
 
 function findNode(tree, id) {
@@ -44,7 +43,6 @@ export default function ProductLoaderFolder({
   batchOverwrite,
   setBatchOverwrite,
   onShowToast,
-  onSendToApollo,
 }) {
   const folderRef = useRef(null);
   const [items, setItems] = useState([]);
@@ -269,8 +267,6 @@ export default function ProductLoaderFolder({
           {renderGroup('ready')}
           {renderGroup('needs_review')}
           {renderGroup('not_found')}
-
-          <ProductLoaderApolloSend items={items} onSendToApollo={onSendToApollo} onShowToast={onShowToast} />
 
           <div className="pl-inline-fields">
             <label>
