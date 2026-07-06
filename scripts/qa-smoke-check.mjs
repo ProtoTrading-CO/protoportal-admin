@@ -4,6 +4,7 @@
  * Run: node scripts/qa-smoke-check.mjs
  */
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
@@ -601,6 +602,15 @@ const updateProductSrc2 = readSrc('api/update-product.js');
 assert.match(updateProductSrc2, /snapshotMottaroPath/, 'single-product save refreshes mottaro_path');
 assert.ok(readSrc('migrations/038_mottaro_path.sql').includes('mottaro_path'), 'migration 038 present');
 console.log('✓ A4 mottaro_path persistence (derive → stored → fallback)');
+
+// Shared Mottaro module — must stay byte-identical to the portal copy
+const MOTTARO_SHARED_HASH = '9f9e87791ab159cd';
+assert.equal(
+  createHash('sha256').update(readSrc('lib/mottaro-category.mjs')).digest('hex').slice(0, 16),
+  MOTTARO_SHARED_HASH,
+  'lib/mottaro-category.mjs must stay byte-identical to Proto-Website-/lib/mottaro-category.mjs — edit both copies together and update the pinned hash in both qa-smoke-check.mjs files',
+);
+console.log('✓ Shared Mottaro module in sync with Proto-Website-');
 
 // A5 — counts refresh after PM bulk move
 const pmMoveBlock = pmEngineSrc2.match(/const confirmBulkMove = async[\s\S]*?finally \{\s*setMoveSaving\(false\);/)?.[0] || '';
