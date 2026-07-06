@@ -44,8 +44,9 @@ export async function fetchTaxonomy({ withCounts = false } = {}) {
   }
 }
 
-export async function fetchCategoryProductCounts() {
-  const res = await fetch(`/api/taxonomy?counts=1&_=${Date.now()}`, { cache: 'no-store' });
+export async function fetchCategoryProductCounts({ onlyInStock = false } = {}) {
+  const stockParam = onlyInStock ? '&onlyInStock=1' : '';
+  const res = await fetch(`/api/taxonomy?counts=1${stockParam}&_=${Date.now()}`, { cache: 'no-store' });
   const json = await res.json();
   if (!res.ok) throw new Error(json.error || 'Failed to load category counts');
   if (json.updatedAt) _taxonomyUpdatedAt = json.updatedAt;
@@ -64,8 +65,9 @@ export async function createSubcategory(parentId, label) {
   return postTaxonomy({ action: 'addSubcategory', parentId, label });
 }
 
-// Deletes a category or subcategory (and its subtree). Products are kept and
-// become uncategorised — the server reports how many were affected.
+// Deletes a category or subcategory (and its subtree). Affected products get
+// the deleted labels cleared server-side (they fall back to Uncategorised or
+// their remaining parent) — the response reports productsCleared.
 export async function deleteTaxonomyNode(id) {
   return postTaxonomy({ action: 'deleteNode', id });
 }

@@ -35,7 +35,7 @@ import { persistSortOrder, fetchSortOrderStore, sortMetaForPath, formatSortSaved
 import { exportProductsCatalogXlsx, exportAllProductsCatalogXlsx, exportSelectedProductsXlsx } from '../lib/exportLiveProducts';
 import { bulkMoveProducts, invalidateAdminCache, updateProduct } from '../lib/products';
 import { formatWebsitePrice } from '../lib/pricing';
-import { childrenOfTree, subcategoryOptionsFromTree } from '../lib/taxonomyAdmin';
+import { childrenOfTree, fetchCategoryProductCounts, subcategoryOptionsFromTree } from '../lib/taxonomyAdmin';
 
 const ONLY_IN_STOCK_KEY = 'pm_only_in_stock';
 
@@ -486,6 +486,26 @@ export default function ProductManagerEngine({
     } catch { /* ignore */ }
   }, []);
 
+  // Category badges must match what the list shows: when the stock toggle is
+  // on, load stock-filtered counts; otherwise the parent-supplied counts
+  // (all live rows) already match the default view.
+  const [inStockCounts, setInStockCounts] = useState(null);
+  const [inStockCountsNonce, setInStockCountsNonce] = useState(0);
+  useEffect(() => {
+    if (!(status === 'live' && onlyInStock)) {
+      setInStockCounts(null);
+      return undefined;
+    }
+    let cancelled = false;
+    fetchCategoryProductCounts({ onlyInStock: true })
+      .then((counts) => { if (!cancelled) setInStockCounts(counts); })
+      .catch(() => { /* keep unfiltered counts as fallback */ });
+    return () => { cancelled = true; };
+  }, [status, onlyInStock, inStockCountsNonce]);
+  const effectiveCategoryCounts = status === 'live' && onlyInStock && inStockCounts
+    ? inStockCounts
+    : categoryProductCounts;
+
   const handlePageChange = useCallback((nextPage) => {
     setPage(nextPage);
     lastSelectIdxRef.current = null;
@@ -693,6 +713,10 @@ export default function ProductManagerEngine({
       invalidateAdminCache();
       queryClient.invalidateQueries({ queryKey: ['catalog'] });
       queryClient.invalidateQueries({ queryKey: queryKeys.dashboardStats() });
+      // Same refresh rename/delete already do — category badges must update
+      // immediately or the admin looks like it lied about the move.
+      onRefreshTaxonomy?.();
+      setInStockCountsNonce((n) => n + 1);
       onRefreshStats?.();
       onShowToast?.(`Moved ${skus.length} product(s) to ${destinationLabel}`, 'success');
     } catch (err) {
@@ -706,6 +730,9 @@ export default function ProductManagerEngine({
         clearSelection();
         invalidateAdminCache();
         queryClient.invalidateQueries({ queryKey: ['catalog'] });
+        // Some rows moved — refresh counts for the part that succeeded.
+        onRefreshTaxonomy?.();
+        setInStockCountsNonce((n) => n + 1);
         onShowToast?.(err.message || 'Move failed', 'warning');
       } else {
         onShowToast?.(err.message || 'Move failed', 'error');
@@ -1127,7 +1154,7 @@ export default function ProductManagerEngine({
               onDeleteNode={onDeleteNode}
               onAddChild={onAddSubcategory}
               onReorder={onCategoryReorder}
-              productCounts={categoryProductCounts}
+              productCounts={effectiveCategoryCounts}
             />
           </aside>
           <div className="adm-panel-main">
@@ -1723,7 +1750,7 @@ export default function ProductManagerEngine({
               className="pm-cat-drawer-sidebar"
               isActive={categoryDrawerOpen}
               onStackNavChange={handleCategoryStackNavChange}
-              productCounts={categoryProductCounts}
+              productCounts={effectiveCategoryCounts}
             />
           </div>
         </>

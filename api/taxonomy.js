@@ -4,14 +4,15 @@ import {
   addCategoryNode,
   addSubcategoryNode,
   buildCategoryProductCounts,
-  buildRenameFilter,
+  clearProductsForDeletedNode,
   countProductsForNode,
+  countRenameOrphans,
   deleteNodeCascade,
-  deleteSubcategoryNode,
   findNodeContext,
   loadTaxonomy,
   readTaxonomyStore,
   renameNodeLabel,
+  renameNodeLabelInProducts,
   resolveLabelsFromPathIds,
   saveTaxonomy,
 } from './_taxonomy-utils.js';
@@ -24,19 +25,13 @@ function getStockClient() {
   );
 }
 
-async function applyRenameToTable(supabase, table, ctx, oldLabel, newLabel) {
-  const { column, filters } = buildRenameFilter(ctx, oldLabel);
-  let q = supabase.from(table).update({ [column]: newLabel, updated_at: new Date().toISOString() });
-  for (const [key, val] of Object.entries(filters)) {
-    if (val != null) q = q.eq(key, val);
-  }
-  const { error } = await q;
-  if (error) throw error;
-}
-
 async function renameProductsForNode(supabase, ctx, oldLabel, newLabel) {
-  await applyRenameToTable(supabase, 'website_stock', ctx, oldLabel, newLabel);
-  await applyRenameToTable(supabase, 'archived_products', ctx, oldLabel, newLabel);
+  let renamed = 0;
+  for (const table of ['website_stock', 'archived_products']) {
+    const result = await renameNodeLabelInProducts(supabase, table, ctx, oldLabel, newLabel);
+    renamed += result.renamed;
+  }
+  return renamed;
 }
 
 function taxonomyConflictResponse(res, err) {
@@ -54,9 +49,11 @@ export default async function handler(req, res) {
       const store = await readTaxonomyStore();
       const categories = await loadTaxonomy();
       if (req.query.counts === '1') {
-        const counts = await buildCategoryProductCounts(getStockClient(), categories);
+        const onlyInStock = req.query.onlyInStock === '1' || req.query.onlyInStock === 'true';
+        const counts = await buildCategoryProductCounts(getStockClient(), categories, { onlyInStock });
         // Category counts require a full-table scan; serve from the edge for
         // 60s and revalidate in the background for the next 5 minutes.
+        // onlyInStock is part of the URL, so each mode gets its own cache entry.
         res.setHeader('Cache-Control', 's-maxage=60, stale-while-revalidate=300');
         return res.status(200).json({ categories, counts, updatedAt: store.updatedAt });
       }
@@ -81,9 +78,23 @@ export default async function handler(req, res) {
     if (action === 'rename') {
       const { id, label } = req.body;
       const { tree: next, oldLabel, ctx } = renameNodeLabel(tree, id, label);
-      await renameProductsForNode(supabase, ctx, oldLabel, label.trim());
+      const newLabel = label.trim();
+      const productsRenamed = await renameProductsForNode(supabase, ctx, oldLabel, newLabel);
       const saved = await saveTaxonomy(next, { expectedUpdatedAt });
-      return res.status(200).json({ ok: true, id, label: label.trim(), updatedAt: saved.updatedAt });
+      // Verification pass — anything still carrying the old label under this
+      // scope escaped the rename and would orphan out of the tree.
+      let orphansRemaining = 0;
+      try {
+        orphansRemaining = await countRenameOrphans(supabase, ctx, oldLabel, newLabel);
+      } catch { /* best effort — rename itself already succeeded */ }
+      return res.status(200).json({
+        ok: true,
+        id,
+        label: newLabel,
+        updatedAt: saved.updatedAt,
+        productsRenamed,
+        orphansRemaining,
+      });
     }
 
     if (action === 'addCategory') {
@@ -115,33 +126,30 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, updatedAt: saved.updatedAt });
     }
 
-    if (action === 'deleteSubcategory') {
-      const { id } = req.body;
-      if (!id) return res.status(400).json({ error: 'id required' });
-      const ctx = findNodeContext(tree, id);
-      if (!ctx) return res.status(404).json({ error: 'Subcategory not found' });
-      const productCount = await countProductsForNode(supabase, ctx);
-      if (productCount > 0) {
-        return res.status(400).json({
-          error: `Cannot delete — ${productCount} live product(s) still use this subcategory. Move or archive them first.`,
-          productCount,
-        });
-      }
-      const { tree: next } = deleteSubcategoryNode(tree, id);
-      const saved = await saveTaxonomy(next, { expectedUpdatedAt });
-      return res.status(200).json({ ok: true, id, productCount: 0, updatedAt: saved.updatedAt });
-    }
-
     if (action === 'deleteNode') {
       const { id } = req.body;
       if (!id) return res.status(400).json({ error: 'id required' });
       const ctx = findNodeContext(tree, id);
       if (!ctx) return res.status(404).json({ error: 'Category not found' });
-      let productCount = 0;
-      try { productCount = await countProductsForNode(supabase, ctx); } catch { /* best effort */ }
       const { tree: next } = deleteNodeCascade(tree, id);
       const saved = await saveTaxonomy(next, { expectedUpdatedAt });
-      return res.status(200).json({ ok: true, id, productCount, updatedAt: saved.updatedAt });
+      // Clear stored labels on affected products so they surface under
+      // Uncategorised (or their remaining parent) instead of leaving phantom
+      // category paths on the live site.
+      let productsCleared = 0;
+      let clearError = null;
+      try {
+        productsCleared = await clearProductsForDeletedNode(supabase, ctx);
+      } catch (err) {
+        clearError = err.message || 'Failed to clear product labels';
+      }
+      return res.status(200).json({
+        ok: true,
+        id,
+        productsCleared,
+        clearError,
+        updatedAt: saved.updatedAt,
+      });
     }
 
     if (action === 'countSubcategoryProducts') {

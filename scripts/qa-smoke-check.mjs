@@ -4,13 +4,22 @@
  * Run: node scripts/qa-smoke-check.mjs
  */
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { orderMatchesTab, isOrderConfirmationSent } from '../src/lib/orderStatus.js';
 import { parseOrderTab, parsePositiveInt, parseBusinessTypeFilter } from '../api/_admin-query-params.js';
-import { injectMotarroIntoTree } from '../lib/mottaro-category.mjs';
+import {
+  deriveMotarroPathFromLabels,
+  inferMotarroPathFromRow,
+  injectMotarroIntoTree,
+  motarroPathSnapshot,
+  parseStoredMotarroPath,
+} from '../lib/mottaro-category.mjs';
+import { matchesTaxonomyLabel, normalizeLabel, rowMatchesLabelScope, escapeIlikePattern } from '../lib/taxonomy-match.mjs';
+import { buildClearLabelsPatch } from '../api/_taxonomy-utils.js';
 import { BULK_CHUNK_SIZE, MOVE_UPDATE_CHUNK_SIZE, runInChunks } from '../lib/bulk-chunk.mjs';
 import { codeLookupCandidates, firstCodeToken } from '../lib/code-normalize.mjs';
 import { catalogueDisplayTitle, catalogueDescription, loaderCodeLabel } from '../lib/product-loader-display.mjs';
@@ -496,5 +505,117 @@ assert.match(sidebarSrc, /id: 'image-replace'/, 'sidebar has Image Replace nav')
 assert.match(adminPageSrc, /BulkImageReplacePanel/, 'AdminPage lazy-loads BulkImageReplacePanel');
 assert.doesNotMatch(readSrc('src/components/ProductLoaderPanel.jsx'), /image-replace/, 'Image Replace removed from Product Loader');
 console.log('✓ Bulk image replace tab (wizard, API, 500 cap)');
+
+// Taxonomy integrity (A1–A5) — count parity, tolerant matching, delete
+// clearing, persisted Mottaro paths, post-move refresh.
+
+// Shared label matcher
+assert.equal(normalizeLabel('  Fasteners  '), 'fasteners');
+assert.equal(normalizeLabel('School  &   Office'), 'school & office');
+assert.ok(matchesTaxonomyLabel(' Fasteners ', 'fasteners'), 'matcher tolerates padding + case');
+assert.ok(!matchesTaxonomyLabel('Fasteners', ''), 'empty tree label never matches');
+assert.ok(rowMatchesLabelScope(
+  { category: ' arts and crafts', subcategory_one: 'Art Supplies ' },
+  { category: 'Arts and Crafts', subcategory_one: 'Art Supplies' },
+), 'scope match tolerates whitespace drift');
+assert.equal(escapeIlikePattern('50%_a\\b'), '50\\%\\_a\\\\b', 'ilike pattern escaping');
+console.log('✓ A3 shared taxonomy label matcher');
+
+// Rename + delete server paths use the tolerant matcher, not raw .eq only
+const taxonomyApiSrc = readSrc('api/taxonomy.js');
+assert.match(taxonomyApiSrc, /renameNodeLabelInProducts/, 'rename uses shared tolerant rename helper');
+assert.match(taxonomyApiSrc, /orphansRemaining/, 'rename returns orphansRemaining verification');
+assert.match(taxonomyApiSrc, /clearProductsForDeletedNode/, 'deleteNode clears product labels');
+assert.match(taxonomyApiSrc, /productsCleared/, 'deleteNode reports productsCleared');
+assert.doesNotMatch(taxonomyApiSrc, /action === 'deleteSubcategory'/, 'dead deleteSubcategory action removed');
+const taxonomyUtilsSrc2 = readSrc('api/_taxonomy-utils.js');
+assert.match(taxonomyUtilsSrc2, /fetchRowsMatchingNodeScope/, 'scope fetch helper present');
+assert.match(taxonomyUtilsSrc2, /rowMatchesLabelScope/, 'scope fetch verifies with shared matcher');
+console.log('✓ A2/A3 rename + delete use tolerant matching');
+
+// buildClearLabelsPatch depth behaviour
+assert.deepEqual(buildClearLabelsPatch({ depth: 0 }), {
+  category: null,
+  subcategory_one: null,
+  subcategory_two: null,
+  subcategory_three: null,
+  subcategory_four: null,
+}, 'main-category delete clears category + all sub columns (shallow duplicate included)');
+assert.deepEqual(buildClearLabelsPatch({ depth: 2 }), {
+  subcategory_two: null,
+  subcategory_three: null,
+  subcategory_four: null,
+}, 'depth-2 delete clears column 2 and deeper only');
+console.log('✓ A2 buildClearLabelsPatch depth-aware clearing');
+
+// A1 — count/content parity
+assert.match(taxonomyUtilsSrc2, /onlyInStock && !isPublishableOnWebsite/, 'counts stock gate only when onlyInStock');
+assert.match(taxonomyApiSrc, /onlyInStock/, 'taxonomy counts endpoint accepts onlyInStock');
+const taxonomyAdminSrc2 = readSrc('src/lib/taxonomyAdmin.js');
+assert.match(taxonomyAdminSrc2, /onlyInStock=1/, 'fetchCategoryProductCounts passes onlyInStock query param');
+const pmEngineSrc2 = readSrc('src/components/ProductManagerEngine.jsx');
+assert.match(pmEngineSrc2, /fetchCategoryProductCounts\(\{ onlyInStock: true \}\)/, 'PM reloads stock-filtered counts when toggle on');
+assert.match(pmEngineSrc2, /productCounts=\{effectiveCategoryCounts\}/, 'category badges use toggle-aware counts');
+console.log('✓ A1 count badges match list contents in both stock modes');
+
+// A4 — persisted Mottaro path
+const mottaroTree = injectMotarroIntoTree([
+  {
+    id: 'arts-and-crafts',
+    label: 'Arts and Crafts',
+    children: [
+      { id: 'art-supplies', label: 'Art Supplies', children: [{ id: 'brushes', label: 'Brushes', children: [] }] },
+      { id: 'crafts', label: 'Crafts', children: [] },
+    ],
+  },
+  { id: 'stationery', label: 'Stationery', children: [] },
+]);
+assert.deepEqual(
+  deriveMotarroPathFromLabels(['Arts and Crafts', 'Art Supplies', 'Brushes'], mottaroTree),
+  ['mottaro', 'mottaro-art-supplies', 'mottaro-brushes'],
+  'derivation from labels resolves branch',
+);
+assert.deepEqual(
+  inferMotarroPathFromRow({ title: 'MOTTARO brush', category: null, mottaro_path: '["mottaro","mottaro-crafts"]' }, mottaroTree),
+  ['mottaro', 'mottaro-crafts'],
+  'stored mottaro_path wins when labels are gone',
+);
+assert.deepEqual(
+  inferMotarroPathFromRow({ title: 'MOTTARO thing', category: '', mottaro_path: '["bogus"]' }, mottaroTree),
+  ['mottaro', 'mottaro-other', 'mottaro-other-general'],
+  'invalid stored path falls back to Other›General',
+);
+assert.equal(motarroPathSnapshot(['mottaro']), null, 'bare root never snapshotted');
+assert.equal(motarroPathSnapshot(['mottaro', 'mottaro-other', 'mottaro-other-general']), null, 'general fallback never snapshotted');
+assert.equal(
+  motarroPathSnapshot(['mottaro', 'mottaro-crafts']),
+  '["mottaro","mottaro-crafts"]',
+  'meaningful path serialises to JSON id array',
+);
+assert.equal(parseStoredMotarroPath('["mottaro","nope"]', mottaroTree), null, 'stored path validated against tree');
+const mottaroSrc = readSrc('lib/mottaro-category.mjs');
+assert.match(mottaroSrc, /row\.mottaro_path/, 'inferMotarroPathFromRow reads persisted mottaro_path');
+const bulkProductsSrc2 = readSrc('api/bulk-products.js');
+assert.match(bulkProductsSrc2, /motarroPathSnapshot/, 'bulk move snapshots mottaro_path');
+assert.match(bulkProductsSrc2, /destinationLabels/, 'bulk move returns destinationLabels');
+const updateProductSrc2 = readSrc('api/update-product.js');
+assert.match(updateProductSrc2, /snapshotMottaroPath/, 'single-product save refreshes mottaro_path');
+assert.ok(readSrc('migrations/038_mottaro_path.sql').includes('mottaro_path'), 'migration 038 present');
+console.log('✓ A4 mottaro_path persistence (derive → stored → fallback)');
+
+// Shared Mottaro module — must stay byte-identical to the portal copy
+const MOTTARO_SHARED_HASH = '9f9e87791ab159cd';
+assert.equal(
+  createHash('sha256').update(readSrc('lib/mottaro-category.mjs')).digest('hex').slice(0, 16),
+  MOTTARO_SHARED_HASH,
+  'lib/mottaro-category.mjs must stay byte-identical to Proto-Website-/lib/mottaro-category.mjs — edit both copies together and update the pinned hash in both qa-smoke-check.mjs files',
+);
+console.log('✓ Shared Mottaro module in sync with Proto-Website-');
+
+// A5 — counts refresh after PM bulk move
+const pmMoveBlock = pmEngineSrc2.match(/const confirmBulkMove = async[\s\S]*?finally \{\s*setMoveSaving\(false\);/)?.[0] || '';
+assert.match(pmMoveBlock, /onRefreshTaxonomy\?\.\(\)/, 'PM bulk move refreshes taxonomy counts');
+assert.match(pmMoveBlock, /setInStockCountsNonce/, 'PM bulk move refetches stock-filtered counts');
+console.log('✓ A5 counts refresh after Product Manager move');
 
 console.log('\nAll smoke checks passed.');

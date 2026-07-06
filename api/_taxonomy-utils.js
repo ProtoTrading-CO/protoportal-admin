@@ -3,6 +3,12 @@ import { join } from 'path';
 import { readSiteConfigJson, writeSiteConfigJson } from './_site-config.js';
 import { isPublishableOnWebsite } from '../lib/catalog-stock.mjs';
 import { isMotarroProduct, inferMotarroPathFromRow, injectMotarroIntoTree } from './_mottaro-category.js';
+import {
+  escapeIlikePattern,
+  matchesTaxonomyLabel,
+  normalizeLabel,
+  rowMatchesLabelScope,
+} from '../lib/taxonomy-match.mjs';
 
 const TAXONOMY_FILE = 'taxonomy/categories.json';
 const BUNDLED_PATH = join(process.cwd(), 'src/data/categories.json');
@@ -154,10 +160,6 @@ export function labelsToDbFields(labels) {
   };
 }
 
-function normalizeLabel(label) {
-  return String(label || '').trim().toLowerCase();
-}
-
 /**
  * Resolve the current taxonomy ids for a product row's labels.
  * Taxonomy node ids stay stable across rename, but the labels stored in the
@@ -264,22 +266,10 @@ export function renameNodeLabel(tree, id, newLabel) {
   return { tree: [...tree], oldLabel, ctx };
 }
 
-export function deleteSubcategoryNode(tree, id) {
-  const ctx = findNodeContext(tree, id);
-  if (!ctx) throw new Error('Subcategory not found');
-  if (ctx.depth === 0) throw new Error('Main categories cannot be deleted here');
-  if (!ctx.parent) throw new Error('Parent category not found');
-  if (ctx.node.children?.length) {
-    throw new Error('Remove nested subcategories first');
-  }
-  ctx.parent.children = (ctx.parent.children || []).filter((child) => child.id !== id);
-  return { tree: [...tree], ctx };
-}
-
 /**
  * Delete a node at any depth (category or subcategory) together with its whole
- * subtree. Products are left untouched — their stored labels remain, so they
- * simply fall back to slug-of-label and show as uncategorised.
+ * subtree. Callers must also clear the affected products' stored labels via
+ * clearProductsForDeletedNode, or phantom category paths survive the delete.
  */
 export function deleteNodeCascade(tree, id) {
   const ctx = findNodeContext(tree, id);
@@ -306,15 +296,132 @@ export function buildNodeProductFilter(ctx) {
   return { filters };
 }
 
+const SCOPE_FETCH_COLS = 'sku,category,subcategory_one,subcategory_two,subcategory_three,subcategory_four';
+
+/**
+ * Fetch rows belonging to a node scope with whitespace/case-tolerant matching.
+ * Pass 1 narrows server-side with a contains-ilike on the deepest column
+ * (catches padded values like " Fasteners"); pass 2 verifies the full
+ * ancestor scope in JS with the shared normalized matcher.
+ */
+export async function fetchRowsMatchingNodeScope(supabase, table, { column, filters }) {
+  const label = String(filters[column] ?? '').trim();
+  if (!label) return [];
+  const pattern = `%${escapeIlikePattern(label)}%`;
+  const rows = [];
+  let from = 0;
+  const PAGE = 1000;
+  while (true) {
+    const { data, error } = await supabase
+      .from(table)
+      .select(SCOPE_FETCH_COLS)
+      .ilike(column, pattern)
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+    const batch = data || [];
+    for (const row of batch) {
+      if (rowMatchesLabelScope(row, filters)) rows.push(row);
+    }
+    if (batch.length < PAGE) break;
+    from += PAGE;
+  }
+  return rows;
+}
+
+/** Deepest column of a node scope — the column that names the node itself. */
+export function nodeScopeColumn(ctx) {
+  return ctx.depth === 0 ? 'category' : SUB_COLS[ctx.depth - 1];
+}
+
 export async function countProductsForNode(supabase, ctx) {
   const { filters } = buildNodeProductFilter(ctx);
-  let q = supabase.from('website_stock').select('sku', { count: 'exact', head: true });
-  for (const [key, val] of Object.entries(filters)) {
-    if (val != null) q = q.eq(key, val);
+  const rows = await fetchRowsMatchingNodeScope(supabase, 'website_stock', {
+    column: nodeScopeColumn(ctx),
+    filters,
+  });
+  return rows.length;
+}
+
+const PRODUCT_UPDATE_CHUNK = 200;
+
+async function chunkedSkuUpdate(supabase, table, skus, patch) {
+  for (let i = 0; i < skus.length; i += PRODUCT_UPDATE_CHUNK) {
+    const { error } = await supabase
+      .from(table)
+      .update(patch)
+      .in('sku', skus.slice(i, i + PRODUCT_UPDATE_CHUNK));
+    if (error) throw error;
   }
-  const { count, error } = await q;
-  if (error) throw error;
-  return count || 0;
+}
+
+/**
+ * Rename a node's label on every product row in one table, tolerant of
+ * whitespace/case drift in stored labels. Shallow rows duplicate the main
+ * category label into subcategory_one, so a depth-0 rename must update both
+ * columns or the row orphans at depth 1.
+ */
+export async function renameNodeLabelInProducts(supabase, table, ctx, oldLabel, newLabel) {
+  const { column, filters } = buildRenameFilter(ctx, oldLabel);
+  const rows = await fetchRowsMatchingNodeScope(supabase, table, { column, filters });
+  if (!rows.length) return { renamed: 0 };
+  const stamp = new Date().toISOString();
+  const needsSubOne = (row) => ctx.depth === 0 && matchesTaxonomyLabel(row.subcategory_one, oldLabel);
+  const dualSkus = rows.filter((r) => needsSubOne(r)).map((r) => r.sku).filter(Boolean);
+  const singleSkus = rows.filter((r) => !needsSubOne(r)).map((r) => r.sku).filter(Boolean);
+  await chunkedSkuUpdate(supabase, table, singleSkus, { [column]: newLabel, updated_at: stamp });
+  await chunkedSkuUpdate(supabase, table, dualSkus, {
+    [column]: newLabel,
+    subcategory_one: newLabel,
+    updated_at: stamp,
+  });
+  return { renamed: dualSkus.length + singleSkus.length };
+}
+
+/**
+ * Column patch for products under a deleted node:
+ * - depth 0: null category and every subcategory column (covers shallow rows
+ *   where subcategory_one duplicates the category label).
+ * - depth N: null column N and everything deeper; category stays intact.
+ */
+export function buildClearLabelsPatch(ctx) {
+  const patch = {};
+  if (ctx.depth === 0) patch.category = null;
+  const firstSub = ctx.depth === 0 ? 0 : ctx.depth - 1;
+  for (let i = firstSub; i < SUB_COLS.length; i += 1) {
+    patch[SUB_COLS[i]] = null;
+  }
+  return patch;
+}
+
+/**
+ * Null out stored labels on every product row (live + archived) under a
+ * deleted node, so no phantom category paths survive the delete. Uses the
+ * same tolerant matching as rename. Returns rows actually updated.
+ */
+export async function clearProductsForDeletedNode(supabase, ctx) {
+  const { filters } = buildNodeProductFilter(ctx);
+  const column = nodeScopeColumn(ctx);
+  const patch = { ...buildClearLabelsPatch(ctx), updated_at: new Date().toISOString() };
+  let cleared = 0;
+  for (const table of ['website_stock', 'archived_products']) {
+    const rows = await fetchRowsMatchingNodeScope(supabase, table, { column, filters });
+    const skus = rows.map((r) => r.sku).filter(Boolean);
+    await chunkedSkuUpdate(supabase, table, skus, patch);
+    cleared += skus.length;
+  }
+  return cleared;
+}
+
+/** Count rows (live + archived) still carrying the old label under the node scope. */
+export async function countRenameOrphans(supabase, ctx, oldLabel, newLabel) {
+  if (normalizeLabel(oldLabel) === normalizeLabel(newLabel)) return 0;
+  const { column, filters } = buildRenameFilter(ctx, oldLabel);
+  let orphans = 0;
+  for (const table of ['website_stock', 'archived_products']) {
+    const remaining = await fetchRowsMatchingNodeScope(supabase, table, { column, filters });
+    orphans += remaining.length;
+  }
+  return orphans;
 }
 
 /** Resolve taxonomy labels from an id path (main + subcategory ids). */
@@ -332,10 +439,15 @@ export function resolveLabelsFromPathIds(tree, pathIds = []) {
   return labels;
 }
 
-const COUNT_ROW_COLS = 'category,subcategory_one,subcategory_two,subcategory_three,subcategory_four,title,available_stock,stock_qty';
+// Requires migration 038 (mottaro_path) to be applied before deploy.
+const COUNT_ROW_COLS = 'category,subcategory_one,subcategory_two,subcategory_three,subcategory_four,title,available_stock,stock_qty,mottaro_path';
 
-/** Count live products per taxonomy node (includes all descendants). */
-export async function buildCategoryProductCounts(supabase, tree) {
+/**
+ * Count live products per taxonomy node (includes all descendants).
+ * Default counts every live row so badges match the Product Manager's default
+ * view; pass onlyInStock=true to mirror the "Show only in stock" toggle.
+ */
+export async function buildCategoryProductCounts(supabase, tree, { onlyInStock = false } = {}) {
   const counts = { __uncategorized__: 0, __all__: 0 };
   let mottaroLive = 0;
   let from = 0;
@@ -349,7 +461,7 @@ export async function buildCategoryProductCounts(supabase, tree) {
     if (error) throw error;
     const batch = data || [];
     for (const row of batch) {
-      if (!isPublishableOnWebsite(row)) continue;
+      if (onlyInStock && !isPublishableOnWebsite(row)) continue;
       counts.__all__ += 1;
 
       const isMottaro = isMotarroProduct(row);

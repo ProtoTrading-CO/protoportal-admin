@@ -2,6 +2,27 @@ import { requireAdminKey } from './_admin-auth.js';
 import { createClient } from '@supabase/supabase-js';
 import { resolveProductLoaderMatch } from './_product-loader-lookup.js';
 import { ensureProductFromCatalogueRow } from './_ensure-product.js';
+import { loadTaxonomy } from './_taxonomy-utils.js';
+import { deriveMotarroPathFromLabels, isMotarroProduct, motarroPathSnapshot } from './_mottaro-category.js';
+
+const CATEGORY_COLS = ['category', 'subcategory_one', 'subcategory_two', 'subcategory_three', 'subcategory_four'];
+
+/**
+ * Snapshot the row's virtual Mottaro position after a category/title change.
+ * Best effort — the primary update already succeeded.
+ */
+async function snapshotMottaroPath(supabase, table, verified) {
+  if (!isMotarroProduct(verified)) return;
+  const tree = await loadTaxonomy();
+  const labels = CATEGORY_COLS.map((col) => verified[col]);
+  const snapshot = motarroPathSnapshot(deriveMotarroPathFromLabels(labels, tree));
+  if (!snapshot || snapshot === verified.mottaro_path) return;
+  const { error } = await supabase
+    .from(table)
+    .update({ mottaro_path: snapshot })
+    .eq('sku', verified.sku);
+  if (!error) verified.mottaro_path = snapshot;
+}
 
 function getStockAdminClient() {
   return createClient(
@@ -112,6 +133,13 @@ export default async function handler(req, res) {
     .maybeSingle();
   if (verifyError) return res.status(400).json({ error: verifyError.message });
   if (!verified) return res.status(500).json({ error: 'Update did not persist — product not found after save' });
+
+  const touchedMottaroInputs = CATEGORY_COLS.some((col) => patch[col] !== undefined) || patch.title !== undefined;
+  if (touchedMottaroInputs) {
+    try {
+      await snapshotMottaroPath(supabase, table, verified);
+    } catch { /* non-fatal — snapshot refresh is best effort */ }
+  }
 
   // Nutstore-archived placeholders often have no ERP row yet. When the admin
   // fixes the SKU or barcode on such a row, re-run the ERP/Positill lookup so
