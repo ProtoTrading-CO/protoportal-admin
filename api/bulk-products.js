@@ -1,6 +1,7 @@
 import { requireAdminKey } from './_admin-auth.js';
 import { createClient } from '@supabase/supabase-js';
 import { labelsToDbFields, loadTaxonomy, resolveLabelsForSubcategory, resolveLabelsFromPathIds } from './_taxonomy-utils.js';
+import { deriveMotarroPathFromLabels, isMotarroProduct, motarroPathSnapshot } from './_mottaro-category.js';
 import { restoreArchivedToLive } from './_ensure-product.js';
 import { BULK_CHUNK_SIZE, MOVE_UPDATE_CHUNK_SIZE, runInChunks } from '../lib/bulk-chunk.mjs';
 
@@ -52,17 +53,17 @@ function getStockClient() {
 }
 
 async function resolveSkuTables(supabase, skus) {
-  const liveSkus = new Set();
-  const archSkus = new Set();
+  const liveSkus = new Map();
+  const archSkus = new Map();
   const CHUNK = 200;
   for (let i = 0; i < skus.length; i += CHUNK) {
     const chunk = skus.slice(i, i + CHUNK);
     const [{ data: live }, { data: arch }] = await Promise.all([
-      supabase.from('website_stock').select('sku').in('sku', chunk),
-      supabase.from('archived_products').select('sku').in('sku', chunk),
+      supabase.from('website_stock').select('sku,title').in('sku', chunk),
+      supabase.from('archived_products').select('sku,title').in('sku', chunk),
     ]);
-    for (const row of live || []) liveSkus.add(row.sku);
-    for (const row of arch || []) archSkus.add(row.sku);
+    for (const row of live || []) liveSkus.set(row.sku, row);
+    for (const row of arch || []) archSkus.set(row.sku, row);
   }
   return { liveSkus, archSkus };
 }
@@ -84,20 +85,32 @@ async function unarchiveProduct(supabase, sku) {
   }
 }
 
-async function bulkMoveProducts(supabase, normalizedSkus, dbFields) {
-  const updatePayload = { ...dbFields, updated_at: new Date().toISOString() };
+async function bulkMoveProducts(supabase, normalizedSkus, dbFields, { mottaroSnapshot = null } = {}) {
+  const stamp = new Date().toISOString();
+  const updatePayload = { ...dbFields, updated_at: stamp };
+  // Mottaro rows also get their virtual position snapshotted so later
+  // renames/deletes of the primary category can't shuffle the Mottaro tree.
+  const mottaroPayload = mottaroSnapshot
+    ? { ...updatePayload, mottaro_path: mottaroSnapshot }
+    : updatePayload;
   const { liveSkus, archSkus } = await resolveSkuTables(supabase, normalizedSkus);
-  const found = new Set([...liveSkus, ...archSkus]);
+  const found = new Set([...liveSkus.keys(), ...archSkus.keys()]);
   const results = [];
-  const liveList = normalizedSkus.filter((sku) => liveSkus.has(sku));
-  const archList = normalizedSkus.filter((sku) => archSkus.has(sku));
 
-  if (liveList.length) {
-    results.push(...await chunkedInUpdate(supabase, 'website_stock', liveList, updatePayload));
-  }
-
-  if (archList.length) {
-    results.push(...await chunkedInUpdate(supabase, 'archived_products', archList, updatePayload));
+  for (const [table, tableRows] of [['website_stock', liveSkus], ['archived_products', archSkus]]) {
+    const list = normalizedSkus.filter((sku) => tableRows.has(sku));
+    if (!list.length) continue;
+    const mottaroSet = new Set(
+      mottaroSnapshot ? list.filter((sku) => isMotarroProduct(tableRows.get(sku))) : [],
+    );
+    const mottaroList = [...mottaroSet];
+    const plainList = mottaroSet.size ? list.filter((sku) => !mottaroSet.has(sku)) : list;
+    if (plainList.length) {
+      results.push(...await chunkedInUpdate(supabase, table, plainList, updatePayload));
+    }
+    if (mottaroList.length) {
+      results.push(...await chunkedInUpdate(supabase, table, mottaroList, mottaroPayload));
+    }
   }
 
   for (const sku of normalizedSkus) {
@@ -109,7 +122,7 @@ async function bulkMoveProducts(supabase, normalizedSkus, dbFields) {
 
 async function bulkDeleteProducts(supabase, normalizedSkus) {
   const { liveSkus, archSkus } = await resolveSkuTables(supabase, normalizedSkus);
-  const found = new Set([...liveSkus, ...archSkus]);
+  const found = new Set([...liveSkus.keys(), ...archSkus.keys()]);
   const results = [];
   const failedSkus = new Set();
 
@@ -195,13 +208,15 @@ export default async function handler(req, res) {
       }
       const dbFields = labelsToDbFields(labels);
       const destinationPath = labels.join(' › ');
-      const results = await bulkMoveProducts(supabase, normalizedSkus, dbFields);
+      const mottaroSnapshot = motarroPathSnapshot(deriveMotarroPathFromLabels(labels, tree));
+      const results = await bulkMoveProducts(supabase, normalizedSkus, dbFields, { mottaroSnapshot });
       const failed = results.filter((r) => !r.ok);
       return res.status(failed.length ? 207 : 200).json({
         ok: failed.length === 0,
         moved: results.filter((r) => r.ok).length,
         failed,
         destinationPath,
+        destinationLabels: labels,
       });
     }
 
