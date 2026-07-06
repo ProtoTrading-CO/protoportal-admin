@@ -21,8 +21,6 @@ import {
   X,
 } from 'lucide-react';
 import CategorySidebar, { resolvePathLabels } from './CategorySidebar';
-import ReorderGrid from './ReorderGrid';
-import ApprovalPanel from './ApprovalPanel';
 import BulkProductEditModal from './BulkProductEditModal';
 import BulkMoveModal from './BulkMoveModal';
 import { useCatalogQuery, buildCatalogParams, fetchAllCatalogRows, CATALOG_STATUSES } from '../hooks/useCatalog';
@@ -108,6 +106,36 @@ function ProductCategoryLine({ item }) {
 function formatStockUnits(qty) {
   const n = qty === null || qty === undefined ? 0 : Number(qty);
   return `${Number.isFinite(n) ? n : 0} units`;
+}
+
+const MOVED_TAG_WINDOW_MS = 48 * 60 * 60 * 1000;
+
+/** Colored tag shown for 48h after a product is moved, e.g. "Beads → Hardware". */
+function MovedBadge({ item }) {
+  if (!item?.movedAt || !item?.movedTo) return null;
+  const movedAt = new Date(item.movedAt).getTime();
+  if (!Number.isFinite(movedAt) || Date.now() - movedAt > MOVED_TAG_WINDOW_MS) return null;
+  const from = item.movedFrom || 'Uncategorised';
+  return (
+    <span
+      title={`Moved ${new Date(item.movedAt).toLocaleString('en-ZA')} — from ${from} to ${item.movedTo}`}
+      style={{
+        fontSize: 10,
+        fontWeight: 700,
+        color: '#9a3412',
+        background: '#ffedd5',
+        border: '1px solid #fdba74',
+        borderRadius: 4,
+        padding: '1px 6px',
+        whiteSpace: 'nowrap',
+        maxWidth: 260,
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+      }}
+    >
+      {from} → {item.movedTo}
+    </span>
+  );
 }
 
 function NutstoreArchiveBadge({ archivedBy }) {
@@ -230,6 +258,7 @@ function PmMobileProductCard({
           <NeedsSohPriceBadge item={item} />
           <OutOfStockLinkedBadge item={item} />
           <MultiCategoryBadge item={item} tree={tree} />
+          <MovedBadge item={item} />
           <div className="adm-muted pm-mobile-card-meta">
             <span>BC: <CodeEllipsis value={item.barcode || item.code} /></span>
             {item.sku && <span>WSK: <CodeEllipsis value={item.sku} /></span>}
@@ -272,16 +301,12 @@ function PmMobileProductCard({
               <Sparkles size={14} />
             </button>
             <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => mutations.archive.mutate(item.sku, { onSuccess: () => onRefreshStats?.() })}>Archive</button>
-            <button type="button" className="adm-btn-red adm-btn--sm" onClick={() => recycleSku(item.sku, false)}>Recycle</button>
           </>
         )}
         {status === 'archived' && (
-          <>
-            <button type="button" className="adm-btn-red adm-btn--sm" onClick={() => onMakeLive?.(item)}>
-              <ArchiveRestore size={14} /> Make live
-            </button>
-            <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => recycleSku(item.sku, true)}>To recycle</button>
-          </>
+          <button type="button" className="adm-btn-red adm-btn--sm" onClick={() => onMakeLive?.(item)}>
+            <ArchiveRestore size={14} /> Make live
+          </button>
         )}
         {status === 'approval' && (
           <>
@@ -391,15 +416,22 @@ export default function ProductManagerEngine({
   onCategoryReorder,
   categoryProductCounts = {},
   initialStatus = 'live',
+  statuses = CATALOG_STATUSES,
+  title = 'Product Manager',
+  note = 'In-stock products are live on the site. Use ✨ to add products to New Arrivals on the trade homepage.',
 }) {
-  const [status, setStatus] = useState(initialStatus);
+  const clampStatus = useCallback(
+    (s) => (statuses.includes(s) ? s : statuses[0]),
+    [statuses.join('|')], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  const [status, setStatus] = useState(() => clampStatus(initialStatus));
   const [archiveStockView, setArchiveStockView] = useState('archived');
   const [archiveSourceFilter, setArchiveSourceFilter] = useState('all');
-  const [reorderMode, setReorderMode] = useState(false);
+  const reorderMode = false; // Reorder mode removed — use the Reorder Grid section instead.
 
   useEffect(() => {
-    setStatus(initialStatus);
-  }, [initialStatus]);
+    setStatus(clampStatus(initialStatus));
+  }, [initialStatus, clampStatus]);
   const [page, setPage] = useState(1);
   const [pageSize] = useState(50);
   const [searchInput, setSearchInput] = useState('');
@@ -520,7 +552,9 @@ export default function ProductManagerEngine({
     page,
     pageSize,
     search: debouncedSearch,
-    categoryPath,
+    // Search is catalogue-wide: a code/name query must find the product no
+    // matter which category or subcategory is currently selected.
+    categoryPath: debouncedSearch ? [] : categoryPath,
     stockFilter: status === 'archived' ? archiveStockView : undefined,
     archivedSource: status === 'archived' && archiveStockView === 'archived' ? archiveSourceFilter : undefined,
     onlyInStock: status === 'live' && onlyInStock,
@@ -1128,8 +1162,8 @@ export default function ProductManagerEngine({
     <div ref={panelTopRef} className="adm-panel adm-panel-with-sidebar pm-engine">
       <div className="adm-section-head">
         <div>
-          <h2 className="adm-section-title">Product Manager</h2>
-          <p className="adm-section-note">In-stock products are live on the site. Use ✨ to add products to New Arrivals on the trade homepage.</p>
+          <h2 className="adm-section-title">{title}</h2>
+          <p className="adm-section-note">{note}</p>
         </div>
         <div className="pm-engine-head-actions">
           {status !== 'approval' && !reorderMode && (
@@ -1160,39 +1194,27 @@ export default function ProductManagerEngine({
         </div>
       </div>
 
-      <div className="adm-customer-tabs pm-status-tabs">
-        {CATALOG_STATUSES.map((s) => {
-          const meta = STATUS_META[s];
-          const Icon = meta.icon;
-          return (
-            <button
-              key={s}
-              type="button"
-              className={`adm-tab${status === s ? ' adm-tab--active' : ''}`}
-              onClick={() => { setStatus(s); setReorderMode(false); }}
-            >
-              <Icon size={14} /> {meta.label}
-            </button>
-          );
-        })}
-        {status === 'live' && (
-          <button
-            type="button"
-            className={`adm-tab pm-reorder-tab${reorderMode ? ' adm-tab--active' : ''}`}
-            onClick={() => { setReorderMode((v) => !v); setReorderDirty(false); }}
-          >
-            <Grip size={14} /> Reorder mode
-          </button>
-        )}
-      </div>
+      {statuses.length > 1 && (
+        <div className="adm-customer-tabs pm-status-tabs">
+          {statuses.map((s) => {
+            const meta = STATUS_META[s];
+            if (!meta) return null;
+            const Icon = meta.icon;
+            return (
+              <button
+                key={s}
+                type="button"
+                className={`adm-tab${status === s ? ' adm-tab--active' : ''}`}
+                onClick={() => setStatus(s)}
+              >
+                <Icon size={14} /> {meta.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
-      {status === 'approval' ? (
-        <ApprovalPanel
-          embedded
-          onShowToast={onShowToast}
-          onRefreshStats={onRefreshStats}
-        />
-      ) : (
+      {(
         <div className="adm-panel-split">
           <aside className={`adm-panel-sidebar adm-reorder-tree-sidebar${isMobile ? ' adm-panel-sidebar--desktop-only' : ''}`}>
             <div className="adm-reorder-cat-heading">
@@ -1444,7 +1466,6 @@ export default function ProductManagerEngine({
                         >
                           {bulkActionPending ? 'Archiving…' : `Archive ${selected.size}`}
                         </button>
-                        <button type="button" className="adm-btn-red adm-btn--sm" onClick={() => runBulk({ mutateAsync: (sku) => mutations.softDelete.mutateAsync({ sku, fromArchive: false }) })}>To recycle</button>
                       </>
                     )}
                     {status === 'archived' && !archiveNegativeLive && (
@@ -1465,7 +1486,6 @@ export default function ProductManagerEngine({
                               </>
                             )}
                         </button>
-                        <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => runBulk({ mutateAsync: (sku) => mutations.softDelete.mutateAsync({ sku, fromArchive: true }) })}>To recycle</button>
                       </>
                     )}
                     {status === 'approval' && (
@@ -1482,60 +1502,7 @@ export default function ProductManagerEngine({
               )}
             </div>
 
-            {showSkeleton ? <CatalogSkeleton /> : reorderMode && status === 'live' ? (
-              <>
-                <div className="adm-reorder-toolbar" style={{ marginBottom: 12 }}>
-                  <span className="adm-reorder-count">{reorderProducts.length} products in this view</span>
-                  {sortOrderMeta.updatedAt && formatSortSavedAt(sortOrderMeta.updatedAt) && (
-                    <span className="adm-pill adm-pill--ok">
-                      Order saved · {formatSortSavedAt(sortOrderMeta.updatedAt)}
-                    </span>
-                  )}
-                  {reorderDirty && <span className="adm-pill adm-pill--warn">Unsaved order</span>}
-                  {debouncedSearch && <span className="adm-muted" style={{ fontSize: 12 }}>Clear search to save</span>}
-                  {catalogChangedWhileDirty && (
-                    <span className="adm-pill adm-pill--warn" style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                      Catalogue changed — reload to sync
-                      <button
-                        type="button"
-                        className="adm-btn-ghost adm-btn--sm"
-                        onClick={() => discardDirtyReorderSync()}
-                      >
-                        Reload
-                      </button>
-                    </span>
-                  )}
-                  {reorderIncomplete && (
-                    <span className="adm-pill adm-pill--warn">Category incomplete — reload before saving</span>
-                  )}
-                  <button
-                    type="button"
-                    className="adm-btn-red adm-btn--sm"
-                    style={{ marginLeft: 'auto' }}
-                    disabled={!reorderDirty || reorderSaving || !!debouncedSearch || reorderIncomplete}
-                    onClick={() => void saveReorderOrder()}
-                  >
-                    {reorderSaving ? 'Saving…' : 'Save order'}
-                  </button>
-                </div>
-              <ReorderGrid
-                products={reorderProducts}
-                onProductsChange={handleReorderProductsChange}
-                selectedIds={selected}
-                onToggleSelect={toggleSelect}
-                mainCategoryId={categoryPath[0] || tree[0]?.id}
-                selectedPath={categoryPath}
-                taxonomyTree={tree}
-                loading={reorderLoading}
-                dragDisabled={!!debouncedSearch}
-                savingOrder={reorderSaving}
-                onEditProduct={onEditProduct}
-                onEditSubcategory={onEditCategory}
-                onDeleteSubcategory={onDeleteSubcategory}
-                onOrderCommitted={(next) => scheduleReorderSave(next)}
-              />
-              </>
-            ) : (
+            {showSkeleton ? <CatalogSkeleton /> : (
               <>
                 {isMobile ? (
                   <div className="pm-mobile-list">
@@ -1629,6 +1596,7 @@ export default function ProductManagerEngine({
                           <NeedsSohPriceBadge item={item} />
                           <OutOfStockLinkedBadge item={item} />
                           <MultiCategoryBadge item={item} tree={tree} />
+                          <MovedBadge item={item} />
                         </div>
                         <div className="adm-muted" style={{ fontSize: 11 }}>
                           <span>BC: <CodeEllipsis value={item.barcode || item.code} /></span>
@@ -1689,22 +1657,15 @@ export default function ProductManagerEngine({
                               <Sparkles size={14} />
                             </button>
                             <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => mutations.archive.mutate(item.sku, { onSuccess: () => onRefreshStats?.() })}>Archive</button>
-                            <button type="button" className="adm-btn-red adm-btn--sm" onClick={() => recycleSku(item.sku, false)}>To recycle</button>
                           </>
                         )}
                         {status === 'archived' && archiveNegativeLive && (
-                          <>
-                            <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => mutations.archive.mutate(item.sku, { onSuccess: () => onRefreshStats?.() })}>Archive</button>
-                            <button type="button" className="adm-btn-red adm-btn--sm" onClick={() => recycleSku(item.sku, false)}>To recycle</button>
-                          </>
+                          <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => mutations.archive.mutate(item.sku, { onSuccess: () => onRefreshStats?.() })}>Archive</button>
                         )}
                         {status === 'archived' && !archiveNegativeLive && (
-                          <>
-                            <button type="button" className="adm-btn-red adm-btn--sm" onClick={() => makeLive(item)}>
-                              <ArchiveRestore size={14} /> Make live
-                            </button>
-                            <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => recycleSku(item.sku, true)}>To recycle</button>
-                          </>
+                          <button type="button" className="adm-btn-red adm-btn--sm" onClick={() => makeLive(item)}>
+                            <ArchiveRestore size={14} /> Make live
+                          </button>
                         )}
                         {status === 'approval' && (
                           <>

@@ -1,4 +1,5 @@
 import {
+  Archive,
   BarChart2,
   Bot,
   DollarSign,
@@ -27,6 +28,7 @@ const NAV_ITEMS = [
   { id: 'apollo', label: 'Apollo', icon: Bot },
   { id: 'cost-tracking', label: 'Cost Tracking', icon: DollarSign },
   { id: 'catalogue', label: 'Product Manager', icon: PackagePlus },
+  { id: 'archive', label: 'Archive', icon: Archive },
   { id: 'reorder', label: 'Reorder Grid', icon: Grip },
   { id: 'customers', label: 'Customer Management', icon: Users },
   { id: 'featured', label: 'Featured', icon: Sparkles },
@@ -90,7 +92,7 @@ export default function GroupedSidebar({
         const badge = item.id === 'customers' && pendingCustomerCount > 0
           ? { count: pendingCustomerCount, title: 'Pending trade applications' }
           : item.id === 'orders' && newOrdersCount > 0
-            ? { count: newOrdersCount, title: 'New orders' }
+            ? { count: newOrdersCount, title: 'Orders awaiting payment' }
             : null;
         return (
           <button

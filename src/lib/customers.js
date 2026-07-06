@@ -77,6 +77,29 @@ export async function deleteProtoActiveCustomer(id) {
   if (!res.ok) throw new Error(json.error || 'Failed to delete proto active customer');
 }
 
+export async function deleteAllProtoActiveCustomers() {
+  const res = await fetch('/api/proto-active-customers', {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ all: true, confirm: 'DELETE ALL CUSTOMERS' }),
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || 'Failed to delete all customers');
+  return json;
+}
+
+/** Import CSV rows (Account, CompanyName, ContactName, EmailAddress, TotalSpend) into pre-registration. */
+export async function importProtoActiveCustomers(rows) {
+  const res = await fetch('/api/proto-active-customers', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'import', rows }),
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || 'Customer import failed');
+  return json;
+}
+
 export async function syncBrevoContacts() {
   const res = await fetch('/api/brevo-sync', { method: 'POST' });
   const json = await res.json();

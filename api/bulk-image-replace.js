@@ -38,9 +38,28 @@ function normalizeSlot(raw) {
   return Math.min(4, Math.max(1, Number(raw) || 1));
 }
 
-async function handlePreflight(supabase, skus, slot) {
+function normalizeScope(raw) {
+  return String(raw || 'live').trim().toLowerCase() === 'archived' ? 'archived' : 'live';
+}
+
+// Staged previews and recycle-bin rows are managed by their own flows —
+// bulk replace must never write into them.
+const ARCHIVED_PROTECTED_BY = new Set(['new-products', 'recycle-bin']);
+
+async function findArchivedRow(supabase, sku) {
+  const { data, error } = await supabase
+    .from('archived_products')
+    .select('sku, archived_by')
+    .eq('sku', sku)
+    .maybeSingle();
+  if (error) throw error;
+  return data || null;
+}
+
+async function handlePreflight(supabase, skus, slot, scope) {
   if (!skus.length) return { ok: true, found: [], missing: [] };
 
+  const table = scope === 'archived' ? 'archived_products' : 'website_stock';
   const found = [];
   const missing = [];
   const chunks = [];
@@ -51,11 +70,12 @@ async function handlePreflight(supabase, skus, slot) {
   const foundSet = new Set();
   for (const chunk of chunks) {
     const { data, error } = await supabase
-      .from('website_stock')
-      .select('sku')
+      .from(table)
+      .select(scope === 'archived' ? 'sku, archived_by' : 'sku')
       .in('sku', chunk);
     if (error) throw error;
     for (const row of data || []) {
+      if (scope === 'archived' && ARCHIVED_PROTECTED_BY.has(row.archived_by)) continue;
       foundSet.add(String(row.sku || '').trim().toUpperCase());
     }
   }
@@ -65,10 +85,10 @@ async function handlePreflight(supabase, skus, slot) {
     else missing.push(sku);
   }
 
-  return { ok: true, found, missing, slot };
+  return { ok: true, found, missing, slot, scope };
 }
 
-async function replaceOneItem(supabase, raw, allowedSet, slot) {
+async function replaceOneItem(supabase, raw, allowedSet, slot, scope) {
   const sku = String(raw.sku || '').trim().toUpperCase();
   const filename = String(raw.filename || '');
   const contentType = String(raw.contentType || 'image/jpeg');
@@ -87,18 +107,28 @@ async function replaceOneItem(supabase, raw, allowedSet, slot) {
     return { sku, ok: false, error: `wrong_slot_expected_${slot}_got_${fileSlot}` };
   }
   const fileSku = String(parsed.code || '').trim().toUpperCase();
-  if (fileSku && fileSku !== sku) {
+  const fileCandidates = parsed.codeCandidates || [];
+  if (fileSku && fileSku !== sku && !fileCandidates.includes(sku)) {
     return { sku, ok: false, error: 'filename_sku_mismatch' };
   }
 
   try {
-    const { data: row, error: fetchErr } = await supabase
-      .from('website_stock')
-      .select('sku')
-      .eq('sku', sku)
-      .maybeSingle();
-    if (fetchErr) throw fetchErr;
-    if (!row) return { sku, ok: false, error: 'not_in_website_stock' };
+    let archivedRow = null;
+    if (scope === 'archived') {
+      archivedRow = await findArchivedRow(supabase, sku);
+      if (!archivedRow) return { sku, ok: false, error: 'not_in_archived_products' };
+      if (ARCHIVED_PROTECTED_BY.has(archivedRow.archived_by)) {
+        return { sku, ok: false, error: 'archived_row_protected' };
+      }
+    } else {
+      const { data: row, error: fetchErr } = await supabase
+        .from('website_stock')
+        .select('sku')
+        .eq('sku', sku)
+        .maybeSingle();
+      if (fetchErr) throw fetchErr;
+      if (!row) return { sku, ok: false, error: 'not_in_website_stock' };
+    }
 
     const ext = filename.split('.').pop()?.toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
     const objectPath = `${sku}/${slot}.${ext}`;
@@ -110,13 +140,35 @@ async function replaceOneItem(supabase, raw, allowedSet, slot) {
 
     const { data: { publicUrl } } = supabase.storage.from(BUCKET).getPublicUrl(objectPath);
     const col = BULK_IMAGE_REPLACE_SLOT_COLS[slot - 1];
-    const { error: patchErr } = await supabase
-      .from('website_stock')
-      .update({ [col]: publicUrl, updated_at: new Date().toISOString() })
-      .eq('sku', sku);
-    if (patchErr) throw patchErr;
+    const patch = { [col]: publicUrl, updated_at: new Date().toISOString() };
 
-    return { sku, ok: true, slot, url: publicUrl };
+    if (scope === 'archived') {
+      const { error: patchErr } = await supabase
+        .from('archived_products')
+        .update(patch)
+        .eq('sku', sku);
+      if (patchErr) throw patchErr;
+      // A live twin shares the same storage object, so its image content
+      // already changed with the upload above — keep its slot URL in sync
+      // too, and surface (rather than swallow) a failed sync.
+      const { data: liveTwin } = await supabase
+        .from('website_stock').select('sku').eq('sku', sku).maybeSingle();
+      if (liveTwin) {
+        const { error: syncErr } = await supabase
+          .from('website_stock').update(patch).eq('sku', sku);
+        if (syncErr) {
+          return { sku, ok: true, slot, scope, url: publicUrl, warning: `live_sync_failed: ${syncErr.message}` };
+        }
+      }
+    } else {
+      const { error: patchErr } = await supabase
+        .from('website_stock')
+        .update(patch)
+        .eq('sku', sku);
+      if (patchErr) throw patchErr;
+    }
+
+    return { sku, ok: true, slot, scope, url: publicUrl };
   } catch (err) {
     return { sku, ok: false, error: err.message || 'replace_failed' };
   }
@@ -130,6 +182,7 @@ export default async function handler(req, res) {
   const body = req.body || {};
   const action = String(body.action || 'replace').trim().toLowerCase();
   const slot = normalizeSlot(body.slot);
+  const scope = normalizeScope(body.scope);
   const allowedSkus = normalizeSkuList(body.allowedSkus || body.skus);
 
   if (allowedSkus.length > BULK_IMAGE_REPLACE_MAX) {
@@ -141,7 +194,7 @@ export default async function handler(req, res) {
 
   if (action === 'preflight') {
     try {
-      const result = await handlePreflight(supabase, allowedSkus, slot);
+      const result = await handlePreflight(supabase, allowedSkus, slot, scope);
       return res.status(200).json(result);
     } catch (err) {
       return res.status(400).json({ error: err.message || 'Preflight failed' });
@@ -166,7 +219,7 @@ export default async function handler(req, res) {
   const results = await runInChunks(
     items,
     BULK_IMAGE_REPLACE_UPLOAD_CONCURRENCY,
-    (item) => replaceOneItem(supabase, item, allowedSet, slot),
+    (item) => replaceOneItem(supabase, item, allowedSet, slot, scope),
   );
 
   const failed = results.filter((r) => !r.ok);

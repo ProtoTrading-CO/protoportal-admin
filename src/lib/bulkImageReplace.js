@@ -41,7 +41,7 @@ export function buildPreflightMatch(selectedProducts, slot, fileList) {
   for (const file of fileList || []) {
     if (!isImageFile(file)) continue;
     const parsed = parseIntakeFilename(file.name);
-    const sku = parsed.sourceSku;
+    let sku = parsed.sourceSku;
     if (!sku || parsed.parseError) {
       invalid.push({ file, reason: parsed.parseError || 'invalid' });
       continue;
@@ -51,8 +51,14 @@ export function buildPreflightMatch(selectedProducts, slot, fileList) {
       continue;
     }
     if (!selectedSkuSet.has(sku)) {
-      extra.push({ file, sku });
-      continue;
+      // Messy filenames ("8774…-10MM", "8774…&8775…") match on the first
+      // code before a separator.
+      const candidate = (parsed.skuCandidates || []).find((c) => selectedSkuSet.has(c));
+      if (!candidate) {
+        extra.push({ file, sku });
+        continue;
+      }
+      sku = candidate;
     }
     matchedSkus.add(sku);
     ready.push({
@@ -80,13 +86,14 @@ export function buildPreflightMatch(selectedProducts, slot, fileList) {
   };
 }
 
-export async function preflightSkus(skus, slot) {
+export async function preflightSkus(skus, slot, scope = 'live') {
   const res = await fetch('/api/bulk-image-replace', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       action: 'preflight',
       slot,
+      scope,
       allowedSkus: skus,
     }),
   });
@@ -105,6 +112,7 @@ async function fileToBase64Blob(file) {
 
 export async function replaceBatch({
   slot,
+  scope = 'live',
   allowedSkus,
   readyItems,
   onProgress,
@@ -134,6 +142,7 @@ export async function replaceBatch({
       body: JSON.stringify({
         action: 'replace',
         slot,
+        scope,
         allowedSkus,
         items,
       }),

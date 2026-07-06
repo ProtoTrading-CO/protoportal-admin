@@ -1,3 +1,5 @@
+import { codeLookupCandidates, firstCodeToken } from '../lib/code-normalize.mjs';
+
 const IMAGE_EXT = /\.(jpe?g|png|webp)$/i;
 const SLOT_SUFFIX = /^(?<sku>.+)-(?<slot>[1-4])$/i;
 const NOISE_PATTERNS = [
@@ -43,7 +45,17 @@ export function parseLoaderFilename(filename) {
     return { code: '', displayCode: '', imageSlot: 1, parseError: 'sku_too_short' };
   }
 
-  return { code, displayCode, imageSlot, parseError: null };
+  // Messy supplier names like "87747748383-10mm" or "87747748383&87747748384"
+  // resolve on the first code before any separator; candidates keep the full
+  // stem first so clean codes still win.
+  return {
+    code,
+    displayCode,
+    imageSlot,
+    parseError: null,
+    codeCandidates: codeLookupCandidates(working),
+    primaryCode: firstCodeToken(working),
+  };
 }
 
 export function isSupportedImageFilename(filename) {

@@ -363,7 +363,10 @@ export default function ProductLoaderNutstore({
   const buildProcessItems = (targetItems, action) => {
     const labels = categoryLabelsFromIds(taxonomyTree, batchDefaultCategoryId, batchDefaultSub1Id);
     return targetItems
-      .filter((i) => i.code && (i.group === 'ready' || i.group === 'needs_review'))
+      // Archive accepts unmatched codes too — they land in the archive as
+      // placeholders and get their data allocated once the code is fixed.
+      .filter((i) => i.code && (i.group === 'ready' || i.group === 'needs_review'
+        || (action === 'archive' && i.group === 'not_found')))
       .map((item) => ({
         path: item.path,
         filename: item.filename,
@@ -536,6 +539,7 @@ export default function ProductLoaderNutstore({
   }
 
   const processable = [...grouped.ready, ...grouped.needs_review];
+  const archivable = [...processable, ...grouped.not_found.filter((i) => i.code)];
   const pct = progress.total ? Math.round((progress.done / progress.total) * 100) : 0;
 
   return (
@@ -713,11 +717,11 @@ export default function ProductLoaderNutstore({
                 <button
                   type="button"
                   className="adm-btn-ghost"
-                  disabled={processing || !processable.length}
-                  onClick={() => void runProcess('archive', processable)}
+                  disabled={processing || !archivable.length}
+                  onClick={() => void runProcess('archive', archivable)}
                 >
                   {processing && processAction === 'archive' ? <Loader2 size={14} className="spin" /> : <Archive size={14} />}
-                  Archive ({processable.length}) — no category needed
+                  Archive ({archivable.length}) — includes not-found, no category needed
                 </button>
               </div>
 

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Code2, Loader2, Mail, Send } from 'lucide-react';
+import { BarChart2, Code2, ImagePlus, Loader2, Mail, Send } from 'lucide-react';
 import { PROTO_URLS } from '../lib/protoUrls';
 import { BUSINESS_TYPES } from '../lib/businessTypes';
 import {
@@ -89,10 +89,13 @@ export default function CustomerEmailModal({
   const [businessTypes, setBusinessTypes] = useState([]);
   const [sending, setSending] = useState(false);
   const [testSending, setTestSending] = useState(false);
+  const [campaigns, setCampaigns] = useState([]);
+  const [uploadingImage, setUploadingImage] = useState(false);
 
   const subjectRef = useRef(null);
   const introRef = useRef(null);
   const htmlRef = useRef(null);
+  const imageRef = useRef(null);
   const activeFieldRef = useRef('intro');
 
   useEffect(() => {
@@ -102,6 +105,47 @@ export default function CustomerEmailModal({
     setFilterBusinessTypes(false);
     setBusinessTypes([]);
   }, [open, customerTab]);
+
+  // Delivery analytics for recent campaigns, shown inside the compose modal.
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    fetch('/api/email-campaigns')
+      .then((r) => r.json())
+      .then((json) => { if (!cancelled) setCampaigns(json.campaigns || []); })
+      .catch(() => { if (!cancelled) setCampaigns([]); });
+    return () => { cancelled = true; };
+  }, [open]);
+
+  const recentCampaigns = useMemo(() => (campaigns || []).slice(0, 3), [campaigns]);
+
+  const handleAttachImage = async (file) => {
+    if (!file) return;
+    setUploadingImage(true);
+    try {
+      const base64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || '').split(',')[1]);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      const res = await fetch('/api/upload-reference-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ base64, contentType: file.type || 'image/jpeg' }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Image upload failed');
+      const imgTag = `<p style="margin:16px 0;"><img src="${json.url}" alt="" style="max-width:100%;border-radius:8px;" /></p>`;
+      setHtmlBody((prev) => (prev ? `${prev}\n${imgTag}` : imgTag));
+      if (htmlPane === 'preview') setHtmlPane('split');
+      onShowToast?.('Image attached to the email body', 'success');
+    } catch (err) {
+      onShowToast?.(err.message || 'Image upload failed', 'error');
+    } finally {
+      setUploadingImage(false);
+    }
+  };
 
   const selectedAudience = useMemo(
     () => AUDIENCE_OPTIONS.find((opt) => opt.value === audience) || AUDIENCE_OPTIONS[0],
@@ -237,6 +281,29 @@ export default function CustomerEmailModal({
         </div>
 
         <div className="adm-modal-body adm-email-modal__body">
+          {recentCampaigns.length > 0 && (
+            <div className="adm-email-field" style={{ background: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: 8, padding: '10px 12px' }}>
+              <span className="adm-email-field__label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <BarChart2 size={14} /> Recent delivery analytics
+              </span>
+              {recentCampaigns.map((c, idx) => {
+                const ev = c.events || {};
+                const sent = c.sent || c.recipientCount || 0;
+                const pct = (part) => (sent ? `${Math.round(((part || 0) / sent) * 100)}%` : '0%');
+                return (
+                  <div key={c.id || idx} style={{ display: 'flex', flexWrap: 'wrap', gap: 10, fontSize: 12, padding: '4px 0', borderTop: idx ? '1px solid #eef2f7' : 'none' }}>
+                    <strong style={{ minWidth: 140, maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.subject || c.audience || 'Campaign'}</strong>
+                    <span>{sent} sent</span>
+                    <span style={{ color: '#15803d' }}>{ev.delivered || 0} delivered ({pct(ev.delivered)})</span>
+                    <span>{ev.opened || 0} opened ({pct(ev.opened)})</span>
+                    <span>{ev.clicked || 0} clicked</span>
+                    <span style={{ color: (ev.bounced || 0) ? '#b91c1c' : '#6b7280' }}>{ev.bounced || 0} bounced</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
           <label className="adm-email-field">
             <span className="adm-email-field__label">Audience</span>
             <select
@@ -316,6 +383,24 @@ export default function CustomerEmailModal({
                 <Code2 size={14} style={{ verticalAlign: -2, marginRight: 4 }} />
                 HTML block (optional)
               </span>
+              <input
+                ref={imageRef}
+                type="file"
+                accept="image/*"
+                hidden
+                onChange={(e) => { void handleAttachImage(e.target.files?.[0]); e.target.value = ''; }}
+              />
+              <button
+                type="button"
+                className="adm-btn-ghost"
+                style={{ fontSize: 12, padding: '4px 10px' }}
+                disabled={uploadingImage}
+                onClick={() => imageRef.current?.click()}
+                title="Upload an image and embed it in the email"
+              >
+                {uploadingImage ? <Loader2 size={13} className="spin" /> : <ImagePlus size={13} />}
+                Attach image
+              </button>
               <div className="adm-email-pane-toggle" role="tablist" aria-label="HTML editor view">
                 <button
                   type="button"

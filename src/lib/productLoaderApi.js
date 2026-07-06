@@ -52,6 +52,52 @@ function fileToBase64(file) {
   });
 }
 
+async function uploadLoaderImage(item) {
+  const b64 = await fileToBase64(item.file);
+  const uploadRes = await fetch('/api/upload-product-image', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      filename: item.filename,
+      contentType: item.file.type || 'image/jpeg',
+      base64: b64,
+      sku: item.code,
+      imageSlot: item.imageSlot,
+    }),
+  });
+  return readApiJson(uploadRes, { fallback: 'Upload failed' });
+}
+
+/**
+ * Send a locally uploaded loader image to the archive — works even when the
+ * code has no Positill/website match yet (placeholder row, tagged nutstore).
+ */
+export async function archiveLoaderImageItem(item) {
+  if (!item?.file || !item.code) throw new Error('Missing image or product code');
+  const uploadJson = await uploadLoaderImage(item);
+  const res = await fetch('/api/product-loader-archive', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      code: item.code,
+      displayCode: item.displayCode,
+      title: item.descriptionOverride || catalogueDisplayTitle(item),
+      description: item.descriptionOverride || catalogueDescription(item),
+      price: item.price ?? item.sqlRow?.price ?? 0,
+      barcode: item.barcode || item.websiteRow?.barcode || item.code,
+      imageUrl: uploadJson.url,
+      imageSlot: item.imageSlot,
+      category: item.websiteRow?.category || '',
+      subcategoryOne: item.websiteRow?.subcategory_one || '',
+      sqlRow: item.sqlRow || null,
+      websiteRow: item.websiteRow || null,
+      filename: item.filename,
+    }),
+  });
+  await readApiJson(res, { fallback: 'Archive failed' });
+  return { sku: item.code, action: 'archived' };
+}
+
 export async function publishLoaderImageItem(item, {
   taxonomyTree,
   findNode,
@@ -67,19 +113,7 @@ export async function publishLoaderImageItem(item, {
     throw new Error('Pick a default category for products not already on the website.');
   }
 
-  const b64 = await fileToBase64(item.file);
-  const uploadRes = await fetch('/api/upload-product-image', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      filename: item.filename,
-      contentType: item.file.type || 'image/jpeg',
-      base64: b64,
-      sku: item.code,
-      imageSlot: item.imageSlot,
-    }),
-  });
-  const uploadJson = await readApiJson(uploadRes, { fallback: 'Upload failed' });
+  const uploadJson = await uploadLoaderImage(item);
 
   const catId = item.websiteRow?.category
     ? (taxonomyTree.find((c) => c.label === item.websiteRow.category)?.id || defaultCategoryId)
@@ -101,7 +135,7 @@ export async function publishLoaderImageItem(item, {
     body: JSON.stringify({
       code: item.code,
       displayCode: item.displayCode,
-      title: catalogueDisplayTitle(item),
+      title: item.descriptionOverride || catalogueDisplayTitle(item),
       price: item.price ?? item.sqlRow?.price ?? 0,
       barcode: item.barcode || item.websiteRow?.barcode || item.code,
       imageUrl: uploadJson.url,
@@ -111,7 +145,7 @@ export async function publishLoaderImageItem(item, {
       category: categoryLabel,
       subcategoryOne: sub1Label,
       subcategoryTwo: item.websiteRow?.subcategory_two || null,
-      description: catalogueDescription(item),
+      description: item.descriptionOverride || catalogueDescription(item),
       sqlRow: item.sqlRow || null,
       websiteRow: item.websiteRow || null,
       stockQty: item.sqlRow?.onhand ?? item.websiteRow?.stock_qty,

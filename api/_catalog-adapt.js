@@ -118,6 +118,9 @@ export function adaptCatalogRow(row, tree, { archived = false } = {}) {
     stillLive: !!row.still_live,
     updatedAt: row.updated_at,
     createdAt: row.created_at,
+    movedAt: row.moved_at || null,
+    movedFrom: row.moved_from || null,
+    movedTo: row.moved_to || null,
     liveImages: archived && row._live ? [
       row._live.image_url_one,
       row._live.image_url_two,

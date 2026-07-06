@@ -1,4 +1,6 @@
 /** Client-side filename parser — mirrors api/_product-loader-filename.js */
+import { codeLookupCandidates, firstCodeToken } from '../../lib/code-normalize.mjs';
+
 const IMAGE_COLUMNS = ['image_url_one', 'image_url_two', 'image_url_three', 'image_url_four'];
 const IMAGE_EXT = /\.(jpe?g|png|webp)$/i;
 const SLOT_SUFFIX = /^(?<sku>.+)-(?<slot>[1-4])$/i;
@@ -44,6 +46,10 @@ export function parseIntakeFilename(filename) {
     imageNumber,
     imageColumn: IMAGE_COLUMNS[imageNumber - 1] || IMAGE_COLUMNS[0],
     parseError: sourceSku.length < 2 ? 'sku_too_short' : null,
+    // Messy names ("87747748383-10mm", "8774…&8774…") match on the first
+    // code before any separator.
+    skuCandidates: codeLookupCandidates(working),
+    primarySku: firstCodeToken(working),
   };
 }
 

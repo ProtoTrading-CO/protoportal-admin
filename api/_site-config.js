@@ -52,3 +52,8 @@ export async function readOrderNotifyLog(orderId) {
   if (!data) return null;
   return data.orderId === orderId || data.sent != null ? data : null;
 }
+
+export async function writeOrderNotifyLog(orderId, payload) {
+  if (!orderId) return null;
+  return writeSiteConfigJson(notifyLogFile(orderId), { orderId: String(orderId), ...payload });
+}

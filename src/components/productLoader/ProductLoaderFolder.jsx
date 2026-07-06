@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import {
+  Archive,
   Download,
   FolderOpen,
   Loader2,
@@ -8,7 +9,7 @@ import {
   Upload,
 } from 'lucide-react';
 import { exportBatchReportCsv, isImageFile } from '../../lib/parseIntakeFilename';
-import { lookupFilenames, logPublishFailure, publishLoaderImageItem } from '../../lib/productLoaderApi';
+import { archiveLoaderImageItem, lookupFilenames, logPublishFailure, publishLoaderImageItem } from '../../lib/productLoaderApi';
 import { catalogueDisplayTitle, loaderCodeLabel } from '../../lib/productLoaderDisplay.js';
 import ProductLoaderApolloSend from './ProductLoaderApolloSend';
 import LoaderCodeEllipsis from './LoaderCodeEllipsis.jsx';
@@ -148,6 +149,35 @@ export default function ProductLoaderFolder({
     await publishItems(failed);
   };
 
+  // Same rule as the Nutstore flow: images whose code has no match still go
+  // to the archive as placeholders; fixing the code later re-links the data.
+  const archiveItems = async (targetItems) => {
+    const rows = targetItems.filter((i) => i.file && i.code && !i.parseError);
+    if (!rows.length) return;
+    setProcessing(true);
+    setError('');
+    setProgress({ done: 0, total: rows.length, current: '' });
+    let archived = 0;
+    let failed = 0;
+    for (let idx = 0; idx < rows.length; idx += 1) {
+      const row = rows[idx];
+      setProgress({ done: idx, total: rows.length, current: row.filename });
+      setItems((prev) => prev.map((r) => (r.filename === row.filename ? { ...r, status: 'processing' } : r)));
+      try {
+        await archiveLoaderImageItem(row);
+        archived += 1;
+        setItems((prev) => prev.map((r) => (r.filename === row.filename ? { ...r, status: 'archived' } : r)));
+      } catch (err) {
+        failed += 1;
+        setItems((prev) => prev.map((r) => (r.filename === row.filename ? { ...r, status: 'error', processError: err.message } : r)));
+      }
+    }
+    setProgress({ done: rows.length, total: rows.length, current: '' });
+    setProcessing(false);
+    setStats((s) => ({ ...s, dormant: s.dormant + archived, failed: s.failed + failed }));
+    onShowToast?.(`Archived ${archived}${failed ? `, ${failed} failed` : ''}`, failed ? 'warning' : 'success');
+  };
+
   const exportReport = () => {
     const csv = exportBatchReportCsv(items, summary);
     const blob = new Blob([csv], { type: 'text/csv' });
@@ -269,6 +299,14 @@ export default function ProductLoaderFolder({
             <button type="button" className="adm-btn-red" disabled={processing || scanning || !grouped.ready.length} onClick={() => void publishItems(grouped.ready)}>
               {processing ? <Loader2 size={14} className="spin" /> : <Upload size={14} />}
               Publish All Ready ({grouped.ready.length})
+            </button>
+            <button
+              type="button"
+              className="adm-btn-ghost"
+              disabled={processing || scanning || !items.some((i) => i.file && i.code && !i.parseError)}
+              onClick={() => void archiveItems(items.filter((i) => i.status !== 'done' && i.status !== 'archived'))}
+            >
+              <Archive size={14} /> Send All to Archive (incl. not found)
             </button>
             <button type="button" className="adm-btn-ghost" disabled={processing || !items.some((i) => i.status === 'error')} onClick={() => void retryFailed()}>
               <RefreshCw size={14} /> Retry Failed

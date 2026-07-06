@@ -78,7 +78,7 @@ import {
   replaceFullTaxonomy,
   subcategoryOptionsFromTree,
 } from '../lib/taxonomyAdmin';
-import { approveCustomer, deleteCustomer, fetchCustomersPage, fetchProtoActiveCustomersPage, updateProtoActiveCustomer, updateCustomerAdmin, deleteProtoActiveCustomer, sendCustomerEmailBroadcast, fetchCrmContactsPage } from '../lib/customers';
+import { approveCustomer, deleteCustomer, fetchCustomersPage, fetchProtoActiveCustomersPage, updateProtoActiveCustomer, updateCustomerAdmin, deleteProtoActiveCustomer, deleteAllProtoActiveCustomers, importProtoActiveCustomers, sendCustomerEmailBroadcast, fetchCrmContactsPage } from '../lib/customers';
 import { BUSINESS_TYPES } from '../lib/businessTypes';
 import { supabase } from '../lib/supabase';
 import { buildOrderNoteSections, createEmailOrderItems, generateOrderPdfBase64, buildEmailItemsFromOrder, base64ToBlob, resolveCustomerOrderPricing, deriveAutoNotesFromItems } from '../lib/orderDocuments';
@@ -96,7 +96,6 @@ import { fetchSpecials, saveSpecials } from '../lib/specials';
 import TaxonomyModals from '../components/TaxonomyModals';
 import SectionErrorBoundary from '../components/SectionErrorBoundary';
 import ComingSoonPanel from '../components/ComingSoonPanel';
-import ApprovalPanel from '../components/ApprovalPanel';
 import OrderWhatsappNotify from '../components/OrderWhatsappNotify';
 import ProductManagerEngine from '../components/ProductManagerEngine';
 import GroupedSidebar, { NAV_GROUPS } from '../components/GroupedSidebar';
@@ -151,13 +150,26 @@ function LazySectionFallback({ label = 'Loading section…' }) {
   );
 }
 
-const productTypes = ['General product', 'Hot seller', 'New stock', 'Clearance stock'];
 const ADMIN_PAGE_SIZE = 50;
 const randFormatter = new Intl.NumberFormat('en-ZA', { style: 'currency', currency: 'ZAR', minimumFractionDigits: 2, maximumFractionDigits: 4 });
 
 function formatRandAmount(value) {
   const amount = Number(value || 0);
   return randFormatter.format(amount);
+}
+
+function orderAmountExVat(order) {
+  const total = Number(order?.total_ex_vat);
+  if (Number.isFinite(total) && total > 0) return total;
+  const items = (order?.final_items?.length ? order.final_items : null)
+    || order?.original_items || order?.items || [];
+  let sum = 0;
+  for (const item of items) {
+    const qty = Number(item?.qty ?? item?.quantity ?? 0);
+    const price = Number(item?.unitPrice ?? item?.price ?? 0);
+    if (Number.isFinite(qty) && Number.isFinite(price)) sum += qty * price;
+  }
+  return sum;
 }
 
 function formatDateTime(value) {
@@ -291,7 +303,6 @@ const emptyForm = {
   childTwoId: '',
   childThreeId: '',
   childFourId: '',
-  productType: 'General product',
 };
 
 function categoryLabel(id, tree = categories) {
@@ -348,22 +359,6 @@ function categoryFormFromPath(categoryPath = [], tree = categories) {
   };
 }
 
-function getProductType(product) {
-  const badges = product.badges || [];
-  if (badges.includes('Hot seller')) return 'Hot seller';
-  if (product.isNew) return 'New stock';
-  if (badges.includes('Clearance stock') || product.isSpecial) return 'Clearance stock';
-  return 'General product';
-}
-
-function typePatch(type, product = {}) {
-  const cleanBadges = (product.badges || []).filter((item) => !['Hot seller', 'Clearance stock'].includes(item));
-  if (type === 'Hot seller') return { badges: [...cleanBadges, 'Hot seller'], isNew: false, isSpecial: false };
-  if (type === 'New stock') return { badges: cleanBadges, isNew: true, isSpecial: false };
-  if (type === 'Clearance stock') return { badges: [...cleanBadges, 'Clearance stock'], isNew: false, isSpecial: true, specialVisibility: 'all' };
-  return { badges: cleanBadges, isNew: false, isSpecial: false };
-}
-
 function compactItems(items = []) {
   return items.map((item) => `${item.code}${item.name ? ` ${item.name}` : ''} × ${item.qty}`).join(', ');
 }
@@ -399,7 +394,6 @@ function productToForm(product, tree = categories) {
     price: String(product.price ?? 0),
     stockOnHand: product.stockOnHand != null ? String(product.stockOnHand) : '',
     ...categoryFormFromPath(product.categoryPath, tree),
-    productType: getProductType(product),
   };
 }
 
@@ -419,7 +413,6 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   useEffect(() => {
     if (activeSection === 'apollo') setApolloEverActive(true);
   }, [activeSection]);
-  const [catalogStatus, setCatalogStatus] = useState('live');
   const [imageFixRequest, setImageFixRequest] = useState(null);
   const [productLoaderCode, setProductLoaderCode] = useState('');
   const { data: dashStats } = useDashboardStats();
@@ -632,6 +625,48 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     }
   };
 
+  const [importingCustomers, setImportingCustomers] = useState(false);
+  const customerCsvRef = useRef(null);
+
+  const handleCustomerCsvUpload = async (file) => {
+    if (!file) return;
+    setImportingCustomers(true);
+    try {
+      const text = await file.text();
+      const { parseCustomerCsv } = await import('../lib/customerCsvImport');
+      const { rows, errors } = parseCustomerCsv(text);
+      if (!rows.length) {
+        showToast(errors[0] || 'No valid rows in that CSV', 'error');
+        return;
+      }
+      const result = await importProtoActiveCustomers(rows);
+      showToast(
+        `Imported ${result.imported} customer(s) into Pre-registration${result.skipped ? ` — ${result.skipped} skipped (duplicates/invalid)` : ''}${errors.length ? ` — ${errors.length} row(s) had errors` : ''}`,
+        errors.length || result.skipped ? 'warning' : 'success',
+      );
+      await loadCustomers();
+    } catch (err) {
+      showToast(err.message || 'CSV import failed', 'error');
+    } finally {
+      setImportingCustomers(false);
+    }
+  };
+
+  const handleDeleteAllProtoActive = async () => {
+    const typed = window.prompt('This deletes EVERY pre-registration customer. Type DELETE ALL to confirm:');
+    if (typed !== 'DELETE ALL') return;
+    setSaving('del-all-proto');
+    try {
+      const result = await deleteAllProtoActiveCustomers();
+      showToast(`Deleted ${result.deleted} pre-registration customer(s)`);
+      await loadCustomers();
+    } catch (err) {
+      showToast(err.message || 'Delete all failed', 'error');
+    } finally {
+      setSaving('');
+    }
+  };
+
   const removeProtoActiveCustomer = async (row) => {
     if (!window.confirm(`Remove ${row.name || row.email} from the pre-registration list?`)) return;
     setSaving(`del-proto-${row.id}`);
@@ -705,7 +740,9 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
       setOrderTotal(data.total);
       if (data.tabCounts) {
         setOrderTabCounts(data.tabCounts);
-        if (data.tabCounts.new != null) setNewOrdersCount(data.tabCounts.new);
+        // The sidebar notification only clears once orders are marked as paid.
+        const badge = data.tabCounts.unpaid ?? data.tabCounts.new;
+        if (badge != null) setNewOrdersCount(badge);
       }
     } catch (err) {
       showToast(err.message || 'Failed to load orders', 'error');
@@ -721,8 +758,8 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   const victorCanSend = isVictorSender(activeFulfillmentUser);
 
   const orderListGridCols = orderTab === 'sent' || orderTab === 'paid'
-    ? '1.4fr 1.2fr 1fr 2fr 120px 56px'
-    : '1.6fr 1.4fr 1.2fr 1fr 160px 80px';
+    ? '1.3fr 1.1fr 0.9fr 0.8fr 2fr 120px 56px'
+    : '1.4fr 1.3fr 1.1fr 0.8fr 1fr 160px 80px';
 
   const confirmationSentIds = useMemo(() => {
     const ids = new Set(Object.keys(confirmationSent).filter((id) => confirmationSent[id]?.sentAt));
@@ -1086,7 +1123,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
           fetchOrdersPage({ tab: 'new', pageSize: 1, page: 1 }),
         ]);
         setPendingCount(requests.total || 0);
-        setNewOrdersCount(ordersData.tabCounts?.new ?? 0);
+        setNewOrdersCount(ordersData.tabCounts?.unpaid ?? ordersData.tabCounts?.new ?? 0);
       } catch { /* badges are best-effort */ }
     };
     load();
@@ -1342,7 +1379,6 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
       price: Number(productForm.price || 0),
       ...(categoryPath.length ? { categoryPath } : {}),
       ...(editingProduct?.updatedAt ? { expectedUpdatedAt: editingProduct.updatedAt } : {}),
-      ...typePatch(productForm.productType, editingProduct || {}),
     };
     setSaving(editingProduct?.id || 'new-product');
     try {
@@ -1920,7 +1956,8 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                 taxonomyTree={taxonomyTree}
                 onShowToast={showToast}
                 onRefreshStats={refreshDashboardStats}
-                initialStatus={catalogStatus}
+                initialStatus="live"
+                statuses={['live']}
                 onEditProduct={(item) => openEditProduct(item)}
                 onEditCategory={setEditTaxonomyModal}
                 onAddCategory={() => setNewCategoryModal({ label: '' })}
@@ -1939,6 +1976,35 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
               </div>
             </SectionErrorBoundary>
 
+            {/* Archived products — own top-level tab, same engine scoped to the archive. */}
+            {activeSection === 'archive' && (
+              <SectionErrorBoundary name="archive" title="Archive crashed" resetKey={activeSection}>
+                <ProductManagerEngine
+                  taxonomyTree={taxonomyTree}
+                  onShowToast={showToast}
+                  onRefreshStats={refreshDashboardStats}
+                  initialStatus="archived"
+                  statuses={['archived']}
+                  title="Archive"
+                  note="Archived products — set them live from here or fix codes/images before publishing."
+                  onEditProduct={(item) => openEditProduct(item)}
+                  onEditCategory={setEditTaxonomyModal}
+                  onAddCategory={() => setNewCategoryModal({ label: '' })}
+                  onAddSubcategory={(parentId) => setNewSubModal({ parentId, label: '' })}
+                  onDeleteSubcategory={(sub) => void openDeleteSubcategory(sub)}
+                  onDeleteNode={(node) => void openDeleteSubcategory(node)}
+                  onRefreshTaxonomy={reloadTaxonomy}
+                  onCategoryReorder={handleCategoryReorder}
+                  categoryProductCounts={categoryProductCounts}
+                  onImageFix={(products) => {
+                    setImageFixRequest({ id: Date.now(), products });
+                    setActiveSection('apollo');
+                    window.scrollTo({ top: 0, behavior: 'instant' });
+                  }}
+                />
+              </SectionErrorBoundary>
+            )}
+
             {activeSection === 'analytics' && (
               <SectionErrorBoundary name="analytics" title="Analytics crashed" resetKey={activeSection}>
                 <Suspense fallback={<LazySectionFallback label="Loading Analytics…" />}>
@@ -1956,7 +2022,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                     isActive={activeSection === 'apollo'}
                     taxonomyTree={taxonomyTree}
                     onShowToast={showToast}
-                    onGoToApproval={() => { setCatalogStatus('approval'); setActiveSection('catalogue'); window.scrollTo({ top: 0, behavior: 'instant' }); }}
+                    onGoToApproval={() => { setActiveSection('catalogue'); window.scrollTo({ top: 0, behavior: 'instant' }); }}
                     onGoToProductLoader={(code) => {
                       setProductLoaderCode(String(code || '').trim());
                       setActiveSection('product-loader');
@@ -2082,6 +2148,35 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                     </p>
                   </div>
                   <div className="adm-customer-actions">
+                    <input
+                      ref={customerCsvRef}
+                      type="file"
+                      accept=".csv,text/csv"
+                      hidden
+                      onChange={(e) => { void handleCustomerCsvUpload(e.target.files?.[0]); e.target.value = ''; }}
+                    />
+                    <button
+                      type="button"
+                      className="adm-btn-ghost"
+                      disabled={importingCustomers}
+                      onClick={() => customerCsvRef.current?.click()}
+                      title="Upload CSV (Account, CompanyName, ContactName, EmailAddress, TotalSpend) into Pre-registration"
+                    >
+                      {importingCustomers
+                        ? <><Loader2 size={14} className="spin" /> Importing…</>
+                        : <><Upload size={14} /> Upload CSV</>}
+                    </button>
+                    <button
+                      type="button"
+                      className="adm-btn-ghost"
+                      style={{ color: '#c40000' }}
+                      disabled={saving === 'del-all-proto'}
+                      onClick={() => void handleDeleteAllProtoActive()}
+                      title="Delete all pre-registration customers"
+                    >
+                      {saving === 'del-all-proto' ? <Loader2 size={14} className="spin" /> : <Trash2 size={14} />}
+                      Delete all
+                    </button>
                     <button
                       type="button"
                       className="adm-btn-ghost"
@@ -2401,7 +2496,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                 )}
                 <div className="adm-list">
                   <div className="adm-list-head" style={{ gridTemplateColumns: orderListGridCols }}>
-                    <span>Order</span><span>Customer</span><span>Date & Time</span><span>{orderTab === 'sent' ? 'Order Confirmation' : orderTab === 'paid' ? 'Payment' : 'Status'}</span><span>Actions</span><span></span>
+                    <span>Order</span><span>Customer</span><span>Date & Time</span><span>Amount</span><span>{orderTab === 'sent' ? 'Order Confirmation' : orderTab === 'paid' ? 'Payment' : 'Status'}</span><span>Actions</span><span></span>
                   </div>
                   {orderRows.map((order) => {
                     const isExpanded = expandedOrderId === order.id;
@@ -2427,6 +2522,10 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                           <div>
                             <div style={{ fontSize: 13, fontWeight: 600 }}>{dateStr}</div>
                             <div className="adm-muted" style={{ fontSize: 11 }}>{timeStr}</div>
+                          </div>
+                          <div>
+                            <div style={{ fontSize: 13, fontWeight: 700 }}>{formatRandAmount(orderAmountExVat(order))}</div>
+                            <div className="adm-muted" style={{ fontSize: 11 }}>ex VAT</div>
                           </div>
                           <div onClick={(e) => e.stopPropagation()} className="adm-presale-col">
                             {orderTab === 'sent' && isPreSale ? (
@@ -2465,7 +2564,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                                 </button>
                               ))}
                             </div>
-                            <OrderWhatsappNotify orderId={order.id} />
+                            <OrderWhatsappNotify orderId={order.id} orderStatus={normalizeOrderStatus(order.status)} />
                             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
                               <OrderItemsList label="Order placed" items={order.original_items || order.items || []} />
                               <OrderItemsList label="Order final" items={order.final_items || order.items || []} />
@@ -3121,11 +3220,6 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 14 }}>
               <AdminField label="Product code"><input type="text" value={productForm.code} onChange={(e) => setProductForm((p) => ({ ...p, code: e.target.value }))} className="adm-field-input" /></AdminField>
-              <AdminField label="Product type">
-                <select value={productForm.productType} onChange={(e) => setProductForm((p) => ({ ...p, productType: e.target.value }))} className="adm-field-input">
-                  {productTypes.map((t) => <option key={t} value={t}>{t}</option>)}
-                </select>
-              </AdminField>
               <AdminField label="Product name" full><input type="text" value={productForm.name} onChange={(e) => setProductForm((p) => ({ ...p, name: e.target.value }))} className="adm-field-input" /></AdminField>
               <AdminField label="Description" full>
                 <textarea value={productForm.description} onChange={(e) => setProductForm((p) => ({ ...p, description: e.target.value }))} className="adm-field-input" rows={3} style={{ resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }} placeholder="Product description shown to customers…" />

@@ -1,11 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Loader2, MessageCircle, RefreshCw } from 'lucide-react';
 
-export default function OrderWhatsappNotify({ orderId }) {
+export default function OrderWhatsappNotify({ orderId, orderStatus = '' }) {
   const [log, setLog] = useState(null);
   const [loading, setLoading] = useState(true);
   const [retrying, setRetrying] = useState(false);
   const [retryMsg, setRetryMsg] = useState('');
+  const autoSentRef = useRef(false);
 
   const loadLog = () => {
     if (!orderId) return Promise.resolve();
@@ -13,13 +14,29 @@ export default function OrderWhatsappNotify({ orderId }) {
     return fetch(`/api/order-notify-log?orderId=${encodeURIComponent(orderId)}`)
       .then((r) => r.json())
       .then((data) => setLog(data))
-      .catch(() => setLog({ found: false }))
+      // loadError distinguishes "couldn't read the log" from "no log exists"
+      // so a transient fetch failure never triggers the auto-send below.
+      .catch(() => setLog({ found: false, loadError: true }))
       .finally(() => setLoading(false));
   };
 
   useEffect(() => {
+    autoSentRef.current = false;
     loadLog();
   }, [orderId]);
+
+  // A brand-new order without any delivery log: fire the notification round
+  // (team WhatsApp + alert email) automatically, once per order. Only for
+  // orders still in "New" — expanding old orders must never re-ping the team,
+  // and a failed log fetch (loadError) is not proof that no log exists.
+  const isNewOrder = String(orderStatus || '').trim().toLowerCase() === 'pending';
+  useEffect(() => {
+    if (loading || retrying || autoSentRef.current) return;
+    if (log && !log.found && !log.loadError && isNewOrder) {
+      autoSentRef.current = true;
+      void handleRetry();
+    }
+  }, [log, loading, isNewOrder]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleRetry = async () => {
     setRetrying(true);
@@ -34,7 +51,7 @@ export default function OrderWhatsappNotify({ orderId }) {
       if (!resp.ok) {
         setRetryMsg(data.error || 'Retry failed');
       } else if (data.ok) {
-        setRetryMsg(`Sent to ${data.sent} team member(s).`);
+        setRetryMsg(`Sent to ${data.sent} team member(s)${data.emailSent ? ' and emailed online@proto.co.za' : ''}.`);
       } else {
         setRetryMsg(data.statusBlockedReason || 'Some team members did not receive WhatsApp.');
       }
@@ -58,11 +75,35 @@ export default function OrderWhatsappNotify({ orderId }) {
     return (
       <div className="oa-wa-notify oa-wa-notify--muted">
         <MessageCircle size={14} />
-        No WhatsApp delivery log for this order yet.
+        {retrying ? 'Sending order notifications (team WhatsApp + email)…' : 'No delivery log for this order yet.'}
         <button type="button" className="oa-wa-notify-retry" onClick={handleRetry} disabled={retrying}>
           {retrying ? <Loader2 size={12} className="star-spinning" /> : <RefreshCw size={12} />}
-          Send team WhatsApp
+          Send order notifications
         </button>
+        {retryMsg && <p className="oa-wa-notify-msg">{retryMsg}</p>}
+      </div>
+    );
+  }
+
+  // WhatsApp not wired up on this install — the alert email carries the order.
+  if (log.whatsappNotConfigured) {
+    return (
+      <div className={`oa-wa-notify${log.emailSent ? ' oa-wa-notify--ok' : ' oa-wa-notify--err'}`}>
+        <div className="oa-wa-notify-head">
+          {log.emailSent ? <CheckCircle2 size={15} /> : <AlertTriangle size={15} />}
+          <strong>Order notification</strong>
+          <span className="oa-wa-notify-meta">
+            {log.emailSent ? `Emailed to ${log.alertEmail || 'online@proto.co.za'}` : 'Email pending'}
+            {log.at ? ` · ${new Date(log.at).toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : ''}
+          </span>
+          <button type="button" className="oa-wa-notify-retry" onClick={handleRetry} disabled={retrying} title="Resend order email">
+            {retrying ? <Loader2 size={12} className="star-spinning" /> : <RefreshCw size={12} />}
+          </button>
+        </div>
+        <p className="oa-wa-notify-msg">
+          Team WhatsApp is not set up on this portal, so new orders are announced by email only.
+          {log.emailSent ? '' : ' The email has not gone out yet — retry above.'}
+        </p>
         {retryMsg && <p className="oa-wa-notify-msg">{retryMsg}</p>}
       </div>
     );
@@ -83,6 +124,7 @@ export default function OrderWhatsappNotify({ orderId }) {
         <strong>Team WhatsApp</strong>
         <span className="oa-wa-notify-meta">
           {log.sent}/{log.teamSize ?? log.sent} sent · {log.failed} failed
+          {log.emailSent ? ' · email sent' : ' · email pending'}
           {log.at ? ` · ${new Date(log.at).toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : ''}
         </span>
         <button type="button" className="oa-wa-notify-retry" onClick={handleRetry} disabled={retrying} title="Resend team WhatsApp">

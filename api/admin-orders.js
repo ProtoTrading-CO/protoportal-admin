@@ -6,7 +6,8 @@ import {
   isVictorSender,
   PAYMENT_RECEIVED_FORBIDDEN,
 } from './_fulfillment-auth.js';
-import { getPortalAdminClient, SITE_CONFIG_BUCKET } from './_site-config.js';
+import { getPortalAdminClient, readOrderNotifyLog, SITE_CONFIG_BUCKET } from './_site-config.js';
+import { isOrderNotifyComplete } from './_order-notify-core.js';
 import { ordersHasConfirmationSentAt } from './_order-confirmation-sent.js';
 import { parseOrderTab, parsePositiveInt } from './_admin-query-params.js';
 
@@ -122,7 +123,7 @@ function isRangeNotSatisfiable(error) {
 
 async function computeTabCounts(supabase, useDbColumn, legacyIds) {
   if (useDbColumn) {
-    const [all, newC, handed, progress, sentC, paidStatus, paidSent] = await Promise.all([
+    const [all, newC, handed, progress, sentC, paidStatus, paidSent, everPaid] = await Promise.all([
       supabase.from('orders').select('*', { count: 'exact', head: true }),
       supabase.from('orders').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
       supabase.from('orders').select('*', { count: 'exact', head: true }).eq('status', 'handed over'),
@@ -130,8 +131,9 @@ async function computeTabCounts(supabase, useDbColumn, legacyIds) {
       supabase.from('orders').select('*', { count: 'exact', head: true }).eq('status', 'order sent').is('confirmation_sent_at', null),
       supabase.from('orders').select('*', { count: 'exact', head: true }).eq('status', 'payment received'),
       supabase.from('orders').select('*', { count: 'exact', head: true }).eq('status', 'order sent').not('confirmation_sent_at', 'is', null),
+      supabase.from('orders').select('*', { count: 'exact', head: true }).in('status', ['payment received', 'paid']),
     ]);
-    const err = [all, newC, handed, progress, sentC, paidStatus, paidSent].find((r) => r.error);
+    const err = [all, newC, handed, progress, sentC, paidStatus, paidSent, everPaid].find((r) => r.error);
     if (err?.error) throw err.error;
     return {
       all: all.count || 0,
@@ -140,14 +142,17 @@ async function computeTabCounts(supabase, useDbColumn, legacyIds) {
       progress: progress.count || 0,
       sent: sentC.count || 0,
       paid: (paidStatus.count || 0) + (paidSent.count || 0),
+      // Orders not yet marked as paid — drives the sidebar notification badge.
+      unpaid: Math.max(0, (all.count || 0) - (everPaid.count || 0)),
     };
   }
 
   const { data, error } = await supabase.from('orders').select('id, status');
   if (error) throw error;
-  const counts = { all: 0, new: 0, handed: 0, progress: 0, sent: 0, paid: 0 };
+  const counts = { all: 0, new: 0, handed: 0, progress: 0, sent: 0, paid: 0, unpaid: 0 };
   for (const order of data || []) {
     counts.all += 1;
+    if (normalizeOrderStatus(order.status) !== 'payment received') counts.unpaid += 1;
     for (const tab of ['new', 'handed', 'progress', 'sent', 'paid']) {
       if (orderMatchesTab(order, tab, legacyIds)) counts[tab] += 1;
     }
@@ -406,6 +411,25 @@ export default async function handler(req, res) {
           error: target === 'payment received' ? PAYMENT_RECEIVED_FORBIDDEN : CUSTOMER_SEND_FORBIDDEN,
         });
       }
+      // A pending order may only leave "New" once the new-order round is done:
+      // team WhatsApp delivered and the alert email to online@proto.co.za sent.
+      const { data: currentOrder, error: currentErr } = await supabase
+        .from('orders')
+        .select('id, status')
+        .eq('id', id)
+        .maybeSingle();
+      if (currentErr) return res.status(400).json({ error: currentErr.message });
+      if (!currentOrder) return res.status(404).json({ error: 'Order not found' });
+      if (normalizeOrderStatus(currentOrder.status) === 'pending') {
+        const log = await readOrderNotifyLog(String(id));
+        const notify = isOrderNotifyComplete(log);
+        if (!notify.ok) {
+          return res.status(409).json({
+            error: `Cannot move to Handed Over yet — ${notify.reason}. Use the resend button on the order to send the notifications.`,
+            reason: 'notifications-incomplete',
+          });
+        }
+      }
       try {
         const result = await advanceOrderStatusToTarget(supabase, id, target);
         if (!result.ok) {
@@ -454,7 +478,7 @@ export default async function handler(req, res) {
         ok: true,
         deleted: count || 0,
         progressFilesRemoved,
-        tabCounts: { all: 0, new: 0, handed: 0, progress: 0, sent: 0, paid: 0 },
+        tabCounts: { all: 0, new: 0, handed: 0, progress: 0, sent: 0, paid: 0, unpaid: 0 },
       });
     }
     if (!id) return res.status(400).json({ error: 'id required' });

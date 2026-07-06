@@ -4,6 +4,7 @@ import { resolveProductLoaderMatch } from './_product-loader-lookup.js';
 import { ensureProductFromCatalogueRow } from './_ensure-product.js';
 import { labelsToDbFields, loadTaxonomy, resolveLabelsFromPathIds } from './_taxonomy-utils.js';
 import { deriveMotarroPathFromLabels, isMotarroProduct, motarroPathSnapshot } from './_mottaro-category.js';
+import { buildMoveTagPatch, tableHasMoveTagColumns } from './_move-tag.js';
 
 const CATEGORY_COLS = ['category', 'subcategory_one', 'subcategory_two', 'subcategory_three', 'subcategory_four'];
 
@@ -101,10 +102,11 @@ export default async function handler(req, res) {
   patch.updated_at = new Date().toISOString();
   const supabase = getStockAdminClient();
 
+  const LOOKUP_CATEGORY_COLS = 'category, subcategory_one, subcategory_two, subcategory_three, subcategory_four';
   let table = 'website_stock';
   let { data: product, error: lookupError } = await supabase
     .from('website_stock')
-    .select('sku, barcode, updated_at')
+    .select(`sku, barcode, updated_at, ${LOOKUP_CATEGORY_COLS}`)
     .eq('sku', sku)
     .maybeSingle();
 
@@ -114,7 +116,7 @@ export default async function handler(req, res) {
   if (!product) {
     const archived = await supabase
       .from('archived_products')
-      .select('sku, barcode, archived_by, updated_at')
+      .select(`sku, barcode, archived_by, updated_at, ${LOOKUP_CATEGORY_COLS}`)
       .eq('sku', sku)
       .maybeSingle();
     if (archived.error) return res.status(400).json({ error: archived.error.message });
@@ -135,6 +137,20 @@ export default async function handler(req, res) {
       const { data: clash } = await supabase.from(tbl).select('sku').eq('sku', nextSku).maybeSingle();
       if (clash) return res.status(409).json({ error: `SKU "${nextSku}" already exists` });
     }
+  }
+
+  // 48h "moved" tag: when the category labels change, stamp where the
+  // product came from and where it went (skipped until migration 039 runs).
+  if (CATEGORY_COLS.some((col) => patch[col] !== undefined)
+    && await tableHasMoveTagColumns(supabase, table)) {
+    // Levels absent from the patch keep their current value; an explicit
+    // null in the patch means that level was cleared.
+    const destination = CATEGORY_COLS
+      .map((col) => (patch[col] !== undefined ? patch[col] : product[col]))
+      .filter(Boolean)
+      .join(' › ');
+    const tag = buildMoveTagPatch(product, destination, patch.updated_at);
+    if (tag) Object.assign(patch, tag);
   }
 
   const lookupSku = sku;

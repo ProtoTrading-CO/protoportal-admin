@@ -51,6 +51,7 @@
     }
   },
   "crons": [
+    { "path": "/api/order-notify-sweep", "schedule": "*/10 * * * *" },
     { "path": "/api/run-scheduled-broadcasts", "schedule": "0 * * * *" },
     { "path": "/api/brevo-sync", "schedule": "*/15 * * * *" },
     { "path": "/api/purge-expired-staging", "schedule": "0 3 * * *" },
