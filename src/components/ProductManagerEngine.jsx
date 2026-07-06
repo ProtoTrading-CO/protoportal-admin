@@ -6,6 +6,7 @@ import {
   ChevronRight,
   ChevronLeft,
   FileSpreadsheet,
+  FolderMinus,
   FolderPlus,
   FolderTree,
   Grip,
@@ -33,7 +34,7 @@ import { getActiveImageBatch, subscribeImageBatch } from '../lib/imageBatchTrack
 import { sortOrderCategoryKey, lookupSortOrder, applySkuOrder, sortOrderLookupKeys } from '../lib/taxonomy';
 import { persistSortOrder, fetchSortOrderStore, sortMetaForPath, formatSortSavedAt, fetchSortMetaForCategory } from '../lib/sortOrderStore';
 import { exportProductsCatalogXlsx, exportAllProductsCatalogXlsx, exportSelectedProductsXlsx } from '../lib/exportLiveProducts';
-import { bulkMoveProducts, invalidateAdminCache, updateProduct } from '../lib/products';
+import { bulkMoveProducts, bulkRemoveFromCategory, invalidateAdminCache, updateProduct } from '../lib/products';
 import { formatWebsitePrice } from '../lib/pricing';
 import { childrenOfTree, fetchCategoryProductCounts, subcategoryOptionsFromTree } from '../lib/taxonomyAdmin';
 
@@ -742,6 +743,60 @@ export default function ProductManagerEngine({
     }
   };
 
+  // True only when every selected row is a known Mottaro product. Rows are
+  // read from the selection cache; if any selected id isn't cached (e.g. a
+  // cross-page select-all), we can't verify → treat as not-all-Mottaro.
+  const selectionAllMottaro = useMemo(() => {
+    if (selected.size === 0) return false;
+    for (const id of selected) {
+      const row = selectedRowsRef.current.get(id);
+      if (!row || !(row.isMultiCategory || row.brandLine === 'Mottaro')) return false;
+    }
+    return true;
+  }, [selected]);
+
+  // "Remove from this category" only makes sense for Mottaro products browsed
+  // inside a normal category — never the virtual Mottaro tree (can't leave
+  // Mottaro), never a mixed selection (would orphan non-Mottaro rows).
+  const browsingMottaroTree = categoryPath[0] === 'mottaro';
+  const canRemoveFromCategory = (status === 'live' || (status === 'archived' && !archiveNegativeLive))
+    && categoryPath.length > 0
+    && !browsingMottaroTree
+    && selectionAllMottaro;
+
+  const confirmRemoveFromCategory = async () => {
+    const skus = [...selected];
+    if (!skus.length) return;
+    if (!window.confirm(
+      `Remove ${skus.length} Mottaro product(s) from this category?\n\nThey stay fully browsable under the Mottaro brand tree — only their normal category is cleared.`,
+    )) return;
+    setBulkActionPending(true);
+    try {
+      const json = await bulkRemoveFromCategory({ skus });
+      clearSelection();
+      // Stay in the current category — the removed rows simply drop out of the
+      // refreshed list (they no longer belong here).
+      invalidateAdminCache();
+      queryClient.invalidateQueries({ queryKey: ['catalog'] });
+      onRefreshTaxonomy?.();
+      setInStockCountsNonce((n) => n + 1);
+      onShowToast?.(`Removed ${json.removed} product(s) from this category`, 'success');
+    } catch (err) {
+      if (err.partial) {
+        clearSelection();
+        invalidateAdminCache();
+        queryClient.invalidateQueries({ queryKey: ['catalog'] });
+        onRefreshTaxonomy?.();
+        setInStockCountsNonce((n) => n + 1);
+        onShowToast?.(err.message || 'Some products could not be removed', 'warning');
+      } else {
+        onShowToast?.(err.message || 'Remove from category failed', 'error');
+      }
+    } finally {
+      setBulkActionPending(false);
+    }
+  };
+
   const handleProductSelect = useCallback((id, item, index, { shiftKey = false, ctrlKey = false } = {}) => {
     setSelectAllView(false);
     const currentRows = rowsRef.current;
@@ -1304,101 +1359,105 @@ export default function ProductManagerEngine({
               )}
               {selected.size > 0 && (
                 <div className="pm-bulk-bar">
-                  <span>
+                  <span className="pm-bulk-bar__count">
                     {selected.size} selected
                     {total > rows.length && selectedOnPage < selected.size && (
-                      <> · {selectedOnPage} on this page</>
+                      <span className="pm-bulk-bar__count-sub"> · {selectedOnPage} on this page</span>
                     )}
                   </span>
-                  <button
-                    type="button"
-                    className="adm-btn-ghost adm-btn--sm"
-                    disabled={exportingSelected || exportingXlsx}
-                    onClick={() => void handleExportSelected()}
-                  >
-                    {exportingSelected
-                      ? <><Loader2 size={14} className="spin" /> Exporting…</>
-                      : <><FileSpreadsheet size={14} /> Export selected</>}
-                  </button>
-                  {(status === 'live' || (status === 'archived' && !archiveNegativeLive)) && selected.size > 0 && (
+
+                  <div className="pm-bulk-group">
                     <button
                       type="button"
                       className="adm-btn-ghost adm-btn--sm"
-                      onClick={() => setMoveModalOpen(true)}
+                      disabled={exportingSelected || exportingXlsx}
+                      onClick={() => void handleExportSelected()}
                     >
-                      Move
+                      {exportingSelected
+                        ? <><Loader2 size={14} className="spin" /> Exporting…</>
+                        : <><FileSpreadsheet size={14} /> Export selected</>}
                     </button>
-                  )}
-                  {(status === 'live' || status === 'archived') && (
-                    <button
-                      type="button"
-                      className="adm-btn-ghost adm-btn--sm"
-                      onClick={() => setBulkEditOpen(true)}
-                    >
-                      <Pencil size={14} /> Bulk edit
-                    </button>
-                  )}
-                  {(status === 'live' || status === 'archived') && onImageFix && (
-                    <button type="button" className="adm-btn-red adm-btn--sm" onClick={handleImageFix}>
-                      <Sparkles size={14} /> Image fix
-                    </button>
-                  )}
-                  {status === 'live' && (
-                    <>
+                    {(status === 'live' || (status === 'archived' && !archiveNegativeLive)) && (
+                      <button
+                        type="button"
+                        className="adm-btn-ghost adm-btn--sm"
+                        onClick={() => setMoveModalOpen(true)}
+                      >
+                        Move
+                      </button>
+                    )}
+                    {canRemoveFromCategory && (
                       <button
                         type="button"
                         className="adm-btn-ghost adm-btn--sm"
                         disabled={bulkActionPending}
-                        onClick={() => void bulkArchiveSelected()}
+                        onClick={() => void confirmRemoveFromCategory()}
+                        title="Detach these Mottaro products from this category — they stay in the Mottaro brand tree"
                       >
-                        {bulkActionPending ? 'Archiving…' : `Archive ${selected.size}`}
+                        <FolderMinus size={14} /> Remove from category
                       </button>
-                      <button type="button" className="adm-btn-red adm-btn--sm" onClick={() => runBulk({ mutateAsync: (sku) => mutations.softDelete.mutateAsync({ sku, fromArchive: false }) })}>To recycle</button>
-                    </>
-                  )}
-                  {status === 'archived' && archiveNegativeLive && (
-                    <>
+                    )}
+                    {(status === 'live' || status === 'archived') && (
                       <button
                         type="button"
                         className="adm-btn-ghost adm-btn--sm"
-                        disabled={bulkActionPending}
-                        onClick={() => void bulkArchiveSelected()}
+                        onClick={() => setBulkEditOpen(true)}
                       >
-                        {bulkActionPending ? 'Archiving…' : `Archive ${selected.size}`}
+                        <Pencil size={14} /> Bulk edit
                       </button>
-                      <button type="button" className="adm-btn-red adm-btn--sm" onClick={() => runBulk({ mutateAsync: (sku) => mutations.softDelete.mutateAsync({ sku, fromArchive: false }) })}>To recycle</button>
-                    </>
-                  )}
-                  {status === 'archived' && !archiveNegativeLive && (
-                    <>
-                      <button
-                        type="button"
-                        className="adm-btn-red adm-btn--sm"
-                        disabled={bulkActionPending}
-                        onClick={() => void bulkMakeLive()}
-                      >
-                        {bulkActionPending
-                          ? 'Restoring…'
-                          : (
-                            <>
-                              <ArchiveRestore size={14} />
-                              {' '}
-                              Make {selected.size} live
-                            </>
-                          )}
+                    )}
+                    {(status === 'live' || status === 'archived') && onImageFix && (
+                      <button type="button" className="adm-btn-red adm-btn--sm" onClick={handleImageFix}>
+                        <Sparkles size={14} /> Image fix
                       </button>
-                      <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => runBulk({ mutateAsync: (sku) => mutations.softDelete.mutateAsync({ sku, fromArchive: true }) })}>To recycle</button>
-                    </>
-                  )}
-                  {status === 'approval' && (
-                    <button type="button" className="adm-btn-red adm-btn--sm" onClick={() => runBulk(mutations.setLive)}>Set live</button>
-                  )}
-                  {status === 'recycle' && (
-                    <>
-                      <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => runBulk(mutations.restoreRecycle)}>Restore</button>
-                      <button type="button" className="adm-btn-red adm-btn--sm" onClick={() => runBulk(mutations.permanentDelete)}>Delete forever</button>
-                    </>
-                  )}
+                    )}
+                  </div>
+
+                  <div className="pm-bulk-group pm-bulk-group--end">
+                    {(status === 'live' || (status === 'archived' && archiveNegativeLive)) && (
+                      <>
+                        <button
+                          type="button"
+                          className="adm-btn-ghost adm-btn--sm"
+                          disabled={bulkActionPending}
+                          onClick={() => void bulkArchiveSelected()}
+                        >
+                          {bulkActionPending ? 'Archiving…' : `Archive ${selected.size}`}
+                        </button>
+                        <button type="button" className="adm-btn-red adm-btn--sm" onClick={() => runBulk({ mutateAsync: (sku) => mutations.softDelete.mutateAsync({ sku, fromArchive: false }) })}>To recycle</button>
+                      </>
+                    )}
+                    {status === 'archived' && !archiveNegativeLive && (
+                      <>
+                        <button
+                          type="button"
+                          className="adm-btn-red adm-btn--sm"
+                          disabled={bulkActionPending}
+                          onClick={() => void bulkMakeLive()}
+                        >
+                          {bulkActionPending
+                            ? 'Restoring…'
+                            : (
+                              <>
+                                <ArchiveRestore size={14} />
+                                {' '}
+                                Make {selected.size} live
+                              </>
+                            )}
+                        </button>
+                        <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => runBulk({ mutateAsync: (sku) => mutations.softDelete.mutateAsync({ sku, fromArchive: true }) })}>To recycle</button>
+                      </>
+                    )}
+                    {status === 'approval' && (
+                      <button type="button" className="adm-btn-red adm-btn--sm" onClick={() => runBulk(mutations.setLive)}>Set live</button>
+                    )}
+                    {status === 'recycle' && (
+                      <>
+                        <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => runBulk(mutations.restoreRecycle)}>Restore</button>
+                        <button type="button" className="adm-btn-red adm-btn--sm" onClick={() => runBulk(mutations.permanentDelete)}>Delete forever</button>
+                      </>
+                    )}
+                  </div>
                 </div>
               )}
             </div>

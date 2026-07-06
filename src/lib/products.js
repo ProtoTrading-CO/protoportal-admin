@@ -689,6 +689,30 @@ export async function bulkMoveProducts({ skus, categoryId, subcategoryId, catego
   return json;
 }
 
+/**
+ * Detach Mottaro products from their primary category (they stay in the
+ * Mottaro brand tree). Server skips any non-Mottaro SKUs in the selection.
+ */
+export async function bulkRemoveFromCategory({ skus }) {
+  const res = await fetch('/api/bulk-products', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'removeFromCategory', skus }),
+  });
+  const json = await readApiJson(res, { fallback: 'Remove from category failed' });
+  if (json.failed?.length) {
+    const detail = json.failed.slice(0, 3).map((f) => `${f.sku}: ${f.error}`).join('; ');
+    const suffix = json.failed.length > 3 ? ` (+${json.failed.length - 3} more)` : '';
+    const err = new Error(`${json.removed || 0} removed, ${json.failed.length} failed — ${detail}${suffix}`);
+    err.partial = true;
+    err.result = json;
+    throw err;
+  }
+  invalidateProductCache();
+  invalidateAdminCache();
+  return json;
+}
+
 export async function bulkArchiveProducts(skus) {
   const res = await fetch('/api/bulk-products', {
     method: 'POST',
