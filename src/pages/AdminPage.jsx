@@ -636,16 +636,23 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     setTimeout(() => setToast(null), 4000);
   };
 
-  const reloadTaxonomy = async () => {
+  const reloadTaxonomy = async ({ onlyInStock = false } = {}) => {
     const tree = await fetchTaxonomy();
     setTaxonomyTree(tree);
     setLiveTaxonomyTree(tree);
     try {
-      const counts = await fetchCategoryProductCounts();
+      const counts = await fetchCategoryProductCounts({ onlyInStock });
       setCategoryProductCounts(counts);
     } catch { /* optional */ }
     return tree;
   };
+
+  const refreshCategoryCounts = useCallback(async (onlyInStock = false) => {
+    try {
+      const counts = await fetchCategoryProductCounts({ onlyInStock });
+      setCategoryProductCounts(counts);
+    } catch { /* optional */ }
+  }, []);
 
   const handleTaxonomyConflict = async (err) => {
     if (err.status === 409) {
@@ -1428,13 +1435,17 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     if (!editTaxonomyModal?.label?.trim()) return;
     setTaxonomySaving(true);
     try {
-      await renameTaxonomyNode(editTaxonomyModal.id, editTaxonomyModal.label.trim());
+      const json = await renameTaxonomyNode(editTaxonomyModal.id, editTaxonomyModal.label.trim());
       await reloadTaxonomy();
       invalidateAdminCache();
       queryClient.invalidateQueries({ queryKey: ['catalog'] });
       await reorderPanelRef.current?.refresh?.();
       setEditTaxonomyModal(null);
-      showToast('Category updated');
+      if (json.orphansRemaining > 0) {
+        showToast(`Renamed — but ${json.orphansRemaining} product(s) may need manual fixing`, 'error');
+      } else {
+        showToast('Category updated');
+      }
     } catch (err) {
       if (await handleTaxonomyConflict(err)) {
         setEditTaxonomyModal(null);
@@ -1507,14 +1518,17 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     if (!deleteSubModal?.id) return;
     setTaxonomySaving(true);
     try {
-      await deleteTaxonomyNode(deleteSubModal.id);
+      const json = await deleteTaxonomyNode(deleteSubModal.id);
       await reloadTaxonomy();
       queryClient.invalidateQueries({ queryKey: ['catalog'] });
       reorderPanelRef.current?.onPathNodeDeleted?.(deleteSubModal.id);
       invalidateAdminCache();
       const isCat = deleteSubModal.type === 'category';
       setDeleteSubModal(null);
-      showToast(isCat ? 'Category deleted' : 'Subcategory deleted');
+      const cleared = json.productsCleared ?? json.productCount ?? 0;
+      showToast(isCat
+        ? `Category deleted — ${cleared} product label(s) cleared`
+        : `Subcategory deleted — ${cleared} product label(s) cleared`);
     } catch (err) {
       if (await handleTaxonomyConflict(err)) {
         setDeleteSubModal(null);
@@ -1902,6 +1916,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                 onDeleteSubcategory={(sub) => void openDeleteSubcategory(sub)}
                 onDeleteNode={(node) => void openDeleteSubcategory(node)}
                 onRefreshTaxonomy={reloadTaxonomy}
+                onRefreshCategoryCounts={refreshCategoryCounts}
                 onCategoryReorder={handleCategoryReorder}
                 categoryProductCounts={categoryProductCounts}
                 onImageFix={(products) => {

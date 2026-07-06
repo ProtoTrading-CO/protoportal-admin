@@ -3,6 +3,14 @@ import { join } from 'path';
 import { readSiteConfigJson, writeSiteConfigJson } from './_site-config.js';
 import { isPublishableOnWebsite } from '../lib/catalog-stock.mjs';
 import { isMotarroProduct, inferMotarroPathFromRow, injectMotarroIntoTree } from './_mottaro-category.js';
+import {
+  applyIlikeTaxonomyFilters,
+  countLabelOrphans,
+  matchesTaxonomyLabel,
+  normalizeTaxonomyLabel,
+  rowMatchesTaxonomyFilters,
+} from '../lib/taxonomy-label-match.mjs';
+import { MOVE_UPDATE_CHUNK_SIZE } from '../lib/bulk-chunk.mjs';
 
 const TAXONOMY_FILE = 'taxonomy/categories.json';
 const BUNDLED_PATH = join(process.cwd(), 'src/data/categories.json');
@@ -155,8 +163,10 @@ export function labelsToDbFields(labels) {
 }
 
 function normalizeLabel(label) {
-  return String(label || '').trim().toLowerCase();
+  return normalizeTaxonomyLabel(label);
 }
+
+export { normalizeTaxonomyLabel, matchesTaxonomyLabel, rowMatchesTaxonomyFilters };
 
 /**
  * Resolve the current taxonomy ids for a product row's labels.
@@ -278,8 +288,7 @@ export function deleteSubcategoryNode(tree, id) {
 
 /**
  * Delete a node at any depth (category or subcategory) together with its whole
- * subtree. Products are left untouched — their stored labels remain, so they
- * simply fall back to slug-of-label and show as uncategorised.
+ * subtree. Product label columns under the deleted node are cleared separately.
  */
 export function deleteNodeCascade(tree, id) {
   const ctx = findNodeContext(tree, id);
@@ -292,10 +301,10 @@ export function deleteNodeCascade(tree, id) {
   return { tree: [...tree], ctx };
 }
 
-export function buildNodeProductFilter(ctx) {
+export function buildNodeLabelFilters(ctx) {
   const { depth, ancestors, node } = ctx;
   if (depth === 0) {
-    return { filters: { category: node.label } };
+    return { category: node.label };
   }
   const col = SUB_COLS[depth - 1];
   const filters = { category: ancestors[0]?.label };
@@ -303,18 +312,108 @@ export function buildNodeProductFilter(ctx) {
     filters[SUB_COLS[i - 1]] = ancestors[i]?.label;
   }
   filters[col] = node.label;
-  return { filters };
+  return filters;
 }
 
-export async function countProductsForNode(supabase, ctx) {
-  const { filters } = buildNodeProductFilter(ctx);
-  let q = supabase.from('website_stock').select('sku', { count: 'exact', head: true });
-  for (const [key, val] of Object.entries(filters)) {
-    if (val != null) q = q.eq(key, val);
+/** @deprecated alias */
+export function buildNodeProductFilter(ctx) {
+  return { filters: buildNodeLabelFilters(ctx) };
+}
+
+export function buildClearLabelsPatch(ctx) {
+  if (ctx.depth === 0) {
+    return {
+      category: null,
+      subcategory_one: null,
+      subcategory_two: null,
+      subcategory_three: null,
+      subcategory_four: null,
+    };
   }
-  const { count, error } = await q;
-  if (error) throw error;
-  return count || 0;
+  const patch = {};
+  for (let i = ctx.depth - 1; i < SUB_COLS.length; i++) {
+    patch[SUB_COLS[i]] = null;
+  }
+  return patch;
+}
+
+const PRODUCT_SCAN_COLS = 'sku,category,subcategory_one,subcategory_two,subcategory_three,subcategory_four';
+
+function sliceIntoChunks(list, size) {
+  const chunks = [];
+  for (let i = 0; i < list.length; i += size) chunks.push(list.slice(i, i + size));
+  return chunks;
+}
+
+async function fetchRowsMatchingFilters(supabase, table, filters) {
+  const rows = [];
+  let from = 0;
+  const PAGE = 1000;
+  while (true) {
+    let q = supabase.from(table).select(PRODUCT_SCAN_COLS).range(from, from + PAGE - 1);
+    q = applyIlikeTaxonomyFilters(q, filters);
+    const { data, error } = await q;
+    if (error) throw error;
+    const batch = data || [];
+    for (const row of batch) {
+      if (rowMatchesTaxonomyFilters(row, filters)) rows.push(row);
+    }
+    if (batch.length < PAGE) break;
+    from += PAGE;
+  }
+  return rows;
+}
+
+async function fetchRowsForNodeScope(supabase, table, ctx) {
+  return fetchRowsMatchingFilters(supabase, table, buildNodeLabelFilters(ctx));
+}
+
+async function applyPatchToSkus(supabase, table, skus, patch) {
+  if (!skus.length) return 0;
+  const payload = { ...patch, updated_at: new Date().toISOString() };
+  let updated = 0;
+  for (const chunk of sliceIntoChunks(skus, MOVE_UPDATE_CHUNK_SIZE)) {
+    const { error } = await supabase.from(table).update(payload).in('sku', chunk);
+    if (error) throw error;
+    updated += chunk.length;
+  }
+  return updated;
+}
+
+/** Clear category label columns on products under a deleted taxonomy node. */
+export async function clearProductLabelsForNode(supabase, ctx) {
+  const patch = buildClearLabelsPatch(ctx);
+  let cleared = 0;
+  for (const table of ['website_stock', 'archived_products']) {
+    const rows = await fetchRowsForNodeScope(supabase, table, ctx);
+    const skus = rows.map((r) => r.sku).filter(Boolean);
+    cleared += await applyPatchToSkus(supabase, table, skus, patch);
+  }
+  return cleared;
+}
+
+export async function countProductsForNode(supabase, ctx, { onlyInStock = false } = {}) {
+  const filters = buildNodeLabelFilters(ctx);
+  let count = 0;
+  let from = 0;
+  const PAGE = 1000;
+  const cols = `${PRODUCT_SCAN_COLS},title,available_stock,stock_qty`;
+
+  while (true) {
+    let q = supabase.from('website_stock').select(cols).range(from, from + PAGE - 1);
+    q = applyIlikeTaxonomyFilters(q, filters);
+    const { data, error } = await q;
+    if (error) throw error;
+    const batch = data || [];
+    for (const row of batch) {
+      if (!rowMatchesTaxonomyFilters(row, filters)) continue;
+      if (onlyInStock && !isPublishableOnWebsite(row)) continue;
+      count += 1;
+    }
+    if (batch.length < PAGE) break;
+    from += PAGE;
+  }
+  return count;
 }
 
 /** Resolve taxonomy labels from an id path (main + subcategory ids). */
@@ -332,10 +431,10 @@ export function resolveLabelsFromPathIds(tree, pathIds = []) {
   return labels;
 }
 
-const COUNT_ROW_COLS = 'category,subcategory_one,subcategory_two,subcategory_three,subcategory_four,title,available_stock,stock_qty';
+const COUNT_ROW_COLS = 'category,subcategory_one,subcategory_two,subcategory_three,subcategory_four,title,available_stock,stock_qty,mottaro_path';
 
 /** Count live products per taxonomy node (includes all descendants). */
-export async function buildCategoryProductCounts(supabase, tree) {
+export async function buildCategoryProductCounts(supabase, tree, { onlyInStock = false } = {}) {
   const counts = { __uncategorized__: 0, __all__: 0 };
   let mottaroLive = 0;
   let from = 0;
@@ -349,7 +448,7 @@ export async function buildCategoryProductCounts(supabase, tree) {
     if (error) throw error;
     const batch = data || [];
     for (const row of batch) {
-      if (!isPublishableOnWebsite(row)) continue;
+      if (onlyInStock && !isPublishableOnWebsite(row)) continue;
       counts.__all__ += 1;
 
       const isMottaro = isMotarroProduct(row);
@@ -380,4 +479,38 @@ export async function buildCategoryProductCounts(supabase, tree) {
   }
 
   return counts;
+}
+
+export async function countRenameOrphans(supabase, ctx, column, oldLabel) {
+  const { filters } = buildRenameFilter(ctx, oldLabel);
+  const ancestorFilters = { ...filters };
+  delete ancestorFilters[column];
+
+  let orphans = 0;
+  for (const table of ['website_stock', 'archived_products']) {
+    let from = 0;
+    const PAGE = 1000;
+    while (true) {
+      let q = supabase.from(table).select(PRODUCT_SCAN_COLS).range(from, from + PAGE - 1);
+      q = applyIlikeTaxonomyFilters(q, ancestorFilters);
+      const { data, error } = await q;
+      if (error) throw error;
+      const batch = data || [];
+      orphans += countLabelOrphans(batch, column, oldLabel, filters);
+      if (batch.length < PAGE) break;
+      from += PAGE;
+    }
+  }
+  return orphans;
+}
+
+export async function applyNormalizedRenamePass(supabase, table, ctx, column, oldLabel, newLabel) {
+  const { filters } = buildRenameFilter(ctx, oldLabel);
+  const rows = await fetchRowsMatchingFilters(supabase, table, filters);
+  const skus = rows
+    .filter((row) => matchesTaxonomyLabel(row[column], oldLabel))
+    .map((row) => row.sku)
+    .filter(Boolean);
+  if (!skus.length) return 0;
+  return applyPatchToSkus(supabase, table, skus, { [column]: newLabel });
 }

@@ -2,6 +2,8 @@ import { requireAdminKey } from './_admin-auth.js';
 import { createClient } from '@supabase/supabase-js';
 import { resolveProductLoaderMatch } from './_product-loader-lookup.js';
 import { ensureProductFromCatalogueRow } from './_ensure-product.js';
+import { loadTaxonomy } from './_taxonomy-utils.js';
+import { mottaroPathSnapshotForRow } from '../lib/mottaro-category.mjs';
 
 function getStockAdminClient() {
   return createClient(
@@ -59,15 +61,13 @@ export default async function handler(req, res) {
   if (subcategory_three !== undefined) patch.subcategory_three = subcategory_three ? String(subcategory_three).trim() : null;
   if (subcategory_four !== undefined) patch.subcategory_four = subcategory_four ? String(subcategory_four).trim() : null;
   if (nextSku && nextSku !== sku) patch.sku = nextSku;
-  if (!Object.keys(patch).length) return res.status(200).json({ ok: true });
 
-  patch.updated_at = new Date().toISOString();
   const supabase = getStockAdminClient();
 
   let table = 'website_stock';
   let { data: product, error: lookupError } = await supabase
     .from('website_stock')
-    .select('sku, barcode, updated_at')
+    .select('sku, barcode, updated_at, title, category, subcategory_one, subcategory_two, subcategory_three, subcategory_four, mottaro_path')
     .eq('sku', sku)
     .maybeSingle();
 
@@ -77,7 +77,7 @@ export default async function handler(req, res) {
   if (!product) {
     const archived = await supabase
       .from('archived_products')
-      .select('sku, barcode, archived_by, updated_at')
+      .select('sku, barcode, archived_by, updated_at, title, category, subcategory_one, subcategory_two, subcategory_three, subcategory_four, mottaro_path')
       .eq('sku', sku)
       .maybeSingle();
     if (archived.error) return res.status(400).json({ error: archived.error.message });
@@ -85,6 +85,27 @@ export default async function handler(req, res) {
     product = archived.data;
     table = 'archived_products';
   }
+
+  const categoryFieldsTouched = ['title', 'name', 'category', 'subcategory_one', 'subcategory_two', 'subcategory_three', 'subcategory_four']
+    .some((key) => req.body?.[key] !== undefined);
+  if (categoryFieldsTouched) {
+    try {
+      const tree = await loadTaxonomy();
+      const categoryPatch = {
+        ...(patch.title !== undefined ? { title: patch.title } : {}),
+        ...(patch.category !== undefined ? { category: patch.category } : {}),
+        ...(patch.subcategory_one !== undefined ? { subcategory_one: patch.subcategory_one } : {}),
+        ...(patch.subcategory_two !== undefined ? { subcategory_two: patch.subcategory_two } : {}),
+        ...(patch.subcategory_three !== undefined ? { subcategory_three: patch.subcategory_three } : {}),
+        ...(patch.subcategory_four !== undefined ? { subcategory_four: patch.subcategory_four } : {}),
+      };
+      const snapshot = mottaroPathSnapshotForRow(product, tree, categoryPatch);
+      if (snapshot) patch.mottaro_path = snapshot;
+    } catch { /* non-fatal */ }
+  }
+
+  if (!Object.keys(patch).length) return res.status(200).json({ ok: true });
+  patch.updated_at = new Date().toISOString();
 
   if (expectedUpdatedAt && product.updated_at && product.updated_at !== expectedUpdatedAt) {
     return res.status(409).json({

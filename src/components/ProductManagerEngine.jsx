@@ -385,6 +385,7 @@ export default function ProductManagerEngine({
   onDeleteSubcategory,
   onDeleteNode,
   onRefreshTaxonomy,
+  onRefreshCategoryCounts,
   onCategoryReorder,
   categoryProductCounts = {},
   initialStatus = 'live',
@@ -478,6 +479,11 @@ export default function ProductManagerEngine({
     lastSelectIdxRef.current = null;
     setSelectAllView(false);
   }, [status, debouncedSearch, categoryPath.join('/'), archiveStockView, archiveSourceFilter, onlyInStock]);
+
+  useEffect(() => {
+    if (status !== 'live') return;
+    onRefreshCategoryCounts?.(onlyInStock);
+  }, [onlyInStock, status, onRefreshCategoryCounts]);
 
   const handleOnlyInStockChange = useCallback((next) => {
     setOnlyInStock(next);
@@ -693,6 +699,8 @@ export default function ProductManagerEngine({
       invalidateAdminCache();
       queryClient.invalidateQueries({ queryKey: ['catalog'] });
       queryClient.invalidateQueries({ queryKey: queryKeys.dashboardStats() });
+      onRefreshCategoryCounts?.(onlyInStock);
+      onRefreshTaxonomy?.();
       onRefreshStats?.();
       onShowToast?.(`Moved ${skus.length} product(s) to ${destinationLabel}`, 'success');
     } catch (err) {
@@ -706,6 +714,7 @@ export default function ProductManagerEngine({
         clearSelection();
         invalidateAdminCache();
         queryClient.invalidateQueries({ queryKey: ['catalog'] });
+        onRefreshCategoryCounts?.(onlyInStock);
         onShowToast?.(err.message || 'Move failed', 'warning');
       } else {
         onShowToast?.(err.message || 'Move failed', 'error');

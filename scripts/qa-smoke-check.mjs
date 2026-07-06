@@ -497,4 +497,31 @@ assert.match(adminPageSrc, /BulkImageReplacePanel/, 'AdminPage lazy-loads BulkIm
 assert.doesNotMatch(readSrc('src/components/ProductLoaderPanel.jsx'), /image-replace/, 'Image Replace removed from Product Loader');
 console.log('✓ Bulk image replace tab (wizard, API, 500 cap)');
 
+// Taxonomy integrity hardening
+assert.match(taxonomyUtilsSrc, /buildCategoryProductCounts\(supabase, tree, \{ onlyInStock/, 'buildCategoryProductCounts accepts onlyInStock');
+assert.match(taxonomyUtilsSrc, /clearProductLabelsForNode/, 'delete clears product labels via clearProductLabelsForNode');
+assert.match(readSrc('api/taxonomy.js'), /clearProductLabelsForNode/, 'taxonomy deleteNode clears product labels');
+assert.match(readSrc('api/taxonomy.js'), /applyIlikeTaxonomyFilters/, 'rename uses ilike taxonomy filters');
+assert.match(readSrc('api/taxonomy.js'), /onlyInStock/, 'taxonomy counts endpoint supports onlyInStock');
+
+const mottaroSrc = readSrc('lib/mottaro-category.mjs');
+assert.match(mottaroSrc, /parseStoredMotarroPath/, 'mottaro module parses stored mottaro_path');
+assert.match(mottaroSrc, /parseStoredMotarroPath\(row\?\.mottaro_path\)/, 'inferMotarroPathFromRow checks stored path');
+
+assert.match(readSrc('src/lib/taxonomyAdmin.js'), /onlyInStock/, 'fetchCategoryProductCounts passes onlyInStock');
+assert.match(readSrc('src/components/ProductManagerEngine.jsx'), /onRefreshCategoryCounts/, 'ProductManagerEngine refreshes category counts');
+
+import {
+  inferMotarroPathFromRow,
+  parseStoredMotarroPath,
+} from '../lib/mottaro-category.mjs';
+const storedPath = JSON.stringify(['mottaro', 'mottaro-art-supplies', 'mottaro-painting-palettes']);
+assert.deepEqual(
+  inferMotarroPathFromRow({ title: 'MOTARRO Test', category: null, mottaro_path: storedPath }, []),
+  JSON.parse(storedPath),
+  'Mottaro product uses stored path when primary category cleared',
+);
+assert.ok(parseStoredMotarroPath(storedPath)?.length === 3, 'parseStoredMotarroPath reads JSON array');
+console.log('✓ Taxonomy integrity hardening (counts parity, delete clear, rename ilike, mottaro_path)');
+
 console.log('\nAll smoke checks passed.');

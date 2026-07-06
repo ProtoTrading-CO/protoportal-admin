@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { labelsToDbFields, loadTaxonomy, resolveLabelsForSubcategory, resolveLabelsFromPathIds } from './_taxonomy-utils.js';
 import { restoreArchivedToLive } from './_ensure-product.js';
 import { BULK_CHUNK_SIZE, MOVE_UPDATE_CHUNK_SIZE, runInChunks } from '../lib/bulk-chunk.mjs';
+import { mottaroPathSnapshotForRow } from '../lib/mottaro-category.mjs';
 
 function sliceIntoChunks(list, size) {
   const chunks = [];
@@ -84,7 +85,7 @@ async function unarchiveProduct(supabase, sku) {
   }
 }
 
-async function bulkMoveProducts(supabase, normalizedSkus, dbFields) {
+async function bulkMoveProducts(supabase, normalizedSkus, dbFields, tree) {
   const updatePayload = { ...dbFields, updated_at: new Date().toISOString() };
   const { liveSkus, archSkus } = await resolveSkuTables(supabase, normalizedSkus);
   const found = new Set([...liveSkus, ...archSkus]);
@@ -92,13 +93,45 @@ async function bulkMoveProducts(supabase, normalizedSkus, dbFields) {
   const liveList = normalizedSkus.filter((sku) => liveSkus.has(sku));
   const archList = normalizedSkus.filter((sku) => archSkus.has(sku));
 
-  if (liveList.length) {
-    results.push(...await chunkedInUpdate(supabase, 'website_stock', liveList, updatePayload));
+  async function moveTableBatch(table, skus) {
+    if (!skus.length) return;
+    const CHUNK = 200;
+    for (let i = 0; i < skus.length; i += CHUNK) {
+      const chunk = skus.slice(i, i + CHUNK);
+      const { data: rows } = await supabase
+        .from(table)
+        .select('sku,title,category,subcategory_one,subcategory_two,subcategory_three,subcategory_four,mottaro_path')
+        .in('sku', chunk);
+      const standard = [];
+      const byPath = new Map();
+      for (const sku of chunk) {
+        const row = (rows || []).find((r) => r.sku === sku);
+        if (!row) {
+          standard.push(sku);
+          continue;
+        }
+        const snapshot = tree ? mottaroPathSnapshotForRow(row, tree, dbFields) : null;
+        if (snapshot) {
+          if (!byPath.has(snapshot)) byPath.set(snapshot, []);
+          byPath.get(snapshot).push(sku);
+        } else {
+          standard.push(sku);
+        }
+      }
+      if (standard.length) {
+        results.push(...await chunkedInUpdate(supabase, table, standard, updatePayload));
+      }
+      for (const [path, pathSkus] of byPath) {
+        results.push(...await chunkedInUpdate(supabase, table, pathSkus, {
+          ...updatePayload,
+          mottaro_path: path,
+        }));
+      }
+    }
   }
 
-  if (archList.length) {
-    results.push(...await chunkedInUpdate(supabase, 'archived_products', archList, updatePayload));
-  }
+  await moveTableBatch('website_stock', liveList);
+  await moveTableBatch('archived_products', archList);
 
   for (const sku of normalizedSkus) {
     if (!found.has(sku)) results.push({ sku, ok: false, error: 'Not found' });
@@ -195,7 +228,7 @@ export default async function handler(req, res) {
       }
       const dbFields = labelsToDbFields(labels);
       const destinationPath = labels.join(' › ');
-      const results = await bulkMoveProducts(supabase, normalizedSkus, dbFields);
+      const results = await bulkMoveProducts(supabase, normalizedSkus, dbFields, tree);
       const failed = results.filter((r) => !r.ok);
       return res.status(failed.length ? 207 : 200).json({
         ok: failed.length === 0,
