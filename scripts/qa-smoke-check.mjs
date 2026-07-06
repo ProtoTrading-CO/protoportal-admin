@@ -618,4 +618,25 @@ assert.match(pmMoveBlock, /onRefreshTaxonomy\?\.\(\)/, 'PM bulk move refreshes t
 assert.match(pmMoveBlock, /setInStockCountsNonce/, 'PM bulk move refetches stock-filtered counts');
 console.log('✓ A5 counts refresh after Product Manager move');
 
+// Remove-from-category (Mottaro-only detach)
+const bulkProductsRemoveSrc = readSrc('api/bulk-products.js');
+assert.match(bulkProductsRemoveSrc, /action === 'removeFromCategory'/, 'bulk-products handles removeFromCategory');
+assert.match(bulkProductsRemoveSrc, /bulkRemoveFromCategory/, 'removeFromCategory helper present');
+assert.match(bulkProductsRemoveSrc, /Not a Mottaro product/, 'removeFromCategory skips non-Mottaro rows server-side');
+assert.match(bulkProductsRemoveSrc, /motarroPathSnapshot\(deriveMotarroPathFromLabels/, 'removeFromCategory snapshots mottaro_path before clearing labels');
+// The clear patch must null category + every subcategory column.
+const removeFn = bulkProductsRemoveSrc.match(/const clearPatch = \{[\s\S]*?\};/)?.[0] || '';
+for (const col of ['category', 'subcategory_one', 'subcategory_two', 'subcategory_three', 'subcategory_four']) {
+  assert.match(removeFn, new RegExp(`${col}: null`), `clearPatch nulls ${col}`);
+}
+const productsRemoveSrc = readSrc('src/lib/products.js');
+assert.match(productsRemoveSrc, /export async function bulkRemoveFromCategory/, 'client bulkRemoveFromCategory present');
+const pmRemoveSrc = readSrc('src/components/ProductManagerEngine.jsx');
+assert.match(pmRemoveSrc, /selectionAllMottaro/, 'PM gates remove button on all-Mottaro selection');
+assert.match(pmRemoveSrc, /canRemoveFromCategory/, 'PM computes remove-from-category visibility');
+assert.match(pmRemoveSrc, /browsingMottaroTree/, 'remove button hidden inside the Mottaro virtual tree');
+assert.match(pmRemoveSrc, /Remove from category/, 'remove-from-category button rendered');
+assert.match(pmRemoveSrc, /pm-bulk-group--end/, 'bulk toolbar regrouped into clustered layout');
+console.log('✓ Remove-from-category (Mottaro-only detach) + regrouped bulk toolbar');
+
 console.log('\nAll smoke checks passed.');

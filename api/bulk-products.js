@@ -120,6 +120,69 @@ async function bulkMoveProducts(supabase, normalizedSkus, dbFields, { mottaroSna
   return results;
 }
 
+const REMOVE_SELECT = 'sku,title,category,subcategory_one,subcategory_two,subcategory_three,subcategory_four,mottaro_path';
+
+async function fetchRowsForSkus(supabase, table, skus) {
+  const map = new Map();
+  const CHUNK = 200;
+  for (let i = 0; i < skus.length; i += CHUNK) {
+    const { data } = await supabase.from(table).select(REMOVE_SELECT).in('sku', skus.slice(i, i + CHUNK));
+    for (const row of data || []) map.set(row.sku, row);
+  }
+  return map;
+}
+
+/**
+ * Detach Mottaro products from their primary category. Mottaro membership is
+ * derived from the product title, so clearing the primary category labels
+ * simply removes the product from the normal browse tree while it stays
+ * fully browsable under the virtual Mottaro tree. The current Mottaro
+ * position is snapshotted to mottaro_path *before* the labels are cleared so
+ * the brand-tree placement survives (otherwise the row would fall back to
+ * Mottaro › Other › General on the next read).
+ */
+async function bulkRemoveFromCategory(supabase, normalizedSkus, tree) {
+  const clearPatch = {
+    category: null,
+    subcategory_one: null,
+    subcategory_two: null,
+    subcategory_three: null,
+    subcategory_four: null,
+  };
+  const results = [];
+  const stamp = new Date().toISOString();
+
+  for (const table of ['website_stock', 'archived_products']) {
+    const rows = await fetchRowsForSkus(supabase, table, normalizedSkus);
+    // Group SKUs by the mottaro_path value we need to write so each snapshot
+    // group is a single chunked UPDATE. '__none__' = leave mottaro_path as-is.
+    const groups = new Map();
+    for (const [sku, row] of rows) {
+      if (!isMotarroProduct(row)) {
+        results.push({ sku, ok: false, error: 'Not a Mottaro product' });
+        continue;
+      }
+      const labels = [row.category, row.subcategory_one, row.subcategory_two, row.subcategory_three, row.subcategory_four];
+      const snapshot = motarroPathSnapshot(deriveMotarroPathFromLabels(labels, tree));
+      const key = snapshot && snapshot !== row.mottaro_path ? snapshot : '__none__';
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(sku);
+    }
+    for (const [key, skus] of groups) {
+      const patch = key === '__none__'
+        ? { ...clearPatch, updated_at: stamp }
+        : { ...clearPatch, mottaro_path: key, updated_at: stamp };
+      results.push(...await chunkedInUpdate(supabase, table, skus, patch));
+    }
+  }
+
+  const handled = new Set(results.map((r) => r.sku));
+  for (const sku of normalizedSkus) {
+    if (!handled.has(sku)) results.push({ sku, ok: false, error: 'Not found' });
+  }
+  return results;
+}
+
 async function bulkDeleteProducts(supabase, normalizedSkus) {
   const { liveSkus, archSkus } = await resolveSkuTables(supabase, normalizedSkus);
   const found = new Set([...liveSkus.keys(), ...archSkus.keys()]);
@@ -217,6 +280,19 @@ export default async function handler(req, res) {
         failed,
         destinationPath,
         destinationLabels: labels,
+      });
+    }
+
+    if (action === 'removeFromCategory') {
+      const tree = await loadTaxonomy();
+      const results = await bulkRemoveFromCategory(supabase, normalizedSkus, tree);
+      const failed = results.filter((r) => !r.ok);
+      const nonMottaro = failed.filter((r) => r.error === 'Not a Mottaro product').length;
+      return res.status(failed.length ? 207 : 200).json({
+        ok: failed.length === 0,
+        removed: results.filter((r) => r.ok).length,
+        failed,
+        nonMottaro,
       });
     }
 
