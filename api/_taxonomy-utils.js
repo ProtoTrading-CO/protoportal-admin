@@ -379,16 +379,20 @@ export async function renameNodeLabelInProducts(supabase, table, ctx, oldLabel, 
 
 /**
  * Column patch for products under a deleted node:
- * - depth 0: null category and every subcategory column (covers shallow rows
+ * - depth 0: clear category and every subcategory column (covers shallow rows
  *   where subcategory_one duplicates the category label).
- * - depth N: null column N and everything deeper; category stays intact.
+ * - depth N: clear column N and everything deeper; category stays intact.
+ *
+ * category / subcategory_one are NOT NULL in website_stock, so they are
+ * cleared to '' (the codebase-wide "uncategorised" representation); deeper
+ * columns are nullable and cleared to null.
  */
 export function buildClearLabelsPatch(ctx) {
   const patch = {};
-  if (ctx.depth === 0) patch.category = null;
+  if (ctx.depth === 0) patch.category = '';
   const firstSub = ctx.depth === 0 ? 0 : ctx.depth - 1;
   for (let i = firstSub; i < SUB_COLS.length; i += 1) {
-    patch[SUB_COLS[i]] = null;
+    patch[SUB_COLS[i]] = SUB_COLS[i] === 'subcategory_one' ? '' : null;
   }
   return patch;
 }

@@ -534,13 +534,21 @@ assert.match(taxonomyUtilsSrc2, /rowMatchesLabelScope/, 'scope fetch verifies wi
 console.log('✓ A2/A3 rename + delete use tolerant matching');
 
 // buildClearLabelsPatch depth behaviour
+// category / subcategory_one are NOT NULL in website_stock — cleared to ''
+// (the uncategorised representation), deeper nullable columns to null.
 assert.deepEqual(buildClearLabelsPatch({ depth: 0 }), {
-  category: null,
-  subcategory_one: null,
+  category: '',
+  subcategory_one: '',
   subcategory_two: null,
   subcategory_three: null,
   subcategory_four: null,
 }, 'main-category delete clears category + all sub columns (shallow duplicate included)');
+assert.deepEqual(buildClearLabelsPatch({ depth: 1 }), {
+  subcategory_one: '',
+  subcategory_two: null,
+  subcategory_three: null,
+  subcategory_four: null,
+}, 'depth-1 delete clears subcategory_one to empty string (NOT NULL column)');
 assert.deepEqual(buildClearLabelsPatch({ depth: 2 }), {
   subcategory_two: null,
   subcategory_three: null,
@@ -624,9 +632,12 @@ assert.match(bulkProductsRemoveSrc, /action === 'removeFromCategory'/, 'bulk-pro
 assert.match(bulkProductsRemoveSrc, /bulkRemoveFromCategory/, 'removeFromCategory helper present');
 assert.match(bulkProductsRemoveSrc, /Not a Mottaro product/, 'removeFromCategory skips non-Mottaro rows server-side');
 assert.match(bulkProductsRemoveSrc, /motarroPathSnapshot\(deriveMotarroPathFromLabels/, 'removeFromCategory snapshots mottaro_path before clearing labels');
-// The clear patch must null category + every subcategory column.
+// The clear patch must clear every category column — '' for the NOT NULL
+// columns (category, subcategory_one), null for the nullable deeper ones.
 const removeFn = bulkProductsRemoveSrc.match(/const clearPatch = \{[\s\S]*?\};/)?.[0] || '';
-for (const col of ['category', 'subcategory_one', 'subcategory_two', 'subcategory_three', 'subcategory_four']) {
+assert.match(removeFn, /category: ''/, 'clearPatch clears category to empty string (NOT NULL column)');
+assert.match(removeFn, /subcategory_one: ''/, 'clearPatch clears subcategory_one to empty string (NOT NULL column)');
+for (const col of ['subcategory_two', 'subcategory_three', 'subcategory_four']) {
   assert.match(removeFn, new RegExp(`${col}: null`), `clearPatch nulls ${col}`);
 }
 const productsRemoveSrc = readSrc('src/lib/products.js');
