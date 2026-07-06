@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Loader2, MessageCircle, RefreshCw } from 'lucide-react';
 
-export default function OrderWhatsappNotify({ orderId }) {
+export default function OrderWhatsappNotify({ orderId, orderStatus = '' }) {
   const [log, setLog] = useState(null);
   const [loading, setLoading] = useState(true);
   const [retrying, setRetrying] = useState(false);
@@ -14,7 +14,9 @@ export default function OrderWhatsappNotify({ orderId }) {
     return fetch(`/api/order-notify-log?orderId=${encodeURIComponent(orderId)}`)
       .then((r) => r.json())
       .then((data) => setLog(data))
-      .catch(() => setLog({ found: false }))
+      // loadError distinguishes "couldn't read the log" from "no log exists"
+      // so a transient fetch failure never triggers the auto-send below.
+      .catch(() => setLog({ found: false, loadError: true }))
       .finally(() => setLoading(false));
   };
 
@@ -24,14 +26,17 @@ export default function OrderWhatsappNotify({ orderId }) {
   }, [orderId]);
 
   // A brand-new order without any delivery log: fire the notification round
-  // (team WhatsApp + alert email) automatically, once per order.
+  // (team WhatsApp + alert email) automatically, once per order. Only for
+  // orders still in "New" — expanding old orders must never re-ping the team,
+  // and a failed log fetch (loadError) is not proof that no log exists.
+  const isNewOrder = String(orderStatus || '').trim().toLowerCase() === 'pending';
   useEffect(() => {
     if (loading || retrying || autoSentRef.current) return;
-    if (log && !log.found) {
+    if (log && !log.found && !log.loadError && isNewOrder) {
       autoSentRef.current = true;
       void handleRetry();
     }
-  }, [log, loading]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [log, loading, isNewOrder]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleRetry = async () => {
     setRetrying(true);

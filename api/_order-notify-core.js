@@ -84,8 +84,12 @@ export function isOrderNotifyComplete(log) {
     return { ok: false, reason: 'No new-order notification has been sent for this order yet' };
   }
   const emailOk = !!log.emailSent;
+  const teamSize = Number(log.teamSize);
+  const sentToWholeTeam = Number(log.sent) > 0
+    && Number(log.failed || 0) === 0
+    && (!Number.isFinite(teamSize) || teamSize <= 0 || Number(log.sent) >= teamSize);
   const whatsappOk = !!log.statusAdvanced
-    || (Number(log.sent) > 0 && Number(log.failed || 0) === 0)
+    || sentToWholeTeam
     || !!log.skippedNoToken
     || !!log.skippedNoTeam;
   if (!emailOk) {

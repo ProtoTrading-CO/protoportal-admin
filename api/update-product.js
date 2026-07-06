@@ -143,11 +143,12 @@ export default async function handler(req, res) {
   // product came from and where it went (skipped until migration 039 runs).
   if (CATEGORY_COLS.some((col) => patch[col] !== undefined)
     && await tableHasMoveTagColumns(supabase, table)) {
-    const destination = [
-      patch.category ?? product.category,
-      patch.subcategory_one ?? product.subcategory_one,
-      patch.subcategory_two, patch.subcategory_three, patch.subcategory_four,
-    ].filter(Boolean).join(' › ');
+    // Levels absent from the patch keep their current value; an explicit
+    // null in the patch means that level was cleared.
+    const destination = CATEGORY_COLS
+      .map((col) => (patch[col] !== undefined ? patch[col] : product[col]))
+      .filter(Boolean)
+      .join(' › ');
     const tag = buildMoveTagPatch(product, destination, patch.updated_at);
     if (tag) Object.assign(patch, tag);
   }

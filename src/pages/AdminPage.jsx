@@ -413,7 +413,6 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   useEffect(() => {
     if (activeSection === 'apollo') setApolloEverActive(true);
   }, [activeSection]);
-  const [catalogStatus, setCatalogStatus] = useState('live');
   const [imageFixRequest, setImageFixRequest] = useState(null);
   const [productLoaderCode, setProductLoaderCode] = useState('');
   const { data: dashStats } = useDashboardStats();
@@ -2565,7 +2564,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                                 </button>
                               ))}
                             </div>
-                            <OrderWhatsappNotify orderId={order.id} />
+                            <OrderWhatsappNotify orderId={order.id} orderStatus={normalizeOrderStatus(order.status)} />
                             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
                               <OrderItemsList label="Order placed" items={order.original_items || order.items || []} />
                               <OrderItemsList label="Order final" items={order.final_items || order.items || []} />

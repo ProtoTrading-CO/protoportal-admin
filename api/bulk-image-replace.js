@@ -148,9 +148,18 @@ async function replaceOneItem(supabase, raw, allowedSet, slot, scope) {
         .update(patch)
         .eq('sku', sku);
       if (patchErr) throw patchErr;
-      // Some archived rows still have a live twin sharing the same storage
-      // object — keep the live slot URL in sync so the two never diverge.
-      await supabase.from('website_stock').update(patch).eq('sku', sku);
+      // A live twin shares the same storage object, so its image content
+      // already changed with the upload above — keep its slot URL in sync
+      // too, and surface (rather than swallow) a failed sync.
+      const { data: liveTwin } = await supabase
+        .from('website_stock').select('sku').eq('sku', sku).maybeSingle();
+      if (liveTwin) {
+        const { error: syncErr } = await supabase
+          .from('website_stock').update(patch).eq('sku', sku);
+        if (syncErr) {
+          return { sku, ok: true, slot, scope, url: publicUrl, warning: `live_sync_failed: ${syncErr.message}` };
+        }
+      }
     } else {
       const { error: patchErr } = await supabase
         .from('website_stock')
