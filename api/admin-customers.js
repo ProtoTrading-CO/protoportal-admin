@@ -88,12 +88,14 @@ export default async function handler(req, res) {
   // PATCH — approve / update customer fields (allowlisted columns only)
   if (req.method === 'PATCH') {
     const ALLOWED_PATCH_FIELDS = new Set([
-      'is_approved', 'tier', 'name', 'email', 'phone', 'business_name',
+      'is_approved', 'tier', 'role', 'name', 'email', 'phone', 'business_name',
       'business_type', 'company_address', 'delivery_address', 'vat_number',
       'monthly_spend', 'website',
       'country', 'province', 'city', 'accept_whatsapp', 'customer_code',
       'sales_last_12_months', 'invoice_count', 'last_purchase_date',
       'contact_name', 'first_name',
+      'street_name', 'suburb', 'postal_code', 'building_type', 'unit_number',
+      'is_flagged', 'flag_reason', 'admin_note', 'whatsapp_opt_in_at',
     ]);
     const { id, ...rawPatch } = req.body || {};
     if (!id) return res.status(400).json({ error: 'id required' });
@@ -106,6 +108,26 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: 'Customer code must be exactly 6 letters or numbers' });
       }
       patch.customer_code = code || null;
+    }
+    if (patch.accept_whatsapp !== undefined) {
+      patch.accept_whatsapp = patch.accept_whatsapp === true || patch.accept_whatsapp === 'true';
+    }
+    if (patch.is_flagged !== undefined) {
+      patch.is_flagged = patch.is_flagged === true || patch.is_flagged === 'true';
+    }
+    if (patch.whatsapp_opt_in_at !== undefined) {
+      const raw = String(patch.whatsapp_opt_in_at || '').trim();
+      patch.whatsapp_opt_in_at = raw || null;
+    }
+    if (patch.last_purchase_date !== undefined) {
+      const raw = String(patch.last_purchase_date || '').trim();
+      patch.last_purchase_date = raw || null;
+    }
+    for (const key of ['sales_last_12_months', 'invoice_count']) {
+      if (patch[key] !== undefined) {
+        const n = Number(patch[key]);
+        patch[key] = Number.isFinite(n) ? n : null;
+      }
     }
     if (!Object.keys(patch).length) return res.status(400).json({ error: 'No valid fields to update' });
 

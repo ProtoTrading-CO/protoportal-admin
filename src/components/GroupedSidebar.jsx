@@ -12,6 +12,7 @@ import {
   SlidersHorizontal,
   Sparkles,
   Star,
+  Tag,
   User,
   Users,
 } from 'lucide-react';
@@ -30,6 +31,7 @@ const NAV_ITEMS = [
   { id: 'reorder', label: 'Reorder Grid', icon: Grip },
   { id: 'customers', label: 'Customer Management', icon: Users },
   { id: 'featured', label: 'Featured', icon: Sparkles },
+  { id: 'promo-codes', label: 'Promo Codes', icon: Tag },
   { id: 'specials', label: 'Specials', icon: Star },
   { id: 'crm', label: 'WhatsApp', icon: MessageCircle },
   { id: 'banner', label: 'Banner Editor', icon: Layout },
@@ -47,6 +49,7 @@ const CHUNK_PREFETCH = {
   crm: () => import('./WhatsappPanel'),
   banner: () => import('./BannerPanel'),
   featured: () => import('./FeaturedPanel'),
+  'promo-codes': () => import('./PromoCodesPanel'),
   specials: () => import('./SpecialsPanel'),
   pricing: () => import('./PricingPanel'),
   reorder: () => import('./ReorderPanel'),

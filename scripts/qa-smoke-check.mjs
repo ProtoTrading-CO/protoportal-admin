@@ -497,4 +497,35 @@ assert.match(adminPageSrc, /BulkImageReplacePanel/, 'AdminPage lazy-loads BulkIm
 assert.doesNotMatch(readSrc('src/components/ProductLoaderPanel.jsx'), /image-replace/, 'Image Replace removed from Product Loader');
 console.log('✓ Bulk image replace tab (wizard, API, 500 cap)');
 
+// Admin portal sync — customers, promo codes, public featured GET
+const customersApiSrc = readSrc('api/admin-customers.js');
+assert.match(customersApiSrc, /street_name/, 'customer PATCH allows street_name');
+assert.match(customersApiSrc, /admin_note/, 'customer PATCH allows admin_note');
+assert.match(customersApiSrc, /whatsapp_opt_in_at/, 'customer PATCH allows whatsapp_opt_in_at');
+
+assert.match(adminPageSrc, /CustomerProfileEditForm/, 'customer drawer has full edit form');
+assert.match(adminPageSrc, /order\.promo_code/, 'customer order history shows promo_code');
+
+const promoApiSrc = readSrc('api/promo-codes.js');
+assert.match(promoApiSrc, /promo-codes\.json/, 'promo codes API persists to promo-codes.json');
+assert.match(readSrc('api/validate-promo.js'), /validatePromoEntry/, 'validate-promo uses shared validator');
+assert.match(readSrc('src/components/PromoCodesPanel.jsx'), /export default function PromoCodesPanel/, 'PromoCodesPanel export');
+assert.match(sidebarSrc, /id: 'promo-codes'/, 'sidebar has Promo Codes nav');
+assert.match(adminPageSrc, /activeSection === 'promo-codes'/, 'AdminPage renders Promo Codes section');
+
+assert.doesNotMatch(featuredApiSrc, /requireAdminKey\(req, res\)\)\) return;\s*\n\s*res\.setHeader\('Cache-Control', 'no-store'\);\s*\n\s*if \(req\.method === 'GET'\)/, 'featured GET is public');
+assert.match(featuredApiSrc, /if \(req\.method === 'POST'\)/, 'featured POST still exists');
+assert.match(featuredApiSrc, /requireAdminKey/, 'featured POST requires admin key');
+
+import { normalizePromoCodes, validatePromoEntry } from '../lib/promo-codes.mjs';
+const samplePromos = normalizePromoCodes([
+  { code: 'proto75', discountPct: 7.5, active: true, minOrder: 100, label: '7.5% off' },
+]);
+assert.equal(samplePromos[0].code, 'PROTO75');
+const valid = validatePromoEntry({ codes: samplePromos }, { code: 'PROTO75', orderTotal: 200 });
+assert.equal(valid.valid, true);
+const tooSmall = validatePromoEntry({ codes: samplePromos }, { code: 'PROTO75', orderTotal: 50 });
+assert.equal(tooSmall.valid, false);
+console.log('✓ Admin portal sync (customers, promo codes, public featured GET)');
+
 console.log('\nAll smoke checks passed.');

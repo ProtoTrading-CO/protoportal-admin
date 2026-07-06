@@ -30,7 +30,6 @@ function normalizeItems(raw) {
 }
 
 export default async function handler(req, res) {
-  if (!(await requireAdminKey(req, res))) return;
   res.setHeader('Cache-Control', 'no-store');
 
   if (req.method === 'GET') {
@@ -50,6 +49,7 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'POST') {
+    if (!(await requireAdminKey(req, res))) return;
     try {
       const body = req.body || {};
       const items = normalizeItems(body.items);
