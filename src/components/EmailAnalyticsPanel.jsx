@@ -81,10 +81,72 @@ export default function EmailAnalyticsPanel({ onShowToast }) {
               <Stat label="Opened" value={opened} hint={formatPct(opened, sent)} />
               <Stat label="Clicked" value={clicked} hint={formatPct(clicked, sent)} />
               <Stat label="Bounced" value={bounced} hint={formatPct(bounced, sent)} />
+              {(events.unsubscribed || 0) > 0 && <Stat label="Unsubscribed" value={events.unsubscribed} hint={formatPct(events.unsubscribed, sent)} />}
+              {(events.complained || 0) > 0 && <Stat label="Complaints" value={events.complained} hint={formatPct(events.complained, sent)} />}
             </div>
+            <CampaignRecipients campaign={campaign} />
           </div>
         );
       })}
+    </div>
+  );
+}
+
+/** Who opened / clicked — expandable per-campaign recipient detail. */
+function CampaignRecipients({ campaign }) {
+  const [open, setOpen] = useState(false);
+  const eventEmails = campaign.eventEmails || {};
+  const clickedEmails = eventEmails.clicked || [];
+  const openedEmails = eventEmails.opened || [];
+  const bouncedEmails = eventEmails.bounced || [];
+  const clickedLinks = campaign.clickedLinks || {};
+  const hasDetail = clickedEmails.length || openedEmails.length || bouncedEmails.length || Object.keys(clickedLinks).length;
+  if (!hasDetail) return null;
+
+  return (
+    <div style={{ marginTop: 12 }}>
+      <button
+        type="button"
+        className="adm-btn-ghost adm-btn--sm"
+        onClick={() => setOpen((v) => !v)}
+      >
+        {open ? 'Hide' : 'Show'} who opened / clicked
+      </button>
+      {open && (
+        <div style={{ marginTop: 10, display: 'grid', gap: 10, fontSize: 12 }}>
+          {clickedEmails.length > 0 && (
+            <RecipientList label={`Clicked (${clickedEmails.length})`} emails={clickedEmails} color="#15803d" />
+          )}
+          {Object.keys(clickedLinks).length > 0 && (
+            <div>
+              <div className="adm-muted" style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', marginBottom: 4 }}>Links clicked</div>
+              {Object.entries(clickedLinks).map(([url, info]) => (
+                <div key={url} style={{ marginBottom: 6 }}>
+                  <div style={{ fontWeight: 600, wordBreak: 'break-all' }}>{url} <span className="adm-muted">· {info.count} click(s)</span></div>
+                  {info.emails?.length > 0 && (
+                    <div className="adm-muted" style={{ wordBreak: 'break-word' }}>{info.emails.join(', ')}</div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+          {openedEmails.length > 0 && (
+            <RecipientList label={`Opened (${openedEmails.length})`} emails={openedEmails} color="#374151" />
+          )}
+          {bouncedEmails.length > 0 && (
+            <RecipientList label={`Bounced (${bouncedEmails.length})`} emails={bouncedEmails} color="#b91c1c" />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RecipientList({ label, emails, color }) {
+  return (
+    <div>
+      <div className="adm-muted" style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', marginBottom: 4, color }}>{label}</div>
+      <div style={{ wordBreak: 'break-word', lineHeight: 1.6 }}>{emails.join(', ')}</div>
     </div>
   );
 }

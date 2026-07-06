@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { BarChart2, Code2, ImagePlus, Loader2, Mail, Send } from 'lucide-react';
+import { BarChart2, CalendarClock, Code2, ImagePlus, Loader2, Mail, Send } from 'lucide-react';
+import { scheduleCustomerEmail } from '../lib/customers';
 import { PROTO_URLS } from '../lib/protoUrls';
 import { BUSINESS_TYPES } from '../lib/businessTypes';
 import {
@@ -91,6 +92,8 @@ export default function CustomerEmailModal({
   const [testSending, setTestSending] = useState(false);
   const [campaigns, setCampaigns] = useState([]);
   const [uploadingImage, setUploadingImage] = useState(false);
+  const [scheduledAt, setScheduledAt] = useState('');
+  const [scheduling, setScheduling] = useState(false);
 
   const subjectRef = useRef(null);
   const introRef = useRef(null);
@@ -195,6 +198,43 @@ export default function CustomerEmailModal({
     setBusinessTypes((prev) => (
       prev.includes(type) ? prev.filter((t) => t !== type) : [...prev, type]
     ));
+  };
+
+  const handleSchedule = async () => {
+    if (!subject.trim()) {
+      onShowToast?.('Subject is required', 'error');
+      return;
+    }
+    if (!introBody.trim() && !htmlBody.trim()) {
+      onShowToast?.('Write a message body and/or HTML block', 'error');
+      return;
+    }
+    if (!scheduledAt) {
+      onShowToast?.('Pick a date and time to schedule the send', 'error');
+      return;
+    }
+    const when = new Date(scheduledAt);
+    if (Number.isNaN(when.getTime()) || when.getTime() < Date.now()) {
+      onShowToast?.('Scheduled time must be in the future', 'error');
+      return;
+    }
+    setScheduling(true);
+    try {
+      await scheduleCustomerEmail({
+        scheduledAt: when.toISOString(),
+        audience,
+        subject: subject.trim(),
+        introText: introBody.trim(),
+        htmlBlock: htmlBody.trim(),
+        businessTypes: filterBusinessTypes ? businessTypes : [],
+      });
+      onShowToast?.(`Email scheduled for ${when.toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} — see the Scheduled tab`, 'success');
+      onClose?.();
+    } catch (err) {
+      onShowToast?.(err.message || 'Scheduling failed', 'error');
+    } finally {
+      setScheduling(false);
+    }
   };
 
   const handleSend = async (test = false) => {
@@ -475,11 +515,31 @@ export default function CustomerEmailModal({
           <button type="button" className="adm-btn-ghost" onClick={onClose} disabled={sending || testSending}>
             Cancel
           </button>
-          <div className="adm-email-modal__footer-actions">
+          <div className="adm-email-modal__footer-actions" style={{ flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+              <CalendarClock size={14} />
+              <input
+                type="datetime-local"
+                className="adm-field-input"
+                style={{ padding: '6px 8px', fontSize: 12 }}
+                value={scheduledAt}
+                onChange={(e) => setScheduledAt(e.target.value)}
+                aria-label="Schedule send date and time"
+              />
+            </label>
             <button
               type="button"
               className="adm-btn-ghost"
-              disabled={sending || testSending}
+              disabled={sending || testSending || scheduling || !scheduledAt}
+              onClick={() => void handleSchedule()}
+              title="Queue this email to send automatically at the chosen time"
+            >
+              {scheduling ? <><Loader2 size={14} className="spin" /> Scheduling…</> : <><CalendarClock size={14} /> Schedule send</>}
+            </button>
+            <button
+              type="button"
+              className="adm-btn-ghost"
+              disabled={sending || testSending || scheduling}
               onClick={() => void handleSend(true)}
             >
               {testSending ? <><Loader2 size={14} className="spin" /> Sending test…</> : 'Send test'}
@@ -487,10 +547,10 @@ export default function CustomerEmailModal({
             <button
               type="button"
               className="adm-btn-red"
-              disabled={sending || testSending}
+              disabled={sending || testSending || scheduling}
               onClick={() => void handleSend(false)}
             >
-              {sending ? <><Loader2 size={14} className="spin" /> Sending…</> : <><Send size={14} /> Send email</>}
+              {sending ? <><Loader2 size={14} className="spin" /> Sending…</> : <><Send size={14} /> Send now</>}
             </button>
           </div>
         </div>

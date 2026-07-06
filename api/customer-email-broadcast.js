@@ -1,23 +1,10 @@
 import { requireAdminKey } from './_admin-auth.js';
-import { createClient } from '@supabase/supabase-js';
 import {
-  fetchCustomerAudience,
-  sendBroadcastBatch,
   buildComposedEmail,
   TEST_MERGE_VARS,
   sendBrevoTransactional,
 } from './_brevo-email.js';
-import { appendEmailCampaign } from './_email-campaigns.js';
-
-function getAdminClient() {
-  return createClient(
-    process.env.VITE_SUPABASE_URL,
-    process.env.SUPABASE_SERVICE_ROLE_KEY,
-    { auth: { autoRefreshToken: false, persistSession: false } },
-  );
-}
-
-const VALID_AUDIENCE = new Set(['requests', 'regular', 'proto-active', 'all-portal', 'all-approved']);
+import { runEmailBroadcast, VALID_EMAIL_AUDIENCE } from './_send-email-broadcast.js';
 
 export const config = {
   api: { bodyParser: { sizeLimit: '2mb' } },
@@ -41,7 +28,7 @@ export default async function handler(req, res) {
   } = req.body || {};
 
   const aud = String(audience || '').trim();
-  if (!VALID_AUDIENCE.has(aud)) {
+  if (!VALID_EMAIL_AUDIENCE.has(aud)) {
     return res.status(400).json({ error: 'Invalid audience. Use requests, regular, proto-active, all-approved, or all-portal.' });
   }
   const subj = String(subject || '').trim();
@@ -54,8 +41,6 @@ export default async function handler(req, res) {
   }
 
   try {
-    const sb = getAdminClient();
-
     if (testEmail) {
       const to = { email: String(testEmail).trim().toLowerCase(), name: 'Test' };
       const composed = buildComposedEmail(
@@ -71,42 +56,24 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, test: true, sent: 1 });
     }
 
-    const recipients = await fetchCustomerAudience(sb, aud, {
-      businessTypes: Array.isArray(businessTypes) ? businessTypes : [],
-    });
-    if (!recipients.length) {
-      return res.status(400).json({ error: 'No customers with valid email addresses in this audience.' });
-    }
-
-    const { sent, failed, errors, messageIds } = await sendBroadcastBatch(recipients, {
+    const outcome = await runEmailBroadcast({
+      audience: aud,
       subject: subj,
       introText: intro,
       htmlBlock: html,
+      businessTypes: Array.isArray(businessTypes) ? businessTypes : [],
     });
-
-    try {
-      await appendEmailCampaign({
-        subject: subj,
-        audience: aud,
-        businessTypes: Array.isArray(businessTypes) ? businessTypes.filter(Boolean) : [],
-        sentAt: new Date().toISOString(),
-        recipientCount: recipients.length,
-        sent,
-        failed,
-        messageIds: messageIds || [],
-        events: {},
-      });
-    } catch (logErr) {
-      console.error('customer-email-broadcast: campaign log failed:', logErr?.message || logErr);
+    if (outcome.error && !outcome.total) {
+      return res.status(400).json({ error: outcome.error });
     }
 
-    return res.status(failed ? 207 : 200).json({
-      ok: failed === 0,
+    return res.status(outcome.failed ? 207 : 200).json({
+      ok: outcome.failed === 0,
       audience: aud,
-      total: recipients.length,
-      sent,
-      failed,
-      errors,
+      total: outcome.total,
+      sent: outcome.sent,
+      failed: outcome.failed,
+      errors: outcome.errors,
     });
   } catch (err) {
     console.error('customer-email-broadcast:', err?.message || err);

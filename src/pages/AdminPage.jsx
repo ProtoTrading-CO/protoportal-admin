@@ -115,6 +115,7 @@ const ProductLoaderPanel = lazyRetry(() => import('../components/ProductLoaderPa
 const BulkImageReplacePanel = lazyRetry(() => import('../components/BulkImageReplacePanel'));
 const WhatsappPanel = lazyRetry(() => import('../components/WhatsappPanel'));
 const EmailAnalyticsPanel = lazyRetry(() => import('../components/EmailAnalyticsPanel'));
+const ScheduledEmailsPanel = lazyRetry(() => import('../components/ScheduledEmailsPanel'));
 const BannerPanel = lazyRetry(() => import('../components/BannerPanel'));
 const FeaturedPanel = lazyRetry(() => import('../components/FeaturedPanel'));
 const SpecialsPanel = lazyRetry(() => import('../components/SpecialsPanel'));
@@ -2231,10 +2232,14 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                     <BarChart2 size={14} style={{ marginRight: 6, verticalAlign: -2 }} />
                     Email Analytics
                   </button>
-                  {customerTab !== 'email-analytics' && (
+                  <button onClick={() => setCustomerTab('scheduled')} className={`adm-tab${customerTab === 'scheduled' ? ' adm-tab--active' : ''}`}>
+                    <Clock size={14} style={{ marginRight: 6, verticalAlign: -2 }} />
+                    Scheduled
+                  </button>
+                  {customerTab !== 'email-analytics' && customerTab !== 'scheduled' && (
                     <label className="adm-search adm-search--inline"><Search size={14} /><input value={customerSearch} onChange={(e) => setCustomerSearch(e.target.value)} placeholder="Search…" className="adm-search-input" /></label>
                   )}
-                  {customerTab !== 'proto-active' && customerTab !== 'email-analytics' && (
+                  {customerTab !== 'proto-active' && customerTab !== 'email-analytics' && customerTab !== 'scheduled' && (
                     <select
                       className="adm-select"
                       value={customerBusinessType}
@@ -2256,7 +2261,11 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                   </p>
                 )}
 
-                {customerTab === 'email-analytics' ? (
+                {customerTab === 'scheduled' ? (
+                  <Suspense fallback={<LazySectionFallback label="Loading Scheduled Emails…" />}>
+                    <ScheduledEmailsPanel onShowToast={showToast} />
+                  </Suspense>
+                ) : customerTab === 'email-analytics' ? (
                   <Suspense fallback={<LazySectionFallback label="Loading Email Analytics…" />}>
                     <EmailAnalyticsPanel onShowToast={showToast} />
                   </Suspense>

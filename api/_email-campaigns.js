@@ -17,7 +17,11 @@ export async function appendEmailCampaign(entry) {
   });
 }
 
-export async function recordEmailWebhookEvent({ messageId, event, email, meta = {} }) {
+// Per-event recipient lists are capped so a huge campaign can't grow the
+// store without bound; 2000 covers a full 1000-recipient send with headroom.
+const EVENT_EMAILS_CAP = 2000;
+
+export async function recordEmailWebhookEvent({ messageId, event, email, link, meta = {} }) {
   if (!messageId || !event) return null;
   return mutateSiteConfigJson(CAMPAIGNS_FILE, EMPTY_STORE, (store) => {
     const campaigns = Array.isArray(store?.campaigns) ? store.campaigns.map((c) => ({ ...c })) : [];
@@ -33,7 +37,20 @@ export async function recordEmailWebhookEvent({ messageId, event, email, meta = 
       if (email && !campaign.eventEmails) campaign.eventEmails = {};
       if (email) {
         campaign.eventEmails[key] = campaign.eventEmails[key] || [];
-        if (!campaign.eventEmails[key].includes(email)) campaign.eventEmails[key].push(email);
+        if (!campaign.eventEmails[key].includes(email)
+          && campaign.eventEmails[key].length < EVENT_EMAILS_CAP) {
+          campaign.eventEmails[key].push(email);
+        }
+      }
+      // Which link was clicked, by whom.
+      if (key === 'clicked' && link) {
+        campaign.clickedLinks = campaign.clickedLinks || {};
+        const entry = campaign.clickedLinks[link] || { count: 0, emails: [] };
+        entry.count += 1;
+        if (email && !entry.emails.includes(email) && entry.emails.length < EVENT_EMAILS_CAP) {
+          entry.emails.push(email);
+        }
+        campaign.clickedLinks[link] = entry;
       }
       if (meta.subject && !campaign.subject) campaign.subject = meta.subject;
     }
