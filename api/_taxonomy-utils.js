@@ -412,12 +412,16 @@ export async function clearProductsForDeletedNode(supabase, ctx) {
   return cleared;
 }
 
-/** Count live rows still carrying the old label under the node scope. */
+/** Count rows (live + archived) still carrying the old label under the node scope. */
 export async function countRenameOrphans(supabase, ctx, oldLabel, newLabel) {
   if (normalizeLabel(oldLabel) === normalizeLabel(newLabel)) return 0;
   const { column, filters } = buildRenameFilter(ctx, oldLabel);
-  const remaining = await fetchRowsMatchingNodeScope(supabase, 'website_stock', { column, filters });
-  return remaining.length;
+  let orphans = 0;
+  for (const table of ['website_stock', 'archived_products']) {
+    const remaining = await fetchRowsMatchingNodeScope(supabase, table, { column, filters });
+    orphans += remaining.length;
+  }
+  return orphans;
 }
 
 /** Resolve taxonomy labels from an id path (main + subcategory ids). */
