@@ -142,9 +142,12 @@ async function fetchRowsForSkus(supabase, table, skus) {
  * Mottaro › Other › General on the next read).
  */
 async function bulkRemoveFromCategory(supabase, normalizedSkus, tree) {
+  // category / subcategory_one are NOT NULL in website_stock — empty string
+  // is the codebase-wide "uncategorised" representation (see the
+  // `category.eq.` filters and `!row.category` checks).
   const clearPatch = {
-    category: null,
-    subcategory_one: null,
+    category: '',
+    subcategory_one: '',
     subcategory_two: null,
     subcategory_three: null,
     subcategory_four: null,
