@@ -117,6 +117,7 @@ const WhatsappPanel = lazyRetry(() => import('../components/WhatsappPanel'));
 const EmailAnalyticsPanel = lazyRetry(() => import('../components/EmailAnalyticsPanel'));
 const BannerPanel = lazyRetry(() => import('../components/BannerPanel'));
 const FeaturedPanel = lazyRetry(() => import('../components/FeaturedPanel'));
+const PromoCodesPanel = lazyRetry(() => import('../components/PromoCodesPanel'));
 const SpecialsPanel = lazyRetry(() => import('../components/SpecialsPanel'));
 const PricingPanel = lazyRetry(() => import('../components/PricingPanel'));
 const ReorderPanel = lazyRetry(() => import('../components/ReorderPanel'));
@@ -1547,21 +1548,18 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
 
   const SPEND_BANDS = ['R0 – R5,000', 'R5,000 – R10,000', 'R10,000 – R25,000', 'R25,000 – R50,000', 'R50,000+'];
   const startEditProfile = () => {
-    setProfileForm({
-      name: profileCustomer.name || '',
-      email: profileCustomer.email || '',
-      phone: profileCustomer.phone || '',
-      business_name: profileCustomer.business_name || profileCustomer.name || '',
-      business_type: profileCustomer.business_type || '',
-      monthly_spend: profileCustomer.monthly_spend || '',
-      website: profileCustomer.website || '',
-      vat_number: profileCustomer.vat_number || '',
-      company_address: profileCustomer.company_address || '',
-      delivery_address: profileCustomer.delivery_address || '',
-      contact_name: profileCustomer.contact_name || '',
-      first_name: profileCustomer.first_name || '',
-      account_code: profileCustomer.account_code || profileCustomer.customer_code || '',
-    });
+    if (profileSource === 'proto-active') {
+      setProfileForm({
+        name: profileCustomer.name || '',
+        email: profileCustomer.email || '',
+        business_name: profileCustomer.business_name || profileCustomer.name || '',
+        contact_name: profileCustomer.contact_name || '',
+        first_name: profileCustomer.first_name || '',
+        account_code: profileCustomer.account_code || profileCustomer.customer_code || '',
+      });
+    } else {
+      setProfileForm(customerProfileToForm(profileCustomer));
+    }
     setProfileEditing(true);
   };
   const saveProfileEdit = async () => {
@@ -1580,7 +1578,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
         await loadCustomers();
         showToast('Pre-registration contact updated');
       } else {
-        const row = await updateCustomerAdmin(profileCustomer.id, profileForm);
+        const row = await updateCustomerAdmin(profileCustomer.id, profileFormToPatch(profileForm));
         setProfileCustomer(row);
         setProfileEditing(false);
         await loadCustomers();
@@ -1591,6 +1589,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     } finally { setSavingProfile(false); }
   };
   const setPf = (key) => (e) => setProfileForm((f) => ({ ...f, [key]: e.target.value }));
+  const setPfBool = (key) => (e) => setProfileForm((f) => ({ ...f, [key]: e.target.checked }));
 
   const refreshPendingCount = async () => {
     try {
@@ -2003,6 +2002,15 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                     taxonomyTree={taxonomyTree}
                     onShowToast={showToast}
                   />
+                </Suspense>
+              </SectionErrorBoundary>
+            )}
+
+            {/* PROMO CODES */}
+            {activeSection === 'promo-codes' && (
+              <SectionErrorBoundary name="promo-codes" title="Promo Codes crashed" resetKey={activeSection}>
+                <Suspense fallback={<SectionSuspenseFallback label="Loading Promo Codes…" />}>
+                  <PromoCodesPanel onShowToast={showToast} />
                 </Suspense>
               </SectionErrorBoundary>
             )}
@@ -2553,35 +2561,13 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                       ))}
                     </>
                   ) : (
-                    <>
-                      {[
-                        ['Contact person', 'name', 'text'],
-                        ['Email', 'email', 'email'],
-                        ['Phone', 'phone', 'tel'],
-                        ['Business name', 'business_name', 'text'],
-                        ['Business type', 'business_type', 'text'],
-                        ['VAT number', 'vat_number', 'text'],
-                        ['Website / social', 'website', 'text'],
-                      ].map(([label, key, type]) => (
-                        <div key={key}>
-                          <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 5 }}>{label}</label>
-                          <input className="adm-field-input" type={type} value={profileForm[key] || ''} onChange={setPf(key)} style={{ width: '100%' }} />
-                        </div>
-                      ))}
-                      <div>
-                        <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 5 }}>Monthly spend</label>
-                        <select className="adm-field-input" value={profileForm.monthly_spend || ''} onChange={setPf('monthly_spend')} style={{ width: '100%' }}>
-                          <option value="">—</option>
-                          {SPEND_BANDS.map((b) => <option key={b} value={b}>{b}</option>)}
-                        </select>
-                      </div>
-                      {[['Company address', 'company_address'], ['Delivery address', 'delivery_address']].map(([label, key]) => (
-                        <div key={key}>
-                          <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 5 }}>{label}</label>
-                          <textarea className="adm-field-input" rows={2} value={profileForm[key] || ''} onChange={setPf(key)} style={{ width: '100%', resize: 'vertical' }} />
-                        </div>
-                      ))}
-                    </>
+                    <CustomerProfileEditForm
+                      profileForm={profileForm}
+                      setPf={setPf}
+                      setPfBool={setPfBool}
+                      spendBands={SPEND_BANDS}
+                      businessTypes={BUSINESS_TYPES}
+                    />
                   )}
                   <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
                     <button className="adm-btn-green" onClick={() => void saveProfileEdit()} disabled={savingProfile}>{savingProfile ? 'Saving…' : 'Save changes'}</button>
@@ -2591,19 +2577,38 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
               ) : (
                 <div className="adm-drawer-fields">
                   <DrawerField icon={User} label="Contact person" value={profileCustomer.contact_name || profileCustomer.name} />
+                  <DrawerField icon={User} label="First name" value={profileCustomer.first_name} />
                   <DrawerField icon={Mail} label="Email" value={profileCustomer.email} />
                   {profileSource !== 'proto-active' && <DrawerField icon={Phone} label="Phone" value={profileCustomer.phone} />}
+                  {profileSource !== 'proto-active' && (
+                    <DrawerField
+                      icon={Shield}
+                      label="Accept WhatsApp"
+                      value={profileCustomer.accept_whatsapp == null ? null : profileCustomer.accept_whatsapp ? 'Yes' : 'No'}
+                      showEmpty
+                    />
+                  )}
+                  {profileSource !== 'proto-active' && (
+                    <DrawerField icon={Clock} label="WhatsApp opt-in at" value={formatDrawerDateTime(profileCustomer.whatsapp_opt_in_at)} />
+                  )}
+                  {profileSource !== 'proto-active' && <DrawerField icon={Store} label="Business name" value={profileCustomer.business_name} />}
                   {profileSource !== 'proto-active' && <DrawerField icon={Store} label="Business type" value={profileCustomer.business_type} />}
                   {profileSource !== 'proto-active' && <DrawerField icon={Store} label="Monthly spend" value={profileCustomer.monthly_spend} />}
                   {profileSource !== 'proto-active' && <DrawerField icon={Globe} label="Website / social" value={profileCustomer.website} />}
-                  {profileSource !== 'proto-active' && (
-                    <DrawerField icon={Shield} label="Accept WhatsApp" value={profileCustomer.accept_whatsapp == null ? null : profileCustomer.accept_whatsapp ? 'Yes' : 'No'} />
-                  )}
                   <DrawerField icon={Building2} label="Customer code" value={profileCustomer.customer_code || profileCustomer.account_code} />
-                  {profileCustomer.first_name && <DrawerField icon={User} label="First name" value={profileCustomer.first_name} />}
+                  {profileSource !== 'proto-active' && <DrawerField icon={Shield} label="Role" value={profileCustomer.role} />}
+                  {profileSource !== 'proto-active' && <DrawerField icon={Shield} label="Tier" value={profileCustomer.tier} />}
                   {profileCustomer.vat_number && <DrawerField icon={Shield} label="VAT number" value={profileCustomer.vat_number} />}
                   {profileCustomer.company_address && <DrawerField icon={MapPin} label="Company address" value={profileCustomer.company_address} />}
                   {profileCustomer.delivery_address && <DrawerField icon={MapPin} label="Delivery address" value={profileCustomer.delivery_address} />}
+                  {profileCustomer.street_name && <DrawerField icon={MapPin} label="Street" value={profileCustomer.street_name} />}
+                  {profileCustomer.suburb && <DrawerField icon={MapPin} label="Suburb" value={profileCustomer.suburb} />}
+                  {profileCustomer.postal_code && <DrawerField icon={MapPin} label="Postal code" value={profileCustomer.postal_code} />}
+                  {profileCustomer.city && <DrawerField icon={MapPin} label="City" value={profileCustomer.city} />}
+                  {profileCustomer.province && <DrawerField icon={MapPin} label="Province" value={profileCustomer.province} />}
+                  {profileCustomer.country && <DrawerField icon={MapPin} label="Country" value={profileCustomer.country} />}
+                  {profileCustomer.building_type && <DrawerField icon={Building2} label="Building type" value={profileCustomer.building_type} />}
+                  {profileCustomer.unit_number && <DrawerField icon={Building2} label="Unit number" value={profileCustomer.unit_number} />}
                   {profileCustomer.sales_last_12_months != null && (
                     <DrawerField icon={Store} label="12mo sales" value={`R${Number(profileCustomer.sales_last_12_months).toLocaleString('en-ZA', { minimumFractionDigits: 2 })}`} />
                   )}
@@ -2613,6 +2618,11 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                   {profileCustomer.last_purchase_date && (
                     <DrawerField icon={Building2} label="Last purchase" value={new Date(profileCustomer.last_purchase_date).toLocaleDateString('en-ZA')} />
                   )}
+                  {profileSource !== 'proto-active' && profileCustomer.is_flagged != null && (
+                    <DrawerField icon={Shield} label="Flagged" value={profileCustomer.is_flagged ? 'Yes' : 'No'} showEmpty />
+                  )}
+                  {profileCustomer.flag_reason && <DrawerField icon={Shield} label="Flag reason" value={profileCustomer.flag_reason} />}
+                  {profileCustomer.admin_note && <DrawerField icon={Shield} label="Admin note" value={profileCustomer.admin_note} />}
                   {profileSource !== 'proto-active' && profileCustomer.created_at && (
                     <DrawerField icon={Building2} label="Applied" value={new Date(profileCustomer.created_at).toLocaleString('en-ZA')} />
                   )}
@@ -2642,6 +2652,17 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                         <div className="adm-muted" style={{ fontSize: 11, marginTop: 4 }}>
                           {compactItems(order.original_items || order.items || [])}
                         </div>
+                        {(order.promo_code || order.discount_pct != null || order.discount_amount != null) && (
+                          <div className="adm-muted" style={{ fontSize: 11, marginTop: 4 }}>
+                            {order.promo_code && <span style={{ fontWeight: 700 }}>Promo: {order.promo_code}</span>}
+                            {order.discount_pct != null && (
+                              <span>{order.promo_code ? ' · ' : ''}{Number(order.discount_pct)}% off</span>
+                            )}
+                            {order.discount_amount != null && (
+                              <span>{(order.promo_code || order.discount_pct != null) ? ' · ' : ''}R{Number(order.discount_amount).toLocaleString('en-ZA', { minimumFractionDigits: 2 })} discount</span>
+                            )}
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -3403,8 +3424,166 @@ function AdminField({ label, children, full = false }) {
   );
 }
 
-function DrawerField({ icon: Icon, label, value }) {
+function customerProfileToForm(customer) {
+  return {
+    name: customer.name || '',
+    contact_name: customer.contact_name || '',
+    first_name: customer.first_name || '',
+    email: customer.email || '',
+    phone: customer.phone || '',
+    accept_whatsapp: customer.accept_whatsapp === true,
+    whatsapp_opt_in_at: customer.whatsapp_opt_in_at ? String(customer.whatsapp_opt_in_at).slice(0, 16) : '',
+    business_name: customer.business_name || customer.name || '',
+    business_type: customer.business_type || '',
+    vat_number: customer.vat_number || '',
+    website: customer.website || '',
+    monthly_spend: customer.monthly_spend || '',
+    customer_code: customer.customer_code || '',
+    role: customer.role || 'customer',
+    tier: customer.tier || 'regular',
+    company_address: customer.company_address || '',
+    delivery_address: customer.delivery_address || '',
+    street_name: customer.street_name || '',
+    suburb: customer.suburb || '',
+    postal_code: customer.postal_code || '',
+    city: customer.city || '',
+    country: customer.country || '',
+    province: customer.province || '',
+    building_type: customer.building_type || '',
+    unit_number: customer.unit_number || '',
+    sales_last_12_months: customer.sales_last_12_months ?? '',
+    invoice_count: customer.invoice_count ?? '',
+    last_purchase_date: customer.last_purchase_date ? String(customer.last_purchase_date).slice(0, 10) : '',
+    is_flagged: customer.is_flagged === true,
+    flag_reason: customer.flag_reason || '',
+    admin_note: customer.admin_note || '',
+  };
+}
+
+function profileFormToPatch(form) {
+  return { ...form };
+}
+
+function formatDrawerDateTime(value) {
   if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString('en-ZA');
+}
+
+function ProfileEditSection({ title, children }) {
+  return (
+    <div style={{ display: 'grid', gap: 10 }}>
+      <div style={{ fontWeight: 800, fontSize: 12, color: '#374151', textTransform: 'uppercase', letterSpacing: '0.08em' }}>{title}</div>
+      {children}
+    </div>
+  );
+}
+
+function ProfileEditField({ label, children }) {
+  return (
+    <label style={{ display: 'block' }}>
+      <span style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 5 }}>{label}</span>
+      {children}
+    </label>
+  );
+}
+
+function CustomerProfileEditForm({ profileForm, setPf, setPfBool, spendBands, businessTypes }) {
+  return (
+    <>
+      <ProfileEditSection title="Identity">
+        {[['Contact person', 'name'], ['First name', 'first_name'], ['Email', 'email'], ['Phone', 'phone']].map(([label, key]) => (
+          <ProfileEditField key={key} label={label}>
+            <input className="adm-field-input" type={key === 'email' ? 'email' : key === 'phone' ? 'tel' : 'text'} value={profileForm[key] || ''} onChange={setPf(key)} style={{ width: '100%' }} />
+          </ProfileEditField>
+        ))}
+        <ProfileEditField label="Accept WhatsApp">
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+            <input type="checkbox" checked={profileForm.accept_whatsapp === true} onChange={setPfBool('accept_whatsapp')} />
+            Customer opted in to WhatsApp
+          </label>
+        </ProfileEditField>
+        <ProfileEditField label="WhatsApp opt-in at">
+          <input className="adm-field-input" type="datetime-local" value={profileForm.whatsapp_opt_in_at || ''} onChange={setPf('whatsapp_opt_in_at')} style={{ width: '100%' }} />
+        </ProfileEditField>
+      </ProfileEditSection>
+
+      <ProfileEditSection title="Business">
+        {[['Business name', 'business_name'], ['VAT number', 'vat_number'], ['Website / social', 'website'], ['Customer code', 'customer_code']].map(([label, key]) => (
+          <ProfileEditField key={key} label={label}>
+            <input className="adm-field-input" type="text" value={profileForm[key] || ''} onChange={setPf(key)} style={{ width: '100%' }} />
+          </ProfileEditField>
+        ))}
+        <ProfileEditField label="Business type">
+          <select className="adm-field-input" value={profileForm.business_type || ''} onChange={setPf('business_type')} style={{ width: '100%' }}>
+            <option value="">—</option>
+            {businessTypes.map((type) => <option key={type} value={type}>{type}</option>)}
+          </select>
+        </ProfileEditField>
+        <ProfileEditField label="Monthly spend">
+          <select className="adm-field-input" value={profileForm.monthly_spend || ''} onChange={setPf('monthly_spend')} style={{ width: '100%' }}>
+            <option value="">—</option>
+            {spendBands.map((b) => <option key={b} value={b}>{b}</option>)}
+          </select>
+        </ProfileEditField>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          <ProfileEditField label="Role">
+            <input className="adm-field-input" type="text" value={profileForm.role || ''} onChange={setPf('role')} style={{ width: '100%' }} />
+          </ProfileEditField>
+          <ProfileEditField label="Tier">
+            <select className="adm-field-input" value={profileForm.tier || 'regular'} onChange={setPf('tier')} style={{ width: '100%' }}>
+              <option value="regular">Regular</option>
+              <option value="premium">Premium</option>
+            </select>
+          </ProfileEditField>
+        </div>
+      </ProfileEditSection>
+
+      <ProfileEditSection title="Addresses">
+        {[['Company address', 'company_address'], ['Delivery address', 'delivery_address']].map(([label, key]) => (
+          <ProfileEditField key={key} label={label}>
+            <textarea className="adm-field-input" rows={2} value={profileForm[key] || ''} onChange={setPf(key)} style={{ width: '100%', resize: 'vertical' }} />
+          </ProfileEditField>
+        ))}
+        {[['Street', 'street_name'], ['Suburb', 'suburb'], ['Postal code', 'postal_code'], ['City', 'city'], ['Province', 'province'], ['Country', 'country'], ['Building type', 'building_type'], ['Unit number', 'unit_number']].map(([label, key]) => (
+          <ProfileEditField key={key} label={label}>
+            <input className="adm-field-input" type="text" value={profileForm[key] || ''} onChange={setPf(key)} style={{ width: '100%' }} />
+          </ProfileEditField>
+        ))}
+      </ProfileEditSection>
+
+      <ProfileEditSection title="Admin">
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10 }}>
+          <ProfileEditField label="12mo sales (R)">
+            <input className="adm-field-input" type="number" step="0.01" value={profileForm.sales_last_12_months ?? ''} onChange={setPf('sales_last_12_months')} style={{ width: '100%' }} />
+          </ProfileEditField>
+          <ProfileEditField label="Invoices (12mo)">
+            <input className="adm-field-input" type="number" step="1" value={profileForm.invoice_count ?? ''} onChange={setPf('invoice_count')} style={{ width: '100%' }} />
+          </ProfileEditField>
+          <ProfileEditField label="Last purchase">
+            <input className="adm-field-input" type="date" value={profileForm.last_purchase_date || ''} onChange={setPf('last_purchase_date')} style={{ width: '100%' }} />
+          </ProfileEditField>
+        </div>
+        <ProfileEditField label="Flagged">
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+            <input type="checkbox" checked={profileForm.is_flagged === true} onChange={setPfBool('is_flagged')} />
+            Mark customer as flagged
+          </label>
+        </ProfileEditField>
+        <ProfileEditField label="Flag reason">
+          <input className="adm-field-input" type="text" value={profileForm.flag_reason || ''} onChange={setPf('flag_reason')} style={{ width: '100%' }} />
+        </ProfileEditField>
+        <ProfileEditField label="Admin note">
+          <textarea className="adm-field-input" rows={3} value={profileForm.admin_note || ''} onChange={setPf('admin_note')} style={{ width: '100%', resize: 'vertical' }} />
+        </ProfileEditField>
+      </ProfileEditSection>
+    </>
+  );
+}
+
+function DrawerField({ icon: Icon, label, value, showEmpty = false }) {
+  if (!showEmpty && (value == null || value === '')) return null;
   return (
     <div className="adm-drawer-field">
       <Icon size={14} className="adm-drawer-field-icon" />
