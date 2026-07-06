@@ -490,6 +490,7 @@ export default function ProductManagerEngine({
   // on, load stock-filtered counts; otherwise the parent-supplied counts
   // (all live rows) already match the default view.
   const [inStockCounts, setInStockCounts] = useState(null);
+  const [inStockCountsNonce, setInStockCountsNonce] = useState(0);
   useEffect(() => {
     if (!(status === 'live' && onlyInStock)) {
       setInStockCounts(null);
@@ -500,7 +501,7 @@ export default function ProductManagerEngine({
       .then((counts) => { if (!cancelled) setInStockCounts(counts); })
       .catch(() => { /* keep unfiltered counts as fallback */ });
     return () => { cancelled = true; };
-  }, [status, onlyInStock]);
+  }, [status, onlyInStock, inStockCountsNonce]);
   const effectiveCategoryCounts = status === 'live' && onlyInStock && inStockCounts
     ? inStockCounts
     : categoryProductCounts;
@@ -712,6 +713,10 @@ export default function ProductManagerEngine({
       invalidateAdminCache();
       queryClient.invalidateQueries({ queryKey: ['catalog'] });
       queryClient.invalidateQueries({ queryKey: queryKeys.dashboardStats() });
+      // Same refresh rename/delete already do — category badges must update
+      // immediately or the admin looks like it lied about the move.
+      onRefreshTaxonomy?.();
+      setInStockCountsNonce((n) => n + 1);
       onRefreshStats?.();
       onShowToast?.(`Moved ${skus.length} product(s) to ${destinationLabel}`, 'success');
     } catch (err) {
@@ -725,6 +730,9 @@ export default function ProductManagerEngine({
         clearSelection();
         invalidateAdminCache();
         queryClient.invalidateQueries({ queryKey: ['catalog'] });
+        // Some rows moved — refresh counts for the part that succeeded.
+        onRefreshTaxonomy?.();
+        setInStockCountsNonce((n) => n + 1);
         onShowToast?.(err.message || 'Move failed', 'warning');
       } else {
         onShowToast?.(err.message || 'Move failed', 'error');
