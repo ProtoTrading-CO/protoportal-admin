@@ -8,6 +8,7 @@ import {
   BULK_IMAGE_REPLACE_UPLOAD_CONCURRENCY,
 } from '../lib/bulk-image-replace.mjs';
 import { parseLoaderFilename } from './_product-loader-lookup.js';
+import { siblingSkuForCopy } from './_product-loader-filename.js';
 
 export const config = { api: { bodyParser: { sizeLimit: '20mb' } } };
 
@@ -108,7 +109,9 @@ async function replaceOneItem(supabase, raw, allowedSet, slot, scope) {
   }
   const fileSku = String(parsed.code || '').trim().toUpperCase();
   const fileCandidates = parsed.codeCandidates || [];
-  if (fileSku && fileSku !== sku && !fileCandidates.includes(sku)) {
+  // A duplicate "CODE (2).jpg" legitimately targets the sibling record CODE-2.
+  const siblingSku = siblingSkuForCopy(parsed.code, parsed.copyIndex);
+  if (fileSku && fileSku !== sku && siblingSku !== sku && !fileCandidates.includes(sku)) {
     return { sku, ok: false, error: 'filename_sku_mismatch' };
   }
 

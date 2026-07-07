@@ -33,6 +33,12 @@ export function parseIntakeFilename(filename) {
     imageNumber = Math.min(4, Math.max(1, Number.parseInt(slotMatch.groups.slot || '1', 10) || 1));
   }
 
+  // Capture the OS "(2)" duplicate marker BEFORE it's stripped, so same-code
+  // duplicate images can each become their own product record.
+  let copyIndex = 1;
+  const dupMatch = working.match(/\s+\((\d+)\)$/);
+  if (dupMatch) copyIndex = Math.max(1, Number.parseInt(dupMatch[1], 10) || 1);
+
   for (const pattern of NOISE_PATTERNS) {
     working = working.replace(pattern, '').trim();
   }
@@ -44,6 +50,7 @@ export function parseIntakeFilename(filename) {
     sourceSku,
     displayCode,
     imageNumber,
+    copyIndex,
     imageColumn: IMAGE_COLUMNS[imageNumber - 1] || IMAGE_COLUMNS[0],
     parseError: sourceSku.length < 2 ? 'sku_too_short' : null,
     // Messy names ("87747748383-10mm", "8774…&8774…") match on the first
@@ -51,6 +58,16 @@ export function parseIntakeFilename(filename) {
     skuCandidates: codeLookupCandidates(working),
     primarySku: firstCodeToken(working),
   };
+}
+
+/**
+ * SKU a duplicate image publishes to: copy #1 keeps the base code, copy #2+
+ * become sibling records (CODE, CODE-2, CODE-3…) sharing the same barcode.
+ */
+export function siblingSkuForCopy(baseSku, copyIndex) {
+  const sku = String(baseSku || '').trim().toUpperCase();
+  const n = Math.max(1, Number(copyIndex) || 1);
+  return n <= 1 ? sku : `${sku}-${n}`;
 }
 
 export function isImageFile(file) {

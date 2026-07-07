@@ -1,5 +1,6 @@
 import { readApiJson } from './apiError.js';
 import { catalogueDisplayTitle, catalogueDescription } from './productLoaderDisplay.js';
+import { parseIntakeFilename, siblingSkuForCopy } from './parseIntakeFilename';
 
 export async function lookupFilenames(filenames, files) {
   const res = await fetch('/api/product-loader-batch-lookup', {
@@ -12,10 +13,15 @@ export async function lookupFilenames(filenames, files) {
   return (json.items || []).map((item) => {
     const file = fileByName.get(item.filename) || null;
     const group = item.group || (item.canPublish ? 'ready' : 'not_found');
+    // Same-code duplicates ("CODE (2).jpg") each become a sibling product
+    // record so no image overwrites another.
+    const copyIndex = parseIntakeFilename(item.filename || '').copyIndex || 1;
     return {
       ...item,
       file,
       group,
+      copyIndex,
+      publishSku: siblingSkuForCopy(item.code, copyIndex),
       status: group === 'not_found' ? 'unmatched' : 'ready',
       processError: item.parseError || '',
       previewUrl: '',
@@ -61,7 +67,8 @@ async function uploadLoaderImage(item) {
       filename: item.filename,
       contentType: item.file.type || 'image/jpeg',
       base64: b64,
-      sku: item.code,
+      // Duplicates upload under their sibling SKU so each keeps its own object.
+      sku: item.publishSku || item.code,
       imageSlot: item.imageSlot,
     }),
   });
@@ -133,11 +140,13 @@ export async function publishLoaderImageItem(item, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      code: item.code,
+      // Copy #2+ publishes to a sibling SKU (CODE-2…) sharing the base
+      // barcode, so each same-code image is its own product record.
+      code: item.publishSku || item.code,
+      barcode: item.barcode || item.websiteRow?.barcode || item.code,
       displayCode: item.displayCode,
       title: item.descriptionOverride || catalogueDisplayTitle(item),
       price: item.price ?? item.sqlRow?.price ?? 0,
-      barcode: item.barcode || item.websiteRow?.barcode || item.code,
       imageUrl: uploadJson.url,
       imageSlot: item.imageSlot,
       imageSource: 'upload',
@@ -156,5 +165,5 @@ export async function publishLoaderImageItem(item, {
     }),
   });
   await readApiJson(publishRes, { fallback: 'Publish failed' });
-  return { sku: item.code, action: publishRes.ok ? 'published' : 'failed' };
+  return { sku: item.publishSku || item.code, action: publishRes.ok ? 'published' : 'failed' };
 }

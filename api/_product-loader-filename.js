@@ -30,6 +30,11 @@ export function parseLoaderFilename(filename) {
     imageSlot = Math.min(4, Math.max(1, Number.parseInt(slotMatch.groups.slot || '1', 10) || 1));
   }
 
+  // Capture the OS "(2)" duplicate marker before it's stripped.
+  let copyIndex = 1;
+  const dupMatch = working.match(/\s+\((\d+)\)$/);
+  if (dupMatch) copyIndex = Math.max(1, Number.parseInt(dupMatch[1], 10) || 1);
+
   for (const pattern of NOISE_PATTERNS) {
     working = working.replace(pattern, '').trim();
   }
@@ -52,10 +57,18 @@ export function parseLoaderFilename(filename) {
     code,
     displayCode,
     imageSlot,
+    copyIndex,
     parseError: null,
     codeCandidates: codeLookupCandidates(working),
     primaryCode: firstCodeToken(working),
   };
+}
+
+/** Sibling SKU a duplicate copy publishes to: CODE, CODE-2, CODE-3… */
+export function siblingSkuForCopy(baseSku, copyIndex) {
+  const sku = String(baseSku || '').trim().toUpperCase();
+  const n = Math.max(1, Number(copyIndex) || 1);
+  return n <= 1 ? sku : `${sku}-${n}`;
 }
 
 export function isSupportedImageFilename(filename) {

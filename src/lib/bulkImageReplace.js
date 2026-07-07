@@ -1,4 +1,4 @@
-import { parseIntakeFilename, isImageFile } from './parseIntakeFilename';
+import { parseIntakeFilename, isImageFile, siblingSkuForCopy } from './parseIntakeFilename';
 import { compressImage } from './products';
 import { readApiJson } from './apiError';
 
@@ -50,7 +50,12 @@ export function buildPreflightMatch(selectedProducts, slot, fileList) {
       wrongSlot.push({ file, sku, fileSlot: parsed.imageNumber });
       continue;
     }
-    if (!selectedSkuSet.has(sku)) {
+    // A duplicate "CODE (2).jpg" targets the sibling record CODE-2 when it's
+    // selected, so each same-code image replaces its own product's image.
+    const siblingSku = siblingSkuForCopy(sku, parsed.copyIndex);
+    if (parsed.copyIndex > 1 && selectedSkuSet.has(siblingSku)) {
+      sku = siblingSku;
+    } else if (!selectedSkuSet.has(sku)) {
       // Messy filenames ("8774…-10MM", "8774…&8775…") match on the first
       // code before a separator.
       const candidate = (parsed.skuCandidates || []).find((c) => selectedSkuSet.has(c));
