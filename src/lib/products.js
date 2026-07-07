@@ -422,35 +422,6 @@ export function compressImage(file) {
   });
 }
 
-export async function uploadDormantImageWithBase64(file, { prompt, imageStyle } = {}) {
-  const compressed = await compressImage(file);
-  const base64 = await new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || '').split(',')[1]);
-    reader.onerror = reject;
-    reader.readAsDataURL(compressed);
-  });
-
-  const res = await fetch('/api/transform-product-image', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      filename: file.name,
-      contentType: 'image/jpeg',
-      base64,
-      prompt: prompt || undefined,
-      imageStyle: imageStyle || 'standard',
-    }),
-  });
-
-  let json;
-  try { json = await res.json(); } catch { json = {}; }
-  if (!res.ok) {
-    if (res.status === 413) throw new Error('Image too large after compression — try a smaller file');
-    throw new Error(json.error || `Image generation failed (${res.status})`);
-  }
-  return { url: json.url, base64 };
-}
 
 export async function uploadDormantImage(file) {
   const compressed = await compressImage(file);

@@ -832,4 +832,15 @@ assert.match(exportCustomersSrc, /r\.customer_code \|\| r\.account_code/, 'expor
 assert.match(readSrc('src/pages/AdminPage.jsx'), /Export all customers/, 'export button rendered');
 console.log('✓ Export all customers');
 
+// Full-review pass — perf wins + serious-bug fixes
+assert.match(readSrc('src/hooks/useDashboardStats.js'), /refresh: false/, 'dashboard stats no longer force a full recompute every load');
+assert.doesNotMatch(readSrc('src/lib/taxonomyAdmin.js'), /counts=1\$\{stockParam\}&_=\$\{Date\.now/, 'category counts no longer bust the edge cache');
+assert.match(readSrc('api/product-loader-publish.js'), /hasValidPrice \? numericPrice/, 'publish never overwrites a real price with 0');
+assert.match(readSrc('api/admin-customers.js'), /const justApproved =/, 'approval email/WhatsApp only fire on the approve transition');
+assert.match(readSrc('api/admin-orders.js'), /Field writes commit only after every gate/, 'order field writes run after the workflow gates');
+assert.match(readSrc('api/archive-floaters.js'), /deptLabels\.size === 0/, 'floater sweep refuses to run on an empty taxonomy');
+assert.doesNotMatch(readSrc('src/lib/products.js'), /uploadDormantImageWithBase64/, 'dead image-gen helper removed');
+assert.doesNotMatch(readSrc('src/components/ProductLoaderPanel.jsx'), /transform-product-image/, 'dead image-transform handler removed');
+console.log('✓ Full-review pass (perf + serious-bug fixes)');
+
 console.log('\nAll smoke checks passed.');

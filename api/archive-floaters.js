@@ -79,6 +79,14 @@ export default async function handler(req, res) {
   try {
     const { categories: tree } = await readTaxonomyForApi();
     const deptLabels = departmentLabelSet(tree);
+    // Safety floor: a degraded/empty taxonomy would mark EVERY live product a
+    // floater and archive the whole catalogue on one click. Refuse to run if
+    // there are no real departments to match against.
+    if (deptLabels.size === 0) {
+      return res.status(409).json({
+        error: 'Refusing to run — the category tree looks empty or failed to load, which would flag every product as a floater. Reload and try again.',
+      });
+    }
     const floaters = await scanFloaters(supabase, deptLabels);
 
     if (action === 'preview') {

@@ -250,7 +250,7 @@ function PmMobileProductCard({
           aria-label={`Select ${item.sku}`}
         />
         {item.image ? (
-          <img src={item.image} alt="" className="adm-product-thumb pm-mobile-card-thumb" />
+          <img src={item.image} alt="" loading="lazy" decoding="async" className="adm-product-thumb pm-mobile-card-thumb" />
         ) : (
           <div className="adm-product-thumb adm-product-thumb--placeholder pm-mobile-card-thumb">IMG</div>
         )}
@@ -1680,7 +1680,7 @@ export default function ProductManagerEngine({
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center' }}>
                         {item.image ? (
-                          <img src={item.image} alt="" className="adm-product-thumb" />
+                          <img src={item.image} alt="" loading="lazy" decoding="async" className="adm-product-thumb" />
                         ) : (
                           <div className="adm-product-thumb adm-product-thumb--placeholder">IMG</div>
                         )}

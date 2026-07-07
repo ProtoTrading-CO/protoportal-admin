@@ -114,6 +114,17 @@ export default async function handler(req, res) {
     // Approval no longer requires a customer_code — codes are allocated
     // manually whenever the admin is ready, and are NEVER auto-generated. If a
     // code was supplied in this same patch it was already validated above.
+
+    // Only fire welcome email + WhatsApp on the TRANSITION into approved, not on
+    // every save that happens to carry is_approved:true (the edit form always
+    // includes it) — otherwise re-saving an approved customer re-spams them.
+    let priorApproved = null;
+    if (patch.is_approved === true) {
+      const { data: before } = await supabase
+        .from('customers').select('is_approved').eq('id', id).maybeSingle();
+      priorApproved = before?.is_approved === true;
+    }
+
     const { data, error } = await supabase
       .from('customers')
       .update(patch)
@@ -122,9 +133,11 @@ export default async function handler(req, res) {
       .single();
     if (error) return res.status(400).json({ error: error.message });
 
+    const justApproved = patch.is_approved === true && priorApproved === false;
+
     // Send WhatsApp welcome via WATI on approval — skip only if customer explicitly opted out
     let watiWelcome = 'skipped';
-    if (patch.is_approved === true && data?.accept_whatsapp !== false && data?.phone) {
+    if (justApproved && data?.accept_whatsapp !== false && data?.phone) {
       const rawPhone = data.phone.replace(/\D/g, '');
       // WATI expects numbers without + in international format: 27821234567
       const watiPhone = rawPhone.startsWith('0') ? `27${rawPhone.slice(1)}` : rawPhone;
@@ -172,7 +185,7 @@ export default async function handler(req, res) {
 
     // Email welcome/approval on approval (best-effort) + stamp last-email status.
     let welcomeEmail = 'skipped';
-    if (patch.is_approved === true && data?.email) {
+    if (justApproved && data?.email) {
       try {
         const result = await sendWelcomeApprovalEmail(data, { supabase });
         welcomeEmail = result?.sent ? 'sent' : 'skipped';

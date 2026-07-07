@@ -49,7 +49,11 @@ export async function fetchTaxonomy({ withCounts = false } = {}) {
 
 export async function fetchCategoryProductCounts({ onlyInStock = false } = {}) {
   const stockParam = onlyInStock ? '&onlyInStock=1' : '';
-  const res = await fetch(`/api/taxonomy?counts=1${stockParam}&_=${Date.now()}`, { cache: 'no-store' });
+  // Let the server's 15s SWR edge cache serve this — it's a full website_stock
+  // scan, and busting it (a unique ?_=Date.now() + no-store) forced that scan on
+  // every dashboard load and every concurrent admin. Counts don't set the edit
+  // lock token, so a slightly-cached count is fine.
+  const res = await fetch(`/api/taxonomy?counts=1${stockParam}`);
   const json = await res.json();
   if (!res.ok) throw new Error(json.error || 'Failed to load category counts');
   // Do NOT set _taxonomyUpdatedAt here — see fetchTaxonomy note; the counts
