@@ -95,6 +95,25 @@ export default function CustomerEmailModal({
   const [campaigns, setCampaigns] = useState([]);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [scheduledAt, setScheduledAt] = useState('');
+  const [scheduleOpen, setScheduleOpen] = useState(false);
+  const scheduleRef = useRef(null);
+
+  // Close the schedule popover on outside click / Escape.
+  useEffect(() => {
+    if (!scheduleOpen) return undefined;
+    const onDoc = (e) => { if (scheduleRef.current && !scheduleRef.current.contains(e.target)) setScheduleOpen(false); };
+    const onKey = (e) => { if (e.key === 'Escape') setScheduleOpen(false); };
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('mousedown', onDoc); document.removeEventListener('keydown', onKey); };
+  }, [scheduleOpen]);
+
+  // Local-time "YYYY-MM-DDTHH:mm" for the datetime-local min (no past times).
+  const minScheduleValue = useMemo(() => {
+    const d = new Date(Date.now() + 60_000);
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }, [scheduleOpen]);
   const [scheduling, setScheduling] = useState(false);
 
   const subjectRef = useRef(null);
@@ -572,26 +591,64 @@ export default function CustomerEmailModal({
             Cancel
           </button>
           <div className="adm-email-modal__footer-actions" style={{ flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
-            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
-              <CalendarClock size={14} />
-              <input
-                type="datetime-local"
-                className="adm-field-input"
-                style={{ padding: '6px 8px', fontSize: 12 }}
-                value={scheduledAt}
-                onChange={(e) => setScheduledAt(e.target.value)}
-                aria-label="Schedule send date and time"
-              />
-            </label>
-            <button
-              type="button"
-              className="adm-btn-ghost"
-              disabled={sending || testSending || scheduling || !scheduledAt}
-              onClick={() => void handleSchedule()}
-              title="Queue this email to send automatically at the chosen time"
-            >
-              {scheduling ? <><Loader2 size={14} className="spin" /> Scheduling…</> : <><CalendarClock size={14} /> Schedule send</>}
-            </button>
+            <div style={{ position: 'relative' }} ref={scheduleRef}>
+              <button
+                type="button"
+                className="adm-btn-ghost"
+                disabled={sending || testSending || scheduling}
+                onClick={() => setScheduleOpen((v) => !v)}
+                aria-haspopup="dialog"
+                aria-expanded={scheduleOpen}
+                title="Queue this email to send automatically at the chosen time"
+              >
+                <CalendarClock size={14} /> Schedule send{scheduledAt ? ' ✓' : ''}
+              </button>
+              {scheduleOpen && (
+                <div
+                  role="dialog"
+                  aria-label="Schedule send"
+                  onClick={(e) => e.stopPropagation()}
+                  style={{
+                    position: 'absolute',
+                    bottom: 'calc(100% + 8px)',
+                    left: 0,
+                    width: 268,
+                    background: '#fff',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: 10,
+                    boxShadow: '0 14px 36px rgba(0,0,0,0.20)',
+                    padding: 14,
+                    zIndex: 60,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 10,
+                  }}
+                >
+                  <span style={{ fontSize: 12, fontWeight: 700, color: '#374151' }}>Send date &amp; time</span>
+                  <input
+                    type="datetime-local"
+                    className="adm-field-input"
+                    style={{ fontSize: 13, width: '100%', padding: '8px 10px' }}
+                    value={scheduledAt}
+                    min={minScheduleValue}
+                    onChange={(e) => setScheduledAt(e.target.value)}
+                    aria-label="Schedule send date and time"
+                  />
+                  <button
+                    type="button"
+                    className="adm-btn-red"
+                    style={{ width: '100%', justifyContent: 'center' }}
+                    disabled={scheduling || !scheduledAt}
+                    onClick={() => void handleSchedule()}
+                  >
+                    {scheduling ? <><Loader2 size={14} className="spin" /> Scheduling…</> : <><CalendarClock size={14} /> Confirm schedule</>}
+                  </button>
+                  <span style={{ fontSize: 11, color: '#6b7280', lineHeight: 1.4 }}>
+                    Queues this exact email (subject, body, audience) to send automatically at the chosen time.
+                  </span>
+                </div>
+              )}
+            </div>
             <button
               type="button"
               className="adm-btn-ghost"
