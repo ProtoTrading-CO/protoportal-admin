@@ -11,6 +11,7 @@ import {
 } from '../lib/taxonomy-match.mjs';
 
 const TAXONOMY_FILE = 'taxonomy/categories.json';
+const MOTTARO_HIDDEN_FILE = 'taxonomy/mottaro-hidden.json';
 const BUNDLED_PATH = join(process.cwd(), 'src/data/categories.json');
 
 export function labelToSlug(label) {
@@ -37,10 +38,39 @@ const TAXONOMY_TTL_MS = 5_000;
 export function invalidateTaxonomyCache() {
   _taxonomyCache = null;
   _taxonomyCachedAt = 0;
+  _hiddenCache = null;
+  _hiddenCachedAt = 0;
 }
 
-function withMotarro(categories) {
-  return injectMotarroIntoTree(Array.isArray(categories) ? categories : []);
+// Deleted Motarro subcategory ids (the Motarro tree is virtual, so "delete"
+// means "hide this node"). Cached with the same short TTL as the taxonomy.
+let _hiddenCache = null;
+let _hiddenCachedAt = 0;
+
+export async function readMottaroHiddenIds({ bypassCache = false } = {}) {
+  const now = Date.now();
+  if (!bypassCache && _hiddenCache && now - _hiddenCachedAt < TAXONOMY_TTL_MS) return _hiddenCache;
+  let ids = [];
+  try {
+    const stored = await readSiteConfigJson(MOTTARO_HIDDEN_FILE, null);
+    if (Array.isArray(stored?.ids)) ids = stored.ids.filter((x) => typeof x === 'string' && x);
+    else if (Array.isArray(stored)) ids = stored.filter((x) => typeof x === 'string' && x);
+  } catch { /* default to none hidden */ }
+  _hiddenCache = ids;
+  _hiddenCachedAt = now;
+  return ids;
+}
+
+export async function writeMottaroHiddenIds(ids) {
+  const clean = [...new Set((ids || []).filter((x) => typeof x === 'string' && x))];
+  const saved = await writeSiteConfigJson(MOTTARO_HIDDEN_FILE, { ids: clean });
+  _hiddenCache = clean;
+  _hiddenCachedAt = Date.now();
+  return { ids: clean, updatedAt: saved.updatedAt || null };
+}
+
+function withMotarro(categories, hiddenIds = _hiddenCache || []) {
+  return injectMotarroIntoTree(Array.isArray(categories) ? categories : [], hiddenIds);
 }
 
 /**
@@ -50,32 +80,33 @@ function withMotarro(categories) {
  * made edits look reverted).
  */
 export async function readTaxonomyForApi() {
-  const store = await readTaxonomyStore();
-  return { categories: withMotarro(store.categories), updatedAt: store.updatedAt };
+  const [store, hidden] = await Promise.all([readTaxonomyStore(), readMottaroHiddenIds()]);
+  return { categories: withMotarro(store.categories, hidden), updatedAt: store.updatedAt };
 }
 
 export async function loadTaxonomy({ bypassCache = false } = {}) {
   const now = Date.now();
+  const hidden = await readMottaroHiddenIds({ bypassCache });
   if (!bypassCache && _taxonomyCache && now - _taxonomyCachedAt < TAXONOMY_TTL_MS) {
-    return withMotarro(_taxonomyCache);
+    return withMotarro(_taxonomyCache, hidden);
   }
   try {
     const stored = await readSiteConfigJson(TAXONOMY_FILE, null);
     if (Array.isArray(stored)) {
       _taxonomyCache = stored;
       _taxonomyCachedAt = now;
-      return withMotarro(stored);
+      return withMotarro(stored, hidden);
     }
     if (stored?.categories && Array.isArray(stored.categories)) {
       _taxonomyCache = stored.categories;
       _taxonomyCachedAt = now;
-      return withMotarro(stored.categories);
+      return withMotarro(stored.categories, hidden);
     }
   } catch { /* fall through */ }
   const bundled = loadBundledTaxonomy();
   _taxonomyCache = bundled;
   _taxonomyCachedAt = now;
-  return withMotarro(bundled);
+  return withMotarro(bundled, hidden);
 }
 
 /** Read stored taxonomy payload (categories + updatedAt) without Mottaro injection. */
@@ -112,7 +143,8 @@ export async function saveTaxonomy(categories, { expectedUpdatedAt } = {}) {
   invalidateTaxonomyCache();
   _taxonomyCache = stripped;
   _taxonomyCachedAt = Date.now();
-  return { categories: withMotarro(stripped), updatedAt: saved.updatedAt || null };
+  const hidden = await readMottaroHiddenIds();
+  return { categories: withMotarro(stripped, hidden), updatedAt: saved.updatedAt || null };
 }
 
 export function findNodeContext(tree, id, parent = null, depth = 0, ancestors = []) {
@@ -450,6 +482,57 @@ export async function archiveProductsForDeletedNode(supabase, ctx, by = CATEGORY
   const failures = [];
   // Bounded concurrency — a big category is thousands of per-SKU RPCs; a
   // sequential loop would exceed the function timeout.
+  const CONCURRENCY = 8;
+  let cursor = 0;
+  async function worker() {
+    while (cursor < skus.length) {
+      const sku = skus[cursor];
+      cursor += 1;
+      const { error } = await supabase.rpc('archive_product', { p_sku: sku, p_by: by });
+      if (error) failures.push({ sku, error: error.message });
+      else archived += 1;
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, skus.length) }, () => worker()));
+  return { archived, failures, total: skus.length };
+}
+
+export const MOTTARO_DELETED_ARCHIVED_BY = 'mottaro-deleted';
+
+const MOTTARO_SCAN_COLS = 'sku,title,category,subcategory_one,subcategory_two,subcategory_three,subcategory_four,mottaro_path';
+
+/**
+ * Live Motarro product SKUs whose virtual Motarro path passes through `nodeId`
+ * (the node being deleted, or any of its descendants). `tree` must be the
+ * Motarro-injected tree that STILL contains the node (call before hiding it).
+ */
+export async function collectMotarroSkusUnderNode(supabase, tree, nodeId) {
+  const skus = [];
+  let from = 0;
+  const PAGE = 1000;
+  while (true) {
+    const { data, error } = await supabase
+      .from('website_stock')
+      .select(MOTTARO_SCAN_COLS)
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+    const batch = data || [];
+    for (const row of batch) {
+      if (!isMotarroProduct(row)) continue;
+      const path = inferMotarroPathFromRow(row, tree);
+      if (Array.isArray(path) && path.includes(nodeId) && row.sku) skus.push(row.sku);
+    }
+    if (batch.length < PAGE) break;
+    from += PAGE;
+  }
+  return skus;
+}
+
+/** Archive every live Motarro product under a (to-be-deleted) Motarro node. */
+export async function archiveMotarroProductsUnderNode(supabase, tree, nodeId, by = MOTTARO_DELETED_ARCHIVED_BY) {
+  const skus = await collectMotarroSkusUnderNode(supabase, tree, nodeId);
+  let archived = 0;
+  const failures = [];
   const CONCURRENCY = 8;
   let cursor = 0;
   async function worker() {

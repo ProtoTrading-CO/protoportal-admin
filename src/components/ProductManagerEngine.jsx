@@ -15,6 +15,7 @@ import {
   Pencil,
   Plus,
   RefreshCw,
+  RotateCcw,
   Search,
   Sparkles,
   Trash2,
@@ -33,7 +34,7 @@ import { persistSortOrder, fetchSortOrderStore, sortMetaForPath, formatSortSaved
 import { exportProductsCatalogXlsx, exportAllProductsCatalogXlsx, exportSelectedProductsXlsx } from '../lib/exportLiveProducts';
 import { bulkMoveProducts, bulkRemoveFromCategory, invalidateAdminCache, updateProduct, previewFloaters, archiveFloaters } from '../lib/products';
 import { formatWebsitePrice } from '../lib/pricing';
-import { childrenOfTree, fetchCategoryProductCounts, subcategoryOptionsFromTree } from '../lib/taxonomyAdmin';
+import { childrenOfTree, fetchCategoryProductCounts, subcategoryOptionsFromTree, listHiddenMottaro, restoreMottaroNode } from '../lib/taxonomyAdmin';
 
 const ONLY_IN_STOCK_KEY = 'pm_only_in_stock';
 
@@ -141,6 +142,7 @@ const ARCHIVE_TAGS = {
   nutstore: { label: 'Nutstore', title: 'Archived from Nutstore Product Loader', color: '#5b21b6', background: '#ede9fe' },
   floater: { label: 'Floater', title: 'Archived by the floater sweep — had no category (or an unknown category)', color: '#9a3412', background: '#ffedd5' },
   'category-deleted': { label: 'Category deleted', title: 'Archived because its category was deleted', color: '#9a3412', background: '#ffedd5' },
+  'mottaro-deleted': { label: 'Motarro deleted', title: 'Archived because its Motarro subcategory was deleted', color: '#9a3412', background: '#ffedd5' },
 };
 
 function NutstoreArchiveBadge({ archivedBy }) {
@@ -905,6 +907,36 @@ export default function ProductManagerEngine({
     }
   };
 
+  // Deleted Motarro subcategories are hidden (virtual tree). Surface them for
+  // restore while the admin is browsing the Motarro tree.
+  const browsingMottaro = categoryPath[0] === 'mottaro';
+  const [hiddenMottaro, setHiddenMottaro] = useState([]);
+  const [restoreModalOpen, setRestoreModalOpen] = useState(false);
+  const [restoringId, setRestoringId] = useState('');
+  useEffect(() => {
+    if (!browsingMottaro) { setHiddenMottaro([]); return undefined; }
+    let cancelled = false;
+    listHiddenMottaro().then((ids) => { if (!cancelled) setHiddenMottaro(ids || []); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [browsingMottaro, taxonomyTree]);
+  const mottaroHiddenLabel = (id) => String(id || '')
+    .replace(/^mottaro-(other-)?/, '')
+    .replace(/-/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase()) || id;
+  const handleRestoreMottaro = async (id) => {
+    setRestoringId(id);
+    try {
+      await restoreMottaroNode(id);
+      setHiddenMottaro((prev) => prev.filter((h) => h !== id));
+      onRefreshTaxonomy?.();
+      onShowToast?.(`Restored "${mottaroHiddenLabel(id)}" — its products stay archived until you restore them from the Archive.`, 'success');
+    } catch (err) {
+      onShowToast?.(err.message || 'Restore failed', 'error');
+    } finally {
+      setRestoringId('');
+    }
+  };
+
   const handleProductSelect = useCallback((id, item, index, { shiftKey = false, ctrlKey = false } = {}) => {
     setSelectAllView(false);
     const currentRows = rowsRef.current;
@@ -1419,6 +1451,16 @@ export default function ProductManagerEngine({
                   {floaterSweeping ? <><Loader2 size={14} className="spin" /> Scanning…</> : <><FolderMinus size={14} /> Clean up floaters</>}
                 </button>
               )}
+              {browsingMottaro && hiddenMottaro.length > 0 && (
+                <button
+                  type="button"
+                  className="adm-btn-ghost adm-btn--sm"
+                  onClick={() => setRestoreModalOpen(true)}
+                  title="Restore Motarro subcategories you deleted"
+                >
+                  <RotateCcw size={14} /> Restore deleted ({hiddenMottaro.length})
+                </button>
+              )}
               {rows.length > 0 && status !== 'approval' && !reorderMode && (
                 <div className="pm-select-toolbar" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', width: '100%' }}>
                   <button
@@ -1882,6 +1924,41 @@ export default function ProductManagerEngine({
         }}
       />
 
+      {restoreModalOpen && (
+        <div className="adm-modal-backdrop" onClick={() => setRestoreModalOpen(false)}>
+          <div className="adm-modal adm-modal--form" onClick={(e) => e.stopPropagation()}>
+            <div className="adm-modal-header">
+              <h3 className="adm-modal-title">Restore deleted Motarro subcategories</h3>
+              <button type="button" className="adm-modal-close" onClick={() => setRestoreModalOpen(false)}><X size={18} /></button>
+            </div>
+            <div className="adm-modal-body">
+              <p className="adm-modal-note">
+                Restoring re-shows the subcategory. Products archived when it was deleted
+                stay in the Archive — restore them from the Archive tab if you want them live again.
+              </p>
+              {hiddenMottaro.length === 0 ? (
+                <p className="adm-muted">No deleted Motarro subcategories.</p>
+              ) : (
+                <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {hiddenMottaro.map((id) => (
+                    <li key={id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                      <span style={{ fontWeight: 600 }}>{mottaroHiddenLabel(id)}</span>
+                      <button
+                        type="button"
+                        className="adm-btn-ghost adm-btn--sm"
+                        disabled={restoringId === id}
+                        onClick={() => void handleRestoreMottaro(id)}
+                      >
+                        {restoringId === id ? <><Loader2 size={14} className="spin" /> Restoring…</> : <><RotateCcw size={14} /> Restore</>}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
       {makeLiveItem && (
         <div className="adm-modal-backdrop" onClick={() => !makeLiveSaving && setMakeLiveItem(null)}>
           <div className="adm-modal adm-modal--form pm-make-live-modal" onClick={(e) => e.stopPropagation()}>

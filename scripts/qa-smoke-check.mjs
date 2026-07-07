@@ -610,7 +610,7 @@ assert.ok(readSrc('migrations/038_mottaro_path.sql').includes('mottaro_path'), '
 console.log('✓ A4 mottaro_path persistence (derive → stored → fallback)');
 
 // Shared Mottaro module — must stay byte-identical to the portal copy
-const MOTTARO_SHARED_HASH = '15207c5f4ac16723';
+const MOTTARO_SHARED_HASH = '702c264b95de85b8';
 assert.equal(
   createHash('sha256').update(readSrc('lib/mottaro-category.mjs')).digest('hex').slice(0, 16),
   MOTTARO_SHARED_HASH,
@@ -678,6 +678,29 @@ assert.match(productsRemoveSrc, /restored, \$\{json\.failed\.length\} failed/, '
 assert.match(bulkSrc, /one row per unique SKU/, 'bulkDelete dedupes results (accurate deleted count)');
 assert.match(pmRemoveSrc, /onError: \(err\) => onShowToast\?\.\(err\.message \|\| 'Archive failed'/, 'single-row archive surfaces errors');
 console.log('✓ Product Manager review fixes (select-all parity, badge sync, page clamp, bulk error surfacing)');
+
+// Motarro subcategory delete — virtual node hide + product remap + reversible
+const hiddenTree = injectMotarroIntoTree([
+  { id: 'arts-and-crafts', label: 'Arts and Crafts', children: [{ id: 'crafts', label: 'Crafts', children: [] }] },
+  { id: 'stationery', label: 'Stationery', children: [] },
+], ['mottaro-crafts', 'mottaro-other-beads']);
+const hiddenMottaroNode = hiddenTree.find((n) => n.id === 'mottaro');
+assert.ok(!hiddenMottaroNode.children.some((c) => c.id === 'mottaro-crafts'), 'deleted Motarro branch pruned from tree');
+assert.ok(!hiddenMottaroNode.children.find((c) => c.id === 'mottaro-other').children.some((c) => c.id === 'mottaro-other-beads'), 'deleted Motarro Other bucket pruned');
+assert.deepEqual(
+  inferMotarroPathFromRow({ title: 'MOTARRO bead', category: 'Beads' }, hiddenTree),
+  ['mottaro', 'mottaro-other', 'mottaro-other-general'],
+  'product in a deleted Motarro bucket remaps to Other›General',
+);
+const taxApiSrc = readSrc('api/taxonomy.js');
+assert.match(taxApiSrc, /action === 'deleteNode' && isMottaroId/, 'taxonomy delete handles Motarro nodes');
+assert.match(taxApiSrc, /archiveMotarroProductsUnderNode/, 'Motarro delete archives products under the node');
+assert.match(taxApiSrc, /writeMottaroHiddenIds/, 'Motarro delete hides the virtual node');
+assert.match(taxApiSrc, /action === 'restoreMottaroNode'/, 'Motarro delete is reversible (restore action)');
+assert.match(taxonomyUtilsSrc, /export async function readMottaroHiddenIds/, 'hidden-ids store reader present');
+assert.match(taxonomyUtilsSrc, /export async function archiveMotarroProductsUnderNode/, 'Motarro product archive helper present');
+assert.match(pmRemoveSrc, /Restore deleted \(/, 'PM surfaces a Motarro restore control');
+console.log('✓ Motarro subcategory delete (hide + archive products + reversible restore)');
 
 // Production hardening (post-audit) — security, promo contract, lifecycle fixes
 

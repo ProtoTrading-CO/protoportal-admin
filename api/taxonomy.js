@@ -6,17 +6,21 @@ import {
   addCategoryNode,
   addSubcategoryNode,
   archiveProductsForDeletedNode,
+  archiveMotarroProductsUnderNode,
   buildCategoryProductCounts,
+  collectMotarroSkusUnderNode,
   countProductsForNode,
   countRenameOrphans,
   deleteNodeCascade,
   findNodeContext,
   loadTaxonomy,
+  readMottaroHiddenIds,
   readTaxonomyForApi,
   renameNodeLabel,
   renameNodeLabelInProducts,
   resolveLabelsFromPathIds,
   saveTaxonomy,
+  writeMottaroHiddenIds,
 } from './_taxonomy-utils.js';
 
 function getStockClient() {
@@ -102,14 +106,61 @@ export default async function handler(req, res) {
     // is never built on a stale snapshot from another instance.
     let tree = await loadTaxonomy({ bypassCache: true });
 
-    // The Mottaro branch is virtual — injected on read, stripped on save — so
-    // edits to it silently no-op. Reject them with a clear message instead.
+    // The Mottaro branch is virtual — injected on read, stripped on save.
+    // Rename / add-subcategory still no-op, so reject those clearly. DELETE is
+    // supported via a hidden-ids list (see the deleteNode branch below).
     const isMottaroId = (id) => id === 'mottaro' || String(id || '').startsWith('mottaro-');
-    if ((action === 'rename' || action === 'deleteNode') && isMottaroId(req.body?.id)) {
-      return res.status(400).json({ error: 'Motarro categories are automatic and cannot be renamed or deleted here.' });
+    if (action === 'rename' && isMottaroId(req.body?.id)) {
+      return res.status(400).json({ error: 'Motarro categories are automatic and cannot be renamed here.' });
     }
     if (action === 'addSubcategory' && isMottaroId(req.body?.parentId)) {
       return res.status(400).json({ error: 'Motarro is an automatic category — you cannot add subcategories under it.' });
+    }
+
+    // Delete a Motarro subcategory: archive the products under it, then hide
+    // the (virtual) node so it stops appearing. The Motarro root cannot go.
+    if (action === 'deleteNode' && isMottaroId(req.body?.id)) {
+      const { id } = req.body;
+      if (id === 'mottaro') {
+        return res.status(400).json({ error: 'The Motarro category itself cannot be deleted.' });
+      }
+      // Use the injected tree that still contains the node so products under it
+      // resolve for archiving. Archive FIRST, then hide — if archiving fails
+      // the node stays visible so the admin can retry.
+      let archiveResult;
+      try {
+        archiveResult = await archiveMotarroProductsUnderNode(supabase, tree, id);
+      } catch (err) {
+        return res.status(502).json({ error: `Could not archive products under this Motarro subcategory: ${err.message || err}. Nothing was deleted — try again.` });
+      }
+      if (archiveResult.failures.length) {
+        return res.status(502).json({
+          error: `${archiveResult.failures.length} of ${archiveResult.total} product(s) could not be archived — the subcategory was not deleted. Try again.`,
+          productsArchived: archiveResult.archived,
+        });
+      }
+      const hidden = await readMottaroHiddenIds({ bypassCache: true });
+      await writeMottaroHiddenIds([...hidden, id]);
+      return res.status(200).json({
+        ok: true,
+        id,
+        mottaroDeleted: true,
+        productsArchived: archiveResult.archived,
+      });
+    }
+
+    if (action === 'restoreMottaroNode') {
+      const { id } = req.body;
+      if (!isMottaroId(id) || id === 'mottaro') return res.status(400).json({ error: 'Not a Motarro subcategory.' });
+      const hidden = await readMottaroHiddenIds({ bypassCache: true });
+      const next = hidden.filter((h) => h !== id);
+      await writeMottaroHiddenIds(next);
+      return res.status(200).json({ ok: true, id, restored: true });
+    }
+
+    if (action === 'listHiddenMottaro') {
+      const hidden = await readMottaroHiddenIds({ bypassCache: true });
+      return res.status(200).json({ ids: hidden });
     }
 
     if (action === 'rename') {
@@ -210,6 +261,11 @@ export default async function handler(req, res) {
     if (action === 'countSubcategoryProducts') {
       const { id } = req.body;
       if (!id) return res.status(400).json({ error: 'id required' });
+      // Motarro nodes are virtual — count products by their derived Motarro path.
+      if (isMottaroId(id)) {
+        const skus = await collectMotarroSkusUnderNode(supabase, tree, id);
+        return res.status(200).json({ productCount: skus.length, mottaro: true });
+      }
       const ctx = findNodeContext(tree, id);
       if (!ctx) return res.status(404).json({ error: 'Subcategory not found' });
       const productCount = await countProductsForNode(supabase, ctx);
