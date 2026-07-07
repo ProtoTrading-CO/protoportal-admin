@@ -81,9 +81,14 @@ export default async function handler(req, res) {
   const resolvedTitle = catalogueDisplayTitle(catalogItem);
   const resolvedDescription = catalogueDescription(catalogItem);
 
+  // Never overwrite a real price with 0. On re-publish (e.g. adding an image
+  // slot) the resolved price can be 0 when there's no ERP/website match — in
+  // that case keep the existing DB price instead of dropping the product to R0.
+  const numericPrice = Number(price);
+  const hasValidPrice = Number.isFinite(numericPrice) && numericPrice > 0;
   const patch = {
     title: resolvedTitle,
-    price: Number(price) || 0,
+    price: hasValidPrice ? numericPrice : (Number(existing?.price) || 0),
     category: String(category || '').trim(),
     subcategory_one: String(subcategoryOne || category || '').trim(),
     subcategory_two: subcategoryTwo ? String(subcategoryTwo).trim() : null,

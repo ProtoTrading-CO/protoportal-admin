@@ -12,6 +12,9 @@ export default defineConfig({
         manualChunks(id) {
           if (id.includes('node_modules/lucide-react')) return 'lucide';
           if (id.includes('node_modules/@tanstack/react-query')) return 'query';
+          // Supabase (~120KB) rarely changes — split it so it caches long-term
+          // instead of riding the entry chunk that busts on every deploy.
+          if (id.includes('node_modules/@supabase')) return 'supabase';
         },
       },
     },

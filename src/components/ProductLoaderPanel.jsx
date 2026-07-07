@@ -7,7 +7,6 @@ import {
   Loader2,
   PackagePlus,
   RefreshCw,
-  Sparkles,
   Trash2,
   Upload,
   X,
@@ -244,7 +243,6 @@ export default function ProductLoaderPanel({
   const [imageSource, setImageSource] = useState('');
   const [imageSlot, setImageSlot] = useState(1);
   const [uploading, setUploading] = useState(false);
-  const [transforming, setTransforming] = useState(false);
   const [dragOver, setDragOver] = useState(false);
 
   const [categoryId, setCategoryId] = useState('');
@@ -731,39 +729,6 @@ export default function ProductLoaderPanel({
     }
   };
 
-  const handleTransform = async () => {
-    if (!fileBase64 || !fileObj) return;
-    setTransforming(true);
-    setPublishError('');
-    try {
-      const transformRes = await fetch('/api/transform-product-image', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ filename: fileObj.name, contentType: fileObj.type, base64: fileBase64 }),
-      });
-      const transformJson = await readApiJson(transformRes, { fallback: 'Transform failed' });
-
-      const uploadRes = await fetch('/api/upload-product-image', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          filename: `${code}-bg-removed.jpg`,
-          contentType: 'image/jpeg',
-          base64: transformJson.base64,
-          sku: code,
-          imageSlot,
-        }),
-      });
-      const uploadJson = await readApiJson(uploadRes, { fallback: 'Upload failed' });
-
-      setImageUrl(uploadJson.url);
-      setImageSource('upload_transformed');
-    } catch (err) {
-      setPublishError(err.message);
-    } finally {
-      setTransforming(false);
-    }
-  };
 
   const handleAnalyze = async () => {
     const hasImage = imageUrl || fileBase64;
@@ -817,8 +782,7 @@ export default function ProductLoaderPanel({
     && (!warnings.includes('price_zero') || priceZeroConfirmed)
     && (!isOverwritingFilledSlot || overwriteConfirmed)
     && !publishing
-    && !uploading
-    && !transforming,
+    && !uploading,
   );
 
   const handlePublish = async () => {

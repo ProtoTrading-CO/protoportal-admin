@@ -394,11 +394,10 @@ export default async function handler(req, res) {
       if (allowed.has(key)) sanitized[key] = value;
     }
 
-    if (Object.keys(sanitized).length) {
-      const { error: patchError } = await supabase.from('orders').update(sanitized).eq('id', id);
-      if (patchError) return res.status(400).json({ error: patchError.message });
-    }
-
+    // Run the workflow gates (Victor-only, pending-notifications, not-found)
+    // BEFORE committing any field write — otherwise a PATCH that bundles field
+    // edits with a workflow advance that is later REJECTED still lands the field
+    // writes (e.g. total_ex_vat corrupted while a 403 is returned).
     if (advanceWorkflow) {
       const target = normalizeOrderStatus(advanceWorkflow);
       const allowedTargets = new Set(['handed over', 'order in progress', 'order sent', 'payment received']);
@@ -441,6 +440,12 @@ export default async function handler(req, res) {
       } catch (err) {
         return res.status(400).json({ error: err.message });
       }
+    }
+
+    // Field writes commit only after every gate above has passed.
+    if (Object.keys(sanitized).length) {
+      const { error: patchError } = await supabase.from('orders').update(sanitized).eq('id', id);
+      if (patchError) return res.status(400).json({ error: patchError.message });
     }
 
     const { data, error } = await supabase
