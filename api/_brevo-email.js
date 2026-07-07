@@ -216,35 +216,47 @@ export async function fetchCustomerAudience(sb, audience, { businessTypes = [] }
   return [...seen.values()];
 }
 
+// Bounded concurrency keeps a 1000-recipient broadcast well inside the 300s
+// function ceiling (sequential sends were 3-6+ minutes and timed out).
+const BROADCAST_CONCURRENCY = 8;
+
 export async function sendBroadcastBatch(recipients, { subject, introText = '', htmlBlock = '', onProgress }) {
   let sent = 0;
   let failed = 0;
   const errors = [];
   const messageIds = [];
 
-  for (const recipient of recipients) {
-    try {
-      const vars = buildRecipientVars(recipient);
-      const { subject: personalizedSubject, htmlContent, textContent } = buildComposedEmail(
-        { subject, introText, htmlBlock },
-        vars,
-      );
-      const result = await sendBrevoTransactional({
-        to: { email: recipient.email, name: vars.name || recipient.email },
-        subject: personalizedSubject,
-        htmlContent,
-        textContent,
-      });
-      const messageId = result?.messageId || result?.['message-id'] || result?.messageIds?.[0];
-      if (messageId) messageIds.push(String(messageId));
-      sent += 1;
-      if (onProgress) onProgress({ sent, failed, total: recipients.length });
-      if (sent % 10 === 0) await new Promise((r) => setTimeout(r, 200));
-    } catch (err) {
-      failed += 1;
-      if (errors.length < 20) errors.push({ email: recipient.email, error: err.message });
+  let cursor = 0;
+  async function worker() {
+    while (cursor < recipients.length) {
+      const idx = cursor;
+      cursor += 1;
+      const recipient = recipients[idx];
+      try {
+        const vars = buildRecipientVars(recipient);
+        const { subject: personalizedSubject, htmlContent, textContent } = buildComposedEmail(
+          { subject, introText, htmlBlock },
+          vars,
+        );
+        const result = await sendBrevoTransactional({
+          to: { email: recipient.email, name: vars.name || recipient.email },
+          subject: personalizedSubject,
+          htmlContent,
+          textContent,
+        });
+        const messageId = result?.messageId || result?.['message-id'] || result?.messageIds?.[0];
+        if (messageId) messageIds.push(String(messageId));
+        sent += 1;
+        if (onProgress) onProgress({ sent, failed, total: recipients.length });
+      } catch (err) {
+        failed += 1;
+        if (errors.length < 20) errors.push({ email: recipient.email, error: err.message });
+      }
     }
   }
+
+  const workers = Math.min(BROADCAST_CONCURRENCY, recipients.length);
+  await Promise.all(Array.from({ length: workers }, () => worker()));
 
   return { sent, failed, errors, messageIds };
 }

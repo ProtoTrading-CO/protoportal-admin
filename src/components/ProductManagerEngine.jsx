@@ -28,7 +28,6 @@ import { useCatalogMutations } from '../hooks/useCatalogMutations';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { queryClient } from '../lib/queryClient';
 import { queryKeys } from '../lib/queryKeys';
-import { getActiveImageBatch, subscribeImageBatch } from '../lib/imageBatchTracker';
 import { sortOrderCategoryKey, lookupSortOrder, applySkuOrder, sortOrderLookupKeys } from '../lib/taxonomy';
 import { persistSortOrder, fetchSortOrderStore, sortMetaForPath, formatSortSavedAt, fetchSortMetaForCategory } from '../lib/sortOrderStore';
 import { exportProductsCatalogXlsx, exportAllProductsCatalogXlsx, exportSelectedProductsXlsx } from '../lib/exportLiveProducts';
@@ -406,7 +405,6 @@ export default function ProductManagerEngine({
   onShowToast,
   onRefreshStats,
   onEditProduct,
-  onImageFix,
   onEditCategory,
   onAddCategory,
   onAddSubcategory,
@@ -417,6 +415,7 @@ export default function ProductManagerEngine({
   categoryProductCounts = {},
   initialStatus = 'live',
   statuses = CATALOG_STATUSES,
+  showCategorySidebar = true,
   title = 'Product Manager',
   note = 'In-stock products are live on the site. Use ✨ to add products to New Arrivals on the trade homepage.',
 }) {
@@ -483,23 +482,6 @@ export default function ProductManagerEngine({
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'instant' });
   }, []);
-
-  useEffect(() => {
-    // Seed prevStatus from current state so we never fire on initial subscribe —
-    // only a genuine running → complete transition should show the toast.
-    let prevStatus = getActiveImageBatch()?.status ?? null;
-    return subscribeImageBatch((batch) => {
-      const nextStatus = batch?.status ?? null;
-      if (prevStatus === 'running' && nextStatus === 'complete') {
-        window.dispatchEvent(new CustomEvent('proto-approval-refresh'));
-        queryClient.invalidateQueries({ queryKey: queryKeys.dashboardStats() });
-        if (status === 'approval') {
-          onShowToast?.('New images ready for approval', 'success');
-        }
-      }
-      prevStatus = nextStatus;
-    });
-  }, [status, onShowToast]);
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(searchInput.trim()), 200);
@@ -980,19 +962,6 @@ export default function ProductManagerEngine({
     }
   };
 
-  const handleImageFix = () => {
-    const products = [...selected]
-      .map((id) => selectedRowsRef.current.get(id))
-      .filter(Boolean);
-    if (!products.length) {
-      onShowToast?.('Select at least one product', 'error');
-      return;
-    }
-    onImageFix?.(products);
-    setSelected(new Set());
-    selectedRowsRef.current = new Map();
-  };
-
   const bulkEditProducts = useMemo(
     () => [...selected].map((id) => selectedRowsRef.current.get(id)).filter(Boolean),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1215,7 +1184,8 @@ export default function ProductManagerEngine({
       )}
 
       {(
-        <div className="adm-panel-split">
+        <div className={`adm-panel-split${showCategorySidebar ? '' : ' adm-panel-split--no-sidebar'}`}>
+          {showCategorySidebar && (
           <aside className={`adm-panel-sidebar adm-reorder-tree-sidebar${isMobile ? ' adm-panel-sidebar--desktop-only' : ''}`}>
             <div className="adm-reorder-cat-heading">
               <span>Categories</span>
@@ -1254,8 +1224,9 @@ export default function ProductManagerEngine({
               showUncategorized={(effectiveCategoryCounts.__uncategorized__ || 0) > 0}
             />
           </aside>
+          )}
           <div className="adm-panel-main">
-            {isMobile && (
+            {isMobile && showCategorySidebar && (
               <div className="pm-mobile-cat-bar">
                 <button
                   type="button"
@@ -1446,11 +1417,6 @@ export default function ProductManagerEngine({
                         onClick={() => setBulkEditOpen(true)}
                       >
                         <Pencil size={14} /> Bulk edit
-                      </button>
-                    )}
-                    {(status === 'live' || status === 'archived') && onImageFix && (
-                      <button type="button" className="adm-btn-red adm-btn--sm" onClick={handleImageFix}>
-                        <Sparkles size={14} /> Image fix
                       </button>
                     )}
                   </div>
@@ -1718,7 +1684,7 @@ export default function ProductManagerEngine({
         </div>
       )}
 
-      {isMobile && categoryDrawerOpen && (
+      {isMobile && showCategorySidebar && categoryDrawerOpen && (
         <>
           <button
             type="button"

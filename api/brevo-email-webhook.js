@@ -47,6 +47,7 @@ export default async function handler(req, res) {
         messageId,
         event,
         email: extractEmail(item),
+        link: String(item.link || item.url || '').trim() || null,
         meta: { subject: item.subject },
       });
       if (result && result !== false && !result?.abort) updated += 1;

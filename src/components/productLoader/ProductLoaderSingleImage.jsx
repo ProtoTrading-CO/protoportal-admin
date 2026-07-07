@@ -38,7 +38,6 @@ export default function ProductLoaderSingleImage({
   setBatchOverwrite,
   onShowToast,
   onPublished,
-  onSendToApollo,
   mainSiteUrl = 'https://site.proto.co.za',
 }) {
   const inputRef = useRef(null);
@@ -231,28 +230,6 @@ export default function ProductLoaderSingleImage({
               <button type="button" className="adm-btn-ghost" disabled={processing || archiving} onClick={() => void handleArchive()}>
                 {archiving ? <Loader2 size={14} className="spin" /> : <Archive size={14} />}
                 Send to Archive
-              </button>
-            )}
-            {item.group !== 'not_found' && item.sqlRow && (
-              <button
-                type="button"
-                className="adm-btn-ghost"
-                disabled={!item.code}
-                onClick={() => onSendToApollo?.([{
-                  id: item.code,
-                  sku: item.code,
-                  name: catalogueDisplayTitle(item) || item.code,
-                  title: catalogueDisplayTitle(item) || item.code,
-                  image: item.websiteRow?.image_url_one || preview,
-                  images: [
-                    item.websiteRow?.image_url_one,
-                    item.websiteRow?.image_url_two,
-                    item.websiteRow?.image_url_three,
-                    item.websiteRow?.image_url_four,
-                  ].filter(Boolean),
-                }])}
-              >
-                <PackagePlus size={14} /> Send to Apollo Image Gen
               </button>
             )}
             {isLive && (

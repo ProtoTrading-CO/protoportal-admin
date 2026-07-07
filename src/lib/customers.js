@@ -129,6 +129,35 @@ export async function sendCustomerEmailBroadcast({
   return json;
 }
 
+export async function scheduleCustomerEmail({ scheduledAt, audience, subject, introText, htmlBlock, businessTypes }) {
+  const res = await fetch('/api/scheduled-emails', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ scheduledAt, audience, subject, introText, htmlBlock, businessTypes }),
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || 'Failed to schedule email');
+  return json.item;
+}
+
+export async function fetchScheduledEmails() {
+  const res = await fetch('/api/scheduled-emails');
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || 'Failed to load scheduled emails');
+  return json.items || [];
+}
+
+export async function cancelScheduledEmail(id) {
+  const res = await fetch('/api/scheduled-emails', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ deleteId: id }),
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || 'Failed to cancel scheduled email');
+  return json;
+}
+
 export async function fetchCrmContactsPage({ page = 1, pageSize = 1 } = {}) {
   const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
   const res = await fetch(`/api/crm-contacts?${params}`);

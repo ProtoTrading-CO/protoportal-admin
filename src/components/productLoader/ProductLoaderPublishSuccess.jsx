@@ -1,10 +1,9 @@
-import { CheckCircle, ExternalLink, Sparkles, Upload } from 'lucide-react';
+import { CheckCircle, ExternalLink, Upload } from 'lucide-react';
 
 export default function ProductLoaderPublishSuccess({
   result,
   mainSiteUrl = 'https://site.proto.co.za',
   onOpenProduct,
-  onGenerateApollo,
   onUploadNext,
   onDone,
 }) {
@@ -23,9 +22,6 @@ export default function ProductLoaderPublishSuccess({
           <a className="adm-btn-ghost" href={productUrl} target="_blank" rel="noopener noreferrer" onClick={onOpenProduct}>
             <ExternalLink size={14} /> Open Product
           </a>
-          <button type="button" className="adm-btn-red" onClick={() => onGenerateApollo?.(result.sku)}>
-            <Sparkles size={14} /> Generate Apollo Images
-          </button>
           <button type="button" className="adm-btn-ghost" onClick={onUploadNext}>
             <Upload size={14} /> Upload Next
           </button>

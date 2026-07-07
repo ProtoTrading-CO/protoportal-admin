@@ -28,20 +28,33 @@ export default async function handler(req, res) {
 
   if (req.method === 'POST') {
     if (!(await requireAdminKey(req, res))) return;
-    const { categoryKey, skuOrder, legacyKeys = [], expectedStoreUpdatedAt } = req.body || {};
+    const body = req.body || {};
+    const { categoryKey, skuOrder, legacyKeys = [], expectedStoreUpdatedAt } = body;
     const key = String(categoryKey || '').trim();
     if (!key || !Array.isArray(skuOrder)) {
       return res.status(400).json({ error: 'categoryKey and skuOrder[] required' });
     }
     try {
-      const store = await readStore();
-      const expected = expectedStoreUpdatedAt != null ? String(expectedStoreUpdatedAt) : '';
-      if (expected && store.updatedAt && expected !== store.updatedAt) {
-        return res.status(409).json({ error: 'Sort order changed elsewhere — refresh and retry' });
-      }
       const fresh = await readStore();
-      if (expected && fresh.updatedAt && expected !== fresh.updatedAt) {
-        return res.status(409).json({ error: 'Sort order changed elsewhere — refresh and retry' });
+      const entry = fresh.orders?.[key] || null;
+      // Conflict detection is PER CATEGORY: saving Beads must never conflict
+      // with a save of Stationery (the old store-wide updatedAt check made
+      // every save invalidate every other category's token, producing false
+      // "changed elsewhere" errors — including racing your own auto-saves).
+      if ('expectedCategoryUpdatedAt' in body) {
+        const expectedCat = body.expectedCategoryUpdatedAt != null ? String(body.expectedCategoryUpdatedAt) : '';
+        if (entry?.updatedAt && expectedCat !== entry.updatedAt) {
+          return res.status(409).json({
+            error: 'Sort order changed elsewhere — refresh and retry',
+            categoryUpdatedAt: entry.updatedAt,
+          });
+        }
+      } else if (expectedStoreUpdatedAt != null) {
+        // Legacy clients still send the store-wide token.
+        const expected = String(expectedStoreUpdatedAt);
+        if (expected && fresh.updatedAt && expected !== fresh.updatedAt) {
+          return res.status(409).json({ error: 'Sort order changed elsewhere — refresh and retry' });
+        }
       }
       const now = new Date().toISOString();
       const nextOrders = { ...(fresh.orders || {}) };
@@ -52,7 +65,13 @@ export default async function handler(req, res) {
       nextOrders[key] = { skuOrder: skuOrder.map(String), updatedAt: now };
       const next = { orders: nextOrders, updatedAt: now };
       await writeSiteConfigJson(SORT_FILE, next);
-      return res.status(200).json({ ok: true, categoryKey: key, updatedAt: now, storeUpdatedAt: now });
+      return res.status(200).json({
+        ok: true,
+        categoryKey: key,
+        updatedAt: now,
+        categoryUpdatedAt: now,
+        storeUpdatedAt: now,
+      });
     } catch (err) {
       return res.status(500).json({ error: err.message });
     }

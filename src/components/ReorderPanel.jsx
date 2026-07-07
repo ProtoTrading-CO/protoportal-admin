@@ -104,6 +104,13 @@ const ReorderPanel = forwardRef(function ReorderPanel({
   const [bulkFieldEditValue, setBulkFieldEditValue] = useState('');
 
   const storeUpdatedAtRef = useRef(null);
+  // Per-category conflict tokens — a save of one category must never
+  // invalidate another category's token (that was the source of the false
+  // "Sort order changed elsewhere" errors).
+  const categoryTokensRef = useRef(new Map());
+  // Serialize saves so a second auto-save never races the first with a
+  // stale token.
+  const saveChainRef = useRef(Promise.resolve());
   const cacheByMainRef = useRef({});
   const saveTimerRef = useRef(null);
   const pendingSaveRef = useRef(null);
@@ -155,6 +162,10 @@ const ReorderPanel = forwardRef(function ReorderPanel({
       const meta = sortMetaForPath(store, navPath, taxonomyTree);
       setSortMeta({ updatedAt: meta.updatedAt, storeUpdatedAt: store.updatedAt || null });
       storeUpdatedAtRef.current = store.updatedAt || null;
+      const canonicalKey = sortOrderCategoryKey(navPath, taxonomyTree);
+      if (canonicalKey) {
+        categoryTokensRef.current.set(canonicalKey, store.orders?.[canonicalKey]?.updatedAt ?? null);
+      }
     }
     setProducts((prev) => {
       if (prev.length === ordered.length && prev.every((p, i) => p.id === ordered[i]?.id)) return prev;
@@ -189,7 +200,7 @@ const ReorderPanel = forwardRef(function ReorderPanel({
     }
   }, [categoryPath.length, mainId, applyReorderView]);
 
-  const commitReorderOrder = useCallback(async (orderedProducts, { groupId } = {}) => {
+  const doCommitReorderOrder = useCallback(async (orderedProducts, { groupId } = {}) => {
     if (search.trim().length > 0) return;
 
     const savePath = groupId && !categoryPath.length ? [groupId] : navPath;
@@ -205,23 +216,31 @@ const ReorderPanel = forwardRef(function ReorderPanel({
     const skuOrder = slice.map((p) => p.id);
     if (!skuOrder.length) return;
 
+    const legacyKeys = sortOrderLookupKeys(savePath, taxonomyTree).filter((k) => k !== categoryKey);
+    const save = () => persistSortOrder({
+      categoryKey,
+      skuOrder,
+      legacyKeys,
+      expectedCategoryUpdatedAt: categoryTokensRef.current.get(categoryKey) ?? null,
+    });
+
     setSavingOrder(true);
     try {
-      const json = await persistSortOrder({
-        categoryKey,
-        skuOrder,
-        legacyKeys: sortOrderLookupKeys(savePath, taxonomyTree).filter((k) => k !== categoryKey),
-        expectedStoreUpdatedAt: storeUpdatedAtRef.current,
-      });
+      let json;
+      try {
+        json = await save();
+      } catch (err) {
+        if (err.status !== 409) throw err;
+        // Token was stale (e.g. another tab saved this category). The user's
+        // latest drag is the intended order — refresh the token and retry
+        // once before giving up.
+        const meta = await fetchSortMetaForCategory(categoryKey);
+        categoryTokensRef.current.set(categoryKey, err.categoryUpdatedAt || meta?.updatedAt || null);
+        json = await save();
+      }
       setSortMeta({ updatedAt: json.updatedAt, storeUpdatedAt: json.storeUpdatedAt || null });
       storeUpdatedAtRef.current = json.storeUpdatedAt || null;
-      setTimeout(() => {
-        void fetchSortMetaForCategory(categoryKey).then((meta) => {
-          if (!meta?.updatedAt) return;
-          setSortMeta({ updatedAt: meta.updatedAt, storeUpdatedAt: meta.storeUpdatedAt || null });
-          storeUpdatedAtRef.current = meta.storeUpdatedAt || null;
-        });
-      }, 5000);
+      categoryTokensRef.current.set(categoryKey, json.categoryUpdatedAt || json.updatedAt || null);
       setDirty(false);
       if (mainId && cacheByMainRef.current[cacheKey]) {
         const cachePath = categoryPath.length ? categoryPath : [mainId];
@@ -233,7 +252,7 @@ const ReorderPanel = forwardRef(function ReorderPanel({
       }
     } catch (err) {
       if (err.status === 409) {
-        toast(err.message || 'Someone else changed this order — refreshing', 'error');
+        toast('Someone else is editing this category right now — refreshing to the latest order', 'error');
         invalidateSortOrderStore();
         await loadProducts({ forceCatalog: true });
         return;
@@ -244,6 +263,14 @@ const ReorderPanel = forwardRef(function ReorderPanel({
       setSavingOrder(false);
     }
   }, [search, categoryPath, navPath, mainId, cacheKey, taxonomyTree, productsForSortSave, mergeIntoCategoryCache, loadProducts, toast]);
+
+  // Queue saves so an in-flight save always finishes (and refreshes the
+  // conflict token) before the next one fires.
+  const commitReorderOrder = useCallback((orderedProducts, meta) => {
+    const run = () => doCommitReorderOrder(orderedProducts, meta);
+    saveChainRef.current = saveChainRef.current.then(run, run);
+    return saveChainRef.current;
+  }, [doCommitReorderOrder]);
 
   const scheduleReorderSave = useCallback((orderedProducts, meta) => {
     pendingSaveRef.current = { orderedProducts, meta };

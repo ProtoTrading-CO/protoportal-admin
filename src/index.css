@@ -6341,6 +6341,7 @@ html, body { background: #f5f5f5; color: #111827; }
   gap: 16px;
   align-items: start;
 }
+.adm-panel-split--no-sidebar { grid-template-columns: 1fr; }
 .adm-panel-main { min-width: 0; padding-left: 0; }
 .adm-panel-sidebar.adm-reorder-tree-sidebar {
   padding: 12px;

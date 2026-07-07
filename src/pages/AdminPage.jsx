@@ -110,11 +110,11 @@ import { lazyRetry } from '../lib/lazyRetry';
 // when the admin clicks a nav item.
 const AnalyticsHub = lazyRetry(() => import('../components/AnalyticsHub'));
 const ApolloPanel = lazyRetry(() => import('../components/ApolloPanel'));
-const CostTrackingPanel = lazyRetry(() => import('../components/CostTrackingPanel'));
 const ProductLoaderPanel = lazyRetry(() => import('../components/ProductLoaderPanel'));
 const BulkImageReplacePanel = lazyRetry(() => import('../components/BulkImageReplacePanel'));
 const WhatsappPanel = lazyRetry(() => import('../components/WhatsappPanel'));
 const EmailAnalyticsPanel = lazyRetry(() => import('../components/EmailAnalyticsPanel'));
+const ScheduledEmailsPanel = lazyRetry(() => import('../components/ScheduledEmailsPanel'));
 const BannerPanel = lazyRetry(() => import('../components/BannerPanel'));
 const FeaturedPanel = lazyRetry(() => import('../components/FeaturedPanel'));
 const SpecialsPanel = lazyRetry(() => import('../components/SpecialsPanel'));
@@ -359,6 +359,29 @@ function categoryFormFromPath(categoryPath = [], tree = categories) {
   };
 }
 
+/** Gold pill for pre-registered CSV customers who signed up (auto-approved, code allocated manually). */
+function TenThousandClubBadge({ customer }) {
+  if (!customer?.tags?.includes?.('10000 club')) return null;
+  return (
+    <span
+      title="Pre-registered customer — auto-approved at signup. Allocate their customer code manually."
+      style={{
+        fontSize: 10,
+        fontWeight: 800,
+        letterSpacing: 0.4,
+        color: '#92400e',
+        background: '#fef3c7',
+        border: '1px solid #f59e0b',
+        borderRadius: 4,
+        padding: '1px 6px',
+        whiteSpace: 'nowrap',
+      }}
+    >
+      10000 CLUB
+    </span>
+  );
+}
+
 function compactItems(items = []) {
   return items.map((item) => `${item.code}${item.name ? ` ${item.name}` : ''} × ${item.qty}`).join(', ');
 }
@@ -413,8 +436,8 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   useEffect(() => {
     if (activeSection === 'apollo') setApolloEverActive(true);
   }, [activeSection]);
-  const [imageFixRequest, setImageFixRequest] = useState(null);
   const [productLoaderCode, setProductLoaderCode] = useState('');
+  const [siteContentTab, setSiteContentTab] = useState('featured');
   const { data: dashStats } = useDashboardStats();
   const [loading, setLoading] = useState(false);
   const [loadingProgress, setLoadingProgress] = useState(null);
@@ -494,7 +517,6 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   const [orderTabCounts, setOrderTabCounts] = useState(null);
   const [orderSearchDebounced, setOrderSearchDebounced] = useState('');
   const [focusOrderId, setFocusOrderId] = useState('');
-  const [orderSubView, setOrderSubView] = useState('list');
   const [orderSearch, setOrderSearch] = useState('');
   const [fulfillmentSettingsOpen, setFulfillmentSettingsOpen] = useState(false);
   const [fulfillmentUsers, setFulfillmentUsers] = useState([]);
@@ -632,21 +654,28 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     if (!file) return;
     setImportingCustomers(true);
     try {
-      const text = await file.text();
-      const { parseCustomerCsv } = await import('../lib/customerCsvImport');
-      const { rows, errors } = parseCustomerCsv(text);
+      const { parseCustomerFile } = await import('../lib/customerCsvImport');
+      const { rows, errors } = await parseCustomerFile(file);
       if (!rows.length) {
-        showToast(errors[0] || 'No valid rows in that CSV', 'error');
+        showToast(errors[0] || 'No valid rows in that file', 'error');
         return;
       }
-      const result = await importProtoActiveCustomers(rows);
+      // Upload in chunks so large files never hit request size/time limits.
+      const CHUNK = 400;
+      let imported = 0;
+      let skipped = 0;
+      for (let i = 0; i < rows.length; i += CHUNK) {
+        const result = await importProtoActiveCustomers(rows.slice(i, i + CHUNK));
+        imported += result.imported || 0;
+        skipped += result.skipped || 0;
+      }
       showToast(
-        `Imported ${result.imported} customer(s) into Pre-registration${result.skipped ? ` — ${result.skipped} skipped (duplicates/invalid)` : ''}${errors.length ? ` — ${errors.length} row(s) had errors` : ''}`,
-        errors.length || result.skipped ? 'warning' : 'success',
+        `Imported ${imported} customer(s) into Pre-registration${skipped ? ` — ${skipped} skipped (duplicates/invalid)` : ''}${errors.length ? ` — ${errors.length} row(s) had errors` : ''}`,
+        errors.length || skipped ? 'warning' : 'success',
       );
       await loadCustomers();
     } catch (err) {
-      showToast(err.message || 'CSV import failed', 'error');
+      showToast(err.message || 'Customer import failed', 'error');
     } finally {
       setImportingCustomers(false);
     }
@@ -1328,7 +1357,6 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
       return reloadTaxonomy();
     }
     if (activeSection === 'orders') {
-      if (orderSubView === 'analytics') dispatchAdminRefresh('analytics');
       return loadOrders();
     }
     if (activeSection === 'catalogue') {
@@ -1967,11 +1995,6 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                 onRefreshTaxonomy={reloadTaxonomy}
                 onCategoryReorder={handleCategoryReorder}
                 categoryProductCounts={categoryProductCounts}
-                onImageFix={(products) => {
-                  setImageFixRequest({ id: Date.now(), products });
-                  setActiveSection('apollo');
-                  window.scrollTo({ top: 0, behavior: 'instant' });
-                }}
               />
               </div>
             </SectionErrorBoundary>
@@ -1985,6 +2008,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                   onRefreshStats={refreshDashboardStats}
                   initialStatus="archived"
                   statuses={['archived']}
+                  showCategorySidebar={false}
                   title="Archive"
                   note="Archived products — set them live from here or fix codes/images before publishing."
                   onEditProduct={(item) => openEditProduct(item)}
@@ -1996,11 +2020,6 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                   onRefreshTaxonomy={reloadTaxonomy}
                   onCategoryReorder={handleCategoryReorder}
                   categoryProductCounts={categoryProductCounts}
-                  onImageFix={(products) => {
-                    setImageFixRequest({ id: Date.now(), products });
-                    setActiveSection('apollo');
-                    window.scrollTo({ top: 0, behavior: 'instant' });
-                  }}
                 />
               </SectionErrorBoundary>
             )}
@@ -2018,35 +2037,11 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
             {apolloEverActive && (
               <div style={{ display: activeSection === 'apollo' ? 'block' : 'none' }}>
                 <Suspense fallback={<LazySectionFallback label="Loading Apollo…" />}>
-                  <ApolloPanel
-                    isActive={activeSection === 'apollo'}
-                    taxonomyTree={taxonomyTree}
-                    onShowToast={showToast}
-                    onGoToApproval={() => { setActiveSection('catalogue'); window.scrollTo({ top: 0, behavior: 'instant' }); }}
-                    onGoToProductLoader={(code) => {
-                      setProductLoaderCode(String(code || '').trim());
-                      setActiveSection('product-loader');
-                    }}
-                    onRefreshCatalog={() => {
-                      window.dispatchEvent(new CustomEvent('proto-approval-refresh'));
-                      queryClient.invalidateQueries({ queryKey: queryKeys.dashboardStats() });
-                      refreshDashboardStats();
-                    }}
-                    imageFixRequest={imageFixRequest}
-                    onImageFixRequestHandled={() => setImageFixRequest(null)}
-                  />
+                  <ApolloPanel onShowToast={showToast} />
                 </Suspense>
               </div>
             )}
             </SectionErrorBoundary>
-
-            {activeSection === 'cost-tracking' && (
-              <SectionErrorBoundary name="cost-tracking" title="Cost Tracking crashed" resetKey={activeSection}>
-                <Suspense fallback={<LazySectionFallback label="Loading Cost Tracking…" />}>
-                  <CostTrackingPanel onShowToast={showToast} />
-                </Suspense>
-              </SectionErrorBoundary>
-            )}
 
             {activeSection === 'product-loader' && (
               <SectionErrorBoundary name="product-loader" title="Product Loader crashed" resetKey={activeSection}>
@@ -2056,19 +2051,6 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                   onShowToast={showToast}
                   initialCode={productLoaderCode}
                   onInitialCodeConsumed={() => setProductLoaderCode('')}
-                  onGoToApollo={(productsOrSku) => {
-                    const products = Array.isArray(productsOrSku)
-                      ? productsOrSku
-                      : [{
-                        id: String(productsOrSku || ''),
-                        sku: String(productsOrSku || ''),
-                        name: String(productsOrSku || ''),
-                        title: String(productsOrSku || ''),
-                      }];
-                    if (!products[0]?.sku) return;
-                    setImageFixRequest({ id: Date.now(), products });
-                    setActiveSection('apollo');
-                  }}
                 />
                 </Suspense>
               </SectionErrorBoundary>
@@ -2088,27 +2070,37 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
 
 
             {/* FEATURED */}
-            {activeSection === 'featured' && (
-              <SectionErrorBoundary name="featured" title="Featured crashed" resetKey={activeSection}>
-                <Suspense fallback={<SectionSuspenseFallback label="Loading Featured…" />}>
-                  <FeaturedPanel
-                    taxonomyTree={taxonomyTree}
-                    onShowToast={showToast}
-                  />
-                </Suspense>
-              </SectionErrorBoundary>
-            )}
-
-            {/* SPECIALS */}
-            {activeSection === 'specials' && (
-              <SectionErrorBoundary name="specials" title="Specials crashed" resetKey={activeSection}>
-                <Suspense fallback={<SectionSuspenseFallback label="Loading Specials…" />}>
-                  <SpecialsPanel
-                    specials={specials}
-                    onSpecialsChange={setSpecials}
-                    onShowToast={showToast}
-                  />
-                </Suspense>
+            {/* SITE CONTENT — Featured, Specials and Banner Editor in one tab */}
+            {activeSection === 'site-content' && (
+              <SectionErrorBoundary name="site-content" title="Site Content crashed" resetKey={activeSection}>
+                <div className="adm-panel">
+                  <div className="adm-section-head">
+                    <div>
+                      <h2 className="adm-section-title">Site Content</h2>
+                      <p className="adm-section-note">Featured products, weekly specials and the homepage banner — everything shown on the trade portal homepage.</p>
+                    </div>
+                  </div>
+                  <div className="adm-customer-tabs" style={{ marginBottom: 16 }}>
+                    <button type="button" onClick={() => setSiteContentTab('featured')} className={`adm-tab${siteContentTab === 'featured' ? ' adm-tab--active' : ''}`}>Featured</button>
+                    <button type="button" onClick={() => setSiteContentTab('specials')} className={`adm-tab${siteContentTab === 'specials' ? ' adm-tab--active' : ''}`}>Specials</button>
+                    <button type="button" onClick={() => setSiteContentTab('banner')} className={`adm-tab${siteContentTab === 'banner' ? ' adm-tab--active' : ''}`}>Banner Editor</button>
+                  </div>
+                  {siteContentTab === 'featured' && (
+                    <Suspense fallback={<SectionSuspenseFallback label="Loading Featured…" />}>
+                      <FeaturedPanel taxonomyTree={taxonomyTree} onShowToast={showToast} />
+                    </Suspense>
+                  )}
+                  {siteContentTab === 'specials' && (
+                    <Suspense fallback={<SectionSuspenseFallback label="Loading Specials…" />}>
+                      <SpecialsPanel specials={specials} onSpecialsChange={setSpecials} onShowToast={showToast} />
+                    </Suspense>
+                  )}
+                  {siteContentTab === 'banner' && (
+                    <Suspense fallback={<SectionSuspenseFallback label="Loading Banner Editor…" />}>
+                      <BannerPanel onShowToast={showToast} />
+                    </Suspense>
+                  )}
+                </div>
               </SectionErrorBoundary>
             )}
 
@@ -2151,7 +2143,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                     <input
                       ref={customerCsvRef}
                       type="file"
-                      accept=".csv,text/csv"
+                      accept=".csv,.xlsx,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
                       hidden
                       onChange={(e) => { void handleCustomerCsvUpload(e.target.files?.[0]); e.target.value = ''; }}
                     />
@@ -2201,10 +2193,14 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                     <BarChart2 size={14} style={{ marginRight: 6, verticalAlign: -2 }} />
                     Email Analytics
                   </button>
-                  {customerTab !== 'email-analytics' && (
+                  <button onClick={() => setCustomerTab('scheduled')} className={`adm-tab${customerTab === 'scheduled' ? ' adm-tab--active' : ''}`}>
+                    <Clock size={14} style={{ marginRight: 6, verticalAlign: -2 }} />
+                    Scheduled
+                  </button>
+                  {customerTab !== 'email-analytics' && customerTab !== 'scheduled' && (
                     <label className="adm-search adm-search--inline"><Search size={14} /><input value={customerSearch} onChange={(e) => setCustomerSearch(e.target.value)} placeholder="Search…" className="adm-search-input" /></label>
                   )}
-                  {customerTab !== 'proto-active' && customerTab !== 'email-analytics' && (
+                  {customerTab !== 'proto-active' && customerTab !== 'email-analytics' && customerTab !== 'scheduled' && (
                     <select
                       className="adm-select"
                       value={customerBusinessType}
@@ -2226,7 +2222,11 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                   </p>
                 )}
 
-                {customerTab === 'email-analytics' ? (
+                {customerTab === 'scheduled' ? (
+                  <Suspense fallback={<LazySectionFallback label="Loading Scheduled Emails…" />}>
+                    <ScheduledEmailsPanel onShowToast={showToast} />
+                  </Suspense>
+                ) : customerTab === 'email-analytics' ? (
                   <Suspense fallback={<LazySectionFallback label="Loading Email Analytics…" />}>
                     <EmailAnalyticsPanel onShowToast={showToast} />
                   </Suspense>
@@ -2295,6 +2295,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                             {person.accept_whatsapp === true && (
                               <Check size={14} color="#15803d" strokeWidth={3} aria-label="WhatsApp opted in" />
                             )}
+                            <TenThousandClubBadge customer={person} />
                           </div>
                           <div className="adm-muted" style={{ fontSize: 11 }}>{person.name}{person.business_type ? ` · ${person.business_type}` : ''}</div>
                         </div>
@@ -2353,6 +2354,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                             {person.accept_whatsapp === true && (
                               <Check size={14} color="#15803d" strokeWidth={3} aria-label="WhatsApp opted in" />
                             )}
+                            <TenThousandClubBadge customer={person} />
                           </span>
                           {(person.first_name || person.contact_name) && (
                             <div className="adm-muted" style={{ fontSize: 11 }}>
@@ -2401,49 +2403,26 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                   <div>
                     <h2 className="adm-section-title">Order Requests</h2>
                     <p className="adm-section-note">
-                      {orderSubView === 'analytics'
-                        ? 'Sales and engagement metrics for the selected time period.'
-                        : 'Paginated order list with server-side search and tab filters. Click a row to expand details.'}
+                      Paginated order list with server-side search and tab filters. Click a row to expand details.
                     </p>
                   </div>
-                  {orderSubView === 'list' && (
-                    <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-                      <button
-                        type="button"
-                        className="adm-btn-ghost"
-                        onClick={() => setFulfillmentSettingsOpen(true)}
-                        title="Fulfillment team settings"
-                        style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px' }}
-                      >
-                        <User size={16} /> Team
-                      </button>
-                      <button
-                        type="button"
-                        className="adm-btn-ghost"
-                        onClick={() => void clearAllOrders()}
-                        disabled={loading || saving === 'clear-all-orders'}
-                        style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px', color: '#c40000' }}
-                        title="Delete all orders"
-                      >
-                        {saving === 'clear-all-orders' ? <Loader2 size={15} className="spin" /> : <Trash2 size={15} />}
-                        Clear all
-                      </button>
-                      <label className="adm-search"><Search size={15} /><input value={orderSearch} onChange={(e) => setOrderSearch(e.target.value)} placeholder="Search orders" className="adm-search-input" /></label>
-                    </div>
-                  )}
+                  <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      className="adm-btn-ghost"
+                      onClick={() => void clearAllOrders()}
+                      disabled={loading || saving === 'clear-all-orders'}
+                      style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px', color: '#c40000' }}
+                      title="Delete all orders"
+                    >
+                      {saving === 'clear-all-orders' ? <Loader2 size={15} className="spin" /> : <Trash2 size={15} />}
+                      Clear all
+                    </button>
+                    <label className="adm-search"><Search size={15} /><input value={orderSearch} onChange={(e) => setOrderSearch(e.target.value)} placeholder="Search orders" className="adm-search-input" /></label>
+                  </div>
                 </div>
 
-                <div className="adm-customer-tabs" style={{ marginBottom: 16 }}>
-                  <button type="button" onClick={() => setOrderSubView('list')} className={`adm-tab${orderSubView === 'list' ? ' adm-tab--active' : ''}`}>Orders</button>
-                  <button type="button" onClick={() => setOrderSubView('analytics')} className={`adm-tab${orderSubView === 'analytics' ? ' adm-tab--active' : ''}`}>
-                    <BarChart2 size={14} style={{ marginRight: 6, verticalAlign: -2 }} />
-                    Analytics
-                  </button>
-                </div>
-
-                {orderSubView === 'analytics' ? (
-                  <AnalyticsHub />
-                ) : (
+                {(
                 <>
                 <div className="adm-order-tabs">
                   {[
@@ -2585,7 +2564,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                     </div>
                   )}
                 </div>
-                {orderSubView === 'list' && orderPages > 1 && (
+                {orderPages > 1 && (
                   <Pager page={orderPage} totalPages={orderPages} onChange={setOrderPage} />
                 )}
                 </>
@@ -2637,16 +2616,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
               </SectionErrorBoundary>
             )}
 
-            {/* BANNER EDITOR */}
-            {activeSection === 'banner' && (
-              <SectionErrorBoundary name="banner" title="Banner Editor crashed" resetKey={activeSection}>
-                <Suspense fallback={<SectionSuspenseFallback label="Loading Banner Editor…" />}>
-                  <BannerPanel onShowToast={showToast} />
-                </Suspense>
-              </SectionErrorBoundary>
-            )}
-
-            {/* POPUP SPECIALS — merged into Specials tab */}
+            {/* BANNER EDITOR + POPUP SPECIALS — merged into the Site Content tab */}
 
 
           </main>
@@ -2668,7 +2638,10 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
             </div>
             <div className="adm-drawer-body">
               <div className="adm-drawer-avatar">{(profileCustomer.business_name || profileCustomer.name || '?')[0].toUpperCase()}</div>
-              <h2 className="adm-drawer-biz">{profileCustomer.business_name || profileCustomer.name}</h2>
+              <h2 className="adm-drawer-biz" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                {profileCustomer.business_name || profileCustomer.name}
+                <TenThousandClubBadge customer={profileCustomer} />
+              </h2>
 
               {profileEditing ? (
                 <div style={{ display: 'grid', gap: 12, marginTop: 4 }}>

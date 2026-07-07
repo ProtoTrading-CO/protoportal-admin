@@ -59,7 +59,7 @@ export function executeIntent(intent, data, terms = '', { limit = null, skus = [
       return {
         source: 'live-index',
         intent,
-        reply: '## Image generation\n\nProduct image generation is handled through the **/image** wizard in Apollo.\n\nType **`/image`** in the chat box to open the guided flow: pick categories or SKUs, choose a style, and run the batch with live progress.',
+        reply: '## Image generation retired\n\nApollo no longer does image generation — it now focuses on answering questions about your products, customers, orders and searches. Use the **Product Loader** or **Image Replace** tabs to manage product images.',
       };
     }
 

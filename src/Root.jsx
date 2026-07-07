@@ -8,7 +8,6 @@ import {
   signOut,
   verifyAdminSession,
 } from './lib/auth';
-import { setImageGenOperator } from './lib/imageGenSession';
 import { PROTO_URLS } from './lib/protoUrls';
 import QueryProvider from './components/QueryProvider';
 import AdminLoginPage from './components/AdminLoginPage';
@@ -81,7 +80,7 @@ function AdminGate() {
         }
         if (mounted) {
           setSession(verified);
-          if (verified.user?.email) setImageGenOperator(verified.user.email);
+          
           setBooting(false);
         }
       } catch {
@@ -113,7 +112,7 @@ function AdminGate() {
         return;
       }
       setSession(s);
-      if (email) setImageGenOperator(email);
+      
     });
 
     const onUnauthorized = () => { void signOut().then(() => setSession(null)); };
@@ -157,7 +156,7 @@ function AdminGate() {
               return;
             }
             setSession(s);
-            if (s.user?.email) setImageGenOperator(s.user.email);
+            
           });
         }}
       />

@@ -12,12 +12,6 @@
     "api/seed-proto-active-customers.js": {
       "includeFiles": "data/proto-active-customers.json"
     },
-    "api/image-intake.js": {
-      "maxDuration": 60
-    },
-    "api/reprocess-live-to-dormant.js": {
-      "maxDuration": 60
-    },
     "api/apply-dormant-live.js": {
       "maxDuration": 60
     },
@@ -36,6 +30,15 @@
     "api/approve-customers-bulk.js": {
       "maxDuration": 60
     },
+    "api/proto-active-customers.js": {
+      "maxDuration": 60
+    },
+    "api/customer-email-broadcast.js": {
+      "maxDuration": 300
+    },
+    "api/run-scheduled-emails.js": {
+      "maxDuration": 300
+    },
     "api/nutstore-batch-lookup.js": {
       "maxDuration": 30
     },
@@ -52,9 +55,9 @@
   },
   "crons": [
     { "path": "/api/order-notify-sweep", "schedule": "*/10 * * * *" },
+    { "path": "/api/run-scheduled-emails", "schedule": "*/10 * * * *" },
     { "path": "/api/run-scheduled-broadcasts", "schedule": "0 * * * *" },
     { "path": "/api/brevo-sync", "schedule": "*/15 * * * *" },
-    { "path": "/api/purge-expired-staging", "schedule": "0 3 * * *" },
-    { "path": "/api/image-gen-budget-check", "schedule": "0 8 * * *" }
+    { "path": "/api/purge-expired-staging", "schedule": "0 3 * * *" }
   ]
 }

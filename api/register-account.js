@@ -57,13 +57,66 @@ export default async function handler(req, res) {
     tier: 'regular',
     role: 'customer',
     is_approved: false,
-    business_name: name,
+    business_name: String(req.body?.businessName || req.body?.business_name || '').trim() || name,
     customer_code: null,
   };
 
-  const { error: customerError } = await supabase
+  // Every signup field the register portal sends lands on the profile.
+  const OPTIONAL_FIELDS = {
+    phone: 'phone',
+    business_type: 'business_type', businessType: 'business_type',
+    vat_number: 'vat_number', vatNumber: 'vat_number',
+    company_address: 'company_address', companyAddress: 'company_address',
+    delivery_address: 'delivery_address', deliveryAddress: 'delivery_address',
+    city: 'city',
+    province: 'province',
+    country: 'country',
+    website: 'website',
+    monthly_spend: 'monthly_spend', monthlySpend: 'monthly_spend',
+    contact_name: 'contact_name', contactName: 'contact_name',
+    first_name: 'first_name', firstName: 'first_name',
+  };
+  for (const [bodyKey, column] of Object.entries(OPTIONAL_FIELDS)) {
+    const value = req.body?.[bodyKey];
+    if (value !== undefined && value !== null && String(value).trim() !== '') {
+      customerRow[column] = String(value).trim();
+    }
+  }
+  if (req.body?.acceptWhatsapp !== undefined || req.body?.accept_whatsapp !== undefined) {
+    customerRow.accept_whatsapp = Boolean(req.body?.acceptWhatsapp ?? req.body?.accept_whatsapp);
+  }
+
+  // 10000 Club: pre-registered contacts (imported CSV) are auto-approved at
+  // signup and tagged — but NO customer_code is allocated (manual admin step).
+  // Mirrors the DB trigger in migration 040 so it also works pre-migration.
+  let autoApproved = false;
+  try {
+    const { data: preReg } = await supabase
+      .from('proto_active_customers')
+      .select('email, contact_name, first_name, sales_last_12_months, invoice_count, last_purchase_date')
+      .ilike('email', email)
+      .maybeSingle();
+    if (preReg) {
+      autoApproved = true;
+      customerRow.is_approved = true;
+      customerRow.tags = ['10000 club'];
+      if (!customerRow.contact_name && preReg.contact_name) customerRow.contact_name = preReg.contact_name;
+      if (!customerRow.first_name && preReg.first_name) customerRow.first_name = preReg.first_name;
+      if (preReg.sales_last_12_months != null) customerRow.sales_last_12_months = preReg.sales_last_12_months;
+      if (preReg.invoice_count != null) customerRow.invoice_count = preReg.invoice_count;
+      if (preReg.last_purchase_date) customerRow.last_purchase_date = preReg.last_purchase_date;
+    }
+  } catch { /* pre-registration lookup is best-effort */ }
+
+  let { error: customerError } = await supabase
     .from('customers')
     .upsert(customerRow, { onConflict: 'id' });
+
+  // Tags column arrives with migration 040 — retry without it if missing.
+  if (customerError && customerRow.tags && /tags/i.test(customerError.message || '')) {
+    const { tags: _tags, ...withoutTags } = customerRow;
+    ({ error: customerError } = await supabase.from('customers').upsert(withoutTags, { onConflict: 'id' }));
+  }
 
   if (customerError) {
     await supabase.auth.admin.deleteUser(user.id).catch(() => {});
@@ -74,5 +127,7 @@ export default async function handler(req, res) {
     ok: true,
     message: 'Account created successfully',
     userId: user.id,
+    autoApproved,
+    tag: autoApproved ? '10000 club' : null,
   });
 }

@@ -102,17 +102,20 @@ export async function fetchSortMetaForCategory(categoryKey) {
   return { updatedAt: json.updatedAt || null, storeUpdatedAt: json.storeUpdatedAt || null };
 }
 
-export async function persistSortOrder({ categoryKey, skuOrder, legacyKeys = [], expectedStoreUpdatedAt } = {}) {
+export async function persistSortOrder({ categoryKey, skuOrder, legacyKeys = [], expectedCategoryUpdatedAt } = {}) {
   const res = await fetch('/api/category-sort-order', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'same-origin',
-    body: JSON.stringify({ categoryKey, skuOrder, legacyKeys, expectedStoreUpdatedAt }),
+    // Conflict token is per category — saves of other categories (or the
+    // trade portal touching the shared store) must not invalidate this one.
+    body: JSON.stringify({ categoryKey, skuOrder, legacyKeys, expectedCategoryUpdatedAt: expectedCategoryUpdatedAt ?? null }),
   });
   const json = await res.json();
   if (!res.ok) {
     const err = new Error(json.error || 'Save failed');
     err.status = res.status;
+    err.categoryUpdatedAt = json.categoryUpdatedAt || null;
     throw err;
   }
   invalidateSortOrderStore();
