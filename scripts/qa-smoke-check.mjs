@@ -313,6 +313,16 @@ assert.match(pmEngineArchiveSrc, /productListTitle/, 'archive list avoids sku-as
 assert.match(pmEngineArchiveSrc, /pm-code-ellipsis/, 'archive code display uses ellipsis');
 assert.match(pmEngineArchiveSrc, /makeLiveItem/, 'single make live opens category picker modal');
 assert.doesNotMatch(pmEngineArchiveSrc, /window\.confirm\(`Move "\$\{name\}" to the live website/, 'single make live no longer uses bare confirm');
+// Make-live pulls the current taxonomy on open (fresh ids survive renames) and offers deep subcategories
+assert.match(pmEngineArchiveSrc, /const makeLive = \(item\) => \{\s*\/\/[\s\S]*?onRefreshTaxonomy\?\.\(\)/, 'make-live refreshes the taxonomy when it opens');
+assert.match(pmEngineArchiveSrc, /Child category 2/, 'make-live modal offers deeper subcategory levels');
+// Schedule-send opens an in-view popover (not a footer picker clipped off-screen)
+const emailModalSrc = readSrc('src/components/CustomerEmailModal.jsx');
+assert.match(emailModalSrc, /scheduleOpen/, 'schedule send uses an in-view popover');
+assert.match(emailModalSrc, /bottom: 'calc\(100% \+ 8px\)'/, 'schedule popover opens upward so the picker stays in view');
+assert.match(emailModalSrc, /min=\{minScheduleValue\}/, 'schedule picker blocks past times');
+// Scheduled sends auto-refresh so failures surface without a manual reload
+assert.match(readSrc('src/components/ScheduledEmailsPanel.jsx'), /setInterval\(\(\) => \{ void load\(\); \}, 30_000\)/, 'scheduled panel polls while sends are active');
 
 const adminPageArchiveEditSrc = readSrc('src/pages/AdminPage.jsx');
 assert.match(adminPageArchiveEditSrc, /!editingProduct\?\.archivedBy/, 'archive edit modal hides category cascade');

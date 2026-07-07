@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { CalendarClock, CheckCircle2, Loader2, X, XCircle } from 'lucide-react';
+import { CalendarClock, CheckCircle2, Loader2, RefreshCw, X, XCircle } from 'lucide-react';
 import { cancelScheduledEmail, fetchScheduledEmails } from '../lib/customers';
 
 const STATUS_META = {
@@ -42,6 +42,15 @@ export default function ScheduledEmailsPanel({ onShowToast }) {
 
   useEffect(() => { void load(); }, [load]);
 
+  // While a send is due/in-flight, poll so the result (including any failures)
+  // appears without a manual reload. Stops once nothing is pending/sending.
+  const hasActive = items.some((i) => i.status === 'pending' || i.status === 'sending');
+  useEffect(() => {
+    if (!hasActive) return undefined;
+    const id = setInterval(() => { void load(); }, 30_000);
+    return () => clearInterval(id);
+  }, [hasActive, load]);
+
   const handleCancel = async (item) => {
     if (!window.confirm(`Cancel the scheduled email "${item.subject}"?`)) return;
     setCancelling(item.id);
@@ -62,7 +71,12 @@ export default function ScheduledEmailsPanel({ onShowToast }) {
         <p className="adm-section-note" style={{ margin: 0 }}>
           Queued email broadcasts. The scheduler checks every 10 minutes, so sends fire within 10 minutes of their time.
         </p>
-        {loading && <Loader2 size={16} className="spin" aria-label="Loading" />}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {loading && <Loader2 size={16} className="spin" aria-label="Loading" />}
+          <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => void load()} disabled={loading}>
+            <RefreshCw size={13} /> Refresh
+          </button>
+        </div>
       </div>
 
       {items.length === 0 && !loading && (
