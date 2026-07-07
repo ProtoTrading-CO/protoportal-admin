@@ -22,6 +22,7 @@ import {
   X,
 } from 'lucide-react';
 import CategorySidebar, { resolvePathLabels } from './CategorySidebar';
+import ActionMenu from './ActionMenu';
 import BulkProductEditModal from './BulkProductEditModal';
 import BulkMoveModal from './BulkMoveModal';
 import { useCatalogQuery, buildCatalogParams, fetchAllCatalogRows, CATALOG_STATUSES } from '../hooks/useCatalog';
@@ -1440,26 +1441,23 @@ export default function ProductManagerEngine({
                   Show only in stock
                 </label>
               )}
-              {status === 'live' && !reorderMode && (
-                <button
-                  type="button"
-                  className="adm-btn-ghost adm-btn--sm"
-                  disabled={floaterSweeping}
-                  onClick={() => void handleFloaterSweep()}
-                  title="Find live products with no category (or an unknown category) and move them to the Archive, tagged 'floater'"
-                >
-                  {floaterSweeping ? <><Loader2 size={14} className="spin" /> Scanning…</> : <><FolderMinus size={14} /> Clean up floaters</>}
-                </button>
-              )}
-              {browsingMottaro && hiddenMottaro.length > 0 && (
-                <button
-                  type="button"
-                  className="adm-btn-ghost adm-btn--sm"
-                  onClick={() => setRestoreModalOpen(true)}
-                  title="Restore Motarro subcategories you deleted"
-                >
-                  <RotateCcw size={14} /> Restore deleted ({hiddenMottaro.length})
-                </button>
+              {!reorderMode && (
+                <ActionMenu
+                  label="Maintenance"
+                  items={[
+                    (status === 'live') && {
+                      label: floaterSweeping ? 'Scanning…' : 'Clean up floaters',
+                      icon: floaterSweeping ? <Loader2 size={14} className="spin" /> : <FolderMinus size={14} />,
+                      disabled: floaterSweeping,
+                      onClick: () => void handleFloaterSweep(),
+                    },
+                    (browsingMottaro && hiddenMottaro.length > 0) && {
+                      label: `Restore deleted (${hiddenMottaro.length})`,
+                      icon: <RotateCcw size={14} />,
+                      onClick: () => setRestoreModalOpen(true),
+                    },
+                  ].filter(Boolean)}
+                />
               )}
               {rows.length > 0 && status !== 'approval' && !reorderMode && (
                 <div className="pm-select-toolbar" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', width: '100%' }}>
