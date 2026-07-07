@@ -1,85 +1,90 @@
-# Apollo PR4 — Today Homepage
+# Apollo PR4 — Executive Morning Brief
+
+## Product vision
+
+Apollo opens to a **Today** executive briefing — not chat-first. Chat is section **6. Ask Apollo** (collapsed by default).
 
 ## 1. Files changed
 
 | File | Change |
 |------|--------|
-| `src/components/ApolloToday.jsx` | Today UI — tabs, header, focus, snapshots, ops sections |
-| `src/components/ApolloPanel.jsx` | Today-first layout; Ask Apollo below |
-| `src/index.css` | Today styles (tabs, snapshots, severity colours) |
-| `api/intelligence/bi/contexts/daily-brief.js` | `snapshots`, `workspaces.tabs`, focus `title`, website-changes focus |
+| `src/components/ApolloToday.jsx` | Six-section executive brief layout |
+| `src/components/ApolloPanel.jsx` | User name for summary; section 6 chat |
+| `src/lib/apolloTodayPresentation.js` | **New** — presentation-only summary & dedup helpers |
+| `src/index.css` | Executive brief typography, 5-col grids, severity colours |
+| `tests/apollo-today-presentation.test.js` | **New** — presentation unit tests |
+| `docs/apollo-pr4-preview.html` | Static layout preview (open in browser) |
 
-## 2. UI sections added
+**No backend changes** — reuses `buildDailyBriefContext()` as-is.
 
-1. **Workspace tabs** — Today active; Customers, Products, Inventory, Buying, Suppliers (coming soon)
-2. **Header** — Greeting, date, brief time, freshness badge, warnings
-3. **Focus today** — Max 5 hero cards (title, severity, why, next step)
-4. **Snapshot cards** — Orders, listing changes, pending customers, inventory alerts
-5. **Operational** — Inventory, Customers, Products (compact rows)
-6. **Ask Apollo** — Collapsible chat below (in `ApolloPanel`)
-
-## 3. Context fields used
-
-| Field | UI use |
-|-------|--------|
-| `workspaces.tabs` | Tab bar |
-| `focusToday[]` | Hero cards |
-| `snapshots[]` | Snapshot row |
-| `inventoryAlerts` | Inventory section |
-| `customerAlerts.items` | Customers section |
-| `productAlerts.items` | Products section |
-| `quietSignals` | Footer |
-| `meta.generatedAt`, `meta.partial`, `meta.warnings` | Header freshness |
-
-## 4. Backend changes
-
-`daily-brief.js` only — no Query Engine changes:
-
-- `snapshots` array (derived from existing data)
-- `workspaces.tabs` for future navigation
-- Focus items include `title`; website listing change when ≥3 updates
-
-## 5. Queries added
-
-**None.**
-
-## 6. Layout description
+## 2. UI layout (top → bottom)
 
 ```
-[Tabs: Today | Customers | Products | Inventory | Buying | Suppliers]
-[Good morning · Tuesday 7 July 2026 · Brief 8:00 · Live ✓]
+[Date · Executive morning brief · Live · Refresh]
 
-FOCUS TODAY — up to 5 cards (red/amber) with Why + Next
+1. EXECUTIVE SUMMARY
+   Good morning Gee.
+   Proto is healthy overall, but 3 important issues need your attention.
+   3+ products with negative stock, Acme has gone quiet, …
 
-[4 snapshot cards: orders | listings | pending | inventory alerts]
+2. FOCUS TODAY — max 5 hero cards (What / Why / Do + View all)
 
-[Inventory]  [Customers]  [Products]   ← 3 compact columns
+3. BUSINESS HEALTH — Sales · Customers · Inventory · Website · CRM
 
-Quiet: …
+4. SINCE YESTERDAY — compact operational lines
 
-── Ask Apollo (collapsed) ──
+5. OPERATIONAL — Inventory · Customers · Products · Orders · Website
+   (deduped vs Focus Today)
+
+6. ASK APOLLO — collapsible chat (ApolloPanel)
 ```
 
-Readable in ~60–90 seconds. No charts.
+## 3. Components
 
-## 7. Test plan
+| Component | Role |
+|-----------|------|
+| `ApolloToday` | Renders `brief.context` — six sections |
+| `ApolloPanel` | Shell, refresh, chat, passes `userName` |
+| `apolloTodayPresentation.js` | Executive summary prose, CRM pulse, ops dedup |
+
+## 4. Context fields consumed
+
+| Field | Section |
+|-------|---------|
+| `focusToday[]` | Executive summary + Focus today |
+| `businessHealth[]` | Business health (+ CRM derived in presentation) |
+| `whatChangedSinceYesterday[]` | Since yesterday |
+| `inventoryAlerts` | Operational → Inventory |
+| `customerAlerts.items` | Operational → Customers + CRM pulse |
+| `productAlerts.items` | Operational → Products |
+| `orderAlerts.needingReview` | Operational → Orders |
+| `yesterday.listingsUpdated` | Operational → Website |
+| `meta.*` | Freshness bar |
+
+## 5. Screenshots
+
+Open `docs/apollo-pr4-preview.html` in a browser for a static visual of the layout (sample data). Live screenshots require deploy + admin login.
+
+## 6. UX principles applied
+
+- Readable in ~90 seconds; desktop fits without scroll where possible
+- Severity: red / amber / green / grey / blue (opportunity)
+- No charts; calm whitespace; Linear/Stripe-style clarity
+- Focus Today is the hero; chat is follow-up
+
+## 7. Tests
 
 ```bash
 npm run test:bi
 npm run build
 ```
 
-Manual:
+## 8. Blockers before PR5
 
-1. Open Apollo → Today loads without typing
-2. Focus shows ≤5 items with why/next
-3. Snapshot cards reflect context counts
-4. Row click → Ask Apollo pre-filled query
-5. Chat still answers product/customer/inventory questions
-
-## 8. Blockers for PR5
-
-- Workspace routes (tabs are visual only)
+- Workspace tab routes (Customers, Products, Inventory, Buying, Suppliers)
+- True CRM/WhatsApp pulse (needs query or context field)
+- Weekly sales average in executive summary (needs query)
 - Overnight Brief cron
 - Legacy chat intents on `apollo-data.js`
-- ERP-only / missing-listing product alerts (needs queries)
+- ERP-only product alerts
+- `/api/bi/*` debug routes

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { loadJsPDF } from '../lib/lazyJspdf';
+import { displayNameFromEmail } from '../lib/apolloTodayPresentation.js';
+import { getVerifiedSession } from '../lib/auth.js';
 import { Bot, ChevronDown, ChevronUp, FileDown, Loader2, MessageSquare, Send, Sparkles, User, Wrench } from 'lucide-react';
 import ApolloToday from './ApolloToday.jsx';
 
@@ -236,8 +238,16 @@ export default function ApolloPanel({ onShowToast }) {
   const [indexError, setIndexError] = useState('');
   const [rebuildingIndex, setRebuildingIndex] = useState(false);
   const [chatExpanded, setChatExpanded] = useState(messages.length > 0);
+  const [userName, setUserName] = useState(null);
   const scrollRef = useRef(null);
   const askRef = useRef(null);
+
+  useEffect(() => {
+    void getVerifiedSession().then((session) => {
+      const name = displayNameFromEmail(session?.user?.email);
+      if (name) setUserName(name);
+    });
+  }, []);
 
   const loadIndexStatus = useCallback(async (refresh = false) => {
     setIndexError('');
@@ -372,7 +382,7 @@ export default function ApolloPanel({ onShowToast }) {
           <div>
             <h2 className="apollo-head-title">Apollo</h2>
             <p className="apollo-head-sub">
-              Business homepage · {indexStatus ? `${indexStatus.counts?.products?.toLocaleString() ?? '—'} products` : 'loading…'}
+              Executive morning brief · {indexStatus ? `${indexStatus.counts?.products?.toLocaleString() ?? '—'} products indexed` : 'loading…'}
             </p>
             {indexError && <p className="apollo-index-error">{indexError}</p>}
           </div>
@@ -404,6 +414,7 @@ export default function ApolloPanel({ onShowToast }) {
           onAsk={askFromToday}
           onRefresh={() => void rebuildIndex()}
           refreshing={rebuildingIndex}
+          userName={userName}
         />
 
         <section className="apollo-ask" id="ask-apollo" ref={askRef}>
@@ -414,7 +425,7 @@ export default function ApolloPanel({ onShowToast }) {
             aria-expanded={chatExpanded}
           >
             <MessageSquare size={16} />
-            <span>5. Ask Apollo</span>
+            <span>6. Ask Apollo</span>
             {messages.length > 0 && <span className="apollo-ask-count">{messages.length}</span>}
             {chatExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
           </button>
