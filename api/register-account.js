@@ -1,5 +1,6 @@
 import { requireAdminKey } from './_admin-auth.js';
 import { createClient } from '@supabase/supabase-js';
+import { sendWelcomeApprovalEmail } from './_welcome-email.js';
 
 function getAdminClient() {
   return createClient(
@@ -132,11 +133,22 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: customerError.message || 'Failed to create customer profile' });
   }
 
+  // Auto-approved 10000-club members get a welcome/approval email immediately.
+  // Best-effort — a mail failure must never fail the (already committed) signup.
+  let welcomeEmailSent = false;
+  if (autoApproved) {
+    try {
+      const result = await sendWelcomeApprovalEmail({ ...customerRow, id: user.id, email }, { supabase });
+      welcomeEmailSent = Boolean(result?.sent);
+    } catch { /* welcome email is best-effort */ }
+  }
+
   return res.status(200).json({
     ok: true,
     message: 'Account created successfully',
     userId: user.id,
     autoApproved,
+    welcomeEmailSent,
     tag: autoApproved ? '10000 club' : null,
   });
 }

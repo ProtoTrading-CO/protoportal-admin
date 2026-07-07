@@ -36,6 +36,24 @@ Removed features — do NOT reintroduce: Apollo image generation, Cost
 Tracking, product approval tab, reorder mode inside Product Manager,
 recycle-bin buttons, product-type dropdown in the edit modal.
 
+## Customers & email
+- **Customer codes are NEVER auto-generated** — always null or an admin-typed
+  6-char code. Approval does **not** require a code (allocate later).
+- **10000 club** = pre-registered emails (`proto_active_customers` allowlist).
+  On signup they auto-approve (JS + DB trigger, migrations 040/041), get the
+  `10000 club` tag, and are sent a **welcome email** (`api/_welcome-email.js`).
+- **Manual add-customer**: POST `api/admin-customers` with a `section`
+  (`approved` / `approved-10000` → creates auth acct + welcome email;
+  `pre-registration` → allowlist). Never trade-requests, never a code.
+- **Per-customer last email**: `customers.last_email_type` + `last_email_at`
+  (migration 042), stamped by `api/_customer-email-status.js` on every send;
+  shown as a badge in Customer Management.
+- **Per-template test send**: `api/email-test-send.js` (welcome, campaign,
+  order_confirmation, trade_application) → `EmailTemplateTests` in the email modal.
+- **Brevo analytics**: opens/clicks flow via `api/brevo-email-webhook.js`. Set
+  `WEBHOOK_SECRET` in Vercel and append `?secret=…` to the Brevo webhook URL to
+  lock it down; without it the webhook still records (with a warning).
+
 ## Auth
 
 Supabase email/password login with a **3-email allowlist** (`src/lib/auth.js`, mirrored in `api/_admin-auth.js`):

@@ -47,6 +47,7 @@ import {
   Trash2,
   TrendingUp,
   User,
+  UserPlus,
   Users,
   X,
   Zap,
@@ -131,6 +132,7 @@ function SectionSuspenseFallback({ label = 'Loading…' }) {
 
 // Modal-only — chunk downloads the first time the admin opens the dialog.
 const CustomerEmailModal = lazyRetry(() => import('../components/CustomerEmailModal'));
+const AddCustomerModal = lazyRetry(() => import('../components/AddCustomerModal'));
 const CrmContactsModal = lazyRetry(() => import('../components/CrmContactsModal'));
 const FulfillmentSettingsModal = lazyRetry(() => import('../components/FulfillmentSettingsModal'));
 import categories from '../data/categories.json';
@@ -382,6 +384,52 @@ function TenThousandClubBadge({ customer }) {
   );
 }
 
+const LAST_EMAIL_LABELS = {
+  welcome: 'Welcome sent',
+  campaign: 'Campaign sent',
+  order_confirmation: 'Order confirmation sent',
+  trade_application: 'Application ack sent',
+};
+
+function relativeSince(iso) {
+  if (!iso) return '';
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return '';
+  const secs = Math.max(0, Math.round((Date.now() - then) / 1000));
+  if (secs < 60) return 'just now';
+  const mins = Math.round(secs / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.round(hrs / 24);
+  return `${days}d ago`;
+}
+
+/** Small pill showing the last email sent to a customer + when. */
+function LastEmailBadge({ customer }) {
+  const type = customer?.last_email_type;
+  if (!type) return null;
+  const label = LAST_EMAIL_LABELS[type] || 'Email sent';
+  const when = relativeSince(customer?.last_email_at);
+  return (
+    <span
+      title={`Last email: ${label}${customer?.last_email_at ? ` (${new Date(customer.last_email_at).toLocaleString()})` : ''}`}
+      style={{
+        fontSize: 10,
+        fontWeight: 700,
+        color: '#1e40af',
+        background: '#dbeafe',
+        border: '1px solid #93c5fd',
+        borderRadius: 4,
+        padding: '1px 6px',
+        whiteSpace: 'nowrap',
+      }}
+    >
+      ✉ {label}{when ? ` · ${when}` : ''}
+    </span>
+  );
+}
+
 function compactItems(items = []) {
   return items.map((item) => `${item.code}${item.name ? ` ${item.name}` : ''} × ${item.qty}`).join(', ');
 }
@@ -482,6 +530,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   const [customerRows, setCustomerRows] = useState([]);
   const [customerTotal, setCustomerTotal] = useState(0);
   const [customerEmailOpen, setCustomerEmailOpen] = useState(false);
+  const [addCustomerOpen, setAddCustomerOpen] = useState(false);
   const [profileSource, setProfileSource] = useState('portal');
   const [approvalCodes, setApprovalCodes] = useState({});
   const [protoNameSaving, setProtoNameSaving] = useState(null);
@@ -2188,6 +2237,9 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                         ? <><Loader2 size={14} className="spin" /> Exporting…</>
                         : <><Download size={14} /> Export all customers</>}
                     </button>
+                    <button type="button" className="adm-btn-ghost" onClick={() => setAddCustomerOpen(true)} title="Manually add a customer into a chosen section">
+                      <UserPlus size={14} /> Add customer
+                    </button>
                     <button type="button" className="adm-btn-red" onClick={() => setCustomerEmailOpen(true)}>
                       <Mail size={14} /> Send email
                     </button>
@@ -2305,6 +2357,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                               <Check size={14} color="#15803d" strokeWidth={3} aria-label="WhatsApp opted in" />
                             )}
                             <TenThousandClubBadge customer={person} />
+                            <LastEmailBadge customer={person} />
                           </div>
                           <div className="adm-muted" style={{ fontSize: 11 }}>{person.name}{person.business_type ? ` · ${person.business_type}` : ''}</div>
                         </div>
@@ -2364,6 +2417,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                               <Check size={14} color="#15803d" strokeWidth={3} aria-label="WhatsApp opted in" />
                             )}
                             <TenThousandClubBadge customer={person} />
+                            <LastEmailBadge customer={person} />
                           </span>
                           {(person.first_name || person.contact_name) && (
                             <div className="adm-muted" style={{ fontSize: 11 }}>
@@ -2650,6 +2704,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
               <h2 className="adm-drawer-biz" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                 {profileCustomer.business_name || profileCustomer.name}
                 <TenThousandClubBadge customer={profileCustomer} />
+                <LastEmailBadge customer={profileCustomer} />
               </h2>
 
               {profileEditing ? (
@@ -2818,6 +2873,17 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
             onSend={sendCustomerEmailBroadcast}
             onShowToast={showToast}
             adminEmail={customer?.email || ''}
+          />
+        </Suspense>
+      )}
+
+      {addCustomerOpen && (
+        <Suspense fallback={null}>
+          <AddCustomerModal
+            open={addCustomerOpen}
+            onClose={() => setAddCustomerOpen(false)}
+            onShowToast={showToast}
+            onAdded={() => { void loadCustomers(); }}
           />
         </Suspense>
       )}

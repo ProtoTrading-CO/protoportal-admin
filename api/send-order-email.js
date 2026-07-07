@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { getPortalAdminClient, SITE_CONFIG_BUCKET } from './_site-config.js';
 import { CUSTOMER_SEND_FORBIDDEN, isVictorSender } from './_fulfillment-auth.js';
 import { markOrderConfirmationSent } from './_order-confirmation-sent.js';
+import { markCustomerEmailed } from './_customer-email-status.js';
 import {
   buildOrderNoteSections,
   customerDetailRows,
@@ -348,6 +349,16 @@ export default async function handler(req, res) {
       console.error('send-order-email: failed to mark confirmation sent:', err.message);
     }
   }
+
+  // Stamp the customer's "last email sent" status (best-effort, analytics only).
+  try {
+    const sb = createClient(
+      process.env.VITE_SUPABASE_URL,
+      process.env.SUPABASE_SERVICE_ROLE_KEY,
+      { auth: { autoRefreshToken: false, persistSession: false } },
+    );
+    await markCustomerEmailed(sb, { email: to, type: 'order_confirmation' });
+  } catch { /* best effort */ }
 
   return res.status(200).json({
     ok: true,

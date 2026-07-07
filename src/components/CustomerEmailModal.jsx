@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { BarChart2, CalendarClock, Code2, ImagePlus, Loader2, Mail, Send } from 'lucide-react';
 import { scheduleCustomerEmail } from '../lib/customers';
+import EmailTemplateTests from './EmailTemplateTests';
 import { PROTO_URLS } from '../lib/protoUrls';
 import { BUSINESS_TYPES } from '../lib/businessTypes';
 import {
@@ -538,6 +539,8 @@ export default function CustomerEmailModal({
               )}
             </div>
           </div>
+
+          <EmailTemplateTests adminEmail={adminEmail} onShowToast={onShowToast} />
         </div>
 
         <div className="adm-modal-footer adm-modal-footer--end adm-email-modal__footer">
