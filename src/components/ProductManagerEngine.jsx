@@ -31,7 +31,7 @@ import { queryKeys } from '../lib/queryKeys';
 import { sortOrderCategoryKey, lookupSortOrder, applySkuOrder, sortOrderLookupKeys } from '../lib/taxonomy';
 import { persistSortOrder, fetchSortOrderStore, sortMetaForPath, formatSortSavedAt, fetchSortMetaForCategory } from '../lib/sortOrderStore';
 import { exportProductsCatalogXlsx, exportAllProductsCatalogXlsx, exportSelectedProductsXlsx } from '../lib/exportLiveProducts';
-import { bulkMoveProducts, bulkRemoveFromCategory, invalidateAdminCache, updateProduct } from '../lib/products';
+import { bulkMoveProducts, bulkRemoveFromCategory, invalidateAdminCache, updateProduct, previewFloaters, archiveFloaters } from '../lib/products';
 import { formatWebsitePrice } from '../lib/pricing';
 import { childrenOfTree, fetchCategoryProductCounts, subcategoryOptionsFromTree } from '../lib/taxonomyAdmin';
 
@@ -137,22 +137,29 @@ function MovedBadge({ item }) {
   );
 }
 
+const ARCHIVE_TAGS = {
+  nutstore: { label: 'Nutstore', title: 'Archived from Nutstore Product Loader', color: '#5b21b6', background: '#ede9fe' },
+  floater: { label: 'Floater', title: 'Archived by the floater sweep — had no category (or an unknown category)', color: '#9a3412', background: '#ffedd5' },
+  'category-deleted': { label: 'Category deleted', title: 'Archived because its category was deleted', color: '#9a3412', background: '#ffedd5' },
+};
+
 function NutstoreArchiveBadge({ archivedBy }) {
-  if (archivedBy !== 'nutstore') return null;
+  const tag = ARCHIVE_TAGS[archivedBy];
+  if (!tag) return null;
   return (
     <span
-      title="Archived from Nutstore Product Loader"
+      title={tag.title}
       style={{
         fontSize: 10,
         fontWeight: 700,
-        color: '#5b21b6',
-        background: '#ede9fe',
+        color: tag.color,
+        background: tag.background,
         borderRadius: 4,
         padding: '1px 6px',
         whiteSpace: 'nowrap',
       }}
     >
-      Nutstore
+      {tag.label}
     </span>
   );
 }
@@ -832,6 +839,42 @@ export default function ProductManagerEngine({
     }
   };
 
+  const [floaterSweeping, setFloaterSweeping] = useState(false);
+  const handleFloaterSweep = async () => {
+    setFloaterSweeping(true);
+    try {
+      const preview = await previewFloaters();
+      if (!preview.total) {
+        onShowToast?.('No floaters found — every live product belongs to a category.', 'success');
+        return;
+      }
+      const top = (preview.byCategory || []).slice(0, 8)
+        .map((c) => `  • ${c.label}: ${c.count}`).join('\n');
+      const more = (preview.byCategory || []).length > 8 ? `\n  …and ${preview.byCategory.length - 8} more label(s)` : '';
+      const ok = window.confirm(
+        `Found ${preview.total} floater product(s) that don't belong to any category `
+        + `(${preview.byReason.empty} with no category, ${preview.byReason.unmatched} with an unknown category).\n\n`
+        + `By category label:\n${top}${more}\n\n`
+        + `Move all ${preview.total} to the Archive, tagged "floater"? `
+        + `They stay restorable from the Archive. Motarro products are not affected.`,
+      );
+      if (!ok) return;
+      const json = await archiveFloaters();
+      queryClient.invalidateQueries({ queryKey: ['catalog'] });
+      onRefreshTaxonomy?.();
+      setInStockCountsNonce((n) => n + 1);
+      if (json.failed?.length) {
+        onShowToast?.(`Archived ${json.archived} floater(s); ${json.failed.length} failed.`, 'warning');
+      } else {
+        onShowToast?.(`Archived ${json.archived} floater(s) — no more floaters.`, 'success');
+      }
+    } catch (err) {
+      onShowToast?.(err.message || 'Floater sweep failed', 'error');
+    } finally {
+      setFloaterSweeping(false);
+    }
+  };
+
   const handleProductSelect = useCallback((id, item, index, { shiftKey = false, ctrlKey = false } = {}) => {
     setSelectAllView(false);
     const currentRows = rowsRef.current;
@@ -1324,6 +1367,17 @@ export default function ProductManagerEngine({
                   />
                   Show only in stock
                 </label>
+              )}
+              {status === 'live' && !reorderMode && (
+                <button
+                  type="button"
+                  className="adm-btn-ghost adm-btn--sm"
+                  disabled={floaterSweeping}
+                  onClick={() => void handleFloaterSweep()}
+                  title="Find live products with no category (or an unknown category) and move them to the Archive, tagged 'floater'"
+                >
+                  {floaterSweeping ? <><Loader2 size={14} className="spin" /> Scanning…</> : <><FolderMinus size={14} /> Clean up floaters</>}
+                </button>
               )}
               {rows.length > 0 && status !== 'approval' && !reorderMode && (
                 <div className="pm-select-toolbar" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', width: '100%' }}>
