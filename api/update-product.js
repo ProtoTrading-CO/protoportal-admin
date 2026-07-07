@@ -184,6 +184,9 @@ export default async function handler(req, res) {
   const lacksErpData = (Number(verified.price) || 0) === 0
     && (Number(verified.stock_qty) || 0) === 0
     && (Number(verified.available_stock) || 0) === 0;
+  // If the admin typed a name/description in THIS save, the ERP relink must not
+  // overwrite it with the Positill title — it still pulls stock/price.
+  const adminSetName = patch.title !== undefined || patch.original_description !== undefined;
   if (
     changedIdentifier
     && table === 'archived_products'
@@ -212,7 +215,7 @@ export default async function handler(req, res) {
           available_stock: Number(match.sqlRow.available) ?? (Number(match.sqlRow.onhand) || 0),
         };
         const matchedTitle = String(match.sqlRow.title || '').trim();
-        if (matchedTitle) {
+        if (matchedTitle && !adminSetName) {
           relinkPatch.original_description = matchedTitle;
           relinkPatch.title = matchedTitle;
         }
@@ -245,7 +248,7 @@ export default async function handler(req, res) {
         const matchedTitle = String(
           match.websiteRow.original_description || match.websiteRow.title || '',
         ).trim();
-        if (matchedTitle) {
+        if (matchedTitle && !adminSetName) {
           relinkPatch.original_description = matchedTitle;
           relinkPatch.title = matchedTitle;
         }

@@ -38,13 +38,18 @@ export function buildPreflightMatch(selectedProducts, slot, fileList) {
   // Map every identifier a file could be named with (the SKU AND the product's
   // barcode/code) to the owning product's SKU. This lets an image labelled with
   // the code match even after the code was changed to differ from the SKU.
+  // Two passes so a SKU ALWAYS wins its own key — otherwise a product whose
+  // barcode equals another product's SKU could shadow the real owner and route
+  // a file to the wrong product.
   const skuByIdentifier = new Map();
   for (const p of selectedProducts || []) {
     const sku = String(p.sku || '').trim().toUpperCase();
-    if (!sku) continue;
-    if (!skuByIdentifier.has(sku)) skuByIdentifier.set(sku, sku);
+    if (sku) skuByIdentifier.set(sku, sku);
+  }
+  for (const p of selectedProducts || []) {
+    const sku = String(p.sku || '').trim().toUpperCase();
     const bc = String(p.barcode || '').trim().toUpperCase();
-    if (bc && !skuByIdentifier.has(bc)) skuByIdentifier.set(bc, sku);
+    if (sku && bc && !skuByIdentifier.has(bc)) skuByIdentifier.set(bc, sku);
   }
   const resolveSku = (code) => skuByIdentifier.get(String(code || '').trim().toUpperCase()) || null;
 

@@ -38,6 +38,11 @@ async function reapInterrupted() {
 async function claimDueItem() {
   let claimed = null;
   await mutateSiteConfigJson(FILE, EMPTY, (store) => {
+    // Reset on every invocation: mutateSiteConfigJson re-runs this callback on
+    // each optimistic-lock retry. If a concurrent run claimed the item between
+    // our read and write, the retry must NOT return a stale claim from a prior
+    // attempt (that would double-blast the whole audience).
+    claimed = null;
     const now = Date.now();
     const items = (store.items || []).map((item) => ({ ...item }));
     // Only 'pending' items are ever claimed — a 'sending' item is never re-run,
