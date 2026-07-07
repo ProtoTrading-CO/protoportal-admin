@@ -108,6 +108,9 @@ export default async function handler(req, res) {
     if ((action === 'rename' || action === 'deleteNode') && isMottaroId(req.body?.id)) {
       return res.status(400).json({ error: 'Mottaro categories are automatic and cannot be renamed or deleted here.' });
     }
+    if (action === 'addSubcategory' && isMottaroId(req.body?.parentId)) {
+      return res.status(400).json({ error: 'Mottaro is an automatic category — you cannot add subcategories under it.' });
+    }
 
     if (action === 'rename') {
       const { id, label } = req.body;
@@ -175,30 +178,31 @@ export default async function handler(req, res) {
       if (!id) return res.status(400).json({ error: 'id required' });
       const ctx = findNodeContext(tree, id);
       if (!ctx) return res.status(404).json({ error: 'Category not found' });
+      // Archive the products FIRST — only remove the category from the tree if
+      // every product moved to the Archive. If any fail, the category is left
+      // intact so the admin can retry, rather than deleting the node and
+      // leaving orphaned live products behind.
+      let archiveResult;
+      try {
+        archiveResult = await archiveProductsForDeletedNode(supabase, ctx);
+      } catch (err) {
+        return res.status(502).json({ error: `Could not archive products under this category: ${err.message || err}. Category was not deleted — try again.` });
+      }
+      if (archiveResult.failures.length) {
+        return res.status(502).json({
+          error: `${archiveResult.failures.length} of ${archiveResult.total} product(s) could not be archived — category was not deleted. Try again.`,
+          productsArchived: archiveResult.archived,
+        });
+      }
       const { tree: next } = deleteNodeCascade(tree, id);
       const saved = await saveTaxonomy(next, { expectedUpdatedAt });
-      // Products under a deleted category are ARCHIVED (not left uncategorised
-      // on the live site), keeping their labels so the admin can restore them
-      // to live from the Archive later.
-      let productsArchived = 0;
-      let archiveError = null;
-      try {
-        const result = await archiveProductsForDeletedNode(supabase, ctx);
-        productsArchived = result.archived;
-        if (result.failures.length) {
-          archiveError = `${result.failures.length} product(s) could not be archived`;
-        }
-      } catch (err) {
-        archiveError = err.message || 'Failed to archive products';
-      }
       try {
         await pruneSortOrdersForNode(ctx, id);
       } catch { /* best effort — orphaned sort keys are harmless until slug reuse */ }
       return res.status(200).json({
         ok: true,
         id,
-        productsArchived,
-        archiveError,
+        productsArchived: archiveResult.archived,
         updatedAt: saved.updatedAt,
       });
     }

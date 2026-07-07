@@ -448,12 +448,21 @@ export async function archiveProductsForDeletedNode(supabase, ctx, by = CATEGORY
   const skus = rows.map((r) => r.sku).filter(Boolean);
   let archived = 0;
   const failures = [];
-  for (const sku of skus) {
-    const { error } = await supabase.rpc('archive_product', { p_sku: sku, p_by: by });
-    if (error) failures.push({ sku, error: error.message });
-    else archived += 1;
+  // Bounded concurrency — a big category is thousands of per-SKU RPCs; a
+  // sequential loop would exceed the function timeout.
+  const CONCURRENCY = 8;
+  let cursor = 0;
+  async function worker() {
+    while (cursor < skus.length) {
+      const sku = skus[cursor];
+      cursor += 1;
+      const { error } = await supabase.rpc('archive_product', { p_sku: sku, p_by: by });
+      if (error) failures.push({ sku, error: error.message });
+      else archived += 1;
+    }
   }
-  return { archived, failures };
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, skus.length) }, () => worker()));
+  return { archived, failures, total: skus.length };
 }
 
 /** Count rows (live + archived) still carrying the old label under the node scope. */

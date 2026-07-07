@@ -26,18 +26,22 @@ export function parseIntakeFilename(filename) {
     };
   }
 
+  // Capture + strip the OS "(2)" duplicate marker FIRST, before the slot
+  // suffix is read — otherwise "CODE-2 (2).jpg" (a duplicate of a slot-2
+  // image) would hide the slot and corrupt the SKU.
+  let copyIndex = 1;
+  const dupMatch = working.match(/\s+\((\d+)\)$/);
+  if (dupMatch) {
+    copyIndex = Math.max(1, Number.parseInt(dupMatch[1], 10) || 1);
+    working = working.replace(/\s+\(\d+\)$/, '').trim();
+  }
+
   let imageNumber = 1;
   const slotMatch = working.match(SLOT_SUFFIX);
   if (slotMatch?.groups?.sku) {
     working = String(slotMatch.groups.sku || '').trim();
     imageNumber = Math.min(4, Math.max(1, Number.parseInt(slotMatch.groups.slot || '1', 10) || 1));
   }
-
-  // Capture the OS "(2)" duplicate marker BEFORE it's stripped, so same-code
-  // duplicate images can each become their own product record.
-  let copyIndex = 1;
-  const dupMatch = working.match(/\s+\((\d+)\)$/);
-  if (dupMatch) copyIndex = Math.max(1, Number.parseInt(dupMatch[1], 10) || 1);
 
   for (const pattern of NOISE_PATTERNS) {
     working = working.replace(pattern, '').trim();

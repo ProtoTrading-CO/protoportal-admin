@@ -23,17 +23,21 @@ export function parseLoaderFilename(filename) {
     return { code: '', displayCode: '', imageSlot: 1, parseError: 'unsupported_extension' };
   }
 
+  // Capture + strip the OS "(2)" duplicate marker FIRST, before the slot
+  // suffix — otherwise "CODE-2 (2).jpg" would lose its slot and corrupt the code.
+  let copyIndex = 1;
+  const dupMatch = working.match(/\s+\((\d+)\)$/);
+  if (dupMatch) {
+    copyIndex = Math.max(1, Number.parseInt(dupMatch[1], 10) || 1);
+    working = working.replace(/\s+\(\d+\)$/, '').trim();
+  }
+
   let imageSlot = 1;
   const slotMatch = working.match(SLOT_SUFFIX);
   if (slotMatch?.groups?.sku) {
     working = String(slotMatch.groups.sku || '').trim();
     imageSlot = Math.min(4, Math.max(1, Number.parseInt(slotMatch.groups.slot || '1', 10) || 1));
   }
-
-  // Capture the OS "(2)" duplicate marker before it's stripped.
-  let copyIndex = 1;
-  const dupMatch = working.match(/\s+\((\d+)\)$/);
-  if (dupMatch) copyIndex = Math.max(1, Number.parseInt(dupMatch[1], 10) || 1);
 
   for (const pattern of NOISE_PATTERNS) {
     working = working.replace(pattern, '').trim();

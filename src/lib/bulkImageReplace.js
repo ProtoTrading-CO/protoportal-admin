@@ -50,10 +50,15 @@ export function buildPreflightMatch(selectedProducts, slot, fileList) {
       wrongSlot.push({ file, sku, fileSlot: parsed.imageNumber });
       continue;
     }
-    // A duplicate "CODE (2).jpg" targets the sibling record CODE-2 when it's
-    // selected, so each same-code image replaces its own product's image.
-    const siblingSku = siblingSkuForCopy(sku, parsed.copyIndex);
-    if (parsed.copyIndex > 1 && selectedSkuSet.has(siblingSku)) {
+    if (parsed.copyIndex > 1) {
+      // A duplicate "CODE (2).jpg" targets ONLY the sibling record CODE-2.
+      // If that sibling isn't selected, it has no valid target — never fall
+      // back to the base SKU (that would overwrite the base's image).
+      const siblingSku = siblingSkuForCopy(sku, parsed.copyIndex);
+      if (!selectedSkuSet.has(siblingSku)) {
+        extra.push({ file, sku: siblingSku });
+        continue;
+      }
       sku = siblingSku;
     } else if (!selectedSkuSet.has(sku)) {
       // Messy filenames ("8774…-10MM", "8774…&8775…") match on the first
