@@ -1,5 +1,5 @@
 import { requireCronOrAdminKey } from './_admin-auth.js';
-import { readSiteConfigJson, writeSiteConfigJson } from './_site-config.js';
+import { mutateSiteConfigJson } from './_site-config-mutate.js';
 import {
   applyContactFilters,
   fetchAllWatiContacts,
@@ -10,7 +10,54 @@ import {
   watiRequest,
 } from './_wati.js';
 
+export const config = { maxDuration: 300 };
+
 const FILE = 'broadcast-schedule.json';
+const EMPTY = { items: [] };
+// A 'sending' claim older than this is treated as interrupted. We do NOT
+// auto-resend it — re-blasting a WhatsApp broadcast to a whole audience is
+// worse than pausing it — so it's flagged for manual review instead.
+const STALE_CLAIM_MS = 20 * 60 * 1000;
+
+async function reapInterrupted() {
+  await mutateSiteConfigJson(FILE, EMPTY, (store) => {
+    const now = Date.now();
+    let changed = false;
+    const items = (store.items || []).map((item) => {
+      if (item.status === 'sending' && now - (Date.parse(item.claimedAt || '') || 0) > STALE_CLAIM_MS) {
+        changed = true;
+        return { ...item, status: 'failed', failedAt: new Date().toISOString(), error: 'Interrupted mid-send — some contacts may have received it. Review before resending.' };
+      }
+      return item;
+    });
+    if (!changed) return { abort: true };
+    return { store: { items } };
+  });
+}
+
+async function claimDueItem() {
+  let claimed = null;
+  await mutateSiteConfigJson(FILE, EMPTY, (store) => {
+    const now = Date.now();
+    const items = (store.items || []).map((item) => ({ ...item }));
+    // Only 'pending' items are ever claimed — a 'sending' item is never re-run,
+    // so a crash after claim can't double-blast the audience.
+    const due = items.find((item) => item.status === 'pending' && new Date(item.scheduledAt).getTime() <= now);
+    if (!due) return { abort: true };
+    due.status = 'sending';
+    due.claimedAt = new Date().toISOString();
+    claimed = { ...due };
+    return { store: { items } };
+  });
+  return claimed;
+}
+
+async function finishItem(id, patch) {
+  await mutateSiteConfigJson(FILE, EMPTY, (store) => {
+    const items = (store.items || []).map((item) => (item.id === id ? { ...item, ...patch } : item));
+    return { store: { items } };
+  });
+}
 
 async function sendBroadcast({ templateName, broadcastName, businessTypes, joinedStatuses }) {
   const approvedTemplates = await fetchApprovedWatiTemplates();
@@ -59,17 +106,18 @@ export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   if (req.method !== 'GET' && req.method !== 'POST') return res.status(405).end();
 
+  const startedAt = Date.now();
+  const results = [];
+
   try {
-    const data = await readSiteConfigJson(FILE, { items: [] });
-    const items = data.items || [];
-    const now = Date.now();
-    const results = [];
+    await reapInterrupted();
 
-    for (const item of items) {
-      if (item.status !== 'pending') continue;
-      const due = new Date(item.scheduledAt).getTime();
-      if (Number.isNaN(due) || due > now) continue;
-
+    // Claim one due broadcast at a time (atomic compare-and-set) and mark it
+    // 'sending' BEFORE dispatching, so an overlapping tick or a mid-send crash
+    // can never re-blast the whole audience. Leave headroom under the limit.
+    while (Date.now() - startedAt < 180_000) {
+      const item = await claimDueItem();
+      if (!item) break;
       try {
         const result = await sendBroadcast({
           templateName: item.templateName,
@@ -77,20 +125,12 @@ export default async function handler(req, res) {
           businessTypes: item.businessTypes || [],
           joinedStatuses: item.joinedStatuses || [],
         });
-        item.status = 'sent';
-        item.sentAt = new Date().toISOString();
-        item.result = result;
+        await finishItem(item.id, { status: 'sent', sentAt: new Date().toISOString(), result });
         results.push({ id: item.id, status: 'sent', ...result });
       } catch (error) {
-        item.status = 'failed';
-        item.failedAt = new Date().toISOString();
-        item.error = error.message;
+        await finishItem(item.id, { status: 'failed', failedAt: new Date().toISOString(), error: error.message });
         results.push({ id: item.id, status: 'failed', error: error.message });
       }
-    }
-
-    if (results.length) {
-      await writeSiteConfigJson(FILE, { items });
     }
 
     return res.status(200).json({ ok: true, processed: results.length, results });

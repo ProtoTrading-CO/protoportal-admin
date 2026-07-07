@@ -394,6 +394,17 @@ export default async function handler(req, res) {
       if (allowed.has(key)) sanitized[key] = value;
     }
 
+    // A fulfillment order-token holder may manage fulfillment fields, but NOT
+    // directly write money/payment columns — those are admin-only, or must go
+    // through the gated advanceWorkflow (which enforces the Victor check).
+    if (auth.type !== 'admin') {
+      const SENSITIVE = ['paid_at', 'payment_received_at', 'order_sent_at', 'total_ex_vat'];
+      const attempted = SENSITIVE.filter((k) => k in sanitized);
+      if (attempted.length) {
+        return res.status(403).json({ error: `Not allowed to change ${attempted.join(', ')} from an order link.` });
+      }
+    }
+
     // Run the workflow gates (Victor-only, pending-notifications, not-found)
     // BEFORE committing any field write — otherwise a PATCH that bundles field
     // edits with a workflow advance that is later REJECTED still lands the field

@@ -238,7 +238,8 @@ function buildEmailHtml({
 }
 
 export default async function handler(req, res) {
-  if (!(await requireAdminOrOrderToken(req, res))) return;
+  const auth = await requireAdminOrOrderToken(req, res);
+  if (!auth) return;
   if (req.method !== 'POST') return res.status(405).end();
 
   const {
@@ -297,6 +298,18 @@ export default async function handler(req, res) {
       .eq('id', orderId)
       .maybeSingle();
     orderRow = data;
+  }
+
+  // A per-order fulfillment link (order token) may ONLY send the confirmation
+  // to that order's own customer — never to an arbitrary address. Admins
+  // (verified session) can send anywhere (e.g. resend to a corrected email).
+  if (auth.type === 'order') {
+    const orderEmail = String(
+      orderRow?.customers?.email || orderRow?.customer_email || orderRow?.email || '',
+    ).trim().toLowerCase();
+    if (!orderEmail || orderEmail !== String(to).trim().toLowerCase()) {
+      return res.status(403).json({ error: "This order link can only email the order's own customer." });
+    }
   }
 
   const autoNotes = autoNotesBody || deriveAutoNotesFromItems(items).join('\n');
