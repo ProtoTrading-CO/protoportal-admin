@@ -15,6 +15,9 @@ export function catalogRowToSelection(row) {
   const images = row.images || [];
   return {
     sku: row.sku,
+    // Keep the product's barcode/code so an image labelled with the code still
+    // matches even after the code was changed to differ from the SKU.
+    barcode: row.barcode || row.code || '',
     title: row.title || row.name || row.sku,
     images: [
       images[0] || row.image || '',
@@ -32,6 +35,19 @@ export function buildPreflightMatch(selectedProducts, slot, fileList) {
   );
   const selectedSkuSet = new Set(selectedBySku.keys());
 
+  // Map every identifier a file could be named with (the SKU AND the product's
+  // barcode/code) to the owning product's SKU. This lets an image labelled with
+  // the code match even after the code was changed to differ from the SKU.
+  const skuByIdentifier = new Map();
+  for (const p of selectedProducts || []) {
+    const sku = String(p.sku || '').trim().toUpperCase();
+    if (!sku) continue;
+    if (!skuByIdentifier.has(sku)) skuByIdentifier.set(sku, sku);
+    const bc = String(p.barcode || '').trim().toUpperCase();
+    if (bc && !skuByIdentifier.has(bc)) skuByIdentifier.set(bc, sku);
+  }
+  const resolveSku = (code) => skuByIdentifier.get(String(code || '').trim().toUpperCase()) || null;
+
   const ready = [];
   const wrongSlot = [];
   const extra = [];
@@ -41,34 +57,36 @@ export function buildPreflightMatch(selectedProducts, slot, fileList) {
   for (const file of fileList || []) {
     if (!isImageFile(file)) continue;
     const parsed = parseIntakeFilename(file.name);
-    let sku = parsed.sourceSku;
-    if (!sku || parsed.parseError) {
+    const fileCode = parsed.sourceSku;
+    if (!fileCode || parsed.parseError) {
       invalid.push({ file, reason: parsed.parseError || 'invalid' });
       continue;
     }
     if (parsed.imageNumber !== slot) {
-      wrongSlot.push({ file, sku, fileSlot: parsed.imageNumber });
+      wrongSlot.push({ file, sku: fileCode, fileSlot: parsed.imageNumber });
       continue;
     }
+    let sku;
     if (parsed.copyIndex > 1) {
       // A duplicate "CODE (2).jpg" targets ONLY the sibling record CODE-2.
       // If that sibling isn't selected, it has no valid target — never fall
       // back to the base SKU (that would overwrite the base's image).
-      const siblingSku = siblingSkuForCopy(sku, parsed.copyIndex);
-      if (!selectedSkuSet.has(siblingSku)) {
+      const siblingSku = siblingSkuForCopy(fileCode, parsed.copyIndex);
+      sku = resolveSku(siblingSku);
+      if (!sku) {
         extra.push({ file, sku: siblingSku });
         continue;
       }
-      sku = siblingSku;
-    } else if (!selectedSkuSet.has(sku)) {
-      // Messy filenames ("8774…-10MM", "8774…&8775…") match on the first
-      // code before a separator.
-      const candidate = (parsed.skuCandidates || []).find((c) => selectedSkuSet.has(c));
-      if (!candidate) {
-        extra.push({ file, sku });
+    } else {
+      // Match on the file's code, then its barcode/candidate variants
+      // ("8774…-10MM", "8774…&8775…", or the base code without a suffix).
+      sku = resolveSku(fileCode)
+        || (parsed.skuCandidates || []).map(resolveSku).find(Boolean)
+        || null;
+      if (!sku) {
+        extra.push({ file, sku: fileCode });
         continue;
       }
-      sku = candidate;
     }
     matchedSkus.add(sku);
     ready.push({

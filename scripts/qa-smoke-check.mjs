@@ -593,6 +593,13 @@ assert.equal(birSlot2.imageNumber, 2);
 assert.equal(birSlot2.sourceSku, 'BASHEWS');
 assert.match(readSrc('api/bulk-image-replace.js'), /BULK_IMAGE_REPLACE_MAX/, 'bulk image replace API enforces cap');
 assert.match(readSrc('src/components/BulkImageReplacePanel.jsx'), /export default function BulkImageReplacePanel/, 'BulkImageReplacePanel export');
+// Image replace matches a labelled file by the product's SKU OR its barcode/code
+// (so an image named with the code still replaces after the code diverges from SKU).
+const birLibSrc = readSrc('src/lib/bulkImageReplace.js');
+assert.match(birLibSrc, /barcode: row\.barcode \|\| row\.code/, 'selection carries the product barcode/code');
+assert.match(birLibSrc, /skuByIdentifier/, 'preflight maps SKU + barcode to the owning product SKU');
+assert.match(readSrc('api/bulk-image-replace.js'), /fileSku === rowBarcode/, 'server accepts a filename that matches the row barcode');
+assert.match(readSrc('api/bulk-image-replace.js'), /select\('sku, archived_by, barcode'\)/, 'archived lookup fetches the barcode for matching');
 assert.match(sidebarSrc, /id: 'image-replace'/, 'sidebar has Image Replace nav');
 assert.match(adminPageSrc, /BulkImageReplacePanel/, 'AdminPage lazy-loads BulkImageReplacePanel');
 assert.doesNotMatch(readSrc('src/components/ProductLoaderPanel.jsx'), /image-replace/, 'Image Replace removed from Product Loader');
