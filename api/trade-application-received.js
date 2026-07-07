@@ -1,11 +1,8 @@
 import { createClient } from '@supabase/supabase-js';
 import { requireTradeRegisterOrAdmin } from './_admin-auth.js';
-import { buildComposedEmail, sendBrevoTransactional } from './_brevo-email.js';
+import { sendBrevoTransactional } from './_brevo-email.js';
 import { markCustomerEmailed } from './_customer-email-status.js';
-import {
-  buildTradeApplicationEmailBodies,
-  tradeApplicationGreetingName,
-} from '../lib/trade-application-email.mjs';
+import { buildTradeApplicationEmail } from '../lib/trade-application-email.mjs';
 
 /**
  * Send trade-application acknowledgment email (Brevo).
@@ -32,18 +29,12 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { subject, introText } = buildTradeApplicationEmailBodies({ email, name, businessName });
-    const vars = {
-      name: tradeApplicationGreetingName({ email, name, businessName }),
-      business_name: businessName,
-      email,
-    };
-    const composed = buildComposedEmail({ subject, introText }, vars);
+    const { subject, html, text, greeting } = buildTradeApplicationEmail({ email, name, businessName });
     await sendBrevoTransactional({
-      to: { email, name: vars.name || email },
-      subject: composed.subject,
-      htmlContent: composed.htmlContent,
-      textContent: composed.textContent,
+      to: { email, name: greeting || email },
+      subject,
+      htmlContent: html,
+      textContent: text,
     });
     try {
       const sb = createClient(

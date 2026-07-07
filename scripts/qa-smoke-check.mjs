@@ -26,7 +26,7 @@ import { catalogueDisplayTitle, catalogueDescription, loaderCodeLabel } from '..
 import { parseNutstoreFilename } from '../api/_nutstore-filename.js';
 import { resolveProductLoaderMatch } from '../api/_product-loader-lookup.js';
 import {
-  buildTradeApplicationEmailBodies,
+  buildTradeApplicationEmail,
   tradeApplicationGreetingName,
 } from '../lib/trade-application-email.mjs';
 import { parseIntakeFilename } from '../src/lib/parseIntakeFilename.js';
@@ -364,16 +364,22 @@ assert.match(adminPageSrc, /Pre-registration/, 'customer tab renamed to Pre-regi
 assert.match(adminPageSrc, /adm-order-tab--overview/, 'All orders tab uses overview styling');
 console.log('✓ Customer/order UX labels + sidebar notification badges');
 
-// Trade application acknowledgment email
-const tradeBodies = buildTradeApplicationEmailBodies({
+// Trade application "approved" email — full branded HTML sent on application submit
+const tradeEmail = buildTradeApplicationEmail({
   email: 'jane@abc.co.za',
   name: 'Jane Smith',
   businessName: 'ABC Stationers',
 });
-assert.match(tradeBodies.introText, /within 24 hours/i, 'trade application email mentions 24 hours');
+assert.match(tradeEmail.subject, /approved/i, 'trade application email subject says approved');
+assert.match(tradeEmail.html, /^<!DOCTYPE html>/, 'trade application email sends a full standalone HTML document');
+assert.match(tradeEmail.html, /APPLICATION<br>\s*<span[^>]*>APPROVED/, 'trade application email keeps the APPROVED header badge');
+assert.match(tradeEmail.html, /Dear Jane Smith,/, 'trade application email greets the applicant by name');
+assert.doesNotMatch(tradeEmail.html, /\{\{\s*name\s*\}\}/i, 'trade application email resolves the {{name}} tag before sending');
+assert.match(tradeEmail.text, /application has been received and your account has been approved/i, 'trade application email has a plain-text fallback');
 assert.equal(tradeApplicationGreetingName({ name: 'Jane', email: 'x@y.z' }), 'Jane');
 const tradeAppApiSrc = readSrc('api/trade-application-received.js');
 assert.match(tradeAppApiSrc, /requireTradeRegisterOrAdmin/, 'trade-application-received uses register secret auth');
+assert.match(tradeAppApiSrc, /buildTradeApplicationEmail\b/, 'trade-application-received sends the branded approved email');
 assert.match(readSrc('api/register-account.js'), /customer_code:\s*null/, 'register-account never assigns customer_code');
 assert.equal(
   spawnSync('node', ['--check', join(REPO_ROOT, 'api/trade-application-received.js')], { encoding: 'utf8' }).status,
