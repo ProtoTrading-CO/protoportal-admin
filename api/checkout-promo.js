@@ -30,10 +30,15 @@ export default async function handler(req, res) {
     if (!(await requireAdminKey(req, res))) return;
     try {
       const body = req.body || {};
+      // Use the supplied percent when it's a real number (including a
+      // deliberate 0) — `Number(body.percent) || DEFAULTS.percent` turned 0
+      // into 7.5%. Only fall back to the default when it's missing/invalid.
+      const rawPercent = Number(body.percent);
+      const percent = Number.isFinite(rawPercent) ? Math.min(50, Math.max(0, rawPercent)) : DEFAULTS.percent;
       const promo = {
         active: Boolean(body.active),
         code: String(body.code || DEFAULTS.code).trim().toUpperCase(),
-        percent: Math.min(50, Math.max(0, Number(body.percent) || DEFAULTS.percent)),
+        percent,
         label: String(body.label || DEFAULTS.label).trim(),
         updatedAt: new Date().toISOString(),
       };

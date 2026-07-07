@@ -843,4 +843,12 @@ assert.doesNotMatch(readSrc('src/lib/products.js'), /uploadDormantImageWithBase6
 assert.doesNotMatch(readSrc('src/components/ProductLoaderPanel.jsx'), /transform-product-image/, 'dead image-transform handler removed');
 console.log('✓ Full-review pass (perf + serious-bug fixes)');
 
+// Order / promo / broadcast security + correctness hardening
+assert.match(readSrc('api/send-order-email.js'), /order link can only email the order's own customer/, 'order-token send is restricted to the order customer');
+assert.match(readSrc('api/admin-orders.js'), /Not allowed to change .* from an order link/, 'order-token cannot write payment/total columns');
+assert.match(readSrc('api/checkout-promo.js'), /Number\.isFinite\(rawPercent\)/, 'promo percent keeps a deliberate 0%');
+assert.match(readSrc('api/run-scheduled-broadcasts.js'), /claimDueItem/, 'WhatsApp broadcast cron claims items atomically (no re-blast)');
+assert.match(readSrc('api/run-scheduled-broadcasts.js'), /maxDuration: 300/, 'WhatsApp broadcast cron has a duration budget');
+console.log('✓ Order/promo/broadcast hardening');
+
 console.log('\nAll smoke checks passed.');
