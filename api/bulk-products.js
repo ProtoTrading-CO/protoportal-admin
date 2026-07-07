@@ -170,7 +170,7 @@ async function bulkRemoveFromCategory(supabase, normalizedSkus, tree) {
     const groups = new Map();
     for (const [sku, row] of rows) {
       if (!isMotarroProduct(row)) {
-        results.push({ sku, ok: false, error: 'Not a Mottaro product' });
+        results.push({ sku, ok: false, error: 'Not a Motarro product' });
         continue;
       }
       const labels = [row.category, row.subcategory_one, row.subcategory_two, row.subcategory_three, row.subcategory_four];
@@ -298,7 +298,7 @@ export default async function handler(req, res) {
       const tree = await loadTaxonomy();
       const results = await bulkRemoveFromCategory(supabase, normalizedSkus, tree);
       const failed = results.filter((r) => !r.ok);
-      const nonMottaro = failed.filter((r) => r.error === 'Not a Mottaro product').length;
+      const nonMottaro = failed.filter((r) => r.error === 'Not a Motarro product').length;
       return res.status(failed.length ? 207 : 200).json({
         ok: failed.length === 0,
         removed: results.filter((r) => r.ok).length,

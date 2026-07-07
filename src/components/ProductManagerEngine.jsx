@@ -68,7 +68,7 @@ function MultiCategoryBadge({ item, tree }) {
   const primary = [item.categoryLabel, ...(item.subcategoryLabels || [])].filter(Boolean).join(' › ');
   const mottaroLabels = item.alternateCategoryPath?.length
     ? resolvePathLabels(tree, item.alternateCategoryPath).join(' › ')
-    : 'Mottaro';
+    : 'Motarro';
   return (
     <span
       title={`Primary: ${primary}\nAlso in: ${mottaroLabels}`}
@@ -95,7 +95,7 @@ function ProductCategoryLine({ item }) {
       {primary}
       {item.isMultiCategory && item.alternateCategoryPath?.length > 1 && (
         <span style={{ display: 'block', color: '#6d28d9', marginTop: 2 }}>
-          + Mottaro › {item.alternateCategoryPath.slice(1).map((id) => id.replace(/^mottaro-/, '').replace(/-/g, ' ')).join(' › ')}
+          + Motarro › {item.alternateCategoryPath.slice(1).map((id) => id.replace(/^mottaro-/, '').replace(/-/g, ' ')).join(' › ')}
         </span>
       )}
     </div>
@@ -785,7 +785,7 @@ export default function ProductManagerEngine({
     if (selected.size === 0) return false;
     for (const id of selected) {
       const row = selectedRowsRef.current.get(id);
-      if (!row || !(row.isMultiCategory || row.brandLine === 'Mottaro')) return false;
+      if (!row || !(row.isMultiCategory || row.brandLine === 'Motarro')) return false;
     }
     return true;
   }, [selected]);
@@ -803,7 +803,7 @@ export default function ProductManagerEngine({
     const skus = [...selected];
     if (!skus.length) return;
     if (!window.confirm(
-      `Remove ${skus.length} Mottaro product(s) from this category?\n\nThey stay fully browsable under the Mottaro brand tree — only their normal category is cleared.`,
+      `Remove ${skus.length} Motarro product(s) from this category?\n\nThey stay fully browsable under the Motarro brand tree — only their normal category is cleared.`,
     )) return;
     setBulkActionPending(true);
     try {
@@ -1405,7 +1405,7 @@ export default function ProductManagerEngine({
                         className="adm-btn-ghost adm-btn--sm"
                         disabled={bulkActionPending}
                         onClick={() => void confirmRemoveFromCategory()}
-                        title="Detach these Mottaro products from this category — they stay in the Mottaro brand tree"
+                        title="Detach these Motarro products from this category — they stay in the Motarro brand tree"
                       >
                         <FolderMinus size={14} /> Remove from category
                       </button>

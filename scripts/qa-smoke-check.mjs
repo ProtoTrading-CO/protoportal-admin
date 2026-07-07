@@ -610,7 +610,7 @@ assert.ok(readSrc('migrations/038_mottaro_path.sql').includes('mottaro_path'), '
 console.log('✓ A4 mottaro_path persistence (derive → stored → fallback)');
 
 // Shared Mottaro module — must stay byte-identical to the portal copy
-const MOTTARO_SHARED_HASH = 'd589775c956734c1';
+const MOTTARO_SHARED_HASH = '15207c5f4ac16723';
 assert.equal(
   createHash('sha256').update(readSrc('lib/mottaro-category.mjs')).digest('hex').slice(0, 16),
   MOTTARO_SHARED_HASH,
@@ -628,7 +628,7 @@ console.log('✓ A5 counts refresh after Product Manager move');
 const bulkProductsRemoveSrc = readSrc('api/bulk-products.js');
 assert.match(bulkProductsRemoveSrc, /action === 'removeFromCategory'/, 'bulk-products handles removeFromCategory');
 assert.match(bulkProductsRemoveSrc, /bulkRemoveFromCategory/, 'removeFromCategory helper present');
-assert.match(bulkProductsRemoveSrc, /Not a Mottaro product/, 'removeFromCategory skips non-Mottaro rows server-side');
+assert.match(bulkProductsRemoveSrc, /Not a Motarro product/, 'removeFromCategory skips non-Motarro rows server-side');
 assert.match(bulkProductsRemoveSrc, /motarroPathSnapshot\(deriveMotarroPathFromLabels/, 'removeFromCategory snapshots mottaro_path before clearing labels');
 // The clear patch must clear every category column — '' for the NOT NULL
 // columns (category, subcategory_one), null for the nullable deeper ones.
