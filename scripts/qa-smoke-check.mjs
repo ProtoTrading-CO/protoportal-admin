@@ -155,7 +155,22 @@ assert.deepEqual(
 assert.deepEqual(codeLookupCandidates(''), []);
 assert.equal(firstCodeToken('8636737332-8636737333'), '8636737332');
 assert.equal(firstCodeToken('abc123'), 'ABC123');
+assert.deepEqual(codeLookupCandidates('LSL36(2)'), ['LSL36(2)', 'LSL36'], 'a (2) copy marker falls back to the base code');
 console.log('✓ Item 1 codeLookupCandidates + firstCodeToken');
+
+// Folder-upload variant codes: "CODE(2)" / "CODE (2)" = same product, another
+// variant — must resolve the base code and publish to a sibling SKU (CODE-2).
+for (const name of ['LSL36(2).jpg', 'LSL36 (2).jpg']) {
+  const v = parseIntakeFilename(name);
+  assert.equal(v.sourceSku, 'LSL36', `${name} resolves the base code`);
+  assert.equal(v.copyIndex, 2, `${name} is copy #2`);
+}
+assert.equal(parseIntakeFilename('LSL36-2.jpg').sourceSku, 'LSL36', 'dash slot still resolves base code');
+assert.equal(parseIntakeFilename('LSL36-2.jpg').imageNumber, 2, 'dash suffix stays an image slot');
+const batchLookupSrc = readSrc('api/product-loader-batch-lookup.js');
+assert.match(batchLookupSrc, /parsed\.copyIndex > 1 && \(match\.websiteRow \|\| match\.sqlRow\)/, 'batch lookup treats a resolved copy as a variant');
+assert.match(batchLookupSrc, /code: siblingSku/, 'variant publishes to the sibling SKU (no parent overwrite)');
+console.log('✓ Folder-upload copy variants pick up the base product');
 
 const nutstoreParsed = parseNutstoreFilename('863673733-8636737332.jpg');
 assert.equal(nutstoreParsed.code, '863673733');
