@@ -78,23 +78,27 @@ describe('business context formatters', () => {
     expect(md).toContain('Stock below zero');
   });
 
-  it('formatDailyBriefContext assembles from daily_brief context', () => {
+  it('formatDailyBriefContext includes why and action on focus items', () => {
     const md = formatDailyBriefContext({
       data: {
         type: 'daily_brief',
-        yesterday: { orderCount: 0, orders: [], listingsCount: 0, listingsUpdated: [], orderTotalExVat: 0 },
-        focusToday: [{ label: '2 customers awaiting approval', detail: 'A — a@b.com' }],
+        yesterday: { orderCount: 0, orders: [], listingsCount: 0, listingsUpdated: [], orderTotalExVat: 0, summary: [] },
+        focusToday: [{
+          label: '2 customers awaiting approval',
+          detail: 'A — a@b.com',
+          why: 'New trade accounts are waiting.',
+          action: 'Review and approve.',
+        }],
         inventoryAlerts: { negative: [], low: [], zero: [], high: [] },
-        customerAlerts: { pending: [], count: 0 },
+        customerAlerts: { pending: [], count: 0, items: [] },
         orderAlerts: { needingReview: [], count: 0 },
-        quietSignals: ['No new portal orders yesterday.'],
+        quietSignals: [],
         notAvailable: [],
       },
       meta: baseMeta,
     });
-    expect(md).toContain('Daily Brief');
-    expect(md).toContain('Focus today');
-    expect(md).toContain('You can ignore');
+    expect(md).toContain('Why:');
+    expect(md).toContain('Do:');
   });
 });
 

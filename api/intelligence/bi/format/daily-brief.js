@@ -35,6 +35,8 @@ export function formatDailyBriefContext(envelope) {
   if (focus.length) {
     for (const item of focus) {
       lines.push(`- **${item.label}**${item.detail ? ` — ${item.detail}` : ''}`);
+      if (item.why) lines.push(`  _Why: ${item.why}_`);
+      if (item.action) lines.push(`  _Do: ${item.action}_`);
     }
   } else {
     lines.push('- Nothing urgent flagged. Review stock and orders when you have time.');

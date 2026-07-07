@@ -1,10 +1,13 @@
 import { executeQuery } from '../../query-engine/execute.js';
-import { contextEnvelope, mergeContextMeta } from './_helpers.js';
+import { contextEnvelope, daysSince, mergeContextMeta } from './_helpers.js';
 import { buildInventoryContext } from './inventory.js';
 import { buildCustomerAlertsContext } from './customer.js';
 import { startOfToday, startOfYesterday } from '../shared/format.js';
 
 const REVIEW_STATUSES = new Set(['pending', 'order in progress']);
+const LARGE_ORDER_ZAR = 10_000;
+const INACTIVE_DAYS = 60;
+const INACTIVE_MIN_SPEND = 5_000;
 
 export async function buildDailyBriefContext(ctx = {}) {
   const yesterday = startOfYesterday();
@@ -40,11 +43,16 @@ export async function buildDailyBriefContext(ctx = {}) {
   const customerAlerts = customerAlertsEnv.data;
   const listingsUpdated = listingsRes.data?.listings || [];
 
+  const customerInsights = buildCustomerInsights(orders);
+  const productItems = buildProductItems(listingsUpdated, inventory);
+  const customerItems = buildCustomerItems(customerAlerts, customerInsights, ordersYesterday);
+
   const focusToday = buildFocusToday({
     inventory,
     customerAlerts,
     needsReview,
-  });
+    customerInsights,
+  }).slice(0, 5);
 
   const quietSignals = buildQuietSignals({
     ordersYesterday,
@@ -60,6 +68,7 @@ export async function buildDailyBriefContext(ctx = {}) {
       orderTotalExVat: ordersYesterdayTotal,
       listingsUpdated,
       listingsCount: listingsUpdated.length,
+      summary: buildYesterdaySummary(ordersYesterday, listingsUpdated, customerAlerts),
     },
     focusToday,
     inventoryAlerts: {
@@ -71,12 +80,21 @@ export async function buildDailyBriefContext(ctx = {}) {
     customerAlerts: {
       pending: customerAlerts.pending,
       count: customerAlerts.count,
+      items: customerItems,
+    },
+    productAlerts: {
+      items: productItems,
     },
     orderAlerts: {
       needingReview: needsReview.slice(0, 10),
       count: needsReview.length,
+      largeRecent: customerInsights.largeRecent,
     },
     quietSignals,
+    workspaces: {
+      available: ['inventory', 'customer', 'product'],
+      comingSoon: ['supplier', 'buying', 'sales'],
+    },
     notAvailable: [
       'erp_sales_summary',
       'search_analytics',
@@ -95,42 +113,230 @@ export async function buildDailyBriefContext(ctx = {}) {
   return contextEnvelope('daily_brief', context, meta, 'brief.morning');
 }
 
-function buildFocusToday({ inventory, customerAlerts, needsReview }) {
+function buildYesterdaySummary(ordersYesterday, listingsUpdated, customerAlerts) {
+  const lines = [];
+  if (ordersYesterday.length) {
+    lines.push({ type: 'orders', label: `${ordersYesterday.length} order${ordersYesterday.length === 1 ? '' : 's'}`, severity: 'info' });
+  }
+  if (listingsUpdated.length) {
+    lines.push({ type: 'listings', label: `${listingsUpdated.length} listing${listingsUpdated.length === 1 ? '' : 's'} updated`, severity: 'info' });
+  }
+  if (customerAlerts.pending?.length) {
+    lines.push({ type: 'approvals', label: `${customerAlerts.pending.length} pending approval`, severity: 'attention' });
+  }
+  return lines;
+}
+
+function buildCustomerInsights(orders) {
+  const byCustomer = new Map();
+  const sevenDaysAgo = Date.now() - 7 * 86_400_000;
+
+  for (const o of orders) {
+    if (!o.customerId) continue;
+    const prev = byCustomer.get(o.customerId) || {
+      customerId: o.customerId,
+      customer: o.customer,
+      lastAt: o.createdAt,
+      spend: 0,
+      count: 0,
+    };
+    prev.spend += Number(o.totalExVat) || 0;
+    prev.count += 1;
+    if (new Date(o.createdAt) > new Date(prev.lastAt)) {
+      prev.lastAt = o.createdAt;
+      prev.customer = o.customer;
+    }
+    byCustomer.set(o.customerId, prev);
+  }
+
+  const inactiveHighValue = [...byCustomer.values()]
+    .map((c) => ({ ...c, daysSince: daysSince(c.lastAt) }))
+    .filter((c) => c.daysSince >= INACTIVE_DAYS && c.spend >= INACTIVE_MIN_SPEND)
+    .sort((a, b) => b.spend - a.spend);
+
+  const largeRecent = orders
+    .filter((o) => new Date(o.createdAt).getTime() >= sevenDaysAgo && Number(o.totalExVat) >= LARGE_ORDER_ZAR)
+    .sort((a, b) => Number(b.totalExVat) - Number(a.totalExVat))
+    .slice(0, 5)
+    .map((o) => ({
+      id: o.id,
+      customer: o.customer,
+      totalExVat: o.totalExVat,
+      createdAt: o.createdAt,
+      status: o.status,
+    }));
+
+  return { inactiveHighValue, largeRecent };
+}
+
+function buildProductItems(listingsUpdated, inventory) {
+  const items = [];
+
+  for (const p of listingsUpdated.slice(0, 4)) {
+    items.push({
+      type: 'recently_updated',
+      sku: p.sku,
+      title: p.title || p.sku,
+      severity: 'info',
+      reason: 'Website listing changed yesterday',
+      workspace: 'product',
+    });
+  }
+
+  for (const p of (inventory.lists.negative || []).slice(0, 3)) {
+    items.push({
+      type: 'negative_stock',
+      sku: p.sku,
+      title: p.title,
+      stockQty: p.stockQty,
+      severity: 'urgent',
+      reason: 'Stock below zero on live listing',
+      workspace: 'inventory',
+    });
+  }
+
+  for (const p of (inventory.lists.zero || []).slice(0, 2)) {
+    items.push({
+      type: 'zero_stock',
+      sku: p.sku,
+      title: p.title,
+      severity: 'attention',
+      reason: 'Live on website with no stock',
+      workspace: 'inventory',
+    });
+  }
+
+  return items.slice(0, 8);
+}
+
+function buildCustomerItems(customerAlerts, customerInsights, ordersYesterday) {
+  const items = [];
+
+  for (const c of (customerAlerts.pending || []).slice(0, 4)) {
+    items.push({
+      type: 'pending_approval',
+      id: c.id,
+      name: c.name,
+      email: c.email,
+      severity: 'attention',
+      reason: 'Awaiting trade account approval',
+      action: 'Review application and approve or decline',
+      workspace: 'customer',
+    });
+  }
+
+  const inactive = customerInsights.inactiveHighValue[0];
+  if (inactive) {
+    items.push({
+      type: 'inactive_high_value',
+      customerId: inactive.customerId,
+      name: inactive.customer,
+      daysSince: inactive.daysSince,
+      spendExVat: inactive.spend,
+      severity: 'attention',
+      reason: `No portal order in ${inactive.daysSince} days`,
+      action: 'Call or email — high-value customer going quiet',
+      workspace: 'customer',
+    });
+  }
+
+  for (const o of customerInsights.largeRecent.slice(0, 2)) {
+    items.push({
+      type: 'large_recent_order',
+      orderId: o.id,
+      name: o.customer,
+      totalExVat: o.totalExVat,
+      severity: 'info',
+      reason: 'Large order in the last 7 days',
+      action: 'Confirm fulfilment and follow up',
+      workspace: 'customer',
+    });
+  }
+
+  for (const o of ordersYesterday.slice(0, 2)) {
+    items.push({
+      type: 'order_yesterday',
+      orderId: o.id,
+      name: o.customer,
+      totalExVat: o.totalExVat,
+      severity: 'info',
+      reason: 'Order received yesterday',
+      workspace: 'customer',
+    });
+  }
+
+  return items.slice(0, 8);
+}
+
+function buildFocusToday({ inventory, customerAlerts, needsReview, customerInsights }) {
   const focus = [];
   const neg = inventory.lists.negative || [];
   const zero = inventory.lists.zero || [];
   const pending = customerAlerts.pending || [];
+  const inactive = customerInsights.inactiveHighValue[0];
 
   if (neg.length) {
     focus.push({
       type: 'negative_stock',
       priority: 1,
+      severity: 'urgent',
       label: `${neg.length}+ products with negative stock`,
       detail: neg[0] ? `${neg[0].title} (${neg[0].sku}) at ${neg[0].stockQty}` : '',
+      why: 'Negative stock risks overselling and fulfilment failures.',
+      action: 'Review levels and reorder or adjust the website listing.',
+      workspace: 'inventory',
     });
   }
+
+  if (inactive) {
+    focus.push({
+      type: 'inactive_customer',
+      priority: 2,
+      severity: 'attention',
+      label: `${inactive.customer} — quiet for ${inactive.daysSince} days`,
+      detail: `R ${Math.round(inactive.spend).toLocaleString('en-ZA')} in loaded portal orders`,
+      why: 'High-value customers who stop ordering are easy to miss.',
+      action: 'Call or email to check in before they shop elsewhere.',
+      workspace: 'customer',
+    });
+  }
+
   if (pending.length) {
     focus.push({
       type: 'pending_customers',
-      priority: 2,
+      priority: 3,
+      severity: 'attention',
       label: `${pending.length} customer${pending.length === 1 ? '' : 's'} awaiting approval`,
       detail: pending[0] ? `${pending[0].name} — ${pending[0].email}` : '',
+      why: 'New trade accounts are waiting to buy from you.',
+      action: 'Review and approve legitimate applications.',
+      workspace: 'customer',
     });
   }
+
   if (needsReview.length) {
     focus.push({
       type: 'orders_review',
-      priority: 3,
-      label: `${needsReview.length} recent order${needsReview.length === 1 ? '' : 's'} need review`,
+      priority: 4,
+      severity: 'attention',
+      label: `${needsReview.length} order${needsReview.length === 1 ? '' : 's'} need review`,
       detail: needsReview[0] ? `${needsReview[0].customer} · ${needsReview[0].status}` : '',
+      why: 'Pending orders block fulfilment and customer satisfaction.',
+      action: 'Open Order Requests and advance workflow.',
+      workspace: 'sales',
     });
   }
+
   if (zero.length) {
     focus.push({
       type: 'zero_stock',
-      priority: 4,
+      priority: 5,
+      severity: 'attention',
       label: `${zero.length}+ live listings at zero stock`,
       detail: zero[0] ? `${zero[0].title} (${zero[0].sku})` : '',
+      why: 'Customers can see products they cannot buy.',
+      action: 'Reorder, hide listing, or mark out of stock.',
+      workspace: 'inventory',
     });
   }
 

@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { loadJsPDF } from '../lib/lazyJspdf';
-import { Bot, FileDown, Loader2, Send, Sparkles, User, Wrench } from 'lucide-react';
+import { Bot, ChevronDown, ChevronUp, FileDown, Loader2, MessageSquare, Send, Sparkles, User, Wrench } from 'lucide-react';
+import ApolloToday from './ApolloToday.jsx';
 
 const STARTERS = [
-  'Morning brief',
   'Show product 8610100001',
   'Which products have negative stock?',
   'Find customer Plushprops',
@@ -117,39 +117,6 @@ function MessageBody({ content }) {
           : <SimpleMarkdown key={i} text={part.content} />
       ))}
     </>
-  );
-}
-
-function ApolloWelcome({ onStarter, busy, briefMarkdown }) {
-  return (
-    <div className="apollo-welcome">
-      <div className="apollo-welcome-badge">
-        <Bot size={22} strokeWidth={2.2} />
-      </div>
-      <div className="apollo-welcome-copy">
-        <h3>Good morning — <span className="apollo-welcome-name">Apollo</span></h3>
-        <p>
-          Your daily brief loads below. Ask about products, customers, or stock —
-          answers come from live portal and ERP data.
-        </p>
-      </div>
-      {briefMarkdown && (
-        <div className="apollo-brief-card">
-          <SimpleMarkdown text={briefMarkdown} />
-        </div>
-      )}
-      <div className="apollo-welcome-starters">
-        <span className="apollo-welcome-hint">Ask next</span>
-        <div className="apollo-starters">
-          {STARTERS.map((s) => (
-            <button key={s} type="button" className="apollo-starter" onClick={() => onStarter(s)} disabled={busy}>
-              <Sparkles size={13} />
-              <span>{s}</span>
-            </button>
-          ))}
-        </div>
-      </div>
-    </div>
   );
 }
 
@@ -268,7 +235,9 @@ export default function ApolloPanel({ onShowToast }) {
   const [indexStatus, setIndexStatus] = useState(null);
   const [indexError, setIndexError] = useState('');
   const [rebuildingIndex, setRebuildingIndex] = useState(false);
+  const [chatExpanded, setChatExpanded] = useState(messages.length > 0);
   const scrollRef = useRef(null);
+  const askRef = useRef(null);
 
   const loadIndexStatus = useCallback(async (refresh = false) => {
     setIndexError('');
@@ -278,8 +247,8 @@ export default function ApolloPanel({ onShowToast }) {
       if (!res.ok) throw new Error(formatErrorMessage(json?.error, 'Index build failed'));
       if (json.ok) setIndexStatus(json);
     } catch (err) {
-      setIndexError(formatErrorMessage(err, 'Could not load Apollo index'));
-      onShowToast?.(formatErrorMessage(err, 'Apollo index failed'), 'error');
+      setIndexError(formatErrorMessage(err, 'Could not load Apollo briefing'));
+      onShowToast?.(formatErrorMessage(err, 'Apollo briefing failed'), 'error');
     }
   }, [onShowToast]);
 
@@ -291,15 +260,17 @@ export default function ApolloPanel({ onShowToast }) {
     setRebuildingIndex(true);
     try {
       await loadIndexStatus(true);
-      onShowToast?.('Apollo index rebuilt', 'success');
+      onShowToast?.('Briefing refreshed', 'success');
     } finally {
       setRebuildingIndex(false);
     }
   }, [loadIndexStatus, onShowToast]);
 
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
-  }, [messages, busy]);
+    if (chatExpanded) {
+      scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+    }
+  }, [messages, busy, chatExpanded]);
 
   useEffect(() => {
     try {
@@ -309,6 +280,7 @@ export default function ApolloPanel({ onShowToast }) {
 
   const clearChat = useCallback(() => {
     setMessages([]);
+    setChatExpanded(false);
     try { sessionStorage.removeItem(APOLLO_STORAGE_KEY); } catch {}
   }, []);
 
@@ -317,6 +289,7 @@ export default function ApolloPanel({ onShowToast }) {
     if (!trimmed && !fix) return;
     if (busy) return;
 
+    setChatExpanded(true);
     setError('');
     setBusy(true);
 
@@ -377,128 +350,145 @@ export default function ApolloPanel({ onShowToast }) {
     }
   }, [busy, messages]);
 
+  const askFromToday = useCallback((query) => {
+    setChatExpanded(true);
+    askRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    void send(query);
+  }, [send]);
+
   const fixLastReply = useCallback(() => {
     void send('', { fix: true });
   }, [send]);
 
   const lastAssistantIdx = messages.reduce((acc, m, i) => (m.role === 'assistant' ? i : acc), -1);
-  const showWelcome = messages.length === 0;
+  const briefContext = indexStatus?.brief?.context;
+  const briefMeta = indexStatus?.brief?.meta;
 
   return (
-    <div className="apollo-panel">
-      {(
-        <>
-          <div className="apollo-head">
-            <div className="apollo-head-brand">
-              <div className="apollo-head-icon"><Bot size={20} /></div>
-              <div>
-                <h2 className="apollo-head-title">Apollo</h2>
-                <p className="apollo-head-sub">
-                  Daily brief + live data · {indexStatus ? `${indexStatus.counts?.products?.toLocaleString() ?? '—'} products, ${indexStatus.counts?.customers ?? '—'} customers` : 'loading…'}
-                  {indexStatus?.indexedAt && (
-                    <span className="apollo-index-time">
-                      {' · '}Indexed {new Date(indexStatus.indexedAt).toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
-                    </span>
-                  )}
-                </p>
-                {indexError && <p className="apollo-index-error">{indexError}</p>}
-              </div>
-            </div>
-            <div className="apollo-head-actions">
-              <button
-                type="button"
-                className="apollo-action-btn apollo-action-btn--ghost"
-                onClick={() => void rebuildIndex()}
-                disabled={busy || rebuildingIndex}
-                title="Rebuild live product/customer index"
-              >
-                {rebuildingIndex ? <Loader2 size={13} className="spin" /> : <Sparkles size={13} />}
-                {rebuildingIndex ? 'Rebuilding…' : 'Rebuild index'}
-              </button>
-              {messages.length > 0 && (
-                <button type="button" className="apollo-action-btn apollo-action-btn--ghost" onClick={clearChat} disabled={busy}>
-                  Clear chat
-                </button>
-              )}
-            </div>
+    <div className="apollo-panel apollo-panel--today">
+      <div className="apollo-head">
+        <div className="apollo-head-brand">
+          <div className="apollo-head-icon"><Bot size={20} /></div>
+          <div>
+            <h2 className="apollo-head-title">Apollo</h2>
+            <p className="apollo-head-sub">
+              Business homepage · {indexStatus ? `${indexStatus.counts?.products?.toLocaleString() ?? '—'} products` : 'loading…'}
+            </p>
+            {indexError && <p className="apollo-index-error">{indexError}</p>}
           </div>
+        </div>
+        <div className="apollo-head-actions">
+          <button
+            type="button"
+            className="apollo-action-btn apollo-action-btn--ghost"
+            onClick={() => void rebuildIndex()}
+            disabled={busy || rebuildingIndex}
+            title="Refresh Today briefing"
+          >
+            {rebuildingIndex ? <Loader2 size={13} className="spin" /> : <Sparkles size={13} />}
+            {rebuildingIndex ? 'Refreshing…' : 'Refresh'}
+          </button>
+          {messages.length > 0 && (
+            <button type="button" className="apollo-action-btn apollo-action-btn--ghost" onClick={clearChat} disabled={busy}>
+              Clear chat
+            </button>
+          )}
+        </div>
+      </div>
 
-          <div className="apollo-shell">
-            <div className="apollo-chat" ref={scrollRef}>
-              {showWelcome && (
-                <ApolloWelcome
-                  onStarter={send}
-                  busy={busy}
-                  briefMarkdown={indexStatus?.brief?.markdown}
-                />
-              )}
-              {messages.map((msg, i) => (
-                <ChatMessage
-                  key={i}
-                  msg={msg}
-                  isLastAssistant={i === lastAssistantIdx && !busy}
-                  onExportPdf={exportMessagePdf}
-                  onFix={fixLastReply}
-                  fixBusy={busy}
-                />
-              ))}
-              {busy && (
-                <div className="apollo-msg-row apollo-msg-row--assistant">
-                  <div className="apollo-avatar apollo-avatar--assistant" aria-hidden="true">
-                    <Bot size={15} />
+      <div className="apollo-today-page">
+        <ApolloToday
+          context={briefContext}
+          meta={briefMeta}
+          loading={!indexStatus && !indexError}
+          onAsk={askFromToday}
+          onRefresh={() => void rebuildIndex()}
+          refreshing={rebuildingIndex}
+        />
+
+        <section className="apollo-ask" id="ask-apollo" ref={askRef}>
+          <button
+            type="button"
+            className="apollo-ask-toggle"
+            onClick={() => setChatExpanded((v) => !v)}
+            aria-expanded={chatExpanded}
+          >
+            <MessageSquare size={16} />
+            <span>Ask Apollo</span>
+            {messages.length > 0 && <span className="apollo-ask-count">{messages.length}</span>}
+            {chatExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+          </button>
+
+          {chatExpanded && (
+            <div className="apollo-ask-body">
+              <div className="apollo-chat apollo-chat--embedded" ref={scrollRef}>
+                {messages.length === 0 && (
+                  <div className="apollo-ask-starters">
+                    {STARTERS.map((s) => (
+                      <button key={s} type="button" className="apollo-starter apollo-starter--compact" onClick={() => void send(s)} disabled={busy}>
+                        {s}
+                      </button>
+                    ))}
                   </div>
-                  <div className="apollo-msg-stack">
-                    <div className="apollo-msg-meta"><span className="apollo-msg-name">Apollo</span></div>
-                    <div className="apollo-msg-body apollo-msg-body--assistant apollo-thinking">
-                      <Loader2 size={15} className="spin" />
-                      <span>Analysing your data…</span>
+                )}
+                {messages.map((msg, i) => (
+                  <ChatMessage
+                    key={i}
+                    msg={msg}
+                    isLastAssistant={i === lastAssistantIdx && !busy}
+                    onExportPdf={exportMessagePdf}
+                    onFix={fixLastReply}
+                    fixBusy={busy}
+                  />
+                ))}
+                {busy && (
+                  <div className="apollo-msg-row apollo-msg-row--assistant">
+                    <div className="apollo-avatar apollo-avatar--assistant" aria-hidden="true">
+                      <Bot size={15} />
+                    </div>
+                    <div className="apollo-msg-stack">
+                      <div className="apollo-msg-meta"><span className="apollo-msg-name">Apollo</span></div>
+                      <div className="apollo-msg-body apollo-msg-body--assistant apollo-thinking">
+                        <Loader2 size={15} className="spin" />
+                        <span>Analysing your data…</span>
+                      </div>
                     </div>
                   </div>
-                </div>
-              )}
-            </div>
+                )}
+              </div>
 
-            <div className="apollo-composer">
-              {error && <p className="apollo-error">{error}</p>}
-              {!busy && messages.length > 0 && (
-                <div className="apollo-composer-starters">
-                  {STARTERS.slice(0, 3).map((s) => (
-                    <button key={s} type="button" className="apollo-starter apollo-starter--compact" onClick={() => void send(s)} disabled={busy}>
-                      {s}
-                    </button>
-                  ))}
-                </div>
-              )}
-              <form
-                className="apollo-input-row"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  void send(input);
-                }}
-              >
-                <textarea
-                  className="apollo-input apollo-input--textarea"
-                  rows={2}
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault();
-                      void send(input);
-                    }
+              <div className="apollo-composer apollo-composer--embedded">
+                {error && <p className="apollo-error">{error}</p>}
+                <form
+                  className="apollo-input-row"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    void send(input);
                   }}
-                  placeholder="Ask Apollo — product code, customer name, stock priorities…"
-                  disabled={busy}
-                />
-                <button type="submit" className="apollo-send-btn" disabled={busy || !input.trim()} aria-label="Send">
-                  {busy ? <Loader2 size={18} className="spin" /> : <Send size={18} />}
-                </button>
-              </form>
-              <p className="apollo-composer-hint">Enter to send · Shift+Enter for a new line</p>
+                >
+                  <textarea
+                    className="apollo-input apollo-input--textarea"
+                    rows={2}
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        void send(input);
+                      }
+                    }}
+                    placeholder="Ask about a product code, customer, or stock priority…"
+                    disabled={busy}
+                  />
+                  <button type="submit" className="apollo-send-btn" disabled={busy || !input.trim()} aria-label="Send">
+                    {busy ? <Loader2 size={18} className="spin" /> : <Send size={18} />}
+                  </button>
+                </form>
+              </div>
             </div>
-          </div>
-        </>
-      )}
+          )}
+        </section>
+      </div>
     </div>
   );
 }

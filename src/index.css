@@ -5815,6 +5815,225 @@ html, body { background: #f5f5f5; color: #111827; }
 .apollo-send-btn:active:not(:disabled) { transform: scale(0.96); }
 .apollo-send-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
+/* ── Apollo Today (PR4) ─────────────────────────────────────────────────── */
+.apollo-panel--today {
+  min-height: calc(100vh - 120px);
+  max-height: calc(100vh - 100px);
+  overflow: hidden;
+}
+
+.apollo-today-page {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.apollo-today {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 2px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.apollo-today--loading,
+.apollo-today--error {
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  min-height: 200px; color: #64748b; font-size: 14px; font-weight: 600;
+}
+
+.apollo-today-hero {
+  display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;
+  padding: 12px 14px; border-radius: 12px;
+  background: linear-gradient(135deg, #fff5f5 0%, #ffffff 60%);
+  border: 1px solid #fecaca;
+}
+.apollo-today-hero-main { display: flex; gap: 12px; align-items: center; }
+.apollo-today-hero-icon {
+  width: 44px; height: 44px; border-radius: 12px; background: #c40000; color: #fff;
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.apollo-today-eyebrow {
+  margin: 0; font-size: 10px; font-weight: 800; letter-spacing: 0.12em;
+  text-transform: uppercase; color: #c40000;
+}
+.apollo-today-greeting { margin: 2px 0 0; font-size: 22px; font-weight: 800; color: #111; letter-spacing: -0.02em; }
+.apollo-today-datetime { margin: 4px 0 0; font-size: 12px; color: #64748b; font-weight: 500; }
+.apollo-today-hero-meta { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.apollo-today-fresh {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11px; font-weight: 700; padding: 4px 8px; border-radius: 6px;
+}
+.apollo-today-fresh--ok { background: #ecfdf5; color: #047857; }
+.apollo-today-fresh--partial { background: #fffbeb; color: #b45309; }
+.apollo-today-refresh {
+  width: 32px; height: 32px; border-radius: 8px; border: 1px solid #e5e7eb;
+  background: #fff; color: #64748b; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+.apollo-today-refresh:hover { border-color: #c40000; color: #c40000; }
+
+.apollo-today-focus-title {
+  margin: 0 0 8px; font-size: 11px; font-weight: 800; letter-spacing: 0.08em;
+  text-transform: uppercase; color: #64748b;
+}
+.apollo-today-focus-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+.apollo-today-focus-card {
+  padding: 10px 12px; border-radius: 10px; border: 1px solid #e5e7eb;
+  background: #fff; font-size: 12px; line-height: 1.45;
+  display: flex; flex-direction: column; gap: 4px; min-height: 0;
+}
+.apollo-today-focus-card--urgent { border-color: #fecaca; background: #fffbfb; }
+.apollo-today-focus-card--attention { border-color: #fde68a; background: #fffef5; }
+.apollo-today-focus-card--info { border-color: #e5e7eb; }
+.apollo-today-focus-head { display: flex; gap: 6px; align-items: flex-start; }
+.apollo-today-focus-head h4 { margin: 0; font-size: 12px; font-weight: 800; color: #111; line-height: 1.35; }
+.apollo-today-focus-detail { margin: 0; color: #475569; font-size: 11px; }
+.apollo-today-focus-why,
+.apollo-today-focus-action { margin: 0; font-size: 11px; color: #64748b; }
+.apollo-today-focus-foot {
+  margin-top: auto; padding-top: 6px;
+  display: flex; justify-content: space-between; align-items: center; gap: 6px;
+}
+.apollo-today-focus-clear {
+  display: flex; align-items: center; gap: 8px; padding: 12px 14px;
+  border-radius: 10px; background: #ecfdf5; border: 1px solid #a7f3d0;
+  color: #047857; font-size: 13px; font-weight: 600;
+}
+.apollo-today-focus-clear p { margin: 0; }
+
+.apollo-today-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+.apollo-today-section {
+  border: 1px solid #e5e7eb; border-radius: 10px; background: #fff;
+  display: flex; flex-direction: column; min-height: 0; overflow: hidden;
+}
+.apollo-today-section-head {
+  display: flex; align-items: center; gap: 6px; padding: 8px 10px;
+  border-bottom: 1px solid #f1f5f9; background: #fafafa;
+}
+.apollo-today-section-head h3 {
+  margin: 0; font-size: 11px; font-weight: 800; letter-spacing: 0.06em;
+  text-transform: uppercase; color: #374151; flex: 1;
+}
+.apollo-today-section-body { padding: 6px; overflow: hidden; }
+.apollo-today-empty { margin: 8px; font-size: 11px; color: #94a3b8; line-height: 1.45; }
+
+.apollo-today-dot {
+  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; margin-top: 4px;
+}
+.apollo-today-dot--urgent { background: #dc2626; }
+.apollo-today-dot--attention { background: #d97706; }
+.apollo-today-dot--info { background: #94a3b8; }
+.apollo-today-dot--healthy { background: #16a34a; }
+
+.apollo-today-row {
+  display: flex; align-items: flex-start; gap: 6px; width: 100%;
+  padding: 6px 8px; border: none; border-radius: 6px; background: transparent;
+  cursor: pointer; font-family: inherit; text-align: left;
+  transition: background 0.12s;
+}
+.apollo-today-row:hover { background: #f8fafc; }
+.apollo-today-row-title {
+  flex: 1; font-size: 11px; font-weight: 700; color: #111;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.apollo-today-row-meta {
+  font-size: 10px; color: #64748b; max-width: 42%; text-align: right;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+.apollo-today-summary { list-style: none; margin: 0; padding: 4px 6px; }
+.apollo-today-summary-item {
+  font-size: 11px; font-weight: 600; padding: 4px 0; color: #475569;
+}
+.apollo-today-summary-item--attention { color: #b45309; }
+.apollo-today-summary-item--info { color: #64748b; }
+
+.apollo-today-quiet {
+  display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+  border-radius: 8px; background: #f8fafc; border: 1px solid #e2e8f0;
+  font-size: 11px; color: #64748b; font-weight: 500;
+}
+
+.apollo-today-ws {
+  font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
+  color: #94a3b8;
+}
+.apollo-today-ws--soon { color: #cbd5e1; }
+.apollo-today-ws-nav {
+  display: flex; gap: 6px; flex-wrap: wrap; padding-top: 4px;
+}
+.apollo-today-ws-pill {
+  font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 999px;
+  border: 1px dashed #e2e8f0; color: #94a3b8; text-transform: capitalize;
+}
+.apollo-today-link-btn {
+  border: none; background: none; padding: 0;
+  font-size: 10px; font-weight: 700; color: #c40000; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 3px; font-family: inherit;
+}
+.apollo-today-link-btn:hover { text-decoration: underline; }
+
+.apollo-ask {
+  flex-shrink: 0;
+  border-top: 1px solid #e5e7eb;
+  background: #fff;
+}
+.apollo-ask-toggle {
+  width: 100%; display: flex; align-items: center; gap: 8px;
+  padding: 10px 14px; border: none; background: #fafafa;
+  font-size: 13px; font-weight: 800; color: #374151; cursor: pointer;
+  font-family: inherit;
+}
+.apollo-ask-toggle:hover { background: #f1f5f9; }
+.apollo-ask-count {
+  font-size: 10px; font-weight: 800; background: #c40000; color: #fff;
+  padding: 2px 6px; border-radius: 999px; margin-right: auto;
+}
+.apollo-ask-body {
+  border-top: 1px solid #eeeeee;
+  max-height: min(42vh, 380px);
+  display: flex; flex-direction: column;
+}
+.apollo-chat--embedded {
+  flex: 1; min-height: 120px; max-height: 280px;
+  padding: 12px 14px;
+}
+.apollo-composer--embedded {
+  padding: 10px 14px 12px; border-top: 1px solid #eeeeee;
+}
+.apollo-ask-starters {
+  display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px;
+}
+
+@media (max-width: 1200px) {
+  .apollo-today-focus-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .apollo-today-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 640px) {
+  .apollo-panel--today { max-height: none; overflow: visible; }
+  .apollo-today-page { overflow: visible; }
+  .apollo-today { overflow: visible; }
+  .apollo-today-focus-grid { grid-template-columns: 1fr; }
+  .apollo-today-grid { grid-template-columns: 1fr; }
+  .apollo-today-hero { flex-direction: column; }
+  .apollo-chat--embedded { max-height: 240px; }
+}
+
 @media (max-width: 640px) {
   .apollo-chat { padding: 14px; max-height: calc(100vh - 300px); }
   .apollo-welcome { padding: 16px 4px 4px; }
