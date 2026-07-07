@@ -1,15 +1,24 @@
 import { describe, it, expect } from 'vitest';
 import { detectExperienceRoute } from '../../api/apollo-experience.js';
 
-describe('apollo-experience routing', () => {
-  it('routes morning brief phrases', () => {
-    expect(detectExperienceRoute('Morning brief')?.intent).toBe('brief.morning');
-    expect(detectExperienceRoute('What changed yesterday?')?.intent).toBe('brief.morning');
+describe('apollo-experience routing (intent engine)', () => {
+  it('routes morning brief phrases to daily_brief', () => {
+    const route = detectExperienceRoute('What needs my attention today?');
+    expect(route?.intent).toBe('brief.morning');
+    expect(route?.businessIntent).toBe('daily_brief');
+  });
+
+  it('routes yesterday to yesterday_summary', () => {
+    const route = detectExperienceRoute('What changed yesterday?');
+    expect(route?.intent).toBe('brief.morning');
+    expect(route?.businessIntent).toBe('yesterday_summary');
+    expect(route?.formatSection).toBe('yesterday');
   });
 
   it('routes product code lookups', () => {
     const route = detectExperienceRoute('Show product 8610100001');
     expect(route?.intent).toBe('product.context');
+    expect(route?.businessIntent).toBe('product_lookup');
     expect(route?.params.code).toBe('8610100001');
   });
 
@@ -22,6 +31,12 @@ describe('apollo-experience routing', () => {
   it('routes inventory attention', () => {
     expect(detectExperienceRoute('negative stock')?.params.type).toBe('negative');
     expect(detectExperienceRoute('zero stock')?.params.type).toBe('zero');
+  });
+
+  it('returns clarify for ambiguous terms', () => {
+    const route = detectExperienceRoute('Leather');
+    expect(route?.clarify).toBeTruthy();
+    expect(route?.reply).toMatch(/Leather/i);
   });
 
   it('returns null for unrelated queries', () => {

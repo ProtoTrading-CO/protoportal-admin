@@ -3,7 +3,7 @@ import { getApolloData } from './apollo-data.js';
 import { parseIntentHint, classifyIntent } from './apollo-intent.js';
 import { validateIntent, validateAnswer } from './apollo-validate.js';
 import { executeIntent, parseLimit } from './apollo-engine.js';
-import { detectExperienceRoute } from './apollo-experience.js';
+import { detectExperienceRoute, resolveIntent, resolutionToRoute } from './apollo-experience.js';
 import { biRun, biFormat, buildDailyBriefContext, formatDailyBriefContext } from './intelligence/bi/facade.js';
 
 const MODEL = 'google/gemini-2.5-flash';
@@ -26,8 +26,29 @@ I'll answer from live portal and stock data — not guesses.`;
 }
 
 async function answerFromExperience(userQuery, actorEmail) {
-  const route = detectExperienceRoute(userQuery);
-  if (!route) return null;
+  const resolved = resolveIntent(userQuery);
+
+  if (resolved && !resolved.ok) {
+    return {
+      reply: resolved.reply,
+      source: 'intent',
+      intent: 'clarify',
+      businessIntent: 'clarify',
+    };
+  }
+
+  const route = resolved?.ok ? resolutionToRoute(resolved) : detectExperienceRoute(userQuery);
+  if (!route || route.clarify) {
+    if (route?.reply) {
+      return {
+        reply: route.reply,
+        source: 'intent',
+        intent: 'clarify',
+        businessIntent: 'clarify',
+      };
+    }
+    return null;
+  }
 
   const ctx = { actorEmail: actorEmail || 'apollo' };
   const envelope = await biRun(route.intent, route.params, ctx);
@@ -36,9 +57,17 @@ async function answerFromExperience(userQuery, actorEmail) {
   }
 
   return {
-    reply: biFormat(route.intent, envelope, { type: route.formatType || route.params?.type }),
+    reply: biFormat(route.intent, envelope, {
+      type: route.formatType || route.params?.type,
+      formatSection: route.formatSection,
+    }),
     source: 'live-index',
     intent: route.intent,
+    businessIntent: route.businessIntent || route.intent,
+    resolution: {
+      method: route.method,
+      confidence: route.confidence,
+    },
     experience: envelope.data,
   };
 }
@@ -249,6 +278,8 @@ export default async function handler(req, res) {
         reply: experience.reply,
         source: experience.source,
         intent: experience.intent,
+        businessIntent: experience.businessIntent || experience.intent,
+        resolution: experience.resolution || null,
         indexedAt: data.generatedAt,
         indexSize: data.index.length,
       });
