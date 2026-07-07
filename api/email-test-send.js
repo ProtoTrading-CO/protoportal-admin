@@ -6,10 +6,7 @@ import {
   TEST_MERGE_VARS,
 } from './_brevo-email.js';
 import { buildWelcomeEmail } from './_welcome-email.js';
-import {
-  buildTradeApplicationEmailBodies,
-  tradeApplicationGreetingName,
-} from '../lib/trade-application-email.mjs';
+import { buildTradeApplicationEmail } from '../lib/trade-application-email.mjs';
 
 /**
  * Send a TEST copy of any email template to the admin (or any address they
@@ -54,9 +51,8 @@ export default async function handler(req, res) {
     const e = buildWelcomeEmail({ email: to, first_name: TEST_MERGE_VARS.first_name, business_name: TEST_MERGE_VARS.business_name });
     msg = { subject: `[TEST] ${e.subject}`, htmlContent: e.htmlContent, textContent: e.textContent };
   } else if (template === 'trade_application') {
-    const { subject, introText } = buildTradeApplicationEmailBodies({ email: to, name: TEST_MERGE_VARS.name, businessName: TEST_MERGE_VARS.business_name });
-    const c = buildComposedEmail({ subject, introText }, { ...sampleVars, name: tradeApplicationGreetingName({ email: to, name: TEST_MERGE_VARS.name }) });
-    msg = { subject: `[TEST] ${c.subject}`, htmlContent: c.htmlContent, textContent: c.textContent };
+    const e = buildTradeApplicationEmail({ email: to, name: TEST_MERGE_VARS.name, businessName: TEST_MERGE_VARS.business_name });
+    msg = { subject: `[TEST] ${e.subject}`, htmlContent: e.html, textContent: e.text };
   } else if (template === 'order_confirmation') {
     msg = sampleOrderConfirmationEmail();
   } else if (template === 'campaign') {
