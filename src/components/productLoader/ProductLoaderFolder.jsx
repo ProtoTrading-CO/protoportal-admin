@@ -34,6 +34,25 @@ const GROUP_LABELS = {
   not_found: 'Not Found',
 };
 
+// Each image is an independent upload + row write, so a folder can process
+// several at once instead of one-at-a-time (which took minutes on big folders).
+// Kept modest so a large folder doesn't overwhelm the serverless upload route.
+const FOLDER_CONCURRENCY = 5;
+
+/** Run `task` over items with a bounded number of concurrent workers. */
+async function runWithConcurrency(items, limit, task) {
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < items.length) {
+      const idx = cursor;
+      cursor += 1;
+      await task(items[idx], idx);
+    }
+  };
+  const workers = Array.from({ length: Math.min(limit, items.length) }, () => worker());
+  await Promise.all(workers);
+}
+
 export default function ProductLoaderFolder({
   taxonomyTree,
   batchDefaultCategoryId,
@@ -107,17 +126,15 @@ export default function ProductLoaderFolder({
 
     setProcessing(true);
     setError('');
-    setStartedAt(Date.now());
+    const start = Date.now();
+    setStartedAt(start);
     setProgress({ done: 0, total: ready.length, current: '' });
     let published = 0;
     let failed = 0;
+    let done = 0;
 
-    for (let idx = 0; idx < ready.length; idx += 1) {
-      const row = ready[idx];
-      setProgress({ done: idx, total: ready.length, current: row.filename });
-      setElapsedMs(Date.now() - (startedAt || Date.now()));
+    await runWithConcurrency(ready, FOLDER_CONCURRENCY, async (row) => {
       setItems((prev) => prev.map((r) => (r.filename === row.filename ? { ...r, status: 'processing' } : r)));
-
       try {
         await publishLoaderImageItem(row, {
           taxonomyTree,
@@ -132,12 +149,16 @@ export default function ProductLoaderFolder({
         failed += 1;
         await logPublishFailure({ sku: row.code, filename: row.filename, reason: err.message });
         setItems((prev) => prev.map((r) => (r.filename === row.filename ? { ...r, status: 'error', processError: err.message } : r)));
+      } finally {
+        done += 1;
+        setProgress({ done, total: ready.length, current: row.filename });
+        setElapsedMs(Date.now() - start);
       }
-    }
+    });
 
     setStats((s) => ({ ...s, published: s.published + published, failed: s.failed + failed }));
     setProgress({ done: ready.length, total: ready.length, current: '' });
-    setElapsedMs(Date.now() - (startedAt || Date.now()));
+    setElapsedMs(Date.now() - start);
     setProcessing(false);
     onShowToast?.(`Published ${published}${failed ? `, ${failed} failed` : ''}`, failed ? 'warning' : 'success');
   };
@@ -157,9 +178,8 @@ export default function ProductLoaderFolder({
     setProgress({ done: 0, total: rows.length, current: '' });
     let archived = 0;
     let failed = 0;
-    for (let idx = 0; idx < rows.length; idx += 1) {
-      const row = rows[idx];
-      setProgress({ done: idx, total: rows.length, current: row.filename });
+    let done = 0;
+    await runWithConcurrency(rows, FOLDER_CONCURRENCY, async (row) => {
       setItems((prev) => prev.map((r) => (r.filename === row.filename ? { ...r, status: 'processing' } : r)));
       try {
         await archiveLoaderImageItem(row);
@@ -168,8 +188,11 @@ export default function ProductLoaderFolder({
       } catch (err) {
         failed += 1;
         setItems((prev) => prev.map((r) => (r.filename === row.filename ? { ...r, status: 'error', processError: err.message } : r)));
+      } finally {
+        done += 1;
+        setProgress({ done, total: rows.length, current: row.filename });
       }
-    }
+    });
     setProgress({ done: rows.length, total: rows.length, current: '' });
     setProcessing(false);
     setStats((s) => ({ ...s, dormant: s.dormant + archived, failed: s.failed + failed }));
