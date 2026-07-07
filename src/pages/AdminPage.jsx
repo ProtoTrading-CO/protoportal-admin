@@ -1450,6 +1450,13 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
       return;
     }
 
+    // Archived rows keep whatever category they had (their category selector is
+    // hidden — a category is chosen at Make live). Their stored path is often a
+    // synthetic "Uncategorised › General" that the live taxonomy can't resolve,
+    // so sending it back would 409 ("Destination category changed") and block a
+    // plain code/price edit. Only live/new products send a category path.
+    const sendCategory = categoryPath.length > 0 && !editingProduct?.archivedBy;
+
     const payload = {
       code: productForm.code.trim(),
       name: productForm.name.trim(),
@@ -1460,7 +1467,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
       imageThree: productForm.imageThree.trim(),
       imageFour: productForm.imageFour.trim(),
       price: Number(productForm.price || 0),
-      ...(categoryPath.length ? { categoryPath } : {}),
+      ...(sendCategory ? { categoryPath } : {}),
       ...(editingProduct?.updatedAt ? { expectedUpdatedAt: editingProduct.updatedAt } : {}),
     };
     setSaving(editingProduct?.id || 'new-product');

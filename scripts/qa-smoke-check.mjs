@@ -128,6 +128,17 @@ console.log('✓ Item 3 Nutstore hardening (timeouts, parallelism, dedup, cache)
 const updateProductSrc = readSrc('api/update-product.js');
 assert.match(updateProductSrc, /verified\.archived_by === 'nutstore'/, 'update-product re-runs ERP lookup on Nutstore-archived rows');
 assert.match(updateProductSrc, /resolveProductLoaderMatch/, 'update-product imports resolveProductLoaderMatch');
+// Changing the code on ANY archived row lacking stock/price re-runs the Positill lookup
+assert.match(updateProductSrc, /const lacksErpData =/, 'update-product detects archived rows with no ERP data');
+assert.match(updateProductSrc, /verified\.archived_by === 'nutstore' \|\| lacksErpData/, 'relink runs for nutstore OR any archived row that needs SOH/price');
+// Archived edits never send a category path (selectors are hidden; set at Make live)
+assert.match(readSrc('src/pages/AdminPage.jsx'), /const sendCategory = categoryPath\.length > 0 && !editingProduct\?\.archivedBy/, 'archived product edits do not resend a (synthetic) category path');
+// Folder publish/archive run with bounded concurrency instead of one-at-a-time
+const plFolderSrc = readSrc('src/components/productLoader/ProductLoaderFolder.jsx');
+assert.match(plFolderSrc, /async function runWithConcurrency/, 'folder loader has a bounded-concurrency runner');
+assert.equal((plFolderSrc.match(/runWithConcurrency\(/g) || []).length, 3, 'runWithConcurrency defined once and used by both publish + archive');
+assert.doesNotMatch(plFolderSrc, /for \(let idx = 0; idx < ready\.length/, 'folder publish no longer processes one image at a time');
+assert.doesNotMatch(plFolderSrc, /for \(let idx = 0; idx < rows\.length/, 'folder archive no longer processes one image at a time');
 assert.equal(
   spawnSync('node', ['--check', join(REPO_ROOT, 'api/update-product.js')], { encoding: 'utf8' }).status,
   0,
