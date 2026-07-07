@@ -9,6 +9,9 @@ import {
   formatCustomerContext,
   formatInventoryContext,
   formatDailyBriefContext,
+  formatBusinessHealthSection,
+  formatYesterdaySummarySection,
+  formatWebsiteSummarySection,
 } from './format/index.js';
 import { fail } from '../query-engine/envelope.js';
 
@@ -36,7 +39,16 @@ export async function biRun(intent, params = {}, ctx = {}) {
   return handler(params, ctx);
 }
 
+const SECTION_FORMATTERS = {
+  business_health: formatBusinessHealthSection,
+  yesterday: formatYesterdaySummarySection,
+  website: formatWebsiteSummarySection,
+};
+
 export function biFormat(intent, envelope, options = {}) {
+  if (options.formatSection && SECTION_FORMATTERS[options.formatSection]) {
+    return SECTION_FORMATTERS[options.formatSection](envelope);
+  }
   const formatter = FORMATTERS[intent];
   if (!formatter) return envelope?.data ? JSON.stringify(envelope.data, null, 2) : 'No data.';
   return formatter(envelope, options);
