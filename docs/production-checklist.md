@@ -35,7 +35,8 @@ Optional: `ADMIN_DASH_KEY`, `IMAGE_GEN_CONCURRENCY`, R2 vars, OpenRouter model o
 | `/api/run-scheduled-broadcasts` | hourly | WhatsApp broadcasts |
 | `/api/brevo-sync` | every 15 min | CRM contact cache |
 | `/api/purge-expired-staging` | 03:00 daily | Staged image cleanup |
-| `/api/image-gen-budget-check` | 08:00 daily | Budget alert emails (deduped) |
+| `/api/order-notify-sweep` | every 10 min | Re-fire incomplete new-order notifications |
+| `/api/run-scheduled-emails` | every 10 min | Send due scheduled email broadcasts |
 
 All use `requireCronOrAdminKey` — failures return JSON `{ error }` without crashing the platform.
 

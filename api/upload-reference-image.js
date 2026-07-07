@@ -1,6 +1,9 @@
 import { requireAdminKey } from './_admin-auth.js';
 import { uploadTransformedImage } from './_image-pipeline.js';
 
+// Pasted screenshots / drag-dropped photos can be several MB as base64.
+export const config = { api: { bodyParser: { sizeLimit: '12mb' } } };
+
 export default async function handler(req, res) {
   if (!(await requireAdminKey(req, res))) return;
   res.setHeader('Cache-Control', 'no-store');

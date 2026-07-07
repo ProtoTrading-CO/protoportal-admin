@@ -593,7 +593,12 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   };
 
 
+  // Tabs backed by their own panels (analytics, scheduled) are not customer
+  // lists — never query the customers endpoint for them.
+  const CUSTOMER_LIST_TABS = new Set(['requests', 'regular', 'proto-active']);
+
   const loadCustomers = async () => {
+    if (!CUSTOMER_LIST_TABS.has(customerTab)) return;
     setLoading(true);
     try {
       const data = customerTab === 'proto-active'
@@ -1044,7 +1049,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     }
   };
 
-  useEffect(() => { if (activeSection === 'customers' && customerTab !== 'email-analytics') void loadCustomers(); }, [activeSection, customerPage, customerTab, customerSearchDebounced, customerBusinessType]);
+  useEffect(() => { if (activeSection === 'customers') void loadCustomers(); }, [activeSection, customerPage, customerTab, customerSearchDebounced, customerBusinessType]);
   useEffect(() => {
     if (activeSection !== 'customers') return;
     void fetchCrmContactsPage({ page: 1, pageSize: 1 })
@@ -1514,7 +1519,11 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
       queryClient.invalidateQueries({ queryKey: ['catalog'] });
       await reorderPanelRef.current?.refresh?.();
       setEditTaxonomyModal(null);
-      if (renameResult?.orphansRemaining > 0) {
+      if (renameResult?.renameError) {
+        // The tree was renamed but the product-label update failed — products
+        // still carry the old label and would drop out of the renamed node.
+        showToast(`Renamed, but product labels did not update: ${renameResult.renameError}. Reload and try again.`, 'error');
+      } else if (renameResult?.orphansRemaining > 0) {
         showToast(`Category renamed, but ${renameResult.orphansRemaining} product(s) kept the old label — check Uncategorised`, 'error');
       } else {
         showToast('Category updated');
@@ -1598,10 +1607,10 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
       invalidateAdminCache();
       const isCat = deleteSubModal.type === 'category';
       setDeleteSubModal(null);
-      if (deleteResult?.clearError) {
-        showToast(`Deleted, but product labels were not fully cleared: ${deleteResult.clearError}`, 'error');
-      } else if (deleteResult?.productsCleared > 0) {
-        showToast(`${isCat ? 'Category' : 'Subcategory'} deleted — ${deleteResult.productsCleared} product(s) recategorised`);
+      if (deleteResult?.archiveError) {
+        showToast(`Deleted, but some products were not archived: ${deleteResult.archiveError}`, 'error');
+      } else if (deleteResult?.productsArchived > 0) {
+        showToast(`${isCat ? 'Category' : 'Subcategory'} deleted — ${deleteResult.productsArchived} product(s) moved to Archive. Restore them from the Archive tab.`);
       } else {
         showToast(isCat ? 'Category deleted' : 'Subcategory deleted');
       }

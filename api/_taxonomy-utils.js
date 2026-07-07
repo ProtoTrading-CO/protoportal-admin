@@ -28,7 +28,11 @@ export function loadBundledTaxonomy() {
 
 let _taxonomyCache = null;
 let _taxonomyCachedAt = 0;
-const TAXONOMY_TTL_MS = 60_000;
+// Short TTL: the taxonomy store is small and read cheaply, and a long cache
+// meant a category edit could take up to a minute to appear on another warm
+// serverless instance (admin AND main portal) — the "changes don't stick /
+// don't reflect" symptom. Keep it tiny so the mirror stays effectively live.
+const TAXONOMY_TTL_MS = 5_000;
 
 export function invalidateTaxonomyCache() {
   _taxonomyCache = null;
@@ -37,6 +41,17 @@ export function invalidateTaxonomyCache() {
 
 function withMotarro(categories) {
   return injectMotarroIntoTree(Array.isArray(categories) ? categories : []);
+}
+
+/**
+ * Single fresh read for the API layer: returns the Mottaro-injected tree AND
+ * its updatedAt from the SAME store read, so a GET can never pair a new
+ * updatedAt with a stale tree (which corrupted the optimistic-lock token and
+ * made edits look reverted).
+ */
+export async function readTaxonomyForApi() {
+  const store = await readTaxonomyStore();
+  return { categories: withMotarro(store.categories), updatedAt: store.updatedAt };
 }
 
 export async function loadTaxonomy({ bypassCache = false } = {}) {
@@ -414,6 +429,40 @@ export async function clearProductsForDeletedNode(supabase, ctx) {
     cleared += skus.length;
   }
   return cleared;
+}
+
+/** Tag applied to products archived because their category was deleted. */
+export const CATEGORY_DELETED_ARCHIVED_BY = 'category-deleted';
+
+/**
+ * When a category/subcategory is deleted, ARCHIVE the live products under it
+ * (move website_stock → archived_products via the archive_product RPC),
+ * keeping their category labels intact so the admin can find and restore them
+ * from the Archive later. Archived copies already under the node are left
+ * as-is. Returns the number of live products archived.
+ */
+export async function archiveProductsForDeletedNode(supabase, ctx, by = CATEGORY_DELETED_ARCHIVED_BY) {
+  const { filters } = buildNodeProductFilter(ctx);
+  const column = nodeScopeColumn(ctx);
+  const rows = await fetchRowsMatchingNodeScope(supabase, 'website_stock', { column, filters });
+  const skus = rows.map((r) => r.sku).filter(Boolean);
+  let archived = 0;
+  const failures = [];
+  // Bounded concurrency — a big category is thousands of per-SKU RPCs; a
+  // sequential loop would exceed the function timeout.
+  const CONCURRENCY = 8;
+  let cursor = 0;
+  async function worker() {
+    while (cursor < skus.length) {
+      const sku = skus[cursor];
+      cursor += 1;
+      const { error } = await supabase.rpc('archive_product', { p_sku: sku, p_by: by });
+      if (error) failures.push({ sku, error: error.message });
+      else archived += 1;
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, skus.length) }, () => worker()));
+  return { archived, failures, total: skus.length };
 }
 
 /** Count rows (live + archived) still carrying the old label under the node scope. */

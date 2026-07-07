@@ -34,10 +34,13 @@ export async function fetchTaxonomy({ withCounts = false } = {}) {
     const res = await fetch(`/api/taxonomy${qs}`);
     if (!res.ok) throw new Error(`Taxonomy ${res.status}`);
     const json = await res.json();
-    _taxonomyUpdatedAt = json.updatedAt || _taxonomyUpdatedAt;
+    // Only the plain (no-store) GET may set the optimistic-lock token. The
+    // ?counts=1 endpoint is edge-cached and can return a stale updatedAt,
+    // which would poison the token and cause spurious 409s on the next edit.
+    if (!withCounts && json.updatedAt) _taxonomyUpdatedAt = json.updatedAt;
     const categories = json.categories || bundledCategories;
     return withCounts
-      ? { categories, counts: json.counts || {}, updatedAt: _taxonomyUpdatedAt }
+      ? { categories, counts: json.counts || {}, updatedAt: json.updatedAt || null }
       : categories;
   } catch {
     return withCounts ? { categories: bundledCategories, counts: {}, updatedAt: null } : bundledCategories;
@@ -49,7 +52,8 @@ export async function fetchCategoryProductCounts({ onlyInStock = false } = {}) {
   const res = await fetch(`/api/taxonomy?counts=1${stockParam}&_=${Date.now()}`, { cache: 'no-store' });
   const json = await res.json();
   if (!res.ok) throw new Error(json.error || 'Failed to load category counts');
-  if (json.updatedAt) _taxonomyUpdatedAt = json.updatedAt;
+  // Do NOT set _taxonomyUpdatedAt here — see fetchTaxonomy note; the counts
+  // response can be stale and corrupt the edit lock token.
   return json.counts || {};
 }
 
@@ -65,9 +69,9 @@ export async function createSubcategory(parentId, label) {
   return postTaxonomy({ action: 'addSubcategory', parentId, label });
 }
 
-// Deletes a category or subcategory (and its subtree). Affected products get
-// the deleted labels cleared server-side (they fall back to Uncategorised or
-// their remaining parent) — the response reports productsCleared.
+// Deletes a category or subcategory (and its subtree). Live products under it
+// are ARCHIVED server-side (kept with their labels so they can be restored
+// from the Archive later) — the response reports productsArchived.
 export async function deleteTaxonomyNode(id) {
   return postTaxonomy({ action: 'deleteNode', id });
 }

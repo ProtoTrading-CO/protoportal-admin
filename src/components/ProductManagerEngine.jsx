@@ -692,7 +692,7 @@ export default function ProductManagerEngine({
         categoryKey,
         skuOrder,
         legacyKeys: sortOrderLookupKeys(categoryPath, tree).filter((k) => k !== categoryKey),
-        expectedStoreUpdatedAt: storeUpdatedAtRef.current,
+        expectedCategoryUpdatedAt: storeUpdatedAtRef.current,
       });
       setSortOrderMeta({ updatedAt: json.updatedAt, storeUpdatedAt: json.storeUpdatedAt || null });
       storeUpdatedAtRef.current = json.storeUpdatedAt || null;

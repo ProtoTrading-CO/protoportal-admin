@@ -150,6 +150,29 @@ export default function CustomerEmailModal({
     }
   };
 
+  // Paste or drag an image straight into the body — uploads and embeds it.
+  const handleBodyPaste = (e) => {
+    const items = e.clipboardData?.items || [];
+    for (const item of items) {
+      if (item.type?.startsWith('image/')) {
+        const file = item.getAsFile();
+        if (file) {
+          e.preventDefault();
+          void handleAttachImage(file);
+          return;
+        }
+      }
+    }
+  };
+
+  const handleBodyDrop = (e) => {
+    const file = [...(e.dataTransfer?.files || [])].find((f) => f.type?.startsWith('image/'));
+    if (file) {
+      e.preventDefault();
+      void handleAttachImage(file);
+    }
+  };
+
   const selectedAudience = useMemo(
     () => AUDIENCE_OPTIONS.find((opt) => opt.value === audience) || AUDIENCE_OPTIONS[0],
     [audience],
@@ -410,10 +433,13 @@ export default function CustomerEmailModal({
               value={introBody}
               onChange={(e) => setIntroBody(e.target.value)}
               onFocus={() => { activeFieldRef.current = 'intro'; }}
+              onPaste={handleBodyPaste}
+              onDrop={handleBodyDrop}
+              onDragOver={(e) => e.preventDefault()}
               placeholder={'Hi {{first_name}},\n\nWe have an update for {{business_name}}…'}
               spellCheck
             />
-            <span className="adm-email-field__hint">Plain text intro shown above any HTML. Blank lines start new paragraphs.</span>
+            <span className="adm-email-field__hint">Plain text intro shown above any HTML. Paste or drop an image here to embed it. Blank lines start new paragraphs.</span>
             <MergeTagBar onInsert={insertMergeTag} />
           </div>
 
@@ -476,6 +502,9 @@ export default function CustomerEmailModal({
                     value={htmlBody}
                     onChange={(e) => setHtmlBody(e.target.value)}
                     onFocus={() => { activeFieldRef.current = 'html'; }}
+                    onPaste={handleBodyPaste}
+                    onDrop={handleBodyDrop}
+                    onDragOver={(e) => e.preventDefault()}
                     placeholder={'<table>...</table>\n<p>Optional rich HTML banner or template below your message body.</p>'}
                     spellCheck={false}
                   />

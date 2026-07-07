@@ -328,7 +328,6 @@ console.log('✓ Item 5 UI polish (labels + move gap 409)');
 // only ships Product Manager. Assert we don't accidentally re-add eager imports.
 assert.match(adminPageSrc, /const AnalyticsHub = lazyRetry\(/, 'AnalyticsHub is lazy');
 assert.match(adminPageSrc, /const ApolloPanel = lazyRetry\(/, 'ApolloPanel is lazy');
-assert.match(adminPageSrc, /const CostTrackingPanel = lazyRetry\(/, 'CostTrackingPanel is lazy');
 assert.match(adminPageSrc, /const ProductLoaderPanel = lazyRetry\(/, 'ProductLoaderPanel is lazy');
 assert.match(adminPageSrc, /const WhatsappPanel = lazyRetry\(/, 'WhatsappPanel is lazy');
 assert.match(adminPageSrc, /const CustomerEmailModal = lazyRetry\(/, 'CustomerEmailModal is lazy');

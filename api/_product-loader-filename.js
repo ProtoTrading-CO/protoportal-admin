@@ -23,6 +23,15 @@ export function parseLoaderFilename(filename) {
     return { code: '', displayCode: '', imageSlot: 1, parseError: 'unsupported_extension' };
   }
 
+  // Capture + strip the OS "(2)" duplicate marker FIRST, before the slot
+  // suffix — otherwise "CODE-2 (2).jpg" would lose its slot and corrupt the code.
+  let copyIndex = 1;
+  const dupMatch = working.match(/\s+\((\d+)\)$/);
+  if (dupMatch) {
+    copyIndex = Math.max(1, Number.parseInt(dupMatch[1], 10) || 1);
+    working = working.replace(/\s+\(\d+\)$/, '').trim();
+  }
+
   let imageSlot = 1;
   const slotMatch = working.match(SLOT_SUFFIX);
   if (slotMatch?.groups?.sku) {
@@ -52,10 +61,18 @@ export function parseLoaderFilename(filename) {
     code,
     displayCode,
     imageSlot,
+    copyIndex,
     parseError: null,
     codeCandidates: codeLookupCandidates(working),
     primaryCode: firstCodeToken(working),
   };
+}
+
+/** Sibling SKU a duplicate copy publishes to: CODE, CODE-2, CODE-3… */
+export function siblingSkuForCopy(baseSku, copyIndex) {
+  const sku = String(baseSku || '').trim().toUpperCase();
+  const n = Math.max(1, Number(copyIndex) || 1);
+  return n <= 1 ? sku : `${sku}-${n}`;
 }
 
 export function isSupportedImageFilename(filename) {

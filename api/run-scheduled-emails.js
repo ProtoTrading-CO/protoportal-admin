@@ -5,21 +5,40 @@ import { EMPTY_SCHEDULE, SCHEDULED_EMAILS_FILE } from './scheduled-emails.js';
 
 export const config = { maxDuration: 300 };
 
-// A 'sending' claim older than this is treated as a crashed run and retried.
+// A 'sending' claim older than this is treated as interrupted. We do NOT
+// auto-resend it — re-blasting a broadcast to a whole audience is worse than
+// pausing it — so it's flagged for manual review instead.
 const STALE_CLAIM_MS = 20 * 60 * 1000;
+
+async function reapInterruptedSends() {
+  await mutateSiteConfigJson(SCHEDULED_EMAILS_FILE, EMPTY_SCHEDULE, (store) => {
+    const now = Date.now();
+    let changed = false;
+    const items = (store.items || []).map((item) => {
+      if (item.status === 'sending' && now - (Date.parse(item.claimedAt || '') || 0) > STALE_CLAIM_MS) {
+        changed = true;
+        return {
+          ...item,
+          status: 'failed',
+          failedAt: new Date().toISOString(),
+          error: 'Interrupted mid-send — some recipients may have received it. Review before resending.',
+        };
+      }
+      return item;
+    });
+    if (!changed) return { abort: true };
+    return { store: { items } };
+  });
+}
 
 async function claimDueItem() {
   let claimed = null;
   await mutateSiteConfigJson(SCHEDULED_EMAILS_FILE, EMPTY_SCHEDULE, (store) => {
     const now = Date.now();
     const items = (store.items || []).map((item) => ({ ...item }));
-    const due = items.find((item) => {
-      if (item.status === 'pending') return new Date(item.scheduledAt).getTime() <= now;
-      if (item.status === 'sending') {
-        return now - (Date.parse(item.claimedAt || '') || 0) > STALE_CLAIM_MS;
-      }
-      return false;
-    });
+    // Only pending items are ever claimed — a 'sending' item is never
+    // re-run, so a failed status-write can't cause a double broadcast.
+    const due = items.find((item) => item.status === 'pending' && new Date(item.scheduledAt).getTime() <= now);
     if (!due) return { abort: true };
     due.status = 'sending';
     due.claimedAt = new Date().toISOString();
@@ -43,6 +62,8 @@ export default async function handler(req, res) {
 
   const startedAt = Date.now();
   const results = [];
+
+  await reapInterruptedSends();
 
   // Leave ~90s headroom per additional job so a claimed item always gets to
   // finish inside the function limit.
