@@ -117,16 +117,30 @@ export async function sendBrevoTransactional({ to, subject, htmlContent, textCon
   };
   if (textContent) payload.textContent = textContent;
 
-  const resp = await fetch('https://api.brevo.com/v3/smtp/email', {
-    method: 'POST',
-    headers: {
-      accept: 'application/json',
-      'content-type': 'application/json',
-      'api-key': apiKey,
-    },
-    body: JSON.stringify(payload),
-  });
-  const body = await resp.json().catch(() => ({}));
+  // Retry on rate-limit (429) and transient 5xx with backoff so a burst of
+  // concurrent sends paces itself instead of dropping recipients.
+  let resp;
+  let body = {};
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    resp = await fetch('https://api.brevo.com/v3/smtp/email', {
+      method: 'POST',
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json',
+        'api-key': apiKey,
+      },
+      body: JSON.stringify(payload),
+    });
+    body = await resp.json().catch(() => ({}));
+    if (resp.ok) break;
+    const retryable = resp.status === 429 || resp.status >= 500;
+    if (!retryable || attempt === 4) break;
+    const retryAfter = Number(resp.headers.get('retry-after'));
+    const waitMs = Number.isFinite(retryAfter) && retryAfter > 0
+      ? retryAfter * 1000
+      : Math.min(8000, 400 * 2 ** attempt) + Math.floor(Math.random() * 250);
+    await new Promise((r) => setTimeout(r, waitMs));
+  }
   if (!resp.ok) throw new Error(body.message || `Brevo ${resp.status}`);
   return body;
 }

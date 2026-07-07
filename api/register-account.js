@@ -50,7 +50,10 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'Account was created without a user id' });
   }
 
-  const customerRow = {
+  // Core columns are guaranteed to exist — if an optional column below is
+  // missing (schema drift / migration not yet run), we fall back to exactly
+  // this row so signup always succeeds and the account is never deleted.
+  const coreRow = {
     id: user.id,
     email,
     name,
@@ -60,6 +63,7 @@ export default async function handler(req, res) {
     business_name: String(req.body?.businessName || req.body?.business_name || '').trim() || name,
     customer_code: null,
   };
+  const customerRow = { ...coreRow };
 
   // Every signup field the register portal sends lands on the profile.
   const OPTIONAL_FIELDS = {
@@ -98,6 +102,9 @@ export default async function handler(req, res) {
       .maybeSingle();
     if (preReg) {
       autoApproved = true;
+      // The critical outcome — approval — is applied to BOTH rows so it
+      // survives the core-only fallback below.
+      coreRow.is_approved = true;
       customerRow.is_approved = true;
       customerRow.tags = ['10000 club'];
       if (!customerRow.contact_name && preReg.contact_name) customerRow.contact_name = preReg.contact_name;
@@ -112,10 +119,12 @@ export default async function handler(req, res) {
     .from('customers')
     .upsert(customerRow, { onConflict: 'id' });
 
-  // Tags column arrives with migration 040 — retry without it if missing.
-  if (customerError && customerRow.tags && /tags/i.test(customerError.message || '')) {
-    const { tags: _tags, ...withoutTags } = customerRow;
-    ({ error: customerError } = await supabase.from('customers').upsert(withoutTags, { onConflict: 'id' }));
+  // Any column error (e.g. tags before migration 040, or schema drift) must
+  // never block a signup or delete the auth user — retry with core columns
+  // only. The customer still registers, and a pre-registered one stays
+  // approved; only the optional profile/tag extras are dropped.
+  if (customerError) {
+    ({ error: customerError } = await supabase.from('customers').upsert(coreRow, { onConflict: 'id' }));
   }
 
   if (customerError) {
