@@ -62,15 +62,25 @@ export async function buildDailyBriefContext(ctx = {}) {
     needsReview,
   });
 
-  const snapshots = buildSnapshots({
+  const whatChangedSinceYesterday = buildWhatChangedSinceYesterday({
     ordersYesterday,
+    ordersYesterdayTotal,
     listingsUpdated,
     customerAlerts,
+  });
+
+  const businessHealth = buildBusinessHealth({
+    ordersYesterday,
+    ordersYesterdayTotal,
+    customerAlerts,
     inventory,
+    needsReview,
+    listingsUpdated,
   });
 
   const context = {
-    snapshots,
+    whatChangedSinceYesterday,
+    businessHealth,
     yesterday: {
       orders: ordersYesterday,
       orderCount: ordersYesterday.length,
@@ -130,37 +140,91 @@ export async function buildDailyBriefContext(ctx = {}) {
   return contextEnvelope('daily_brief', context, meta, 'brief.morning');
 }
 
-function buildSnapshots({ ordersYesterday, listingsUpdated, customerAlerts, inventory }) {
-  const invUrgent = (inventory.lists.negative || []).length;
-  const invAttention = (inventory.lists.low || []).length + (inventory.lists.zero || []).length;
-  const invTotal = invUrgent + invAttention + (inventory.lists.high || []).length;
+function buildWhatChangedSinceYesterday({ ordersYesterday, ordersYesterdayTotal, listingsUpdated, customerAlerts }) {
+  const lines = [];
+
+  if (ordersYesterday.length) {
+    const total = ordersYesterdayTotal
+      ? ` · R ${Math.round(ordersYesterdayTotal).toLocaleString('en-ZA')} ex VAT`
+      : '';
+    lines.push({
+      type: 'orders',
+      text: `${ordersYesterday.length} portal order${ordersYesterday.length === 1 ? '' : 's'} received${total}`,
+      severity: 'info',
+    });
+  } else {
+    lines.push({ type: 'orders', text: 'No portal orders yesterday', severity: 'healthy' });
+  }
+
+  if (listingsUpdated.length) {
+    lines.push({
+      type: 'listings',
+      text: `${listingsUpdated.length} website listing${listingsUpdated.length === 1 ? '' : 's'} updated`,
+      severity: 'info',
+    });
+  }
+
   const pending = customerAlerts.pending?.length || 0;
+  if (pending) {
+    lines.push({
+      type: 'approvals',
+      text: `${pending} customer${pending === 1 ? '' : 's'} awaiting approval`,
+      severity: 'attention',
+    });
+  }
+
+  if (!lines.some((l) => l.type === 'listings') && !pending && !ordersYesterday.length) {
+    lines.push({ type: 'quiet', text: 'Quiet day across portal and website', severity: 'healthy' });
+  }
+
+  return lines;
+}
+
+function buildBusinessHealth({ ordersYesterday, ordersYesterdayTotal, customerAlerts, inventory, needsReview, listingsUpdated }) {
+  const neg = (inventory.lists.negative || []).length;
+  const low = (inventory.lists.low || []).length;
+  const zero = (inventory.lists.zero || []).length;
+  const invAlerts = neg + low + zero;
+  const pending = customerAlerts.pending?.length || 0;
+  const review = needsReview.length;
+
+  const salesStatus = ordersYesterday.length
+    ? `${ordersYesterday.length} order${ordersYesterday.length === 1 ? '' : 's'} yesterday`
+    : 'Quiet';
+  const salesHint = ordersYesterdayTotal
+    ? `R ${Math.round(ordersYesterdayTotal).toLocaleString('en-ZA')} ex VAT`
+    : null;
+
+  let customerStatus = 'All clear';
+  let customerSeverity = 'healthy';
+  if (pending) {
+    customerStatus = `${pending} pending approval`;
+    customerSeverity = 'attention';
+  } else if (review) {
+    customerStatus = `${review} order${review === 1 ? '' : 's'} to review`;
+    customerSeverity = 'attention';
+  }
+
+  let inventoryStatus = 'Stable';
+  let inventorySeverity = 'healthy';
+  if (neg) {
+    inventoryStatus = `${neg} negative stock`;
+    inventorySeverity = 'urgent';
+  } else if (invAlerts) {
+    inventoryStatus = `${invAlerts} stock alert${invAlerts === 1 ? '' : 's'}`;
+    inventorySeverity = 'attention';
+  }
+
+  const websiteStatus = listingsUpdated.length
+    ? `${listingsUpdated.length} listing change${listingsUpdated.length === 1 ? '' : 's'}`
+    : 'No changes';
+  const websiteSeverity = listingsUpdated.length ? 'info' : 'healthy';
 
   return [
-    {
-      key: 'orders',
-      label: "Yesterday's orders",
-      count: ordersYesterday.length,
-      severity: ordersYesterday.length ? 'info' : 'healthy',
-    },
-    {
-      key: 'listings',
-      label: 'Website listing changes',
-      count: listingsUpdated.length,
-      severity: listingsUpdated.length ? 'info' : 'healthy',
-    },
-    {
-      key: 'pending_customers',
-      label: 'Pending customers',
-      count: pending,
-      severity: pending ? 'attention' : 'healthy',
-    },
-    {
-      key: 'inventory_alerts',
-      label: 'Inventory alerts',
-      count: invTotal,
-      severity: invUrgent ? 'urgent' : (invAttention ? 'attention' : (invTotal ? 'info' : 'healthy')),
-    },
+    { key: 'sales', label: 'Sales', status: salesStatus, hint: salesHint, severity: ordersYesterday.length ? 'healthy' : 'info' },
+    { key: 'customers', label: 'Customers', status: customerStatus, severity: customerSeverity },
+    { key: 'inventory', label: 'Inventory', status: inventoryStatus, severity: inventorySeverity },
+    { key: 'website', label: 'Website', status: websiteStatus, severity: websiteSeverity },
   ];
 }
 

@@ -414,7 +414,7 @@ export default function ApolloPanel({ onShowToast }) {
             aria-expanded={chatExpanded}
           >
             <MessageSquare size={16} />
-            <span>Ask Apollo</span>
+            <span>5. Ask Apollo</span>
             {messages.length > 0 && <span className="apollo-ask-count">{messages.length}</span>}
             {chatExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
           </button>

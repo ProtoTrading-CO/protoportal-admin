@@ -4,9 +4,11 @@ import {
   Bot,
   CheckCircle2,
   Clock,
+  Globe,
   Loader2,
   Package,
   RefreshCw,
+  ShoppingCart,
   Users,
 } from 'lucide-react';
 
@@ -45,13 +47,33 @@ function WorkspaceTabs({ tabs = [] }) {
   );
 }
 
-function SnapshotCard({ snap }) {
+function ChangedLine({ line }) {
   return (
-    <div className={`apollo-today-snapshot apollo-today-snapshot--${snap.severity || 'info'}`}>
-      <span className="apollo-today-snapshot-count">{snap.count}</span>
-      <span className="apollo-today-snapshot-label">{snap.label}</span>
+    <li className={`apollo-today-changed-line apollo-today-changed-line--${line.severity || 'info'}`}>
+      <SeverityDot severity={line.severity} />
+      <span>{line.text}</span>
+    </li>
+  );
+}
+
+function HealthPulse({ item }) {
+  const icons = { sales: ShoppingCart, customers: Users, inventory: Package, website: Globe };
+  const Icon = icons[item.key] || Package;
+  return (
+    <div className={`apollo-today-health apollo-today-health--${item.severity || 'info'}`}>
+      <div className="apollo-today-health-head">
+        <Icon size={14} />
+        <span>{item.label}</span>
+        <SeverityDot severity={item.severity} />
+      </div>
+      <p className="apollo-today-health-status">{item.status}</p>
+      {item.hint && <p className="apollo-today-health-hint">{item.hint}</p>}
     </div>
   );
+}
+
+function SectionHeading({ children }) {
+  return <h3 className="apollo-today-section-title">{children}</h3>;
 }
 
 function FocusCard({ item, onAsk }) {
@@ -174,7 +196,8 @@ export default function ApolloToday({ context, meta, loading, onAsk, onRefresh, 
   }
 
   const focus = context.focusToday || [];
-  const snapshots = context.snapshots || [];
+  const changed = context.whatChangedSinceYesterday || [];
+  const health = context.businessHealth || [];
   const inv = context.inventoryAlerts || {};
   const customerItems = context.customerAlerts?.items || [];
   const productItems = context.productAlerts?.items || [];
@@ -215,7 +238,7 @@ export default function ApolloToday({ context, meta, loading, onAsk, onRefresh, 
       )}
 
       <section className="apollo-today-focus" aria-label="Focus today">
-        <h3 className="apollo-today-focus-title">Focus today</h3>
+        <SectionHeading>1. Focus today</SectionHeading>
         {focus.length ? (
           <div className="apollo-today-focus-grid">
             {focus.map((item) => (
@@ -230,15 +253,27 @@ export default function ApolloToday({ context, meta, loading, onAsk, onRefresh, 
         )}
       </section>
 
-      {snapshots.length > 0 && (
-        <div className="apollo-today-snapshots" aria-label="Snapshot">
-          {snapshots.map((snap) => (
-            <SnapshotCard key={snap.key} snap={snap} />
+      <section className="apollo-today-changed" aria-label="What changed since yesterday">
+        <SectionHeading>2. What changed since yesterday</SectionHeading>
+        <ul className="apollo-today-changed-list">
+          {changed.length
+            ? changed.map((line) => <ChangedLine key={line.type} line={line} />)
+            : <li className="apollo-today-changed-line apollo-today-changed-line--healthy">No notable changes</li>}
+        </ul>
+      </section>
+
+      <section className="apollo-today-health-row" aria-label="Business health">
+        <SectionHeading>3. Business health</SectionHeading>
+        <div className="apollo-today-health-grid">
+          {health.map((item) => (
+            <HealthPulse key={item.key} item={item} />
           ))}
         </div>
-      )}
+      </section>
 
-      <div className="apollo-today-grid apollo-today-grid--ops">
+      <div className="apollo-today-ops-wrap">
+        <SectionHeading>4. Operational</SectionHeading>
+        <div className="apollo-today-grid apollo-today-grid--ops">
         <SectionCard
           id="inventory"
           title="Inventory"
@@ -283,6 +318,7 @@ export default function ApolloToday({ context, meta, loading, onAsk, onRefresh, 
             <ProductRow key={`${item.type}-${item.sku}-${i}`} item={item} onAsk={onAsk} />
           ))}
         </SectionCard>
+        </div>
       </div>
 
       {quiet.length > 0 && (
