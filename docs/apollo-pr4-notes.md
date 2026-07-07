@@ -1,56 +1,85 @@
 # Apollo PR4 — Today Homepage
 
-Product UI PR. No Query Engine changes. Daily Brief context extended with UI-ready fields only.
+## 1. Files changed
 
-## 1. Files created
+| File | Change |
+|------|--------|
+| `src/components/ApolloToday.jsx` | Today UI — tabs, header, focus, snapshots, ops sections |
+| `src/components/ApolloPanel.jsx` | Today-first layout; Ask Apollo below |
+| `src/index.css` | Today styles (tabs, snapshots, severity colours) |
+| `api/intelligence/bi/contexts/daily-brief.js` | `snapshots`, `workspaces.tabs`, focus `title`, website-changes focus |
 
-- `src/components/ApolloToday.jsx` — renders `daily_brief` context (no business logic)
+## 2. UI sections added
 
-## 2. Files modified
+1. **Workspace tabs** — Today active; Customers, Products, Inventory, Buying, Suppliers (coming soon)
+2. **Header** — Greeting, date, brief time, freshness badge, warnings
+3. **Focus today** — Max 5 hero cards (title, severity, why, next step)
+4. **Snapshot cards** — Orders, listing changes, pending customers, inventory alerts
+5. **Operational** — Inventory, Customers, Products (compact rows)
+6. **Ask Apollo** — Collapsible chat below (in `ApolloPanel`)
 
-- `src/components/ApolloPanel.jsx` — Today-first layout; chat in collapsible Ask Apollo section
-- `src/index.css` — Today grid, focus cards, severity colours
-- `api/intelligence/bi/contexts/daily-brief.js` — richer context for UI (why/action/severity, product & customer items)
-- `api/intelligence/bi/format/daily-brief.js` — markdown includes why/do lines
+## 3. Context fields used
 
-## 3. Context builders
+| Field | UI use |
+|-------|--------|
+| `workspaces.tabs` | Tab bar |
+| `focusToday[]` | Hero cards |
+| `snapshots[]` | Snapshot row |
+| `inventoryAlerts` | Inventory section |
+| `customerAlerts.items` | Customers section |
+| `productAlerts.items` | Products section |
+| `quietSignals` | Footer |
+| `meta.generatedAt`, `meta.partial`, `meta.warnings` | Header freshness |
 
-Unchanged entry point: `buildDailyBriefContext`. Extended output:
+## 4. Backend changes
 
-- `focusToday[]` — max 5, each with `why`, `action`, `severity`, `workspace`
-- `yesterday.summary[]` — concise lines for UI
-- `customerAlerts.items[]` — pending, inactive high-value, large orders
-- `productAlerts.items[]` — recently updated, negative, zero stock
-- `workspaces.available` / `workspaces.comingSoon`
+`daily-brief.js` only — no Query Engine changes:
 
-## 4. Queries added
+- `snapshots` array (derived from existing data)
+- `workspaces.tabs` for future navigation
+- Focus items include `title`; website listing change when ≥3 updates
+
+## 5. Queries added
 
 **None.**
 
-## 5. Queries deferred
+## 6. Layout description
 
-Unchanged from PR3.
+```
+[Tabs: Today | Customers | Products | Inventory | Buying | Suppliers]
+[Good morning · Tuesday 7 July 2026 · Brief 8:00 · Live ✓]
 
-## 6. Daily Brief change
+FOCUS TODAY — up to 5 cards (red/amber) with Why + Next
 
-Backend assembles UI-ready structures; React only maps `brief.context` to cards.
+[4 snapshot cards: orders | listings | pending | inventory alerts]
 
-## 7–9. Lookup / inventory
+[Inventory]  [Customers]  [Products]   ← 3 compact columns
 
-Chat behaviour unchanged. Today page rows pre-fill Ask Apollo queries on click.
+Quiet: …
 
-## 10. Test plan
+── Ask Apollo (collapsed) ──
+```
+
+Readable in ~60–90 seconds. No charts.
+
+## 7. Test plan
 
 ```bash
 npm run test:bi
 npm run build
 ```
 
-Manual: open Apollo → Today loads → Focus ≤5 cards → expand Ask Apollo → starters work.
+Manual:
 
-## 11. Blockers for PR5
+1. Open Apollo → Today loads without typing
+2. Focus shows ≤5 items with why/next
+3. Snapshot cards reflect context counts
+4. Row click → Ask Apollo pre-filled query
+5. Chat still answers product/customer/inventory questions
 
-- Dedicated workspace routes (Customer / Product / Inventory tabs)
-- Overnight Brief Builder cron
-- Legacy chat intents still on `apollo-data.js`
-- `/api/bi/*` debug routes
+## 8. Blockers for PR5
+
+- Workspace routes (tabs are visual only)
+- Overnight Brief cron
+- Legacy chat intents on `apollo-data.js`
+- ERP-only / missing-listing product alerts (needs queries)

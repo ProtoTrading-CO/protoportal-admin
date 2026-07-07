@@ -52,6 +52,7 @@ export async function buildDailyBriefContext(ctx = {}) {
     customerAlerts,
     needsReview,
     customerInsights,
+    listingsUpdated,
   }).slice(0, 5);
 
   const quietSignals = buildQuietSignals({
@@ -61,7 +62,15 @@ export async function buildDailyBriefContext(ctx = {}) {
     needsReview,
   });
 
+  const snapshots = buildSnapshots({
+    ordersYesterday,
+    listingsUpdated,
+    customerAlerts,
+    inventory,
+  });
+
   const context = {
+    snapshots,
     yesterday: {
       orders: ordersYesterday,
       orderCount: ordersYesterday.length,
@@ -92,6 +101,14 @@ export async function buildDailyBriefContext(ctx = {}) {
     },
     quietSignals,
     workspaces: {
+      tabs: [
+        { id: 'today', label: 'Today', active: true },
+        { id: 'customers', label: 'Customers', comingSoon: true },
+        { id: 'products', label: 'Products', comingSoon: true },
+        { id: 'inventory', label: 'Inventory', comingSoon: true },
+        { id: 'buying', label: 'Buying', comingSoon: true },
+        { id: 'suppliers', label: 'Suppliers', comingSoon: true },
+      ],
       available: ['inventory', 'customer', 'product'],
       comingSoon: ['supplier', 'buying', 'sales'],
     },
@@ -111,6 +128,40 @@ export async function buildDailyBriefContext(ctx = {}) {
   ]);
 
   return contextEnvelope('daily_brief', context, meta, 'brief.morning');
+}
+
+function buildSnapshots({ ordersYesterday, listingsUpdated, customerAlerts, inventory }) {
+  const invUrgent = (inventory.lists.negative || []).length;
+  const invAttention = (inventory.lists.low || []).length + (inventory.lists.zero || []).length;
+  const invTotal = invUrgent + invAttention + (inventory.lists.high || []).length;
+  const pending = customerAlerts.pending?.length || 0;
+
+  return [
+    {
+      key: 'orders',
+      label: "Yesterday's orders",
+      count: ordersYesterday.length,
+      severity: ordersYesterday.length ? 'info' : 'healthy',
+    },
+    {
+      key: 'listings',
+      label: 'Website listing changes',
+      count: listingsUpdated.length,
+      severity: listingsUpdated.length ? 'info' : 'healthy',
+    },
+    {
+      key: 'pending_customers',
+      label: 'Pending customers',
+      count: pending,
+      severity: pending ? 'attention' : 'healthy',
+    },
+    {
+      key: 'inventory_alerts',
+      label: 'Inventory alerts',
+      count: invTotal,
+      severity: invUrgent ? 'urgent' : (invAttention ? 'attention' : (invTotal ? 'info' : 'healthy')),
+    },
+  ];
 }
 
 function buildYesterdaySummary(ordersYesterday, listingsUpdated, customerAlerts) {
@@ -268,7 +319,7 @@ function buildCustomerItems(customerAlerts, customerInsights, ordersYesterday) {
   return items.slice(0, 8);
 }
 
-function buildFocusToday({ inventory, customerAlerts, needsReview, customerInsights }) {
+function buildFocusToday({ inventory, customerAlerts, needsReview, customerInsights, listingsUpdated = [] }) {
   const focus = [];
   const neg = inventory.lists.negative || [];
   const zero = inventory.lists.zero || [];
@@ -276,11 +327,13 @@ function buildFocusToday({ inventory, customerAlerts, needsReview, customerInsig
   const inactive = customerInsights.inactiveHighValue[0];
 
   if (neg.length) {
+    const title = `${neg.length}+ products with negative stock`;
     focus.push({
       type: 'negative_stock',
       priority: 1,
       severity: 'urgent',
-      label: `${neg.length}+ products with negative stock`,
+      title,
+      label: title,
       detail: neg[0] ? `${neg[0].title} (${neg[0].sku}) at ${neg[0].stockQty}` : '',
       why: 'Negative stock risks overselling and fulfilment failures.',
       action: 'Review levels and reorder or adjust the website listing.',
@@ -289,11 +342,13 @@ function buildFocusToday({ inventory, customerAlerts, needsReview, customerInsig
   }
 
   if (inactive) {
+    const title = `${inactive.customer} — quiet for ${inactive.daysSince} days`;
     focus.push({
       type: 'inactive_customer',
       priority: 2,
       severity: 'attention',
-      label: `${inactive.customer} — quiet for ${inactive.daysSince} days`,
+      title,
+      label: title,
       detail: `R ${Math.round(inactive.spend).toLocaleString('en-ZA')} in loaded portal orders`,
       why: 'High-value customers who stop ordering are easy to miss.',
       action: 'Call or email to check in before they shop elsewhere.',
@@ -302,11 +357,13 @@ function buildFocusToday({ inventory, customerAlerts, needsReview, customerInsig
   }
 
   if (pending.length) {
+    const title = `${pending.length} customer${pending.length === 1 ? '' : 's'} awaiting approval`;
     focus.push({
       type: 'pending_customers',
       priority: 3,
       severity: 'attention',
-      label: `${pending.length} customer${pending.length === 1 ? '' : 's'} awaiting approval`,
+      title,
+      label: title,
       detail: pending[0] ? `${pending[0].name} — ${pending[0].email}` : '',
       why: 'New trade accounts are waiting to buy from you.',
       action: 'Review and approve legitimate applications.',
@@ -315,11 +372,13 @@ function buildFocusToday({ inventory, customerAlerts, needsReview, customerInsig
   }
 
   if (needsReview.length) {
+    const title = `${needsReview.length} order${needsReview.length === 1 ? '' : 's'} need review`;
     focus.push({
       type: 'orders_review',
       priority: 4,
       severity: 'attention',
-      label: `${needsReview.length} order${needsReview.length === 1 ? '' : 's'} need review`,
+      title,
+      label: title,
       detail: needsReview[0] ? `${needsReview[0].customer} · ${needsReview[0].status}` : '',
       why: 'Pending orders block fulfilment and customer satisfaction.',
       action: 'Open Order Requests and advance workflow.',
@@ -327,12 +386,27 @@ function buildFocusToday({ inventory, customerAlerts, needsReview, customerInsig
     });
   }
 
-  if (zero.length) {
+  if (listingsUpdated.length >= 3 && focus.length < 5) {
+    const title = `${listingsUpdated.length} website listings changed yesterday`;
+    focus.push({
+      type: 'website_changes',
+      priority: 5,
+      severity: 'info',
+      title,
+      label: title,
+      detail: listingsUpdated[0] ? `${listingsUpdated[0].title} (${listingsUpdated[0].sku})` : '',
+      why: 'Catalogue changes may need pricing or stock review.',
+      action: 'Spot-check updated listings for accuracy.',
+      workspace: 'product',
+    });
+  } else if (zero.length && focus.length < 5) {
+    const title = `${zero.length}+ live listings at zero stock`;
     focus.push({
       type: 'zero_stock',
       priority: 5,
       severity: 'attention',
-      label: `${zero.length}+ live listings at zero stock`,
+      title,
+      label: title,
       detail: zero[0] ? `${zero[0].title} (${zero[0].sku})` : '',
       why: 'Customers can see products they cannot buy.',
       action: 'Reorder, hide listing, or mark out of stock.',

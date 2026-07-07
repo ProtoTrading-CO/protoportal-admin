@@ -7,13 +7,8 @@ import {
   Loader2,
   Package,
   RefreshCw,
-  ShoppingCart,
   Users,
 } from 'lucide-react';
-
-function money(n) {
-  return `R ${Number(n || 0).toLocaleString('en-ZA', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
-}
 
 function greetingForHour(h) {
   if (h < 12) return 'Good morning';
@@ -32,13 +27,30 @@ function SeverityDot({ severity }) {
   return <span className={`apollo-today-dot apollo-today-dot--${severity || 'info'}`} aria-hidden="true" />;
 }
 
-function WorkspaceTag({ workspace, comingSoon }) {
-  if (!workspace) return null;
+function WorkspaceTabs({ tabs = [] }) {
+  if (!tabs.length) return null;
   return (
-    <span className={`apollo-today-ws${comingSoon ? ' apollo-today-ws--soon' : ''}`} title={comingSoon ? 'Workspace coming soon' : ''}>
-      {workspace}
-      {comingSoon && ' · soon'}
-    </span>
+    <nav className="apollo-today-tabs" aria-label="Apollo workspaces">
+      {tabs.map((tab) => (
+        <span
+          key={tab.id}
+          className={`apollo-today-tab${tab.active ? ' apollo-today-tab--active' : ''}${tab.comingSoon ? ' apollo-today-tab--soon' : ''}`}
+          aria-current={tab.active ? 'page' : undefined}
+          title={tab.comingSoon ? 'Coming soon' : undefined}
+        >
+          {tab.label}
+        </span>
+      ))}
+    </nav>
+  );
+}
+
+function SnapshotCard({ snap }) {
+  return (
+    <div className={`apollo-today-snapshot apollo-today-snapshot--${snap.severity || 'info'}`}>
+      <span className="apollo-today-snapshot-count">{snap.count}</span>
+      <span className="apollo-today-snapshot-label">{snap.label}</span>
+    </div>
   );
 }
 
@@ -48,13 +60,15 @@ function FocusCard({ item, onAsk }) {
     <article className={`apollo-today-focus-card apollo-today-focus-card--${item.severity || 'attention'}`}>
       <div className="apollo-today-focus-head">
         <SeverityDot severity={item.severity} />
-        <h4>{item.label}</h4>
+        <h4>{item.title || item.label}</h4>
       </div>
       {item.detail && <p className="apollo-today-focus-detail">{item.detail}</p>}
       <p className="apollo-today-focus-why"><strong>Why:</strong> {item.why}</p>
-      <p className="apollo-today-focus-action"><strong>Do:</strong> {item.action}</p>
+      <p className="apollo-today-focus-action"><strong>Next:</strong> {item.action}</p>
       <div className="apollo-today-focus-foot">
-        <WorkspaceTag workspace={item.workspace} comingSoon />
+        {item.workspace && (
+          <span className="apollo-today-ws apollo-today-ws--soon" title="Workspace coming soon">{item.workspace}</span>
+        )}
         {askQuery && (
           <button type="button" className="apollo-today-link-btn" onClick={() => onAsk?.(askQuery)}>
             Ask Apollo <ArrowRight size={12} />
@@ -67,10 +81,11 @@ function FocusCard({ item, onAsk }) {
 
 function focusAskQuery(item) {
   if (item.type === 'negative_stock') return 'Which products have negative stock?';
-  if (item.type === 'inactive_customer') return `Find customer ${String(item.label).split(' — ')[0]}`;
+  if (item.type === 'inactive_customer') return `Find customer ${String(item.title || item.label).split(' — ')[0]}`;
   if (item.type === 'pending_customers') return 'Show pending customer approvals';
   if (item.type === 'orders_review') return 'Orders needing review';
   if (item.type === 'zero_stock') return 'Which products have zero stock?';
+  if (item.type === 'website_changes') return 'Morning brief';
   return null;
 }
 
@@ -80,7 +95,7 @@ function SectionCard({ id, title, icon: Icon, children, empty, workspace }) {
       <header className="apollo-today-section-head">
         <Icon size={15} />
         <h3>{title}</h3>
-        {workspace && <WorkspaceTag workspace={workspace} comingSoon />}
+        {workspace && <span className="apollo-today-ws apollo-today-ws--soon" title="Workspace coming soon">{workspace}</span>}
       </header>
       <div className="apollo-today-section-body">
         {empty ? <p className="apollo-today-empty">{empty}</p> : children}
@@ -95,6 +110,7 @@ function InventoryRow({ item, onAsk }) {
       type="button"
       className={`apollo-today-row apollo-today-row--${item.severity || 'info'}`}
       onClick={() => onAsk?.(`Show product ${item.sku}`)}
+      title="Inventory workspace — coming soon"
     >
       <SeverityDot severity={item.severity || (item.stockQty < 0 ? 'urgent' : 'attention')} />
       <span className="apollo-today-row-title">{item.title}</span>
@@ -133,10 +149,10 @@ export default function ApolloToday({ context, meta, loading, onAsk, onRefresh, 
   const now = new Date();
   const greeting = greetingForHour(now.getHours());
   const dateStr = now.toLocaleDateString('en-ZA', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-  const timeStr = now.toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' });
   const generatedAt = meta?.generatedAt
     ? new Date(meta.generatedAt).toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
     : null;
+  const warnings = (meta?.warnings || []).filter(Boolean);
 
   if (loading && !context) {
     return (
@@ -158,36 +174,45 @@ export default function ApolloToday({ context, meta, loading, onAsk, onRefresh, 
   }
 
   const focus = context.focusToday || [];
+  const snapshots = context.snapshots || [];
   const inv = context.inventoryAlerts || {};
   const customerItems = context.customerAlerts?.items || [];
   const productItems = context.productAlerts?.items || [];
-  const yesterday = context.yesterday || {};
   const quiet = context.quietSignals || [];
+  const tabs = context.workspaces?.tabs || [];
 
   const hasInv = (inv.negative?.length || 0) + (inv.low?.length || 0) + (inv.zero?.length || 0) + (inv.high?.length || 0) > 0;
 
   return (
     <div className="apollo-today">
+      <WorkspaceTabs tabs={tabs} />
+
       <header className="apollo-today-hero">
         <div className="apollo-today-hero-main">
-          <div className="apollo-today-hero-icon"><Bot size={22} /></div>
+          <div className="apollo-today-hero-icon"><Bot size={20} /></div>
           <div>
-            <p className="apollo-today-eyebrow">Today</p>
             <h2 className="apollo-today-greeting">{greeting}</h2>
-            <p className="apollo-today-datetime">{dateStr} · {timeStr}</p>
+            <p className="apollo-today-datetime">{dateStr}</p>
           </div>
         </div>
         <div className="apollo-today-hero-meta">
           <span className={`apollo-today-fresh apollo-today-fresh--${meta?.partial ? 'partial' : 'ok'}`}>
             <Clock size={12} />
             {freshnessLabel(meta)}
-            {generatedAt && ` · ${generatedAt}`}
+            {generatedAt && ` · Brief ${generatedAt}`}
           </span>
           <button type="button" className="apollo-today-refresh" onClick={onRefresh} disabled={refreshing} title="Refresh briefing">
             <RefreshCw size={14} className={refreshing ? 'spin' : ''} />
           </button>
         </div>
       </header>
+
+      {warnings.length > 0 && (
+        <p className="apollo-today-warn" role="status">
+          <AlertTriangle size={13} />
+          {warnings.join(' · ')}
+        </p>
+      )}
 
       <section className="apollo-today-focus" aria-label="Focus today">
         <h3 className="apollo-today-focus-title">Focus today</h3>
@@ -205,33 +230,21 @@ export default function ApolloToday({ context, meta, loading, onAsk, onRefresh, 
         )}
       </section>
 
-      <div className="apollo-today-grid">
-        <SectionCard
-          id="yesterday"
-          title="Yesterday"
-          icon={ShoppingCart}
-          empty={!yesterday.summary?.length ? 'Quiet day — no notable portal activity.' : null}
-        >
-          <ul className="apollo-today-summary">
-            {(yesterday.summary || []).map((line) => (
-              <li key={line.type} className={`apollo-today-summary-item apollo-today-summary-item--${line.severity}`}>
-                {line.label}
-              </li>
-            ))}
-            {yesterday.orderCount > 0 && (
-              <li className="apollo-today-summary-item apollo-today-summary-item--info">
-                {money(yesterday.orderTotalExVat)} ex VAT total
-              </li>
-            )}
-          </ul>
-        </SectionCard>
+      {snapshots.length > 0 && (
+        <div className="apollo-today-snapshots" aria-label="Snapshot">
+          {snapshots.map((snap) => (
+            <SnapshotCard key={snap.key} snap={snap} />
+          ))}
+        </div>
+      )}
 
+      <div className="apollo-today-grid apollo-today-grid--ops">
         <SectionCard
           id="inventory"
           title="Inventory"
           icon={Package}
           workspace="inventory"
-          empty={!hasInv ? 'No actionable stock issues in linked listings.' : null}
+          empty={!hasInv ? 'No actionable stock issues.' : null}
         >
           {inv.negative?.slice(0, 3).map((p) => (
             <InventoryRow key={`n-${p.sku}`} item={{ ...p, severity: 'urgent' }} onAsk={onAsk} />
@@ -252,7 +265,7 @@ export default function ApolloToday({ context, meta, loading, onAsk, onRefresh, 
           title="Customers"
           icon={Users}
           workspace="customer"
-          empty={!customerItems.length ? 'No customers need attention right now.' : null}
+          empty={!customerItems.length ? 'No customers need attention.' : null}
         >
           {customerItems.slice(0, 5).map((item, i) => (
             <CustomerRow key={`${item.type}-${item.id || item.orderId || i}`} item={item} onAsk={onAsk} />
@@ -264,7 +277,7 @@ export default function ApolloToday({ context, meta, loading, onAsk, onRefresh, 
           title="Products"
           icon={Package}
           workspace="product"
-          empty={!productItems.length ? 'No product issues flagged today.' : null}
+          empty={!productItems.length ? 'No product flags today.' : null}
         >
           {productItems.slice(0, 5).map((item, i) => (
             <ProductRow key={`${item.type}-${item.sku}-${i}`} item={item} onAsk={onAsk} />
@@ -275,15 +288,9 @@ export default function ApolloToday({ context, meta, loading, onAsk, onRefresh, 
       {quiet.length > 0 && (
         <footer className="apollo-today-quiet">
           <CheckCircle2 size={14} />
-          <span>You can ignore: {quiet.join(' · ')}</span>
+          <span>Quiet: {quiet.join(' · ')}</span>
         </footer>
       )}
-
-      <nav className="apollo-today-ws-nav" aria-label="Future workspaces">
-        {(context.workspaces?.comingSoon || []).map((ws) => (
-          <span key={ws} className="apollo-today-ws-pill apollo-today-ws-pill--soon">{ws}</span>
-        ))}
-      </nav>
     </div>
   );
 }
