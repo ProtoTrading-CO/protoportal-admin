@@ -106,10 +106,10 @@ export default async function handler(req, res) {
     // edits to it silently no-op. Reject them with a clear message instead.
     const isMottaroId = (id) => id === 'mottaro' || String(id || '').startsWith('mottaro-');
     if ((action === 'rename' || action === 'deleteNode') && isMottaroId(req.body?.id)) {
-      return res.status(400).json({ error: 'Mottaro categories are automatic and cannot be renamed or deleted here.' });
+      return res.status(400).json({ error: 'Motarro categories are automatic and cannot be renamed or deleted here.' });
     }
     if (action === 'addSubcategory' && isMottaroId(req.body?.parentId)) {
-      return res.status(400).json({ error: 'Mottaro is an automatic category — you cannot add subcategories under it.' });
+      return res.status(400).json({ error: 'Motarro is an automatic category — you cannot add subcategories under it.' });
     }
 
     if (action === 'rename') {

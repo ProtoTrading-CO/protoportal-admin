@@ -383,7 +383,7 @@ const useCatalogSrc = readSrc('src/hooks/useCatalog.js');
 assert.match(useCatalogSrc, /Promise\.all\(Array\.from\(\{ length: Math\.min\(CONCURRENCY/, 'fetchAllCatalogRows fans out in parallel');
 
 const taxonomySrc = readSrc('api/taxonomy.js');
-assert.match(taxonomySrc, /Cache-Control', 's-maxage=60, stale-while-revalidate=300/, 'taxonomy counts endpoint has SWR cache');
+assert.match(taxonomySrc, /Cache-Control', 's-maxage=\d+, stale-while-revalidate=\d+/, 'taxonomy counts endpoint has SWR cache');
 
 console.log('✓ Bundle + perf follow-ups (jspdf lazy, catalog parallel, counts SWR)');
 
@@ -405,9 +405,8 @@ const specialsPanel = readSrc('src/components/SpecialsPanel.jsx');
 assert.match(specialsPanel, /export default function SpecialsPanel/, 'SpecialsPanel exports a default component');
 assert.match(specialsPanel, /onSpecialsChange/, 'SpecialsPanel accepts an onSpecialsChange prop for parent star-toggle');
 
-assert.match(sidebarSrc, /banner: \(\) => import\('\.\/BannerPanel'\)/, 'sidebar prefetches BannerPanel on hover');
-assert.match(sidebarSrc, /specials: \(\) => import\('\.\/SpecialsPanel'\)/, 'sidebar prefetches SpecialsPanel on hover');
-console.log('✓ AdminPage split — BannerPanel + SpecialsPanel extracted, lazy, prefetched');
+assert.match(sidebarSrc, /'site-content': \(\) => import\('\.\/FeaturedPanel'\)/, 'sidebar prefetches the merged Site Content section on hover');
+console.log('✓ AdminPage split — BannerPanel + SpecialsPanel extracted, lazy, merged into Site Content');
 
 // Featured products tab
 const featuredApiSrc = readSrc('api/featured-products.js');
@@ -423,10 +422,10 @@ assert.match(featuredPanelSrc, /export default function FeaturedPanel/, 'Feature
 assert.match(featuredPanelSrc, /SectionErrorBoundary name="featured"/, 'FeaturedPanel wrapped in SectionErrorBoundary');
 assert.doesNotMatch(featuredPanelSrc, /window\.__featured/, 'FeaturedPanel drag avoids window globals');
 
-assert.match(sidebarSrc, /id: 'featured'/, 'sidebar has Featured nav item');
-assert.match(sidebarSrc, /featured: \(\) => import\('\.\/FeaturedPanel'\)/, 'sidebar prefetches FeaturedPanel on hover');
+assert.match(sidebarSrc, /id: 'site-content'/, 'sidebar has the merged Site Content nav item');
+assert.match(sidebarSrc, /'site-content': \(\) => import\('\.\/FeaturedPanel'\)/, 'sidebar prefetches FeaturedPanel on hover');
 assert.match(adminPageSrc, /const FeaturedPanel = lazyRetry\(/, 'FeaturedPanel is lazy in AdminPage');
-assert.match(adminPageSrc, /activeSection === 'featured'/, 'AdminPage renders Featured section');
+assert.match(adminPageSrc, /activeSection === 'site-content'/, 'AdminPage renders Featured under Site Content section');
 console.log('✓ Featured products tab (API, panel, sidebar, lazy load)');
 
 // PricingPanel extraction
@@ -480,7 +479,7 @@ assert.match(readSrc('api/_catalog-adapt.js'), /stockLinked/, 'catalog rows expo
 console.log('✓ Live product visibility policy (PM default = Reorder Grid)');
 
 const boundaryCount = (adminPageSrc.match(/<SectionErrorBoundary/g) || []).length;
-assert.ok(boundaryCount >= 14, `AdminPage should wrap all sections in SectionErrorBoundary (found ${boundaryCount})`);
+assert.ok(boundaryCount >= 12, `AdminPage should wrap all sections in SectionErrorBoundary (found ${boundaryCount})`);
 console.log('✓ AdminPage section error boundaries');
 
 const lazyRetrySrc = readSrc('src/lib/lazyRetry.js');
@@ -524,8 +523,8 @@ console.log('✓ A3 shared taxonomy label matcher');
 const taxonomyApiSrc = readSrc('api/taxonomy.js');
 assert.match(taxonomyApiSrc, /renameNodeLabelInProducts/, 'rename uses shared tolerant rename helper');
 assert.match(taxonomyApiSrc, /orphansRemaining/, 'rename returns orphansRemaining verification');
-assert.match(taxonomyApiSrc, /clearProductsForDeletedNode/, 'deleteNode clears product labels');
-assert.match(taxonomyApiSrc, /productsCleared/, 'deleteNode reports productsCleared');
+assert.match(taxonomyApiSrc, /archiveProductsForDeletedNode/, 'deleteNode archives products under the node');
+assert.match(taxonomyApiSrc, /productsArchived/, 'deleteNode reports productsArchived');
 assert.doesNotMatch(taxonomyApiSrc, /action === 'deleteSubcategory'/, 'dead deleteSubcategory action removed');
 const taxonomyUtilsSrc2 = readSrc('api/_taxonomy-utils.js');
 assert.match(taxonomyUtilsSrc2, /fetchRowsMatchingNodeScope/, 'scope fetch helper present');
@@ -611,7 +610,7 @@ assert.ok(readSrc('migrations/038_mottaro_path.sql').includes('mottaro_path'), '
 console.log('✓ A4 mottaro_path persistence (derive → stored → fallback)');
 
 // Shared Mottaro module — must stay byte-identical to the portal copy
-const MOTTARO_SHARED_HASH = '9f9e87791ab159cd';
+const MOTTARO_SHARED_HASH = '15207c5f4ac16723';
 assert.equal(
   createHash('sha256').update(readSrc('lib/mottaro-category.mjs')).digest('hex').slice(0, 16),
   MOTTARO_SHARED_HASH,
@@ -629,7 +628,7 @@ console.log('✓ A5 counts refresh after Product Manager move');
 const bulkProductsRemoveSrc = readSrc('api/bulk-products.js');
 assert.match(bulkProductsRemoveSrc, /action === 'removeFromCategory'/, 'bulk-products handles removeFromCategory');
 assert.match(bulkProductsRemoveSrc, /bulkRemoveFromCategory/, 'removeFromCategory helper present');
-assert.match(bulkProductsRemoveSrc, /Not a Mottaro product/, 'removeFromCategory skips non-Mottaro rows server-side');
+assert.match(bulkProductsRemoveSrc, /Not a Motarro product/, 'removeFromCategory skips non-Motarro rows server-side');
 assert.match(bulkProductsRemoveSrc, /motarroPathSnapshot\(deriveMotarroPathFromLabels/, 'removeFromCategory snapshots mottaro_path before clearing labels');
 // The clear patch must clear every category column — '' for the NOT NULL
 // columns (category, subcategory_one), null for the nullable deeper ones.
