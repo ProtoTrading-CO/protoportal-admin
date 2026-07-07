@@ -3,10 +3,10 @@ import { loadJsPDF } from '../lib/lazyJspdf';
 import { Bot, FileDown, Loader2, Send, Sparkles, User, Wrench } from 'lucide-react';
 
 const STARTERS = [
-  'Create a report of my best performing products',
-  'Create a report of best sellers from Positill',
-  'Find code 8610100001',
-  'Positill report on 101 findings',
+  'Morning brief',
+  'Show product 8610100001',
+  'Which products have negative stock?',
+  'Find customer Plushprops',
   'Which products have the lowest stock?',
 ];
 
@@ -120,21 +120,26 @@ function MessageBody({ content }) {
   );
 }
 
-function ApolloWelcome({ onStarter, busy }) {
+function ApolloWelcome({ onStarter, busy, briefMarkdown }) {
   return (
     <div className="apollo-welcome">
       <div className="apollo-welcome-badge">
         <Bot size={22} strokeWidth={2.2} />
       </div>
       <div className="apollo-welcome-copy">
-        <h3>Hi, I'm <span className="apollo-welcome-name">Apollo</span></h3>
+        <h3>Good morning — <span className="apollo-welcome-name">Apollo</span></h3>
         <p>
-          Your conversational analyst — ask in plain English and I answer from live data
-          (products, customers, orders, searches) plus Positill for code lookups.
+          Your daily brief loads below. Ask about products, customers, or stock —
+          answers come from live portal and ERP data.
         </p>
       </div>
+      {briefMarkdown && (
+        <div className="apollo-brief-card">
+          <SimpleMarkdown text={briefMarkdown} />
+        </div>
+      )}
       <div className="apollo-welcome-starters">
-        <span className="apollo-welcome-hint">Try asking</span>
+        <span className="apollo-welcome-hint">Ask next</span>
         <div className="apollo-starters">
           {STARTERS.map((s) => (
             <button key={s} type="button" className="apollo-starter" onClick={() => onStarter(s)} disabled={busy}>
@@ -389,7 +394,7 @@ export default function ApolloPanel({ onShowToast }) {
               <div>
                 <h2 className="apollo-head-title">Apollo</h2>
                 <p className="apollo-head-sub">
-                  Live keyword index · {indexStatus ? `${indexStatus.counts?.products?.toLocaleString() ?? '—'} products, ${indexStatus.counts?.customers ?? '—'} customers` : 'building…'}
+                  Daily brief + live data · {indexStatus ? `${indexStatus.counts?.products?.toLocaleString() ?? '—'} products, ${indexStatus.counts?.customers ?? '—'} customers` : 'loading…'}
                   {indexStatus?.indexedAt && (
                     <span className="apollo-index-time">
                       {' · '}Indexed {new Date(indexStatus.indexedAt).toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
@@ -420,7 +425,13 @@ export default function ApolloPanel({ onShowToast }) {
 
           <div className="apollo-shell">
             <div className="apollo-chat" ref={scrollRef}>
-              {showWelcome && <ApolloWelcome onStarter={send} busy={busy} />}
+              {showWelcome && (
+                <ApolloWelcome
+                  onStarter={send}
+                  busy={busy}
+                  briefMarkdown={indexStatus?.brief?.markdown}
+                />
+              )}
               {messages.map((msg, i) => (
                 <ChatMessage
                   key={i}
@@ -476,7 +487,7 @@ export default function ApolloPanel({ onShowToast }) {
                       void send(input);
                     }
                   }}
-                  placeholder="Ask Apollo anything — orders, stock, customers, sales…"
+                  placeholder="Ask Apollo — product code, customer name, stock priorities…"
                   disabled={busy}
                 />
                 <button type="submit" className="apollo-send-btn" disabled={busy || !input.trim()} aria-label="Send">

@@ -3,6 +3,9 @@ import { getApolloData } from './apollo-data.js';
 import { parseIntentHint, classifyIntent } from './apollo-intent.js';
 import { validateIntent, validateAnswer } from './apollo-validate.js';
 import { executeIntent, parseLimit } from './apollo-engine.js';
+import { detectExperienceRoute } from './apollo-experience.js';
+import { biRun, biFormat, buildMorningBrief } from './intelligence/bi/facade.js';
+import { formatMorningBriefMarkdown } from './intelligence/bi/morning-brief.js';
 
 const MODEL = 'google/gemini-2.5-flash';
 
@@ -14,13 +17,31 @@ function isGreeting(query) {
 function greetingReply() {
   return `Hello — I'm **Apollo**, your Proto Trading admin assistant.
 
-Ask me things like:
-- *Show low stock items*
-- *Orders this week*
-- *Top searches this month*
+Your **Daily Brief** loads when you open this tab. Ask me things like:
+- *Show product 8610100001*
+- *Find customer Plushprops*
 - *Which products have negative stock?*
+- *Morning brief*
 
-I'll pull live numbers from your dashboard. I won't show charts unless you're asking for data.`;
+I'll answer from live portal and stock data — not guesses.`;
+}
+
+async function answerFromExperience(userQuery, actorEmail) {
+  const route = detectExperienceRoute(userQuery);
+  if (!route) return null;
+
+  const ctx = { actorEmail: actorEmail || 'apollo' };
+  const envelope = await biRun(route.intent, route.params, ctx);
+  if (!envelope.ok) {
+    throw new Error(envelope.error?.message || 'Experience query failed');
+  }
+
+  return {
+    reply: biFormat(route.intent, envelope, { type: route.formatType || route.params?.type }),
+    source: 'live-index',
+    intent: route.intent,
+    experience: envelope.data,
+  };
 }
 
 function appendChart(reply, title, labels, values) {
@@ -174,10 +195,17 @@ export default async function handler(req, res) {
 
   if (req.method === 'GET') {
     try {
+      const actorEmail = req.headers['x-admin-email'] || 'apollo';
+      const briefEnvelope = await buildMorningBrief({ actorEmail, bypassCache: req.query?.refresh === '1' });
       const data = await getApolloData(req.query?.refresh === '1');
       return res.status(200).json({
         ok: true,
         indexedAt: data.generatedAt,
+        brief: briefEnvelope.ok ? {
+          data: briefEnvelope.data,
+          meta: briefEnvelope.meta,
+          markdown: formatMorningBriefMarkdown(briefEnvelope),
+        } : null,
         counts: {
           products: data.products.liveCount,
           customers: data.customers.total,
@@ -214,6 +242,19 @@ export default async function handler(req, res) {
   }
 
   try {
+    const actorEmail = req.headers['x-admin-email'] || 'apollo';
+    const experience = await answerFromExperience(userQuery, actorEmail);
+    if (experience) {
+      const data = await getApolloData();
+      return res.status(200).json({
+        reply: experience.reply,
+        source: experience.source,
+        intent: experience.intent,
+        indexedAt: data.generatedAt,
+        indexSize: data.index.length,
+      });
+    }
+
     const data = await getApolloData();
     const rejectIntent = fix ? (previousIntent || '') : '';
     const { reply, source, intent, batchAction } = await resolveQuery(userQuery, data, apiKey, {

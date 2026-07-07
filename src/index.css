@@ -5597,6 +5597,21 @@ html, body { background: #f5f5f5; color: #111827; }
   margin: 0; font-size: 14px; line-height: 1.6; color: #64748b; max-width: 480px; margin-inline: auto;
 }
 
+.apollo-brief-card {
+  margin: 20px auto 0;
+  max-width: 680px;
+  text-align: left;
+  padding: 18px 20px;
+  border-radius: 12px;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+}
+.apollo-brief-card .apollo-md h3 { font-size: 16px; margin: 0 0 10px; }
+.apollo-brief-card .apollo-md h4 { font-size: 13px; margin: 14px 0 6px; color: #374151; }
+.apollo-brief-card .apollo-md p { font-size: 13px; line-height: 1.55; color: #475569; }
+.apollo-brief-card .apollo-md-bullet { font-size: 13px; }
+
 .apollo-welcome-starters { margin-top: 22px; }
 .apollo-welcome-hint {
   display: block; font-size: 11px; font-weight: 700;
