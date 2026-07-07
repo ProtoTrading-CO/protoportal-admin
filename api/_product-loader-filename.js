@@ -4,7 +4,7 @@ const IMAGE_EXT = /\.(jpe?g|png|webp)$/i;
 const SLOT_SUFFIX = /^(?<sku>.+)-(?<slot>[1-4])$/i;
 const NOISE_PATTERNS = [
   /\s+copy$/i,
-  /\s+\(\d+\)$/,
+  /\s*\(\d+\)$/,
   /[_\s]+(front|back|side|detail|hero)$/i,
 ];
 
@@ -25,11 +25,13 @@ export function parseLoaderFilename(filename) {
 
   // Capture + strip the OS "(2)" duplicate marker FIRST, before the slot
   // suffix — otherwise "CODE-2 (2).jpg" would lose its slot and corrupt the code.
+  // The marker counts with OR without a leading space: "CODE (2)" and "CODE(2)"
+  // both mean a duplicate/variant of CODE.
   let copyIndex = 1;
-  const dupMatch = working.match(/\s+\((\d+)\)$/);
+  const dupMatch = working.match(/\s*\((\d+)\)$/);
   if (dupMatch) {
     copyIndex = Math.max(1, Number.parseInt(dupMatch[1], 10) || 1);
-    working = working.replace(/\s+\(\d+\)$/, '').trim();
+    working = working.replace(/\s*\(\d+\)$/, '').trim();
   }
 
   let imageSlot = 1;

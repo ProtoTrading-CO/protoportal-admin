@@ -7,6 +7,7 @@ import {
   parseLoaderFilename,
   resolveProductLoaderMatch,
 } from './_product-loader-lookup.js';
+import { siblingSkuForCopy } from './_product-loader-filename.js';
 
 function getStockClient() {
   return createClient(
@@ -56,15 +57,35 @@ export default async function handler(req, res) {
       imageSlot: parsed.imageSlot,
       dormantSkus,
     });
-    if (match.canPublish) matched += 1;
-    const group = classifyBatchItem(match);
+
+    let item = { filename, ...match };
+
+    // A "(2)/(3)" copy is the SAME product, another variant. It resolves the
+    // PARENT (so it picks up the title/description/category/barcode) but
+    // publishes to its own sibling record (CODE-2, CODE-3…) so it never
+    // overwrites the parent's image.
+    if (parsed.copyIndex > 1 && (match.websiteRow || match.sqlRow)) {
+      const siblingSku = siblingSkuForCopy(match.code, parsed.copyIndex);
+      const warnings = (match.warnings || []).filter((w) => w !== 'image_exists');
+      item = {
+        ...item,
+        code: siblingSku,
+        displayCode: siblingSku,
+        isVariant: true,
+        variantOf: match.code,
+        copyIndex: parsed.copyIndex,
+        imageSlot: 1,
+        warnings,
+        canPublish: true,
+        needsReview: warnings.some((w) => ['price_zero', 'low_stock', 'needs_category'].includes(w)),
+      };
+    }
+
+    if (item.canPublish) matched += 1;
+    const group = classifyBatchItem(item);
     groups[group] += 1;
 
-    items.push({
-      filename,
-      ...match,
-      group,
-    });
+    items.push({ ...item, group });
   }
 
   return res.status(200).json({
