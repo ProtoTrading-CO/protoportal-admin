@@ -1,21 +1,31 @@
-import { buildMorningBrief, formatMorningBriefMarkdown } from './morning-brief.js';
-import { buildProductContext, formatProductContextMarkdown } from './product-context.js';
-import { buildCustomerContext, formatCustomerContextMarkdown } from './customer-context.js';
-import { buildInventoryAttention, formatInventoryAttentionMarkdown } from './inventory-attention.js';
+import {
+  buildProductContext,
+  buildCustomerContext,
+  buildInventoryContext,
+  buildDailyBriefContext,
+} from './contexts/index.js';
+import {
+  formatProductContext,
+  formatCustomerContext,
+  formatInventoryContext,
+  formatDailyBriefContext,
+} from './format/index.js';
 import { fail } from '../query-engine/envelope.js';
 
 const HANDLERS = {
-  'brief.morning': buildMorningBrief,
+  'brief.morning': buildDailyBriefContext,
   'product.context': buildProductContext,
   'customer.context': buildCustomerContext,
-  'inventory.attention': buildInventoryAttention,
+  'inventory.context': buildInventoryContext,
+  'inventory.attention': buildInventoryContext,
 };
 
 const FORMATTERS = {
-  'brief.morning': formatMorningBriefMarkdown,
-  'product.context': formatProductContextMarkdown,
-  'customer.context': formatCustomerContextMarkdown,
-  'inventory.attention': formatInventoryAttentionMarkdown,
+  'brief.morning': formatDailyBriefContext,
+  'product.context': formatProductContext,
+  'customer.context': formatCustomerContext,
+  'inventory.context': formatInventoryContext,
+  'inventory.attention': formatInventoryContext,
 };
 
 export async function biRun(intent, params = {}, ctx = {}) {
@@ -32,4 +42,18 @@ export function biFormat(intent, envelope, options = {}) {
   return formatter(envelope, options);
 }
 
-export { buildMorningBrief, buildProductContext, buildCustomerContext, buildInventoryAttention };
+export {
+  buildProductContext,
+  buildCustomerContext,
+  buildInventoryContext,
+  buildDailyBriefContext,
+  buildDailyBriefContext as buildMorningBrief,
+};
+
+export {
+  formatProductContext,
+  formatCustomerContext,
+  formatInventoryContext,
+  formatDailyBriefContext,
+  formatDailyBriefContext as formatMorningBriefMarkdown,
+};

@@ -4,8 +4,7 @@ import { parseIntentHint, classifyIntent } from './apollo-intent.js';
 import { validateIntent, validateAnswer } from './apollo-validate.js';
 import { executeIntent, parseLimit } from './apollo-engine.js';
 import { detectExperienceRoute } from './apollo-experience.js';
-import { biRun, biFormat, buildMorningBrief } from './intelligence/bi/facade.js';
-import { formatMorningBriefMarkdown } from './intelligence/bi/morning-brief.js';
+import { biRun, biFormat, buildDailyBriefContext, formatDailyBriefContext } from './intelligence/bi/facade.js';
 
 const MODEL = 'google/gemini-2.5-flash';
 
@@ -196,15 +195,15 @@ export default async function handler(req, res) {
   if (req.method === 'GET') {
     try {
       const actorEmail = req.headers['x-admin-email'] || 'apollo';
-      const briefEnvelope = await buildMorningBrief({ actorEmail, bypassCache: req.query?.refresh === '1' });
+      const briefEnvelope = await buildDailyBriefContext({ actorEmail, bypassCache: req.query?.refresh === '1' });
       const data = await getApolloData(req.query?.refresh === '1');
       return res.status(200).json({
         ok: true,
         indexedAt: data.generatedAt,
         brief: briefEnvelope.ok ? {
-          data: briefEnvelope.data,
+          context: briefEnvelope.data,
           meta: briefEnvelope.meta,
-          markdown: formatMorningBriefMarkdown(briefEnvelope),
+          markdown: formatDailyBriefContext(briefEnvelope),
         } : null,
         counts: {
           products: data.products.liveCount,
