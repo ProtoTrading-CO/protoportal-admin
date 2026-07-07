@@ -70,6 +70,9 @@ export default function TaxonomyModals({
               {deleteModal.productCount > 0
                 ? ` ${deleteModal.productCount} product(s) will be moved to the Archive — restore them to live from there anytime.`
                 : ' No products are assigned to it.'}
+              {String(deleteModal.id || '').startsWith('mottaro') && (
+                <><br /><span className="adm-muted">This is a Motarro subcategory. Its products are Motarro-branded items that also sit in a normal department — archiving removes them from <strong>both</strong> places. You can undo the deletion with “Restore deleted” while browsing Motarro.</span></>
+              )}
             </p>
             <div className="adm-modal-footer adm-modal-footer--end">
               <div className="adm-modal-footer__actions">

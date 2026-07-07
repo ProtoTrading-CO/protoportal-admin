@@ -76,6 +76,18 @@ export async function deleteTaxonomyNode(id) {
   return postTaxonomy({ action: 'deleteNode', id });
 }
 
+// Deleted Motarro subcategories are virtual, so "delete" hides the node.
+// These let the admin see and undo those hides (the archived products are
+// restored separately from the Archive tab).
+export async function listHiddenMottaro() {
+  const json = await postTaxonomy({ action: 'listHiddenMottaro' });
+  return json.ids || [];
+}
+
+export async function restoreMottaroNode(id) {
+  return postTaxonomy({ action: 'restoreMottaroNode', id });
+}
+
 export async function countSubcategoryProducts(id) {
   const res = await fetch('/api/taxonomy', {
     method: 'POST',
