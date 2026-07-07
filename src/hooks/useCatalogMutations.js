@@ -28,6 +28,11 @@ function invalidateCatalogAndStats(queryClient, statuses = []) {
     });
   }
   queryClient.invalidateQueries({ queryKey: queryKeys.dashboardStats() });
+  // Signal that catalogue membership changed so the sidebar category-count
+  // badges (a separate data source from the list) can refresh. Without this,
+  // single-row/bulk archive/restore/delete updated the list but left the
+  // badges stale until an unrelated taxonomy reload.
+  window.dispatchEvent(new CustomEvent('proto-catalog-mutated'));
 }
 
 function refreshApproval() {

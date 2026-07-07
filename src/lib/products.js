@@ -657,6 +657,13 @@ export async function fetchReorderProducts({
   return products.sort((a, b) => a.name.localeCompare(b.name));
 }
 
+/** Short human summary of a server `failed[]` array: first 3 SKUs + a +N tail. */
+function summarizeFailed(failed = []) {
+  const detail = failed.slice(0, 3).map((f) => `${f.sku}: ${f.error}`).join('; ');
+  const suffix = failed.length > 3 ? ` (+${failed.length - 3} more)` : '';
+  return `${detail}${suffix}`;
+}
+
 export async function bulkMoveProducts({ skus, categoryId, subcategoryId, categoryPathIds }) {
   const res = await fetch('/api/bulk-products', {
     method: 'POST',
@@ -724,11 +731,13 @@ export async function bulkArchiveProducts(skus) {
     body: JSON.stringify({ action: 'archive', skus }),
   });
   const json = await readApiJson(res, { fallback: 'Bulk archive failed' });
-  if (json.failed?.length) {
-    throw new Error(`${json.failed.length} item(s) failed to archive`);
-  }
+  // Invalidate BEFORE any throw — a partial success still changed data, so the
+  // caches must refresh or the succeeded rows keep showing their old state.
   invalidateProductCache();
   invalidateAdminCache();
+  if (json.failed?.length) {
+    throw new Error(`${json.archived ?? 0} archived, ${json.failed.length} failed — ${summarizeFailed(json.failed)}`);
+  }
   return json;
 }
 
@@ -741,6 +750,11 @@ export async function bulkUnarchiveProducts(skus) {
   const json = await readApiJson(res, { fallback: 'Bulk restore failed' });
   invalidateProductCache();
   invalidateAdminCache();
+  // Restore failures were silently swallowed before — surface them so the
+  // admin knows some SKUs are still archived rather than assuming all restored.
+  if (json.failed?.length) {
+    throw new Error(`${json.restored ?? 0} restored, ${json.failed.length} failed — ${summarizeFailed(json.failed)}`);
+  }
   return json;
 }
 
@@ -757,11 +771,11 @@ export async function bulkDeleteProducts(skus) {
     body: JSON.stringify({ action: 'delete', skus }),
   });
   const json = await readApiJson(res, { fallback: 'Bulk delete failed' });
-  if (json.failed?.length) {
-    throw new Error(`${json.failed.length} item(s) failed to delete`);
-  }
   invalidateProductCache();
   invalidateAdminCache();
+  if (json.failed?.length) {
+    throw new Error(`${json.deleted ?? 0} deleted, ${json.failed.length} failed — ${summarizeFailed(json.failed)}`);
+  }
   return json;
 }
 

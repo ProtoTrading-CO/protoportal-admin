@@ -306,7 +306,7 @@ function PmMobileProductCard({
             >
               <Sparkles size={14} />
             </button>
-            <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => mutations.archive.mutate(item.sku, { onSuccess: () => onRefreshStats?.() })}>Archive</button>
+            <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => mutations.archive.mutate(item.sku, { onSuccess: () => onRefreshStats?.(), onError: (err) => onShowToast?.(err.message || 'Archive failed', 'error') })}>Archive</button>
           </>
         )}
         {status === 'archived' && (
@@ -503,6 +503,26 @@ export default function ProductManagerEngine({
     setSelectAllView(false);
   }, [status, debouncedSearch, categoryPath.join('/'), archiveStockView, archiveSourceFilter, onlyInStock]);
 
+  // Any catalogue mutation (single-row or bulk archive/restore/delete/make-live)
+  // changes category membership — refresh BOTH badge sources so the sidebar
+  // counts never drift from the list. Debounced so a burst of per-row actions
+  // coalesces into one counts refresh.
+  useEffect(() => {
+    let timer = null;
+    const onMutated = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        onRefreshTaxonomy?.();
+        setInStockCountsNonce((n) => n + 1);
+      }, 400);
+    };
+    window.addEventListener('proto-catalog-mutated', onMutated);
+    return () => {
+      window.removeEventListener('proto-catalog-mutated', onMutated);
+      if (timer) clearTimeout(timer);
+    };
+  }, [onRefreshTaxonomy]);
+
   const handleOnlyInStockChange = useCallback((next) => {
     setOnlyInStock(next);
     try {
@@ -559,6 +579,16 @@ export default function ProductManagerEngine({
   rowsRef.current = rows;
   const total = data?.total || 0;
   const archiveNegativeLive = status === 'archived' && archiveStockView === 'negative';
+
+  // If an action shrinks the total (bulk archive/delete/move) while the admin
+  // is on a high page, clamp back to the last real page — otherwise the server
+  // returns an empty page and the admin is stranded on "No products in view"
+  // with the pager reading e.g. "5 / 2".
+  useEffect(() => {
+    if (rowsStale || isFetching) return;
+    const maxPage = Math.max(1, Math.ceil(total / pageSize));
+    if (page > maxPage) setPage(maxPage);
+  }, [total, pageSize, page, rowsStale, isFetching]);
   const tree = taxonomyTree.length ? taxonomyTree : (data?.tree || []);
 
   const categoryKey = categoryPath.length
@@ -968,12 +998,18 @@ export default function ProductManagerEngine({
   const selectAllInView = async () => {
     setSelectingAll(true);
     try {
+      // MUST mirror catalogParams exactly, or "Select all (N)" gathers a
+      // different set than the list shows — e.g. omitting onlyInStock would
+      // select (and then archive) out-of-stock rows the admin never saw, and
+      // keeping categoryPath during a search would narrow the set below the
+      // catalogue-wide list.
       const allRows = await fetchAllCatalogRows({
         status,
         search: debouncedSearch,
-        categoryPath,
+        categoryPath: debouncedSearch ? [] : categoryPath,
         stockFilter: status === 'archived' ? archiveStockView : undefined,
         archivedSource: status === 'archived' && archiveStockView === 'archived' ? archiveSourceFilter : undefined,
+        onlyInStock: status === 'live' && onlyInStock,
       });
       selectedRowsRef.current = new Map(allRows.map((r) => [r.id, r]));
       setSelected(new Set(allRows.map((r) => r.id)));
@@ -1017,6 +1053,10 @@ export default function ProductManagerEngine({
     setBulkEditOpen(false);
     queryClient.invalidateQueries({ queryKey: ['catalog'] });
     onRefreshStats?.();
+    // Bulk edit can change a product's category — refresh the sidebar badges
+    // too (this path does not go through the mutations hook's event).
+    onRefreshTaxonomy?.();
+    setInStockCountsNonce((n) => n + 1);
   };
 
   const runBulk = async (action, { successMessage } = {}) => {
@@ -1676,11 +1716,11 @@ export default function ProductManagerEngine({
                             >
                               <Sparkles size={14} />
                             </button>
-                            <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => mutations.archive.mutate(item.sku, { onSuccess: () => onRefreshStats?.() })}>Archive</button>
+                            <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => mutations.archive.mutate(item.sku, { onSuccess: () => onRefreshStats?.(), onError: (err) => onShowToast?.(err.message || 'Archive failed', 'error') })}>Archive</button>
                           </>
                         )}
                         {status === 'archived' && archiveNegativeLive && (
-                          <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => mutations.archive.mutate(item.sku, { onSuccess: () => onRefreshStats?.() })}>Archive</button>
+                          <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => mutations.archive.mutate(item.sku, { onSuccess: () => onRefreshStats?.(), onError: (err) => onShowToast?.(err.message || 'Archive failed', 'error') })}>Archive</button>
                         )}
                         {status === 'archived' && !archiveNegativeLive && (
                           <button type="button" className="adm-btn-red adm-btn--sm" onClick={() => makeLive(item)}>
