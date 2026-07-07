@@ -197,23 +197,22 @@ async function bulkRemoveFromCategory(supabase, normalizedSkus, tree) {
 async function bulkDeleteProducts(supabase, normalizedSkus) {
   const { liveSkus, archSkus } = await resolveSkuTables(supabase, normalizedSkus);
   const found = new Set([...liveSkus.keys(), ...archSkus.keys()]);
-  const results = [];
   const failedSkus = new Set();
+  const errorBySku = new Map();
 
   const liveList = normalizedSkus.filter((sku) => liveSkus.has(sku));
   const archList = normalizedSkus.filter((sku) => archSkus.has(sku));
 
-  if (liveList.length) {
-    const liveOutcome = await chunkedInDelete(supabase, 'website_stock', liveList);
-    results.push(...liveOutcome.results);
-    for (const sku of liveOutcome.failedSkus) failedSkus.add(sku);
-  }
-
-  if (archList.length) {
-    const archOutcome = await chunkedInDelete(supabase, 'archived_products', archList);
-    results.push(...archOutcome.results);
-    for (const sku of archOutcome.failedSkus) failedSkus.add(sku);
-  }
+  // A SKU can live in BOTH tables; the per-table outcomes only feed the
+  // failure set + error detail here. The final results are built ONCE below,
+  // one row per unique SKU — otherwise a deleted product was counted twice
+  // (3× when present in both tables), inflating the reported `deleted` total.
+  const collect = (outcome) => {
+    for (const sku of outcome.failedSkus) failedSkus.add(sku);
+    for (const r of outcome.results) if (!r.ok && !errorBySku.has(r.sku)) errorBySku.set(r.sku, r.error);
+  };
+  if (liveList.length) collect(await chunkedInDelete(supabase, 'website_stock', liveList));
+  if (archList.length) collect(await chunkedInDelete(supabase, 'archived_products', archList));
 
   if (normalizedSkus.length) {
     const previewChunks = sliceIntoChunks(normalizedSkus, MOVE_UPDATE_CHUNK_SIZE);
@@ -222,14 +221,12 @@ async function bulkDeleteProducts(supabase, normalizedSkus) {
     }
   }
 
+  const results = [];
   for (const sku of normalizedSkus) {
-    if (!found.has(sku)) {
-      results.push({ sku, ok: false, error: 'Not found' });
-    } else if (!failedSkus.has(sku)) {
-      results.push({ sku, ok: true });
-    }
+    if (!found.has(sku)) results.push({ sku, ok: false, error: 'Not found' });
+    else if (failedSkus.has(sku)) results.push({ sku, ok: false, error: errorBySku.get(sku) || 'Delete failed' });
+    else results.push({ sku, ok: true });
   }
-
   return results;
 }
 

@@ -661,6 +661,24 @@ assert.match(pmRemoveSrc, /floater: \{ label: 'Floater'/, 'Archive shows a Float
 assert.match(productsRemoveSrc, /export async function archiveFloaters/, 'client archiveFloaters present');
 console.log('✓ Floater sweep (archive uncategorised live products, tagged)');
 
+// Product Manager review fixes (bulk handling + selection + counts sync)
+// 1. "Select all (N)" must gather exactly what the list shows.
+const selectAllBlock = pmRemoveSrc.match(/const selectAllInView = async[\s\S]*?setSelectingAll\(false\);/)?.[0] || '';
+assert.match(selectAllBlock, /onlyInStock: status === 'live' && onlyInStock/, 'select-all mirrors the onlyInStock filter (no OOS leak)');
+assert.match(selectAllBlock, /categoryPath: debouncedSearch \? \[\] : categoryPath/, 'select-all mirrors catalogue-wide search scope');
+// 2. Category badges refresh after any catalogue mutation.
+assert.match(readSrc('src/hooks/useCatalogMutations.js'), /dispatchEvent\(new CustomEvent\('proto-catalog-mutated'\)\)/, 'mutations signal catalogue change');
+assert.match(pmRemoveSrc, /addEventListener\('proto-catalog-mutated'/, 'PM refreshes badges on catalogue mutation');
+// 3. Page clamp so a shrunk total never strands the admin on a blank page.
+assert.match(pmRemoveSrc, /if \(page > maxPage\) setPage\(maxPage\)/, 'PM clamps page when total shrinks');
+// 4. Bulk client wrappers surface partial failures with SKUs and invalidate first.
+assert.match(productsRemoveSrc, /function summarizeFailed/, 'shared failed-SKU summary helper');
+assert.match(productsRemoveSrc, /restored, \$\{json\.failed\.length\} failed/, 'bulkUnarchive surfaces restore failures');
+// 5. Delete reports one result per unique SKU (no double-count).
+assert.match(bulkSrc, /one row per unique SKU/, 'bulkDelete dedupes results (accurate deleted count)');
+assert.match(pmRemoveSrc, /onError: \(err\) => onShowToast\?\.\(err\.message \|\| 'Archive failed'/, 'single-row archive surfaces errors');
+console.log('✓ Product Manager review fixes (select-all parity, badge sync, page clamp, bulk error surfacing)');
+
 // Production hardening (post-audit) — security, promo contract, lifecycle fixes
 
 // Webhooks must fail CLOSED when WEBHOOK_SECRET is unset
