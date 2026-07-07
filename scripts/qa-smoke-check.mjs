@@ -438,6 +438,23 @@ const orderDocsSrc = readSrc('src/lib/orderDocuments.js');
 assert.doesNotMatch(orderDocsSrc, /^import \{ jsPDF \} from 'jspdf'/m, 'jspdf no longer statically imported');
 assert.match(orderDocsSrc, /loadJsPDF/, 'orderDocuments uses lazy jspdf loader');
 
+// Order confirmation PDF — packing-slip layout with the Proto Trading Online banner
+assert.match(orderDocsSrc, /doc\.text\('ONLINE'/, 'order confirmation banner says PROTO TRADING ONLINE');
+assert.match(orderDocsSrc, /SHIPPING METHOD/, 'order confirmation shows the shipping-method banner');
+assert.match(orderDocsSrc, /doc\.text\('BARCODE'/, 'order confirmation table has a Barcode column');
+assert.match(orderDocsSrc, /doc\.text\('AVAIL'/, 'order confirmation table has an Avail column');
+assert.match(orderDocsSrc, /drawAddressBlock\('Invoice To'/, 'order confirmation renders the Invoice To block');
+assert.match(orderDocsSrc, /drawAddressBlock\('Delivery Address'/, 'order confirmation renders the Delivery Address block');
+{
+  const { pdfShippingMethod, invoiceToLines, deliveryAddressLines } = await import('../lib/order-format.mjs');
+  assert.equal(pdfShippingMethod({ delivery_method: 'proto-deliver' }), 'Proto to Quote Delivery', 'proto delivery → Proto to Quote Delivery');
+  assert.equal(pdfShippingMethod({ delivery_method: 'pickup' }), 'In store pick up', 'pickup → In store pick up');
+  assert.equal(pdfShippingMethod({}), 'Proto to Quote Delivery', 'empty delivery defaults to Proto to Quote Delivery');
+  const inv = invoiceToLines({ customers: { contact_name: 'Jane', business_name: 'ABC', phone: '021', email: 'a@b.co', city: 'CT', country: 'ZA' } });
+  assert.ok(inv.some((l) => l.startsWith('Phone:')) && inv.some((l) => l.startsWith('Email:')), 'invoice block carries phone + email');
+  assert.ok(deliveryAddressLines({ customers: {} }).length > 0, 'delivery block always has a fallback line');
+}
+
 const apolloSrc = readSrc('src/components/ApolloPanel.jsx');
 assert.doesNotMatch(apolloSrc, /^import \{ jsPDF \} from 'jspdf'/m, 'ApolloPanel does not statically import jspdf');
 assert.match(apolloSrc, /loadJsPDF/, 'ApolloPanel uses lazy jspdf loader');

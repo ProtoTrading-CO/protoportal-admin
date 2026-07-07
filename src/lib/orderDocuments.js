@@ -2,13 +2,15 @@ import { loadJsPDF } from './lazyJspdf';
 import { displayOrderNumber, buildFulfillmentUrl } from './orderNumber';
 import {
   buildOrderNoteSections,
-  customerDetailRows,
+  pdfShippingMethod,
+  invoiceToLines,
+  deliveryAddressLines,
 } from '../../lib/order-format.mjs';
 
 /** Customer-facing order confirmation PDF/email — staff preview may still show prices. */
 export const SHOW_CUSTOMER_PRICES = false;
 
-export { buildOrderNoteSections, deriveAutoNotesFromItems, resolveDeliveryMethod, formatDeliveryMethod } from '../../lib/order-format.mjs';
+export { buildOrderNoteSections, deriveAutoNotesFromItems, resolveDeliveryMethod, formatDeliveryMethod, pdfShippingMethod } from '../../lib/order-format.mjs';
 
 export function stripPricesFromOrderItems(items = []) {
   return items.map(({ unitPrice, price, ...rest }) => rest);
@@ -129,6 +131,17 @@ async function loadImageDataUrl(url, maxPx = 160) {
   }
 }
 
+// The built-in PDF fonts only cover CP1252, so characters like → or smart
+// quotes (which arrive in customer notes / auto-notes) render garbled or throw
+// off letter spacing. Map the common ones to safe ASCII before drawing.
+function pdfSafeText(value) {
+  return String(value ?? '')
+    .replace(/[→➔➜]/g, '->')
+    .replace(/[‘’]/g, "'")
+    .replace(/[“”]/g, '"')
+    .replace(/…/g, '...');
+}
+
 function detectImageFormat(dataUrl) {
   if (!dataUrl) return 'JPEG';
   if (dataUrl.includes('image/png')) return 'PNG';
@@ -136,24 +149,18 @@ function detectImageFormat(dataUrl) {
   return 'JPEG';
 }
 
+// Packing-slip column layout: #  Image  Barcode  Product  Qty  Avail
 const COL = {
-  img: { x: 40, w: 40 },
-  code: { x: 84, w: 54 },
-  name: { x: 140, w: 128 },
-  ord: { x: 270, w: 40 },
-  stock: { x: 312, w: 52 },
-  pick: { x: 368, w: 28 },
-  total: { x: 400, w: 75 },
+  num: { x: 40, w: 20 },
+  img: { x: 62, w: 44 },
+  code: { x: 112, w: 80 },
+  name: { x: 196, w: 212 },
+  qty: { x: 410, w: 52 },
+  avail: { x: 464, w: 91 },
 };
 
 function colCenter(col) {
   return col.x + col.w / 2;
-}
-
-function drawEmptyCheckbox(doc, x, y, size = 12) {
-  doc.setDrawColor(71, 85, 105);
-  doc.setLineWidth(0.9);
-  doc.rect(x, y, size, size, 'S');
 }
 
 const ROW_LINE = 12;
@@ -189,128 +196,142 @@ export async function generateOrderPdfBase64({
     day: 'numeric', month: 'long', year: 'numeric',
   });
   const linkUrl = includeInternalLink ? (fulfillmentUrl || buildFulfillmentUrl(order?.id)) : '';
-  const details = customerDetailRows(order);
+  const shippingMethod = pdfShippingMethod(order);
+  const invoiceLines = invoiceToLines(order);
+  const deliverLines = deliveryAddressLines(order);
 
-  // ── Header band (black bar with Proto logo) ─────────────────────────────
+  // ── Header band — Proto Trading Online ──────────────────────────────────
   doc.setFillColor(196, 0, 0);
   doc.rect(0, 0, pageWidth, 5, 'F');
-  doc.setFillColor(17, 17, 17);
-  doc.rect(0, 5, pageWidth, 105, 'F');
+  doc.setFillColor(11, 11, 11);
+  doc.rect(0, 5, pageWidth, 110, 'F');
 
   const logoData = await loadImageDataUrl('/proto-logo.png');
   let brandX = margin;
   if (logoData) {
-    try { doc.addImage(logoData, detectImageFormat(logoData), margin, 30, 44, 44); brandX = margin + 56; } catch { brandX = margin; }
+    try { doc.addImage(logoData, detectImageFormat(logoData), margin, 30, 46, 46); brandX = margin + 58; } catch { brandX = margin; }
   }
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(16);
+  doc.setFontSize(17);
   doc.setTextColor(255, 255, 255);
-  doc.text('PROTO', brandX, 50);
+  doc.text('PROTO', brandX, 46);
   const protoW = doc.getTextWidth('PROTO');
-  doc.setTextColor(220, 38, 38);
-  doc.text(' TRADING', brandX + protoW, 50);
+  doc.setTextColor(224, 0, 0);
+  doc.text(' TRADING', brandX + protoW, 46);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  doc.setTextColor(217, 155, 61);
+  doc.setCharSpace(4);
+  doc.text('ONLINE', brandX + 1, 66);
+  doc.setCharSpace(0);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8);
   doc.setTextColor(150, 150, 150);
   doc.setCharSpace(1.4);
-  doc.text('ORDER CONFIRMATION', brandX, 66);
+  doc.text('ORDER CONFIRMATION', brandX, 84);
   doc.setCharSpace(0);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(15);
   doc.setTextColor(255, 255, 255);
-  doc.text(orderNumber, pageWidth - margin, 48, { align: 'right' });
+  doc.text(orderNumber, pageWidth - margin, 46, { align: 'right' });
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
   doc.setTextColor(150, 150, 150);
   doc.text(dateStr, pageWidth - margin, 64, { align: 'right' });
-  y = 140;
+  y = 138;
 
-  // ── Customer details ──────────────────────────────────────────────────
-  const customerRow = details.find((d) => d.label === 'Customer');
-  const businessRow = details.find((d) => d.label === 'Business');
-  const primaryName = customerRow?.value || businessRow?.value || 'Customer';
-  doc.setTextColor(15, 23, 42);
+  // ── Shipping method banner ──────────────────────────────────────────────
+  ensureSpace(28);
+  doc.setFillColor(255, 247, 237);
+  doc.setDrawColor(217, 155, 61);
+  doc.setLineWidth(1);
+  doc.roundedRect(margin, y, contentWidth, 28, 4, 4, 'FD');
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(14);
-  doc.text(primaryName, margin, y);
-  y += 22;
+  doc.setFontSize(8.5);
+  doc.setTextColor(146, 64, 14);
+  doc.setCharSpace(0.6);
+  doc.text('SHIPPING METHOD', margin + 12, y + 17);
+  doc.setCharSpace(0);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(12);
+  doc.setTextColor(15, 23, 42);
+  doc.text(shippingMethod, margin + 128, y + 18);
+  y += 44;
 
-  const detail = (label, value) => {
-    if (!value) return;
-    ensureSpace(18);
+  // ── Invoice To + Delivery Address (two columns) ─────────────────────────
+  ensureSpace(130);
+  const gap = 16;
+  const blockW = (contentWidth - gap) / 2;
+  const rightX = margin + blockW + gap;
+
+  const drawAddressBlock = (title, lines, bx, startY) => {
+    let yy = startY;
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(8.5);
-    doc.setTextColor(100, 116, 139);
-    const labelText = `${label}:  `;
-    doc.text(labelText, margin, y);
-    const lw = doc.getTextWidth(labelText);
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(10);
-    doc.setTextColor(30, 41, 59);
-    const vlines = doc.splitTextToSize(String(value), contentWidth - lw);
-    doc.text(vlines, margin + lw, y, { lineHeightFactor: 1.4 });
-    y += Math.max(18, vlines.length * 14);
+    doc.setTextColor(196, 0, 0);
+    doc.setCharSpace(0.5);
+    doc.text(title.toUpperCase(), bx, yy);
+    doc.setCharSpace(0);
+    yy += 15;
+    lines.forEach((line, i) => {
+      doc.setFont('helvetica', i === 0 ? 'bold' : 'normal');
+      doc.setFontSize(i === 0 ? 10 : 9);
+      doc.setTextColor(i === 0 ? 15 : 55, i === 0 ? 23 : 65, i === 0 ? 42 : 81);
+      const wrapped = doc.splitTextToSize(String(line), blockW);
+      wrapped.forEach((wl) => { doc.text(wl, bx, yy); yy += 13; });
+    });
+    return yy;
   };
 
-  for (const row of details) {
-    if (row.label === 'Customer') continue;
-    if (row.label === 'Delivery') {
-      ensureSpace(22);
-      doc.setFillColor(255, 247, 237);
-      doc.setDrawColor(251, 191, 36);
-      doc.roundedRect(margin, y - 10, contentWidth, 24, 4, 4, 'FD');
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(10);
-      doc.setTextColor(15, 23, 42);
-      doc.text(`Delivery: ${row.value}`, margin + 10, y + 4);
-      y += 28;
-      continue;
-    }
-    detail(row.label, row.value);
-  }
-  y += 14;
+  const blockStartY = y;
+  const leftEnd = drawAddressBlock('Invoice To', invoiceLines, margin, blockStartY);
+  const rightEnd = drawAddressBlock('Delivery Address', deliverLines, rightX, blockStartY);
+  y = Math.max(leftEnd, rightEnd) + 14;
 
-  // ── Table header ──────────────────────────────────────────────────────
+  // ── Table header (redrawn on every page) ────────────────────────────────
+  const drawTableHeader = () => {
+    doc.setFillColor(11, 11, 11);
+    doc.rect(margin, y, contentWidth, 24, 'F');
+    doc.setFillColor(196, 0, 0);
+    doc.rect(COL.avail.x - 4, y, COL.avail.w + 4, 24, 'F');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7.5);
+    doc.setTextColor(255, 255, 255);
+    doc.text('#', COL.num.x + 3, y + 15);
+    doc.text('IMAGE', COL.img.x, y + 15);
+    doc.text('BARCODE', COL.code.x, y + 15);
+    doc.text('PRODUCT', COL.name.x, y + 15);
+    doc.text('QTY', colCenter(COL.qty), y + 15, { align: 'center' });
+    doc.text('AVAIL', colCenter(COL.avail), y + 15, { align: 'center' });
+    y += 32;
+  };
   ensureSpace(34);
-  doc.setFillColor(17, 17, 17);
-  doc.rect(margin, y, contentWidth, 24, 'F');
-  doc.setFillColor(196, 0, 0);
-  doc.rect(COL.stock.x - 4, y, COL.stock.w + COL.pick.w + 12, 24, 'F');
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(7);
-  doc.setTextColor(255, 255, 255);
-  doc.text('IMG', COL.img.x + 4, y + 14);
-  doc.setFontSize(8);
-  doc.text('CODE', COL.code.x, y + 14);
-  doc.text('PRODUCT', COL.name.x, y + 14);
-  doc.text('ORD', colCenter(COL.ord), y + 14, { align: 'center' });
-  doc.setFontSize(6.5);
-  doc.text('STOCK', colCenter(COL.stock), y + 10, { align: 'center' });
-  doc.text('AVAIL.', colCenter(COL.stock), y + 17, { align: 'center' });
-  doc.setFontSize(7);
-  doc.text('PICK', colCenter(COL.pick), y + 14, { align: 'center' });
-  if (hasPrices) doc.text('TOTAL', COL.total.x + COL.total.w, y + 15, { align: 'right' });
-  y += 32;
+  drawTableHeader();
 
   // ── Line items ────────────────────────────────────────────────────────
+  let rowIndex = 0;
   for (const item of items) {
+    rowIndex += 1;
     const orderedQty = item.originalQty != null ? item.originalQty : item.qty;
     const confirmedQty = item.removed ? 0 : (item.qty ?? item.finalQty ?? 0);
-    const price = Number(item.unitPrice ?? item.price ?? 0);
-    const lineTotal = hasPrices && !item.removed ? confirmedQty * price : null;
     const codeText = String(item.code || '—');
     const nameText = String(item.name || '—');
 
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(8);
-    const codeLines = doc.splitTextToSize(codeText, COL.code.w);
+    const codeLines = doc.splitTextToSize(codeText, COL.code.w).slice(0, 2);
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(9);
-    const nameLines = doc.splitTextToSize(nameText, COL.name.w).slice(0, 2);
-    const textLines = Math.max(1, Math.min(2, codeLines.length), nameLines.length);
+    const nameLines = doc.splitTextToSize(nameText, COL.name.w).slice(0, 3);
+    const textLines = Math.max(1, codeLines.length, nameLines.length);
     const rowH = Math.max(54, ROW_PAD + textLines * ROW_LINE);
 
-    ensureSpace(rowH + 8);
+    // Page break — carry the column header onto the new page.
+    if (y + rowH + 8 > pageHeight - margin) {
+      doc.addPage();
+      y = margin;
+      drawTableHeader();
+    }
 
     if (item.removed) doc.setFillColor(255, 245, 245);
     else if (orderedQty !== confirmedQty) doc.setFillColor(255, 251, 235);
@@ -319,26 +340,34 @@ export async function generateOrderPdfBase64({
     doc.setDrawColor(226, 232, 240);
     doc.line(margin, y + rowH - 2, margin + contentWidth, y + rowH - 2);
 
+    // # index
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(100, 116, 139);
+    doc.text(String(rowIndex), COL.num.x + 3, y + rowH / 2 + 3);
+
+    // image
     const imgData = await loadImageDataUrl(item.image);
     const imgY = y + (rowH - 44) / 2;
     if (imgData) {
       try {
-        doc.addImage(imgData, detectImageFormat(imgData), COL.img.x + 2, imgY, 44, 44);
+        doc.addImage(imgData, detectImageFormat(imgData), COL.img.x, imgY, 44, 44);
       } catch {
         doc.setFillColor(243, 244, 246);
-        doc.rect(COL.img.x + 2, imgY, 44, 44, 'F');
+        doc.rect(COL.img.x, imgY, 44, 44, 'F');
       }
     } else {
       doc.setFillColor(243, 244, 246);
-      doc.rect(COL.img.x + 2, imgY, 44, 44, 'F');
+      doc.rect(COL.img.x, imgY, 44, 44, 'F');
     }
 
-    const textY = y + 14;
+    const textY = y + 16;
+    // barcode / code
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(8);
     doc.setTextColor(item.removed ? 148 : 71, item.removed ? 163 : 85, item.removed ? 184 : 105);
-    doc.text(codeLines.slice(0, 2), COL.code.x, textY, { maxWidth: COL.code.w, lineHeightFactor: 1.15 });
-
+    doc.text(codeLines, COL.code.x, textY, { maxWidth: COL.code.w, lineHeightFactor: 1.15 });
+    // product name
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(9);
     doc.setTextColor(item.removed ? 148 : 15, item.removed ? 163 : 23, item.removed ? 184 : 42);
@@ -361,25 +390,15 @@ export async function generateOrderPdfBase64({
       doc.text('QTY CHANGED', COL.name.x, textY + nameLines.length * ROW_LINE + 2);
     }
 
+    // qty (ordered) + avail (available)
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(10);
     doc.setTextColor(100, 116, 139);
-    doc.text(String(orderedQty), colCenter(COL.ord), textY + 4, { align: 'center' });
+    doc.text(String(orderedQty), colCenter(COL.qty), y + rowH / 2 + 3, { align: 'center' });
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(10);
     doc.setTextColor(item.removed ? 220 : 15, item.removed ? 38 : 23, item.removed ? 38 : 42);
-    doc.text(item.removed ? '0' : String(confirmedQty), colCenter(COL.stock), textY + 4, { align: 'center' });
-
-    const boxSize = 12;
-    const boxX = colCenter(COL.pick) - boxSize / 2;
-    const boxY = y + (rowH - boxSize) / 2;
-    drawEmptyCheckbox(doc, boxX, boxY, boxSize);
-
-    if (hasPrices && lineTotal != null) {
-      doc.setFont('helvetica', 'normal');
-      doc.setTextColor(15, 23, 42);
-      doc.text(money(lineTotal), COL.total.x + COL.total.w, textY + 4, { align: 'right', maxWidth: COL.total.w });
-    }
+    doc.text(item.removed ? '0' : String(confirmedQty), colCenter(COL.avail), y + rowH / 2 + 3, { align: 'center' });
 
     y += rowH;
   }
@@ -430,7 +449,7 @@ export async function generateOrderPdfBase64({
     doc.setFontSize(10);
     doc.setTextColor(55, 65, 81);
     section.lines.forEach((line) => {
-      const lines = doc.splitTextToSize(line, contentWidth - 28);
+      const lines = doc.splitTextToSize(pdfSafeText(line), contentWidth - 28);
       lines.forEach((ln) => {
         ensureSpace(16);
         doc.text(ln, margin + 14, y, { maxWidth: contentWidth - 28 });
