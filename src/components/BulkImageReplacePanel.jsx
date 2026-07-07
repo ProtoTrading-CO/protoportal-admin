@@ -496,9 +496,25 @@ function BulkImageReplacePanelInner({ taxonomyTree = [], onShowToast }) {
             </div>
           )}
 
+          <p className="adm-section-note" style={{ marginBottom: 8 }}>
+            Previews below show the new image now on each product — confirm the change before running again.
+          </p>
           <div className="bir-review-scroll">
             {runResults.slice(0, 200).map((r) => (
-              <div key={r.sku} className="bir-review-row">
+              <div key={r.sku} className="bir-review-row" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                {r.ok && r.url ? (
+                  <a href={r.url} target="_blank" rel="noopener noreferrer" style={{ lineHeight: 0 }}>
+                    <img
+                      src={r.url}
+                      alt={r.sku}
+                      width={44}
+                      height={44}
+                      style={{ width: 44, height: 44, objectFit: 'cover', borderRadius: 6, border: '1px solid #e5e7eb', background: '#f8fafc' }}
+                    />
+                  </a>
+                ) : (
+                  <span style={{ width: 44, height: 44, borderRadius: 6, border: '1px solid #fee2e2', background: '#fef2f2', display: 'inline-block' }} />
+                )}
                 <code style={{ fontSize: 12, minWidth: 100 }}>{r.sku}</code>
                 {r.ok
                   ? <span style={{ color: '#15803d', fontWeight: 700, fontSize: 12 }}>Replaced</span>

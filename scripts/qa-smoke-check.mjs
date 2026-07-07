@@ -600,6 +600,11 @@ assert.match(birLibSrc, /barcode: row\.barcode \|\| row\.code/, 'selection carri
 assert.match(birLibSrc, /skuByIdentifier/, 'preflight maps SKU + barcode to the owning product SKU');
 assert.match(readSrc('api/bulk-image-replace.js'), /fileSku === rowBarcode/, 'server accepts a filename that matches the row barcode');
 assert.match(readSrc('api/bulk-image-replace.js'), /select\('sku, archived_by, barcode'\)/, 'archived lookup fetches the barcode for matching');
+// Replaced image URL is cache-busted so the new picture actually shows (not the cached old one)
+assert.match(readSrc('api/bulk-image-replace.js'), /const bustedUrl = `\$\{publicUrl\}\?v=\$\{Date\.now\(\)\}`/, 'replaced image URL carries a version param to bust the cache');
+assert.match(readSrc('api/bulk-image-replace.js'), /\[col\]: bustedUrl/, 'the cache-busted URL is what gets stored');
+// Results step previews the new image so it can be confirmed before another run
+assert.match(readSrc('src/components/BulkImageReplacePanel.jsx'), /src=\{r\.url\}/, 'results show a preview of the replaced image');
 assert.match(sidebarSrc, /id: 'image-replace'/, 'sidebar has Image Replace nav');
 assert.match(adminPageSrc, /BulkImageReplacePanel/, 'AdminPage lazy-loads BulkImageReplacePanel');
 assert.doesNotMatch(readSrc('src/components/ProductLoaderPanel.jsx'), /image-replace/, 'Image Replace removed from Product Loader');

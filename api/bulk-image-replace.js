@@ -157,8 +157,13 @@ async function replaceOneItem(supabase, raw, allowedSet, slot, scope) {
     if (uploadErr) throw uploadErr;
 
     const { data: { publicUrl } } = supabase.storage.from(BUCKET).getPublicUrl(objectPath);
+    // The object path is reused (upsert), so the URL is byte-identical run to
+    // run and the browser/CDN keeps serving the OLD image. A version query
+    // param makes each replaced image a fresh URL so the new picture shows in
+    // the admin, the preview, and the live site.
+    const bustedUrl = `${publicUrl}?v=${Date.now()}`;
     const col = BULK_IMAGE_REPLACE_SLOT_COLS[slot - 1];
-    const patch = { [col]: publicUrl, updated_at: new Date().toISOString() };
+    const patch = { [col]: bustedUrl, updated_at: new Date().toISOString() };
 
     if (scope === 'archived') {
       const { error: patchErr } = await supabase
@@ -175,7 +180,7 @@ async function replaceOneItem(supabase, raw, allowedSet, slot, scope) {
         const { error: syncErr } = await supabase
           .from('website_stock').update(patch).eq('sku', sku);
         if (syncErr) {
-          return { sku, ok: true, slot, scope, url: publicUrl, warning: `live_sync_failed: ${syncErr.message}` };
+          return { sku, ok: true, slot, scope, url: bustedUrl, warning: `live_sync_failed: ${syncErr.message}` };
         }
       }
     } else {
@@ -186,7 +191,7 @@ async function replaceOneItem(supabase, raw, allowedSet, slot, scope) {
       if (patchErr) throw patchErr;
     }
 
-    return { sku, ok: true, slot, scope, url: publicUrl };
+    return { sku, ok: true, slot, scope, url: bustedUrl };
   } catch (err) {
     return { sku, ok: false, error: err.message || 'replace_failed' };
   }
