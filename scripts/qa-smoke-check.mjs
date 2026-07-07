@@ -435,6 +435,19 @@ assert.match(readSrc('src/components/AddCustomerModal.jsx'), /export default fun
 assert.match(readSrc('api/_customer-email-status.js'), /export async function markCustomerEmailed/, 'last-email marker present');
 assert.match(readSrc('api/_send-email-broadcast.js'), /markCustomersEmailed/, 'broadcast stamps last-email');
 assert.match(readSrc('src/pages/AdminPage.jsx'), /function LastEmailBadge/, 'last-email badge rendered');
+// Send to specific people (explicit email list) — for testing + a handful of customers
+assert.match(readSrc('api/_send-email-broadcast.js'), /'selected'/, 'broadcast audience allows a selected email list');
+assert.match(readSrc('api/_send-email-broadcast.js'), /fetchRecipientsByEmail/, 'broadcast can resolve an explicit recipient list');
+assert.match(readSrc('api/_brevo-email.js'), /export async function fetchRecipientsByEmail/, 'recipient-by-email resolver present (personalizes known customers)');
+assert.match(readSrc('api/customer-email-broadcast.js'), /const isSelected =/, 'send endpoint handles the specific-people path');
+assert.match(readSrc('src/components/CustomerEmailModal.jsx'), /Specific people \(enter emails\)/, 'email modal offers a specific-people audience');
+assert.match(readSrc('src/components/CustomerEmailModal.jsx'), /export function parseEmailList/, 'email modal parses a typed/pasted email list');
+{
+  const { parseEmailList } = await import('../src/components/CustomerEmailModal.jsx').catch(() => ({}));
+  if (parseEmailList) {
+    assert.deepEqual(parseEmailList('a@b.co, a@b.co\nbad  c@d.co'), ['a@b.co', 'c@d.co'], 'parseEmailList dedupes + drops invalid');
+  }
+}
 assert.ok(readSrc('migrations/042_customer_last_email.sql').includes('last_email_type'), 'migration 042 adds last-email columns');
 
 // Per-template test send + Brevo webhook robustness

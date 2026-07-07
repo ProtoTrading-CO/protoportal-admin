@@ -33,7 +33,22 @@ const AUDIENCE_OPTIONS = [
     label: 'Approved + Pre-registration',
     hint: 'Everyone you can email (deduped by email)',
   },
+  {
+    value: 'selected',
+    label: 'Specific people (enter emails)',
+    hint: 'Sends only to the exact addresses you enter below — good for testing or a handful of customers',
+  },
 ];
+
+/** Split a pasted/typed blob into unique lowercase email addresses. */
+export function parseEmailList(raw) {
+  return [...new Set(
+    String(raw || '')
+      .split(/[\s,;]+/)
+      .map((e) => e.trim().toLowerCase())
+      .filter((e) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)),
+  )];
+}
 
 function defaultAudienceForTab(customerTab) {
   if (customerTab === 'requests') return 'requests';
@@ -94,6 +109,8 @@ export default function CustomerEmailModal({
   const [testSending, setTestSending] = useState(false);
   const [campaigns, setCampaigns] = useState([]);
   const [uploadingImage, setUploadingImage] = useState(false);
+  const [recipientsText, setRecipientsText] = useState('');
+  const selectedEmails = useMemo(() => parseEmailList(recipientsText), [recipientsText]);
   const [scheduledAt, setScheduledAt] = useState('');
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const scheduleRef = useRef(null);
@@ -247,6 +264,10 @@ export default function CustomerEmailModal({
   };
 
   const handleSchedule = async () => {
+    if (audience === 'selected') {
+      onShowToast?.('Scheduling isn’t available for specific people — use Send now, or pick an audience to schedule.', 'error');
+      return;
+    }
     if (!subject.trim()) {
       onShowToast?.('Subject is required', 'error');
       return;
@@ -293,15 +314,23 @@ export default function CustomerEmailModal({
       return;
     }
 
-    if (!test && filterBusinessTypes && !businessTypes.length) {
+    const isSelected = audience === 'selected';
+    if (!test && isSelected && !selectedEmails.length) {
+      onShowToast?.('Enter at least one valid email address', 'error');
+      return;
+    }
+    if (!test && !isSelected && filterBusinessTypes && !businessTypes.length) {
       onShowToast?.('Select at least one business type or turn off the filter', 'error');
       return;
     }
 
-    if (!test && !window.confirm(`Send this email to: ${selectedAudience.label}${filterBusinessTypes && businessTypes.length ? ` (${businessTypes.length} business type${businessTypes.length === 1 ? '' : 's'})` : ''}?`)) return;
+    const audienceLabel = isSelected
+      ? `${selectedEmails.length} specific ${selectedEmails.length === 1 ? 'person' : 'people'}`
+      : `${selectedAudience.label}${filterBusinessTypes && businessTypes.length ? ` (${businessTypes.length} business type${businessTypes.length === 1 ? '' : 's'})` : ''}`;
+    if (!test && !window.confirm(`Send this email to: ${audienceLabel}?`)) return;
 
     if (test) {
-      const testEmail = adminEmail || window.prompt('Send test to email address:');
+      const testEmail = (isSelected ? selectedEmails[0] : adminEmail) || window.prompt('Send test to email address:');
       if (!testEmail?.trim()) return;
       setTestSending(true);
       try {
@@ -311,7 +340,7 @@ export default function CustomerEmailModal({
           introText: introBody.trim(),
           htmlBlock: htmlBody.trim(),
           testEmail: testEmail.trim(),
-          businessTypes: filterBusinessTypes ? businessTypes : [],
+          businessTypes: filterBusinessTypes && !isSelected ? businessTypes : [],
         });
         onShowToast?.(`Test email sent to ${testEmail.trim()}`, 'success');
       } catch (err) {
@@ -329,10 +358,11 @@ export default function CustomerEmailModal({
         subject: subject.trim(),
         introText: introBody.trim(),
         htmlBlock: htmlBody.trim(),
-        businessTypes: filterBusinessTypes ? businessTypes : [],
+        businessTypes: filterBusinessTypes && !isSelected ? businessTypes : [],
+        ...(isSelected ? { recipients: selectedEmails } : {}),
       });
       onShowToast?.(
-        `Sent to ${result.sent} customer(s)${result.failed ? ` — ${result.failed} failed` : ''}`,
+        `Sent to ${result.sent} ${isSelected ? 'recipient' : 'customer'}(s)${result.failed ? ` — ${result.failed} failed` : ''}`,
         result.failed ? 'error' : 'success',
       );
       onClose?.();
@@ -404,6 +434,41 @@ export default function CustomerEmailModal({
             <span className="adm-email-field__hint">{selectedAudience.hint}</span>
           </label>
 
+          {audience === 'selected' && (
+            <label className="adm-email-field">
+              <span className="adm-email-field__label">
+                Recipients{selectedEmails.length ? ` — ${selectedEmails.length} valid` : ''}
+              </span>
+              <textarea
+                className="adm-field-input"
+                rows={3}
+                value={recipientsText}
+                onChange={(e) => setRecipientsText(e.target.value)}
+                placeholder="Enter email addresses, separated by commas, spaces or new lines"
+                style={{ resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }}
+              />
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 6 }}>
+                {adminEmail && (
+                  <button
+                    type="button"
+                    className="adm-btn-ghost adm-btn--sm"
+                    onClick={() => setRecipientsText((prev) => (
+                      parseEmailList(prev).includes(adminEmail.toLowerCase())
+                        ? prev
+                        : `${prev ? `${prev.trim()}\n` : ''}${adminEmail}`
+                    ))}
+                  >
+                    + Add my email ({adminEmail})
+                  </button>
+                )}
+                <span className="adm-email-field__hint" style={{ margin: 0 }}>
+                  Known customers get their {'{{name}}'} filled in; unknown addresses still send.
+                </span>
+              </div>
+            </label>
+          )}
+
+          {audience !== 'selected' && (
           <label className="adm-email-field">
             <span className="adm-email-field__label">Filter by business type?</span>
             <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -433,6 +498,7 @@ export default function CustomerEmailModal({
               </div>
             )}
           </label>
+          )}
 
           <div className="adm-email-field">
             <span className="adm-email-field__label">Subject</span>
@@ -660,10 +726,10 @@ export default function CustomerEmailModal({
             <button
               type="button"
               className="adm-btn-red"
-              disabled={sending || testSending || scheduling}
+              disabled={sending || testSending || scheduling || (audience === 'selected' && !selectedEmails.length)}
               onClick={() => void handleSend(false)}
             >
-              {sending ? <><Loader2 size={14} className="spin" /> Sending…</> : <><Send size={14} /> Send now</>}
+              {sending ? <><Loader2 size={14} className="spin" /> Sending…</> : <><Send size={14} /> Send now{audience === 'selected' && selectedEmails.length ? ` (${selectedEmails.length})` : ''}</>}
             </button>
           </div>
         </div>
