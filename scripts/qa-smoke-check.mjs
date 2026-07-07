@@ -419,6 +419,14 @@ assert.match(webhookSrc2, /x-webhook-secret/, 'webhook accepts the secret via he
 assert.match(webhookSrc2, /accepting events unauthenticated/, 'webhook works when no secret is set (with a warning)');
 console.log('✓ Add-customer, last-email status, per-template test send, webhook robustness');
 
+// Simplified email merge fields — one reliable "name", no blank-prone codes
+const mergeSrc = readSrc('src/lib/emailMergeTags.js');
+assert.doesNotMatch(mergeSrc, /key: 'first_name'/, 'first_name merge chip removed (one name)');
+assert.doesNotMatch(mergeSrc, /key: 'customer_code'/, 'customer_code merge chip removed (usually blank)');
+assert.match(mergeSrc, /key: 'name'/, 'single name merge field kept');
+assert.match(readSrc('src/components/CustomerEmailModal.jsx'), /Add HTML \/ banner/, 'HTML block collapsed behind a toggle');
+console.log('✓ Simplified email compose (one name, HTML optional)');
+
 // Bundle-perf follow-ups
 const orderDocsSrc = readSrc('src/lib/orderDocuments.js');
 assert.doesNotMatch(orderDocsSrc, /^import \{ jsPDF \} from 'jspdf'/m, 'jspdf no longer statically imported');

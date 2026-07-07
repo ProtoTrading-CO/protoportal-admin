@@ -86,6 +86,7 @@ export default function CustomerEmailModal({
   const [introBody, setIntroBody] = useState('');
   const [htmlBody, setHtmlBody] = useState('');
   const [htmlPane, setHtmlPane] = useState('split');
+  const [showHtml, setShowHtml] = useState(false);
   const [audience, setAudience] = useState('all-approved');
   const [filterBusinessTypes, setFilterBusinessTypes] = useState(false);
   const [businessTypes, setBusinessTypes] = useState([]);
@@ -106,6 +107,7 @@ export default function CustomerEmailModal({
     if (!open) return;
     setAudience(defaultAudienceForTab(customerTab));
     setHtmlPane('split');
+    setShowHtml(false);
     setFilterBusinessTypes(false);
     setBusinessTypes([]);
   }, [open, customerTab]);
@@ -142,6 +144,7 @@ export default function CustomerEmailModal({
       if (!res.ok) throw new Error(json.error || 'Image upload failed');
       const imgTag = `<p style="margin:16px 0;"><img src="${json.url}" alt="" style="max-width:100%;border-radius:8px;" /></p>`;
       setHtmlBody((prev) => (prev ? `${prev}\n${imgTag}` : imgTag));
+      setShowHtml(true);
       if (htmlPane === 'preview') setHtmlPane('split');
       onShowToast?.('Image attached to the email body', 'success');
     } catch (err) {
@@ -338,7 +341,7 @@ export default function CustomerEmailModal({
               <Mail size={18} /> Send email via Brevo
             </h3>
             <p className="adm-email-modal__lead">
-              Write your message above, add optional HTML below, and use fields like {'{{name}}'} or {'{{business_name}}'} — replaced per customer on send.
+              Write the message, then Send. Fields like {'{{name}}'} are filled in per customer.
             </p>
           </div>
           <button type="button" className="adm-modal-close" onClick={onClose} aria-label="Close">×</button>
@@ -422,11 +425,10 @@ export default function CustomerEmailModal({
               onFocus={() => { activeFieldRef.current = 'subject'; }}
               placeholder="Proto Trading update for {{business_name}}"
             />
-            <MergeTagBar onInsert={insertMergeTag} />
           </div>
 
           <div className="adm-email-field adm-email-field--intro">
-            <span className="adm-email-field__label">Message body</span>
+            <span className="adm-email-field__label">Message</span>
             <textarea
               ref={introRef}
               className="adm-field-input adm-email-modal__textarea"
@@ -437,19 +439,11 @@ export default function CustomerEmailModal({
               onPaste={handleBodyPaste}
               onDrop={handleBodyDrop}
               onDragOver={(e) => e.preventDefault()}
-              placeholder={'Hi {{first_name}},\n\nWe have an update for {{business_name}}…'}
+              placeholder={'Hi {{name}},\n\nWe have an update for {{business_name}}…'}
               spellCheck
             />
-            <span className="adm-email-field__hint">Plain text intro shown above any HTML. Paste or drop an image here to embed it. Blank lines start new paragraphs.</span>
-            <MergeTagBar onInsert={insertMergeTag} />
-          </div>
-
-          <div className="adm-email-field">
-            <div className="adm-email-field__row">
-              <span className="adm-email-field__label">
-                <Code2 size={14} style={{ verticalAlign: -2, marginRight: 4 }} />
-                HTML block (optional)
-              </span>
+            <div className="adm-email-field__row" style={{ justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+              <MergeTagBar onInsert={insertMergeTag} />
               <input
                 ref={imageRef}
                 type="file"
@@ -467,6 +461,35 @@ export default function CustomerEmailModal({
               >
                 {uploadingImage ? <Loader2 size={13} className="spin" /> : <ImagePlus size={13} />}
                 Attach image
+              </button>
+            </div>
+            <span className="adm-email-field__hint">Fields like {'{{name}}'} are filled per customer. Blank lines start new paragraphs.</span>
+          </div>
+
+          {!showHtml && (
+            <button
+              type="button"
+              className="adm-btn-ghost"
+              style={{ alignSelf: 'flex-start', fontSize: 12 }}
+              onClick={() => setShowHtml(true)}
+            >
+              <Code2 size={13} style={{ marginRight: 4 }} /> Add HTML / banner (optional)
+            </button>
+          )}
+          {showHtml && (
+          <div className="adm-email-field">
+            <div className="adm-email-field__row">
+              <span className="adm-email-field__label">
+                <Code2 size={14} style={{ verticalAlign: -2, marginRight: 4 }} />
+                HTML block (optional)
+              </span>
+              <button
+                type="button"
+                className="adm-btn-ghost"
+                style={{ fontSize: 12, padding: '4px 10px' }}
+                onClick={() => { setShowHtml(false); setHtmlBody(''); }}
+              >
+                Remove
               </button>
               <div className="adm-email-pane-toggle" role="tablist" aria-label="HTML editor view">
                 <button
@@ -539,6 +562,7 @@ export default function CustomerEmailModal({
               )}
             </div>
           </div>
+          )}
 
           <EmailTemplateTests adminEmail={adminEmail} onShowToast={onShowToast} />
         </div>

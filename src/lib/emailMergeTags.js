@@ -1,12 +1,11 @@
+// The only fields that reliably exist for every customer. One "name" (it
+// falls back to the business name, then the email) so it is never blank.
+// customer/account codes were removed — they are usually empty (codes are
+// allocated manually), so a {{customer_code}} tag rendered blank.
 export const MERGE_TAGS = [
   { key: 'name', label: 'Name', sample: 'Jane Smith' },
-  { key: 'first_name', label: 'First name', sample: 'Jane' },
-  { key: 'contact_name', label: 'Contact name', sample: 'Jane Smith' },
   { key: 'business_name', label: 'Business name', sample: 'ABC Stationers' },
   { key: 'email', label: 'Email', sample: 'jane@abcstationers.co.za' },
-  { key: 'customer_code', label: 'Customer code', sample: 'ABC123' },
-  { key: 'account_code', label: 'Account code', sample: 'ABC123' },
-  { key: 'phone', label: 'Phone', sample: '082 555 1234' },
 ];
 
 export const PREVIEW_MERGE_VARS = Object.fromEntries(
