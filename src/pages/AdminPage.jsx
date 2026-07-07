@@ -133,6 +133,7 @@ function SectionSuspenseFallback({ label = 'Loading…' }) {
 // Modal-only — chunk downloads the first time the admin opens the dialog.
 const CustomerEmailModal = lazyRetry(() => import('../components/CustomerEmailModal'));
 const AddCustomerModal = lazyRetry(() => import('../components/AddCustomerModal'));
+import ActionMenu from '../components/ActionMenu';
 const CrmContactsModal = lazyRetry(() => import('../components/CrmContactsModal'));
 const FulfillmentSettingsModal = lazyRetry(() => import('../components/FulfillmentSettingsModal'));
 import categories from '../data/categories.json';
@@ -2205,38 +2206,31 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                       hidden
                       onChange={(e) => { void handleCustomerCsvUpload(e.target.files?.[0]); e.target.value = ''; }}
                     />
-                    <button
-                      type="button"
-                      className="adm-btn-ghost"
-                      disabled={importingCustomers}
-                      onClick={() => customerCsvRef.current?.click()}
-                      title="Upload CSV (Account, CompanyName, ContactName, EmailAddress, TotalSpend) into Pre-registration"
-                    >
-                      {importingCustomers
-                        ? <><Loader2 size={14} className="spin" /> Importing…</>
-                        : <><Upload size={14} /> Upload CSV</>}
-                    </button>
-                    <button
-                      type="button"
-                      className="adm-btn-ghost"
-                      style={{ color: '#c40000' }}
-                      disabled={saving === 'del-all-proto'}
-                      onClick={() => void handleDeleteAllProtoActive()}
-                      title="Delete all pre-registration customers"
-                    >
-                      {saving === 'del-all-proto' ? <Loader2 size={14} className="spin" /> : <Trash2 size={14} />}
-                      Delete all
-                    </button>
-                    <button
-                      type="button"
-                      className="adm-btn-ghost"
-                      disabled={exportingCustomers}
-                      onClick={() => void handleExportAllCustomers()}
-                    >
-                      {exportingCustomers
-                        ? <><Loader2 size={14} className="spin" /> Exporting…</>
-                        : <><Download size={14} /> Export all customers</>}
-                    </button>
+                    {/* Primary actions stay one-click; infrequent data/utility
+                        actions move into a tidy overflow menu. */}
+                    <ActionMenu
+                      items={[
+                        {
+                          label: importingCustomers ? 'Importing…' : 'Upload CSV',
+                          icon: importingCustomers ? <Loader2 size={14} className="spin" /> : <Upload size={14} />,
+                          disabled: importingCustomers,
+                          onClick: () => customerCsvRef.current?.click(),
+                        },
+                        {
+                          label: exportingCustomers ? 'Exporting…' : 'Export all customers',
+                          icon: exportingCustomers ? <Loader2 size={14} className="spin" /> : <Download size={14} />,
+                          disabled: exportingCustomers,
+                          onClick: () => void handleExportAllCustomers(),
+                        },
+                        {
+                          label: 'Delete all pre-registration',
+                          icon: <Trash2 size={14} />,
+                          danger: true,
+                          disabled: saving === 'del-all-proto',
+                          onClick: () => void handleDeleteAllProtoActive(),
+                        },
+                      ]}
+                    />
                     <button type="button" className="adm-btn-ghost" onClick={() => setAddCustomerOpen(true)} title="Manually add a customer into a chosen section">
                       <UserPlus size={14} /> Add customer
                     </button>
@@ -2470,18 +2464,18 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                     </p>
                   </div>
                   <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-                    <button
-                      type="button"
-                      className="adm-btn-ghost"
-                      onClick={() => void clearAllOrders()}
-                      disabled={loading || saving === 'clear-all-orders'}
-                      style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px', color: '#c40000' }}
-                      title="Delete all orders"
-                    >
-                      {saving === 'clear-all-orders' ? <Loader2 size={15} className="spin" /> : <Trash2 size={15} />}
-                      Clear all
-                    </button>
                     <label className="adm-search"><Search size={15} /><input value={orderSearch} onChange={(e) => setOrderSearch(e.target.value)} placeholder="Search orders" className="adm-search-input" /></label>
+                    <ActionMenu
+                      items={[
+                        {
+                          label: saving === 'clear-all-orders' ? 'Deleting…' : 'Delete all orders',
+                          icon: saving === 'clear-all-orders' ? <Loader2 size={14} className="spin" /> : <Trash2 size={14} />,
+                          danger: true,
+                          disabled: loading || saving === 'clear-all-orders',
+                          onClick: () => void clearAllOrders(),
+                        },
+                      ]}
+                    />
                   </div>
                 </div>
 
