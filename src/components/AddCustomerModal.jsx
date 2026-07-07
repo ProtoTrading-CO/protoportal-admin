@@ -73,11 +73,11 @@ export default function AddCustomerModal({ open, onClose, onAdded, onShowToast }
             <label className="adm-field-label">Section</label>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 }}>
               {SECTIONS.map((s) => (
-                <label key={s.value} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', cursor: 'pointer', padding: '6px 8px', border: `1px solid ${section === s.value ? '#8B1A1A' : '#e5e7eb'}`, borderRadius: 8 }}>
+                <label key={s.value} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', cursor: 'pointer', padding: '8px 10px', border: `1.5px solid ${section === s.value ? '#8B1A1A' : '#e5e7eb'}`, background: section === s.value ? '#fdf3f3' : '#fff', borderRadius: 8, transition: 'border-color .12s, background .12s' }}>
                   <input type="radio" name="add-section" checked={section === s.value} onChange={() => setSection(s.value)} style={{ marginTop: 3, accentColor: '#8B1A1A' }} />
                   <span>
                     <span style={{ fontWeight: 700 }}>{s.label}</span>
-                    <span style={{ display: 'block', fontSize: 12, color: '#6b7280' }}>{s.hint}</span>
+                    <span style={{ display: 'block', fontSize: 12, color: '#6b7280', marginTop: 2 }}>{s.hint}</span>
                   </span>
                 </label>
               ))}
@@ -96,14 +96,20 @@ export default function AddCustomerModal({ open, onClose, onAdded, onShowToast }
               <label className="adm-field-label">Contact name</label>
               <input className="adm-input" value={form.contact_name} onChange={set('contact_name')} />
             </div>
-            <div>
-              <label className="adm-field-label">Phone</label>
-              <input className="adm-input" value={form.phone} onChange={set('phone')} placeholder="+27…" />
-            </div>
-            <div>
-              <label className="adm-field-label">Monthly spend</label>
-              <input className="adm-input" value={form.monthly_spend} onChange={set('monthly_spend')} />
-            </div>
+            {/* Phone + monthly spend only apply to a real approved account —
+                the pre-registration allowlist ignores them. */}
+            {!isPreReg && (
+              <>
+                <div>
+                  <label className="adm-field-label">Phone</label>
+                  <input className="adm-input" value={form.phone} onChange={set('phone')} placeholder="+27…" />
+                </div>
+                <div>
+                  <label className="adm-field-label">Monthly spend</label>
+                  <input className="adm-input" value={form.monthly_spend} onChange={set('monthly_spend')} />
+                </div>
+              </>
+            )}
             {isPreReg && (
               <div style={{ gridColumn: '1 / -1' }}>
                 <label className="adm-field-label">Account reference (optional)</label>
@@ -111,6 +117,10 @@ export default function AddCustomerModal({ open, onClose, onAdded, onShowToast }
               </div>
             )}
           </div>
+          <p style={{ margin: '2px 0 0', fontSize: 12, color: '#6b7280' }}>
+            No customer code is set here. Allocate it later from the customer's profile — saving the code
+            is what sends the confirmation email.
+          </p>
         </div>
         <div className="adm-modal-footer adm-modal-footer--end">
           <div className="adm-modal-footer__actions">

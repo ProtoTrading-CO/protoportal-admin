@@ -201,6 +201,11 @@ export async function seedProtoActiveCustomers() {
   return json;
 }
 
+/**
+ * PATCH a customer. Returns the full response { row, welcomeEmail, watiWelcome }
+ * so callers can tell whether a confirmation email was sent (it only sends when
+ * a code is newly assigned to an approved customer).
+ */
 export async function updateCustomerAdmin(id, fields) {
   const res = await fetch('/api/admin-customers', {
     method: 'PATCH',
@@ -209,5 +214,5 @@ export async function updateCustomerAdmin(id, fields) {
   });
   const json = await res.json();
   if (!res.ok) throw new Error(json.error || 'Failed to update customer');
-  return json.row;
+  return json;
 }

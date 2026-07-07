@@ -1710,6 +1710,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
       contact_name: profileCustomer.contact_name || '',
       first_name: profileCustomer.first_name || '',
       account_code: profileCustomer.account_code || profileCustomer.customer_code || '',
+      customer_code: profileCustomer.customer_code || '',
     });
     setProfileEditing(true);
   };
@@ -1729,11 +1730,13 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
         await loadCustomers();
         showToast('Pre-registration contact updated');
       } else {
-        const row = await updateCustomerAdmin(profileCustomer.id, profileForm);
-        setProfileCustomer(row);
+        const res = await updateCustomerAdmin(profileCustomer.id, profileForm);
+        setProfileCustomer(res.row);
         setProfileEditing(false);
         await loadCustomers();
-        showToast('Customer profile updated');
+        if (res.welcomeEmail === 'sent') showToast('Code saved — confirmation email sent');
+        else if (res.welcomeEmail === 'failed') showToast('Saved, but the confirmation email failed to send', 'error');
+        else showToast('Customer profile updated');
       }
     } catch (err) {
       showToast(err.message || 'Update failed', 'error');
@@ -1750,13 +1753,15 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
 
   const approveRequest = async (person) => {
     const customerCode = String(approvalCodes[person.id] || '').trim().toUpperCase();
-    if (!/^[A-Z0-9]{6}$/.test(customerCode)) {
-      showToast('Enter a 6-character customer code before approving', 'error');
+    // A code is OPTIONAL at approval — approve now, allocate the code later. If
+    // a code IS typed it must be valid; assigning it sends the confirmation email.
+    if (customerCode && !/^[A-Z0-9]{6}$/.test(customerCode)) {
+      showToast('Code must be 6 letters or numbers — or leave it blank to allocate later', 'error');
       return;
     }
     setSaving(person.id);
     try {
-      const result = await approveCustomer(person.id, true, { customerCode });
+      const result = await approveCustomer(person.id, true, customerCode ? { customerCode } : {});
       if (result.watiWelcome === 'failed') {
         showToast('Approved, but WhatsApp welcome message failed to send', 'error');
       }
@@ -1771,7 +1776,10 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
       setCustomerPage(1);
       await loadCustomers();
       closeCustomerProfile();
-      showToast(`${person.business_name || person.name || 'Customer'} approved`);
+      const who = person.business_name || person.name || 'Customer';
+      if (result.welcomeEmail === 'sent') showToast(`${who} approved — confirmation email sent`);
+      else if (customerCode) showToast(`${who} approved with code ${customerCode}`);
+      else showToast(`${who} approved — allocate a code later to send the confirmation email`);
     } catch (err) {
       showToast(err.message || 'Approval failed', 'error');
     } finally { setSaving(''); }
@@ -2366,14 +2374,15 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                           <input
                             type="text"
                             className="adm-tiny-input"
-                            placeholder="6-digit"
+                            placeholder="Code (opt.)"
                             maxLength={6}
                             value={approvalCodes[person.id] || ''}
                             onChange={(e) => setApprovalCodes((prev) => ({
                               ...prev,
                               [person.id]: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6),
                             }))}
-                            style={{ width: '72px', fontFamily: 'monospace', fontWeight: 700 }}
+                            title="Optional. A code sends the confirmation email now; leave blank to allocate later."
+                            style={{ width: '84px', fontFamily: 'monospace', fontWeight: 700 }}
                             aria-label={`Customer code for ${person.email}`}
                           />
                         </div>
@@ -2382,7 +2391,8 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                           <button
                             onClick={() => void approveRequest(person)}
                             className="adm-btn-green adm-btn-sm"
-                            disabled={saving === person.id || !/^[A-Z0-9]{6}$/.test(approvalCodes[person.id] || '')}
+                            disabled={saving === person.id
+                              || (!!approvalCodes[person.id] && !/^[A-Z0-9]{6}$/.test(approvalCodes[person.id]))}
                           >
                             {saving === person.id ? '…' : <><Check size={12} /> Approve</>}
                           </button>
@@ -2735,6 +2745,22 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                         </div>
                       ))}
                       <div>
+                        <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 5 }}>Customer code</label>
+                        <input
+                          className="adm-field-input"
+                          value={profileForm.customer_code || ''}
+                          onChange={(e) => setProfileForm((f) => ({ ...f, customer_code: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6) }))}
+                          placeholder="6-character code"
+                          maxLength={6}
+                          style={{ width: '100%', fontFamily: 'monospace', fontWeight: 700, letterSpacing: '0.08em' }}
+                        />
+                        <span style={{ display: 'block', fontSize: 11, color: '#6b7280', marginTop: 4 }}>
+                          {profileCustomer.customer_code
+                            ? 'A code is already set. Changing it will not resend the email.'
+                            : 'Leave blank to allocate later. Saving a code sends the confirmation email.'}
+                        </span>
+                      </div>
+                      <div>
                         <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 5 }}>Monthly spend</label>
                         <select className="adm-field-input" value={profileForm.monthly_spend || ''} onChange={setPf('monthly_spend')} style={{ width: '100%' }}>
                           <option value="">—</option>
@@ -2822,19 +2848,21 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                   <input
                     type="text"
                     className="adm-tiny-input"
-                    placeholder="6-digit code"
+                    placeholder="Code (optional)"
                     maxLength={6}
                     value={approvalCodes[profileCustomer.id] || ''}
                     onChange={(e) => setApprovalCodes((prev) => ({
                       ...prev,
                       [profileCustomer.id]: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6),
                     }))}
-                    style={{ width: 88, fontFamily: 'monospace', fontWeight: 700 }}
+                    title="Optional. Type a 6-character code to send the confirmation email now, or leave blank and allocate it later."
+                    style={{ width: 108, fontFamily: 'monospace', fontWeight: 700 }}
                   />
                   <button
                     onClick={() => void approveRequest(profileCustomer)}
                     className="adm-btn-green"
-                    disabled={saving === profileCustomer.id || !/^[A-Z0-9]{6}$/.test(approvalCodes[profileCustomer.id] || '')}
+                    disabled={saving === profileCustomer.id
+                      || (!!approvalCodes[profileCustomer.id] && !/^[A-Z0-9]{6}$/.test(approvalCodes[profileCustomer.id]))}
                   >
                     {saving === profileCustomer.id ? 'Approving…' : <><Check size={15} /> Approve</>}
                   </button>
