@@ -1,18 +1,14 @@
--- 10000 Club: customers who were pre-registered (proto_active_customers,
--- imported from the spend CSV) get auto-approved the moment they sign up at
--- register.proto.co.za, tagged "10000 club". No customer_code is allocated —
--- codes stay a manual admin step.
-
-ALTER TABLE customers
-  ADD COLUMN IF NOT EXISTS tags text[] NOT NULL DEFAULT '{}'::text[];
-
--- Trigger fires on INSERT no matter which system writes the row (the admin
--- register-account endpoint or the register portal writing directly), so the
--- auto-approval can never be bypassed by a different signup path.
+-- HOTFIX for migration 040: the auto-approve trigger could raise inside the
+-- signup flow (unqualified table name resolved under the auth flow's
+-- search_path, and/or RLS on proto_active_customers), which surfaced to users
+-- as "Database error creating new user" and blocked account creation.
 --
--- SECURITY DEFINER + explicit search_path so it resolves/reads
--- public.proto_active_customers regardless of caller context or RLS, and a
--- catch-all EXCEPTION so a convenience feature can NEVER block a signup.
+-- This hardens the function so it:
+--   1. runs SECURITY DEFINER with an explicit search_path (resolves + reads
+--      public.proto_active_customers regardless of caller context / RLS), and
+--   2. swallows ANY error — auto-approval is a convenience and must never
+--      block a signup.
+
 CREATE OR REPLACE FUNCTION auto_approve_pre_registered()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -31,10 +27,12 @@ BEGIN
           NEW.tags := array_append(coalesce(NEW.tags, '{}'::text[]), '10000 club');
         END IF;
       EXCEPTION WHEN undefined_column THEN
+        -- tags column not present yet — approval alone is enough.
         NULL;
       END;
     END IF;
   EXCEPTION WHEN OTHERS THEN
+    -- Never let auto-approval block account creation.
     NULL;
   END;
   RETURN NEW;
