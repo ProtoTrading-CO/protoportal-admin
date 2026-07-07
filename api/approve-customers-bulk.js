@@ -36,13 +36,8 @@ function classifyEmail(email, customer) {
   if (customer.is_approved) {
     return { kind: 'approved', entry: { email, id: customer.id, already: true } };
   }
-  if (!String(customer.customer_code || '').trim()) {
-    return { kind: 'failed', entry: { email, error: 'Missing customer code — assign a code before approving' } };
-  }
-  const code = String(customer.customer_code || '').trim().toUpperCase();
-  if (!/^[A-Z0-9]{6}$/.test(code)) {
-    return { kind: 'failed', entry: { email, error: 'Customer code must be exactly 6 letters or numbers' } };
-  }
+  // A customer code is NOT required to approve — codes are allocated manually
+  // later and are never auto-generated.
   return { kind: 'pending', email, customer };
 }
 

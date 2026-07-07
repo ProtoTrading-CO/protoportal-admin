@@ -27,11 +27,16 @@ export default async function handler(req, res) {
     return res.status(405).end();
   }
 
-  // Fail closed: campaign stats are data-integrity sensitive — require the
-  // secret to be configured, not merely matched when present.
+  // When WEBHOOK_SECRET is configured, require it (query ?secret= OR the
+  // X-Webhook-Secret header) — this is the locked-down mode. When it is NOT
+  // configured, accept events so analytics work out of the box (open/click
+  // counters only; nothing destructive), and log a one-line nudge to set it.
   const webhookSecret = process.env.WEBHOOK_SECRET;
-  if (!webhookSecret || String(req.query?.secret || '') !== webhookSecret) {
-    return res.status(401).json({ error: 'Unauthorized' });
+  if (webhookSecret) {
+    const provided = String(req.query?.secret || req.headers['x-webhook-secret'] || '');
+    if (provided !== webhookSecret) return res.status(401).json({ error: 'Unauthorized' });
+  } else {
+    console.warn('brevo-email-webhook: WEBHOOK_SECRET not set — accepting events unauthenticated. Set WEBHOOK_SECRET in Vercel and append ?secret=… to the Brevo webhook URL to lock this down.');
   }
 
   const payload = req.body || {};
@@ -39,6 +44,7 @@ export default async function handler(req, res) {
 
   try {
     let updated = 0;
+    let unmatched = 0;
     for (const item of items) {
       const messageId = extractMessageId(item);
       const event = extractEvent(item);
@@ -51,8 +57,14 @@ export default async function handler(req, res) {
         meta: { subject: item.subject },
       });
       if (result && result !== false && !result?.abort) updated += 1;
+      else unmatched += 1;
     }
-    return res.status(200).json({ ok: true, updated });
+    // Surface silent drops: an event whose message-id matches no known campaign
+    // means the send path didn't capture that id (e.g. a transactional email).
+    if (unmatched) {
+      console.warn(`brevo-email-webhook: ${unmatched} event(s) did not match any campaign message-id (${items.length} received).`);
+    }
+    return res.status(200).json({ ok: true, updated, unmatched });
   } catch (err) {
     console.error('brevo-email-webhook:', err?.message || err);
     return res.status(500).json({ error: err.message || 'Webhook processing failed' });

@@ -1,5 +1,7 @@
+import { createClient } from '@supabase/supabase-js';
 import { requireTradeRegisterOrAdmin } from './_admin-auth.js';
 import { buildComposedEmail, sendBrevoTransactional } from './_brevo-email.js';
+import { markCustomerEmailed } from './_customer-email-status.js';
 import {
   buildTradeApplicationEmailBodies,
   tradeApplicationGreetingName,
@@ -43,6 +45,14 @@ export default async function handler(req, res) {
       htmlContent: composed.htmlContent,
       textContent: composed.textContent,
     });
+    try {
+      const sb = createClient(
+        process.env.VITE_SUPABASE_URL,
+        process.env.SUPABASE_SERVICE_ROLE_KEY,
+        { auth: { autoRefreshToken: false, persistSession: false } },
+      );
+      await markCustomerEmailed(sb, { email, type: 'trade_application' });
+    } catch { /* best effort */ }
     return res.status(200).json({ ok: true, sent: true, email });
   } catch (err) {
     console.error('trade-application-received:', err?.message || err);

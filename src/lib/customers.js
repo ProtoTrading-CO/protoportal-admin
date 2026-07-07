@@ -100,6 +100,34 @@ export async function importProtoActiveCustomers(rows) {
   return json;
 }
 
+/**
+ * Manually add a customer into a chosen section.
+ * section: 'approved' | 'approved-10000' | 'pre-registration' | '10000-club'
+ * Never generates a customer code.
+ */
+export async function addCustomerManually({ section, ...fields }) {
+  const res = await fetch('/api/admin-customers', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ section, ...fields }),
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || 'Failed to add customer');
+  return json;
+}
+
+/** Send a TEST copy of an email template to yourself. */
+export async function sendEmailTemplateTest({ template, to, subject, introText, htmlBlock }) {
+  const res = await fetch('/api/email-test-send', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ template, to, subject, introText, htmlBlock }),
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || 'Test send failed');
+  return json;
+}
+
 export async function syncBrevoContacts() {
   const res = await fetch('/api/brevo-sync', { method: 'POST' });
   const json = await res.json();

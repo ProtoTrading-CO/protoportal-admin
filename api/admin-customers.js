@@ -1,6 +1,8 @@
 import { requireAdminKey } from './_admin-auth.js';
 import { createClient } from '@supabase/supabase-js';
+import { randomBytes } from 'crypto';
 import { parseCustomerTab, parsePositiveInt, parseBusinessTypeFilter } from './_admin-query-params.js';
+import { sendWelcomeApprovalEmail } from './_welcome-email.js';
 
 function getAdminClient() {
   return createClient(
@@ -109,18 +111,9 @@ export default async function handler(req, res) {
     }
     if (!Object.keys(patch).length) return res.status(400).json({ error: 'No valid fields to update' });
 
-    if (patch.is_approved === true) {
-      const { data: existing } = await supabase
-        .from('customers')
-        .select('customer_code')
-        .eq('id', id)
-        .maybeSingle();
-      const code = patch.customer_code || existing?.customer_code;
-      if (!code || !/^[A-Z0-9]{6}$/.test(code)) {
-        return res.status(400).json({ error: 'A 6-character customer code is required before approval' });
-      }
-      if (!patch.customer_code) patch.customer_code = code;
-    }
+    // Approval no longer requires a customer_code — codes are allocated
+    // manually whenever the admin is ready, and are NEVER auto-generated. If a
+    // code was supplied in this same patch it was already validated above.
     const { data, error } = await supabase
       .from('customers')
       .update(patch)
@@ -177,7 +170,108 @@ export default async function handler(req, res) {
       }
     }
 
-    return res.status(200).json({ row: data, watiWelcome });
+    // Email welcome/approval on approval (best-effort) + stamp last-email status.
+    let welcomeEmail = 'skipped';
+    if (patch.is_approved === true && data?.email) {
+      try {
+        const result = await sendWelcomeApprovalEmail(data, { supabase });
+        welcomeEmail = result?.sent ? 'sent' : 'skipped';
+      } catch (mailErr) {
+        console.error('welcome email error:', mailErr.message);
+        welcomeEmail = 'failed';
+      }
+    }
+
+    return res.status(200).json({ row: data, watiWelcome, welcomeEmail });
+  }
+
+  // POST — manually add a customer into a chosen section (never trade-requests,
+  // never an auto-generated code).
+  if (req.method === 'POST') {
+    const b = req.body || {};
+    const section = String(b.section || '').trim();
+    const email = String(b.email || '').trim().toLowerCase();
+    if (!email || !email.includes('@')) return res.status(400).json({ error: 'A valid email is required' });
+    const name = String(b.name || b.business_name || '').trim();
+
+    // Pre-registration / 10000-club allowlist — they auto-approve + get the
+    // welcome email when they sign up. account_code here is a REFERENCE only,
+    // never copied into customers.customer_code.
+    if (section === 'pre-registration' || section === '10000-club') {
+      const row = {
+        email,
+        name: name || null,
+        contact_name: String(b.contact_name || '').trim() || null,
+        first_name: String(b.first_name || '').trim() || null,
+        account_code: String(b.account_code || '').trim() || null,
+        sales_last_12_months: b.sales_last_12_months != null && b.sales_last_12_months !== ''
+          ? Number(b.sales_last_12_months) || 0 : null,
+      };
+      const { error } = await supabase
+        .from('proto_active_customers')
+        .upsert(row, { onConflict: 'email' });
+      if (error) return res.status(400).json({ error: error.message });
+      return res.status(200).json({ ok: true, section: 'pre-registration' });
+    }
+
+    // Approved customer — needs an auth account so they can sign in. No code.
+    if (section === 'approved' || section === 'approved-10000') {
+      const tempPassword = `Pt-${randomBytes(16).toString('base64url')}`;
+      const { data: created, error: createErr } = await supabase.auth.admin.createUser({
+        email,
+        password: tempPassword,
+        email_confirm: true,
+        user_metadata: { name },
+      });
+      if (createErr) {
+        if (createErr.code === 'email_exists') {
+          return res.status(409).json({ error: 'An account with that email already exists — find them in the list.' });
+        }
+        return res.status(400).json({ error: createErr.message || 'Failed to create account' });
+      }
+      const user = created?.user;
+      if (!user?.id) return res.status(500).json({ error: 'Account created without a user id' });
+
+      const row = {
+        id: user.id,
+        email,
+        name: name || email,
+        business_name: String(b.business_name || '').trim() || name || null,
+        tier: 'regular',
+        role: 'customer',
+        is_approved: true,
+        customer_code: null,
+      };
+      for (const col of ['phone', 'business_type', 'contact_name', 'first_name', 'vat_number', 'website', 'city', 'province', 'country', 'company_address', 'delivery_address']) {
+        const v = b[col];
+        if (v !== undefined && v !== null && String(v).trim() !== '') row[col] = String(v).trim();
+      }
+      if (b.monthly_spend !== undefined && b.monthly_spend !== '') row.monthly_spend = String(b.monthly_spend).trim();
+      if (b.accept_whatsapp !== undefined) row.accept_whatsapp = Boolean(b.accept_whatsapp);
+      if (section === 'approved-10000') row.tags = ['10000 club'];
+
+      const { data: inserted, error: custErr } = await supabase
+        .from('customers')
+        .upsert(row, { onConflict: 'id' })
+        .select('*')
+        .single();
+      if (custErr) {
+        await supabase.auth.admin.deleteUser(user.id).catch(() => {});
+        return res.status(400).json({ error: custErr.message });
+      }
+
+      let welcomeEmail = 'skipped';
+      try {
+        const result = await sendWelcomeApprovalEmail(inserted, { supabase, needsPasswordSetup: true });
+        welcomeEmail = result?.sent ? 'sent' : 'skipped';
+      } catch (mailErr) {
+        console.error('manual add welcome email:', mailErr.message);
+        welcomeEmail = 'failed';
+      }
+      return res.status(200).json({ ok: true, section: 'approved', row: inserted, welcomeEmail });
+    }
+
+    return res.status(400).json({ error: `Unknown section: ${section || '(none)'}` });
   }
 
   // DELETE — remove customer

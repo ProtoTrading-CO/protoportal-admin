@@ -382,6 +382,43 @@ assert.equal(
 );
 console.log('✓ Trade application acknowledgment email');
 
+// Customer codes never auto-generated + approval no longer requires a code
+const adminCustSrc = readSrc('api/admin-customers.js');
+assert.doesNotMatch(adminCustSrc, /A 6-character customer code is required before approval/, 'approval no longer forces a code');
+assert.doesNotMatch(approveSrc, /Missing customer code/, 'bulk approve no longer forces a code');
+assert.match(readSrc('api/register-account.js'), /customer_code: null/, 'register still never assigns a code');
+console.log('✓ Customer codes: manual only, approval not blocked');
+
+// 10000-club welcome/approval email
+const welcomeSrc = readSrc('api/_welcome-email.js');
+assert.match(welcomeSrc, /export function buildWelcomeEmail/, 'welcome email builder present');
+assert.match(welcomeSrc, /export async function sendWelcomeApprovalEmail/, 'welcome email sender present');
+assert.match(readSrc('api/register-account.js'), /sendWelcomeApprovalEmail/, 'auto-approval sends the welcome email');
+assert.match(adminCustSrc, /sendWelcomeApprovalEmail/, 'admin approve sends the welcome email');
+console.log('✓ Welcome / approval email on approval');
+
+// Manual add-customer with section selection
+assert.match(adminCustSrc, /req\.method === 'POST'/, 'admin-customers accepts manual add (POST)');
+assert.match(adminCustSrc, /section === 'pre-registration'/, 'add-customer supports pre-registration');
+assert.match(adminCustSrc, /section === 'approved'/, 'add-customer supports approved');
+assert.match(readSrc('src/lib/customers.js'), /export async function addCustomerManually/, 'client add-customer present');
+assert.match(readSrc('src/components/AddCustomerModal.jsx'), /export default function AddCustomerModal/, 'AddCustomerModal component present');
+
+// Per-customer last-email status
+assert.match(readSrc('api/_customer-email-status.js'), /export async function markCustomerEmailed/, 'last-email marker present');
+assert.match(readSrc('api/_send-email-broadcast.js'), /markCustomersEmailed/, 'broadcast stamps last-email');
+assert.match(readSrc('src/pages/AdminPage.jsx'), /function LastEmailBadge/, 'last-email badge rendered');
+assert.ok(readSrc('migrations/042_customer_last_email.sql').includes('last_email_type'), 'migration 042 adds last-email columns');
+
+// Per-template test send + Brevo webhook robustness
+assert.match(readSrc('api/email-test-send.js'), /template === 'welcome'/, 'test-send handles welcome template');
+assert.match(readSrc('api/email-test-send.js'), /template === 'order_confirmation'/, 'test-send handles order confirmation');
+assert.match(readSrc('src/components/EmailTemplateTests.jsx'), /sendEmailTemplateTest/, 'template test UI present');
+const webhookSrc2 = readSrc('api/brevo-email-webhook.js');
+assert.match(webhookSrc2, /x-webhook-secret/, 'webhook accepts the secret via header');
+assert.match(webhookSrc2, /accepting events unauthenticated/, 'webhook works when no secret is set (with a warning)');
+console.log('✓ Add-customer, last-email status, per-template test send, webhook robustness');
+
 // Bundle-perf follow-ups
 const orderDocsSrc = readSrc('src/lib/orderDocuments.js');
 assert.doesNotMatch(orderDocsSrc, /^import \{ jsPDF \} from 'jspdf'/m, 'jspdf no longer statically imported');
@@ -719,12 +756,14 @@ console.log('✓ Motarro subcategory delete (hide + archive products + reversibl
 
 // Production hardening (post-audit) — security, promo contract, lifecycle fixes
 
-// Webhooks must fail CLOSED when WEBHOOK_SECRET is unset
-for (const f of ['api/wati-intercom.js', 'api/intercom-reply.js', 'api/brevo-email-webhook.js']) {
+// Action-taking webhooks must fail CLOSED when WEBHOOK_SECRET is unset.
+// (The Brevo email webhook is analytics-only — it fails OPEN with a warning so
+// open/click stats work out of the box; asserted separately above.)
+for (const f of ['api/wati-intercom.js', 'api/intercom-reply.js']) {
   const src = readSrc(f);
   assert.match(src, /if \(!webhookSecret \|\|/, `${f} fails closed without WEBHOOK_SECRET`);
 }
-console.log('✓ Hardening: webhooks fail closed');
+console.log('✓ Hardening: action webhooks fail closed');
 
 // Checkout promo must mirror into the portal validator file
 const promoSrc = readSrc('api/checkout-promo.js');

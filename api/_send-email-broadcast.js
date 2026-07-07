@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { fetchCustomerAudience, sendBroadcastBatch } from './_brevo-email.js';
 import { appendEmailCampaign } from './_email-campaigns.js';
+import { markCustomersEmailed } from './_customer-email-status.js';
 
 export const VALID_EMAIL_AUDIENCE = new Set(['requests', 'regular', 'proto-active', 'all-portal', 'all-approved']);
 
@@ -46,6 +47,11 @@ export async function runEmailBroadcast({ audience, subject, introText = '', htm
   } catch (logErr) {
     console.error('runEmailBroadcast: campaign log failed:', logErr?.message || logErr);
   }
+
+  // Stamp the per-customer "last email sent" status (best-effort, analytics only).
+  try {
+    await markCustomersEmailed(sb, recipients.map((r) => r.email), 'campaign');
+  } catch { /* best effort */ }
 
   return { ok: failed === 0, total: recipients.length, sent, failed, errors };
 }
