@@ -765,6 +765,33 @@ export async function bulkDeleteProducts(skus) {
   return json;
 }
 
+/**
+ * Preview the "floater" sweep: live products with no category, or a category
+ * that matches no real department (orphaned labels). Returns counts + a sample
+ * so the caller can confirm before archiving. Motarro products are excluded.
+ */
+export async function previewFloaters() {
+  const res = await fetch('/api/archive-floaters', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'preview' }),
+  });
+  return readApiJson(res, { fallback: 'Floater preview failed' });
+}
+
+/** Archive every floater, tagged archived_by='floater'. Recomputed server-side. */
+export async function archiveFloaters() {
+  const res = await fetch('/api/archive-floaters', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'execute' }),
+  });
+  const json = await readApiJson(res, { fallback: 'Floater archive failed' });
+  invalidateProductCache();
+  invalidateAdminCache();
+  return json;
+}
+
 export async function saveSortOrder() { /* website_stock has no sort_order column */ }
 export async function setSpecial() { throw new Error('Not supported'); }
 export async function updateSortOrder() { throw new Error('Not supported'); }

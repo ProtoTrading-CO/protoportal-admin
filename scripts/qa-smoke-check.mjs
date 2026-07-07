@@ -648,6 +648,19 @@ assert.match(pmRemoveSrc, /Remove from category/, 'remove-from-category button r
 assert.match(pmRemoveSrc, /pm-bulk-group--end/, 'bulk toolbar regrouped into clustered layout');
 console.log('✓ Remove-from-category (Mottaro-only detach) + regrouped bulk toolbar');
 
+// Floater sweep — archive live products that belong to no category
+const floaterApiSrc = readSrc('api/archive-floaters.js');
+assert.match(floaterApiSrc, /FLOATER_ARCHIVED_BY = 'floater'/, 'floaters tagged archived_by=floater');
+assert.match(floaterApiSrc, /if \(isMotarroProduct\(row\)\) return null/, 'Motarro products excluded from floaters');
+assert.match(floaterApiSrc, /if \(!cat\) return 'empty'/, 'empty category is a floater');
+assert.match(floaterApiSrc, /if \(!deptLabels\.has\(cat\)\) return 'unmatched'/, 'unknown department is a floater');
+assert.match(floaterApiSrc, /rpc\('archive_product', \{[\s\S]*p_by: FLOATER_ARCHIVED_BY/, 'floater execute uses archive_product RPC with the floater tag');
+assert.match(pmRemoveSrc, /handleFloaterSweep/, 'PM has floater sweep handler');
+assert.match(pmRemoveSrc, /Clean up floaters/, 'PM renders the Clean up floaters button');
+assert.match(pmRemoveSrc, /floater: \{ label: 'Floater'/, 'Archive shows a Floater tag badge');
+assert.match(productsRemoveSrc, /export async function archiveFloaters/, 'client archiveFloaters present');
+console.log('✓ Floater sweep (archive uncategorised live products, tagged)');
+
 // Production hardening (post-audit) — security, promo contract, lifecycle fixes
 
 // Webhooks must fail CLOSED when WEBHOOK_SECRET is unset
