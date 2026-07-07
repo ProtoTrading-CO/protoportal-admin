@@ -330,7 +330,9 @@ export default function CustomerEmailModal({
     if (!test && !window.confirm(`Send this email to: ${audienceLabel}?`)) return;
 
     if (test) {
-      const testEmail = (isSelected ? selectedEmails[0] : adminEmail) || window.prompt('Send test to email address:');
+      // A test is a self-preview with sample merge data + a [TEST] subject, so
+      // it must go to the admin — never to a real customer in the recipient list.
+      const testEmail = adminEmail || window.prompt('Send test to email address:');
       if (!testEmail?.trim()) return;
       setTestSending(true);
       try {

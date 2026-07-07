@@ -31,8 +31,11 @@ export default async function handler(req, res) {
     }
 
     const audience = String(body.audience || '').trim();
-    if (!VALID_EMAIL_AUDIENCE.has(audience)) {
-      return res.status(400).json({ error: 'Invalid audience' });
+    // 'selected' is a live-send-only mode (explicit recipient list) — the
+    // schedule store carries no recipients, so a scheduled 'selected' send could
+    // never resolve anyone. Reject it here rather than queue a doomed item.
+    if (audience === 'selected' || !VALID_EMAIL_AUDIENCE.has(audience)) {
+      return res.status(400).json({ error: audience === 'selected' ? 'Scheduling to specific people is not supported — use Send now.' : 'Invalid audience' });
     }
     const subject = String(body.subject || '').trim();
     if (!subject) return res.status(400).json({ error: 'Subject is required' });

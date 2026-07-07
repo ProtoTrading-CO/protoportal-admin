@@ -175,6 +175,8 @@ export default function ProductLoaderFolder({
     if (!rows.length) return;
     setProcessing(true);
     setError('');
+    const start = Date.now();
+    setStartedAt(start);
     setProgress({ done: 0, total: rows.length, current: '' });
     let archived = 0;
     let failed = 0;
@@ -191,9 +193,11 @@ export default function ProductLoaderFolder({
       } finally {
         done += 1;
         setProgress({ done, total: rows.length, current: row.filename });
+        setElapsedMs(Date.now() - start);
       }
     });
     setProgress({ done: rows.length, total: rows.length, current: '' });
+    setElapsedMs(Date.now() - start);
     setProcessing(false);
     setStats((s) => ({ ...s, dormant: s.dormant + archived, failed: s.failed + failed }));
     onShowToast?.(`Archived ${archived}${failed ? `, ${failed} failed` : ''}`, failed ? 'warning' : 'success');
@@ -283,7 +287,7 @@ export default function ProductLoaderFolder({
           {processing && (
             <div className="pl-progress">
               <div className="pl-progress-bar" style={{ width: `${pct}%` }} />
-              <span>Processing {progress.done + 1}/{progress.total}{progress.current ? ` — ${progress.current}` : ''}</span>
+              <span>Processing {Math.min(progress.done + 1, progress.total)}/{progress.total}{progress.current ? ` — ${progress.current}` : ''}</span>
             </div>
           )}
 

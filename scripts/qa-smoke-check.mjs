@@ -922,4 +922,27 @@ assert.match(readSrc('api/run-scheduled-broadcasts.js'), /claimDueItem/, 'WhatsA
 assert.match(readSrc('api/run-scheduled-broadcasts.js'), /maxDuration: 300/, 'WhatsApp broadcast cron has a duration budget');
 console.log('✓ Order/promo/broadcast hardening');
 
+// Adversarial-review fixes (multi-agent review of PRs #107-#122)
+// 1. claimDueItem must reset the claim on every optimistic-lock retry (no double-blast)
+for (const f of ['api/run-scheduled-broadcasts.js', 'api/run-scheduled-emails.js']) {
+  assert.match(readSrc(f), /mutateSiteConfigJson\([^,]+,[^,]+,\s*\(store\)\s*=>\s*\{\s*(?:\/\/[^\n]*\n\s*)*claimed = null;/, `${f}: claim resets each mutator invocation`);
+}
+// 2. Email "Send test" always goes to the admin, never a typed customer
+assert.doesNotMatch(readSrc('src/components/CustomerEmailModal.jsx'), /isSelected \? selectedEmails\[0\] : adminEmail/, 'test send never targets a selected customer');
+// 3. ERP relink must not overwrite a name/description the admin typed in the same save
+assert.match(readSrc('api/update-product.js'), /const adminSetName = patch\.title !== undefined \|\| patch\.original_description !== undefined/, 'relink detects admin-typed name/description');
+assert.match(readSrc('api/update-product.js'), /matchedTitle && !adminSetName/, 'relink skips title overwrite when admin set it');
+// 4. Image-replace identifier map registers SKUs first so a barcode cannot shadow a real SKU
+assert.match(readSrc('src/lib/bulkImageReplace.js'), /Two passes so a SKU ALWAYS wins/, 'preflight builds SKU-first identifier map');
+// 5. Folder progress label cannot exceed the total
+assert.match(readSrc('src/components/productLoader/ProductLoaderFolder.jsx'), /Math\.min\(progress\.done \+ 1, progress\.total\)/, 'folder progress clamps to total');
+// 6. Archive run tracks its own elapsed time
+assert.match(readSrc('src/components/productLoader/ProductLoaderFolder.jsx'), /const archiveItems[\s\S]*?setElapsedMs\(Date\.now\(\) - start\)/, 'archive run updates elapsed time');
+// 7. Scheduling rejects the live-only "selected" audience
+assert.match(readSrc('api/scheduled-emails.js'), /audience === 'selected'/, 'scheduling rejects the specific-people mode');
+// 8. Chunk-reload guard clears after mount, not synchronously at boot
+assert.match(readSrc('src/Root.jsx'), /useEffect\(\(\) => \{ clearChunkReloadGuard\(\); \}, \[\]\)/, 'chunk guard cleared post-mount in Root');
+assert.doesNotMatch(readSrc('src/main.jsx'), /clearChunkReloadGuard\(\)/, 'main.jsx no longer clears the guard pre-mount');
+console.log('✓ Adversarial-review fixes (6 bugs + robustness)');
+
 console.log('\nAll smoke checks passed.');

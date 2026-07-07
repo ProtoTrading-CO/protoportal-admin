@@ -1,6 +1,6 @@
 import { useEffect, useState, Suspense } from 'react';
 import { installAuthFetch } from './lib/adminKey';
-import { lazyRetry } from './lib/lazyRetry';
+import { clearChunkReloadGuard, lazyRetry } from './lib/lazyRetry';
 import {
   getVerifiedSession,
   isAllowedAdminEmail,
@@ -27,6 +27,11 @@ const loadingFallback = (
 );
 
 export default function Root() {
+  // Clear the one-shot chunk-reload guard only AFTER a successful mount, so a
+  // stale-chunk reload that fixed things isn't undone before the app renders
+  // (and a failed initial load can't spin in a reload loop).
+  useEffect(() => { clearChunkReloadGuard(); }, []);
+
   const path = window.location.pathname;
   const isFulfillment = path === '/fulfillment' || path === '/f' || path.startsWith('/f/');
   const isResetPassword = path === '/reset-password';
