@@ -50,7 +50,7 @@ const ARCHIVED_PROTECTED_BY = new Set(['new-products', 'recycle-bin']);
 async function findArchivedRow(supabase, sku) {
   const { data, error } = await supabase
     .from('archived_products')
-    .select('sku, archived_by')
+    .select('sku, archived_by, barcode')
     .eq('sku', sku)
     .maybeSingle();
   if (error) throw error;
@@ -108,14 +108,15 @@ async function replaceOneItem(supabase, raw, allowedSet, slot, scope) {
     return { sku, ok: false, error: `wrong_slot_expected_${slot}_got_${fileSlot}` };
   }
   const fileSku = String(parsed.code || '').trim().toUpperCase();
-  const fileCandidates = parsed.codeCandidates || [];
+  const fileCandidates = (parsed.codeCandidates || []).map((c) => String(c || '').trim().toUpperCase());
   // A duplicate "CODE (2).jpg" legitimately targets the sibling record CODE-2.
   const siblingSku = siblingSkuForCopy(parsed.code, parsed.copyIndex);
-  if (fileSku && fileSku !== sku && siblingSku !== sku && !fileCandidates.includes(sku)) {
-    return { sku, ok: false, error: 'filename_sku_mismatch' };
-  }
 
   try {
+    // Fetch the target row first so we know its barcode — a file may be labelled
+    // with the product's code/barcode rather than its SKU (e.g. after the code
+    // was changed to differ from the SKU). Both are valid ways to name the file.
+    let rowBarcode = '';
     let archivedRow = null;
     if (scope === 'archived') {
       archivedRow = await findArchivedRow(supabase, sku);
@@ -123,14 +124,28 @@ async function replaceOneItem(supabase, raw, allowedSet, slot, scope) {
       if (ARCHIVED_PROTECTED_BY.has(archivedRow.archived_by)) {
         return { sku, ok: false, error: 'archived_row_protected' };
       }
+      rowBarcode = String(archivedRow.barcode || '').trim().toUpperCase();
     } else {
       const { data: row, error: fetchErr } = await supabase
         .from('website_stock')
-        .select('sku')
+        .select('sku, barcode')
         .eq('sku', sku)
         .maybeSingle();
       if (fetchErr) throw fetchErr;
       if (!row) return { sku, ok: false, error: 'not_in_website_stock' };
+      rowBarcode = String(row.barcode || '').trim().toUpperCase();
+    }
+
+    // The file must correspond to this target — by its SKU, its barcode, a
+    // duplicate sibling, or one of the parsed candidate codes.
+    const matchesTarget = !fileSku
+      || fileSku === sku
+      || (rowBarcode && fileSku === rowBarcode)
+      || siblingSku === sku
+      || fileCandidates.includes(sku)
+      || (rowBarcode && fileCandidates.includes(rowBarcode));
+    if (!matchesTarget) {
+      return { sku, ok: false, error: 'filename_sku_mismatch' };
     }
 
     const ext = filename.split('.').pop()?.toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
