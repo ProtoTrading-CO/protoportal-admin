@@ -1519,7 +1519,11 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
       queryClient.invalidateQueries({ queryKey: ['catalog'] });
       await reorderPanelRef.current?.refresh?.();
       setEditTaxonomyModal(null);
-      if (renameResult?.orphansRemaining > 0) {
+      if (renameResult?.renameError) {
+        // The tree was renamed but the product-label update failed — products
+        // still carry the old label and would drop out of the renamed node.
+        showToast(`Renamed, but product labels did not update: ${renameResult.renameError}. Reload and try again.`, 'error');
+      } else if (renameResult?.orphansRemaining > 0) {
         showToast(`Category renamed, but ${renameResult.orphansRemaining} product(s) kept the old label — check Uncategorised`, 'error');
       } else {
         showToast('Category updated');
@@ -1603,10 +1607,10 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
       invalidateAdminCache();
       const isCat = deleteSubModal.type === 'category';
       setDeleteSubModal(null);
-      if (deleteResult?.clearError) {
-        showToast(`Deleted, but product labels were not fully cleared: ${deleteResult.clearError}`, 'error');
-      } else if (deleteResult?.productsCleared > 0) {
-        showToast(`${isCat ? 'Category' : 'Subcategory'} deleted — ${deleteResult.productsCleared} product(s) recategorised`);
+      if (deleteResult?.archiveError) {
+        showToast(`Deleted, but some products were not archived: ${deleteResult.archiveError}`, 'error');
+      } else if (deleteResult?.productsArchived > 0) {
+        showToast(`${isCat ? 'Category' : 'Subcategory'} deleted — ${deleteResult.productsArchived} product(s) moved to Archive. Restore them from the Archive tab.`);
       } else {
         showToast(isCat ? 'Category deleted' : 'Subcategory deleted');
       }

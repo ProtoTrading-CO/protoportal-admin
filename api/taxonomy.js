@@ -5,14 +5,14 @@ import {
   labelToSlug,
   addCategoryNode,
   addSubcategoryNode,
+  archiveProductsForDeletedNode,
   buildCategoryProductCounts,
-  clearProductsForDeletedNode,
   countProductsForNode,
   countRenameOrphans,
   deleteNodeCascade,
   findNodeContext,
   loadTaxonomy,
-  readTaxonomyStore,
+  readTaxonomyForApi,
   renameNodeLabel,
   renameNodeLabelInProducts,
   resolveLabelsFromPathIds,
@@ -71,19 +71,19 @@ export default async function handler(req, res) {
 
   if (req.method === 'GET') {
     try {
-      const store = await readTaxonomyStore();
-      const categories = await loadTaxonomy();
+      // Categories AND updatedAt come from ONE fresh read so the tree and the
+      // lock token can never disagree (that split made edits look reverted).
+      const { categories, updatedAt } = await readTaxonomyForApi();
       if (req.query.counts === '1') {
         const onlyInStock = req.query.onlyInStock === '1' || req.query.onlyInStock === 'true';
         const counts = await buildCategoryProductCounts(getStockClient(), categories, { onlyInStock });
-        // Category counts require a full-table scan; serve from the edge for
-        // 60s and revalidate in the background for the next 5 minutes.
-        // onlyInStock is part of the URL, so each mode gets its own cache entry.
-        res.setHeader('Cache-Control', 's-maxage=60, stale-while-revalidate=300');
-        return res.status(200).json({ categories, counts, updatedAt: store.updatedAt });
+        // Counts need a full-table scan; a short edge cache is fine, but keep
+        // it tight so admin badges and portal empty-hiding stay close to live.
+        res.setHeader('Cache-Control', 's-maxage=15, stale-while-revalidate=45');
+        return res.status(200).json({ categories, counts, updatedAt });
       }
       res.setHeader('Cache-Control', 'no-store');
-      return res.status(200).json({ categories, updatedAt: store.updatedAt });
+      return res.status(200).json({ categories, updatedAt });
     } catch (err) {
       res.setHeader('Cache-Control', 'no-store');
       return res.status(500).json({ error: err.message || 'Failed to load taxonomy' });
@@ -98,7 +98,16 @@ export default async function handler(req, res) {
   const supabase = getStockClient();
 
   try {
-    let tree = await loadTaxonomy();
+    // Writes always operate on a FRESH tree (never the 5s cache) so an edit
+    // is never built on a stale snapshot from another instance.
+    let tree = await loadTaxonomy({ bypassCache: true });
+
+    // The Mottaro branch is virtual — injected on read, stripped on save — so
+    // edits to it silently no-op. Reject them with a clear message instead.
+    const isMottaroId = (id) => id === 'mottaro' || String(id || '').startsWith('mottaro-');
+    if ((action === 'rename' || action === 'deleteNode') && isMottaroId(req.body?.id)) {
+      return res.status(400).json({ error: 'Mottaro categories are automatic and cannot be renamed or deleted here.' });
+    }
 
     if (action === 'rename') {
       const { id, label } = req.body;
@@ -168,15 +177,19 @@ export default async function handler(req, res) {
       if (!ctx) return res.status(404).json({ error: 'Category not found' });
       const { tree: next } = deleteNodeCascade(tree, id);
       const saved = await saveTaxonomy(next, { expectedUpdatedAt });
-      // Clear stored labels on affected products so they surface under
-      // Uncategorised (or their remaining parent) instead of leaving phantom
-      // category paths on the live site.
-      let productsCleared = 0;
-      let clearError = null;
+      // Products under a deleted category are ARCHIVED (not left uncategorised
+      // on the live site), keeping their labels so the admin can restore them
+      // to live from the Archive later.
+      let productsArchived = 0;
+      let archiveError = null;
       try {
-        productsCleared = await clearProductsForDeletedNode(supabase, ctx);
+        const result = await archiveProductsForDeletedNode(supabase, ctx);
+        productsArchived = result.archived;
+        if (result.failures.length) {
+          archiveError = `${result.failures.length} product(s) could not be archived`;
+        }
       } catch (err) {
-        clearError = err.message || 'Failed to clear product labels';
+        archiveError = err.message || 'Failed to archive products';
       }
       try {
         await pruneSortOrdersForNode(ctx, id);
@@ -184,8 +197,8 @@ export default async function handler(req, res) {
       return res.status(200).json({
         ok: true,
         id,
-        productsCleared,
-        clearError,
+        productsArchived,
+        archiveError,
         updatedAt: saved.updatedAt,
       });
     }
