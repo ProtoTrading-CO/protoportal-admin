@@ -96,12 +96,9 @@ export function buildComposedText({ introText = '', htmlBlock = '' }, vars = {})
 
 export function wrapBroadcastHtml({ subject, bodyHtml }) {
   const safeBody = bodyHtml || '<p>Hello from Proto Trading.</p>';
+  // No footer/button — the email ends with the composed body.
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escapeHtml(subject)}</title></head><body style="font-family:Arial,sans-serif;line-height:1.5;color:#111827;max-width:640px;margin:0 auto;padding:24px;">
   ${safeBody}
-  <hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0;" />
-  <div style="text-align:center;margin:0;">
-    <a href="${PROTO_URLS.site}" style="display:inline-block;background:#c40000;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:6px;font-weight:bold;font-size:14px;">Shop Proto Trading</a>
-  </div>
 </body></html>`;
 }
 

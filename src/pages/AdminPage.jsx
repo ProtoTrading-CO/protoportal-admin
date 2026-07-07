@@ -593,7 +593,12 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   };
 
 
+  // Tabs backed by their own panels (analytics, scheduled) are not customer
+  // lists — never query the customers endpoint for them.
+  const CUSTOMER_LIST_TABS = new Set(['requests', 'regular', 'proto-active']);
+
   const loadCustomers = async () => {
+    if (!CUSTOMER_LIST_TABS.has(customerTab)) return;
     setLoading(true);
     try {
       const data = customerTab === 'proto-active'
@@ -1044,7 +1049,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     }
   };
 
-  useEffect(() => { if (activeSection === 'customers' && customerTab !== 'email-analytics') void loadCustomers(); }, [activeSection, customerPage, customerTab, customerSearchDebounced, customerBusinessType]);
+  useEffect(() => { if (activeSection === 'customers') void loadCustomers(); }, [activeSection, customerPage, customerTab, customerSearchDebounced, customerBusinessType]);
   useEffect(() => {
     if (activeSection !== 'customers') return;
     void fetchCrmContactsPage({ page: 1, pageSize: 1 })
