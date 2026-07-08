@@ -226,7 +226,10 @@ export default async function handler(req, res) {
         name: name || null,
         contact_name: String(b.contact_name || '').trim() || null,
         first_name: String(b.first_name || '').trim() || null,
-        account_code: String(b.account_code || '').trim() || null,
+        // account_code is NOT NULL in proto_active_customers (migration 021) and
+        // is a reference only (its unique index was dropped in 023/024), so an
+        // empty string is the safe "no reference" value — null would 400.
+        account_code: String(b.account_code || '').trim(),
         sales_last_12_months: b.sales_last_12_months != null && b.sales_last_12_months !== ''
           ? Number(b.sales_last_12_months) || 0 : null,
       };

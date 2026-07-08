@@ -121,15 +121,15 @@ export default function AddCustomerModal({ open, onClose, onAdded, onShowToast }
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <div style={{ gridColumn: '1 / -1' }}>
               <label style={fieldLabel}>Email *</label>
-              <input className="adm-input" type="email" value={form.email} onChange={set('email')} placeholder="customer@business.co.za" />
+              <input className="adm-field-input" type="email" value={form.email} onChange={set('email')} placeholder="customer@business.co.za" />
             </div>
             <div>
               <label style={fieldLabel}>Business name</label>
-              <input className="adm-input" value={form.business_name} onChange={set('business_name')} />
+              <input className="adm-field-input" value={form.business_name} onChange={set('business_name')} />
             </div>
             <div>
               <label style={fieldLabel}>Contact name</label>
-              <input className="adm-input" value={form.contact_name} onChange={set('contact_name')} />
+              <input className="adm-field-input" value={form.contact_name} onChange={set('contact_name')} />
             </div>
             {/* Phone + monthly spend only apply to a real approved account —
                 the pre-registration allowlist ignores them. */}
@@ -137,18 +137,18 @@ export default function AddCustomerModal({ open, onClose, onAdded, onShowToast }
               <>
                 <div>
                   <label style={fieldLabel}>Phone</label>
-                  <input className="adm-input" value={form.phone} onChange={set('phone')} placeholder="+27…" />
+                  <input className="adm-field-input" value={form.phone} onChange={set('phone')} placeholder="+27…" />
                 </div>
                 <div>
                   <label style={fieldLabel}>Monthly spend</label>
-                  <input className="adm-input" value={form.monthly_spend} onChange={set('monthly_spend')} />
+                  <input className="adm-field-input" value={form.monthly_spend} onChange={set('monthly_spend')} />
                 </div>
               </>
             )}
             {isPreReg && (
               <div style={{ gridColumn: '1 / -1' }}>
                 <label style={fieldLabel}>Account reference (optional)</label>
-                <input className="adm-input" value={form.account_code} onChange={set('account_code')} placeholder="Positill account code — reference only, not a customer code" />
+                <input className="adm-field-input" value={form.account_code} onChange={set('account_code')} placeholder="Positill account code — reference only, not a customer code" />
               </div>
             )}
           </div>
