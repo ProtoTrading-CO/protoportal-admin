@@ -172,6 +172,50 @@ function upsertRecipient(seen, row) {
   seen.set(email, { ...prev, ...row, email });
 }
 
+/**
+ * Build recipients for an explicit list of email addresses. Known customers /
+ * pre-registration contacts are matched so their merge fields ({{name}} etc.)
+ * personalize; unknown addresses still send (name falls back to the local part).
+ */
+export async function fetchRecipientsByEmail(sb, emails = []) {
+  const wanted = [...new Set(
+    (emails || []).map((e) => String(e || '').trim().toLowerCase()).filter((e) => e.includes('@')),
+  )];
+  if (!wanted.length) return [];
+  const seen = new Map();
+
+  for (let i = 0; i < wanted.length; i += 200) {
+    const chunk = wanted.slice(i, i + 200);
+    const { data: custRows } = await sb.from('customers').select('*').in('email', chunk);
+    (custRows || []).forEach((r) => upsertRecipient(seen, {
+      email: r.email,
+      name: r.first_name || r.contact_name || r.name || r.business_name || '',
+      first_name: r.first_name || '',
+      contact_name: r.contact_name || r.name || '',
+      business_name: r.business_name || r.name || '',
+      customer_code: r.customer_code || '',
+      account_code: r.customer_code || '',
+      phone: r.phone || '',
+      business_type: r.business_type || '',
+    }));
+    const { data: protoRows } = await sb.from('proto_active_customers').select('*').in('email', chunk);
+    (protoRows || []).forEach((r) => upsertRecipient(seen, {
+      email: r.email,
+      name: r.first_name || r.contact_name || r.name || '',
+      first_name: r.first_name || '',
+      contact_name: r.contact_name || '',
+      business_name: r.name || '',
+      account_code: r.account_code || '',
+      customer_code: r.account_code || '',
+    }));
+  }
+  // Any address not on file still gets the email (personalization falls back).
+  for (const email of wanted) {
+    if (!seen.has(email)) seen.set(email, { email });
+  }
+  return [...seen.values()];
+}
+
 export async function fetchCustomerAudience(sb, audience, { businessTypes = [] } = {}) {
   const seen = new Map();
   const types = [...new Set((businessTypes || []).map((t) => String(t || '').trim()).filter(Boolean))];

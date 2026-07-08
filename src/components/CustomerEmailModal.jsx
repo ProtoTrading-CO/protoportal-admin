@@ -33,7 +33,22 @@ const AUDIENCE_OPTIONS = [
     label: 'Approved + Pre-registration',
     hint: 'Everyone you can email (deduped by email)',
   },
+  {
+    value: 'selected',
+    label: 'Specific people (enter emails)',
+    hint: 'Sends only to the exact addresses you enter below — good for testing or a handful of customers',
+  },
 ];
+
+/** Split a pasted/typed blob into unique lowercase email addresses. */
+export function parseEmailList(raw) {
+  return [...new Set(
+    String(raw || '')
+      .split(/[\s,;]+/)
+      .map((e) => e.trim().toLowerCase())
+      .filter((e) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)),
+  )];
+}
 
 function defaultAudienceForTab(customerTab) {
   if (customerTab === 'requests') return 'requests';
@@ -94,7 +109,28 @@ export default function CustomerEmailModal({
   const [testSending, setTestSending] = useState(false);
   const [campaigns, setCampaigns] = useState([]);
   const [uploadingImage, setUploadingImage] = useState(false);
+  const [recipientsText, setRecipientsText] = useState('');
+  const selectedEmails = useMemo(() => parseEmailList(recipientsText), [recipientsText]);
   const [scheduledAt, setScheduledAt] = useState('');
+  const [scheduleOpen, setScheduleOpen] = useState(false);
+  const scheduleRef = useRef(null);
+
+  // Close the schedule popover on outside click / Escape.
+  useEffect(() => {
+    if (!scheduleOpen) return undefined;
+    const onDoc = (e) => { if (scheduleRef.current && !scheduleRef.current.contains(e.target)) setScheduleOpen(false); };
+    const onKey = (e) => { if (e.key === 'Escape') setScheduleOpen(false); };
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('mousedown', onDoc); document.removeEventListener('keydown', onKey); };
+  }, [scheduleOpen]);
+
+  // Local-time "YYYY-MM-DDTHH:mm" for the datetime-local min (no past times).
+  const minScheduleValue = useMemo(() => {
+    const d = new Date(Date.now() + 60_000);
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }, [scheduleOpen]);
   const [scheduling, setScheduling] = useState(false);
 
   const subjectRef = useRef(null);
@@ -228,6 +264,10 @@ export default function CustomerEmailModal({
   };
 
   const handleSchedule = async () => {
+    if (audience === 'selected') {
+      onShowToast?.('Scheduling isn’t available for specific people — use Send now, or pick an audience to schedule.', 'error');
+      return;
+    }
     if (!subject.trim()) {
       onShowToast?.('Subject is required', 'error');
       return;
@@ -274,14 +314,24 @@ export default function CustomerEmailModal({
       return;
     }
 
-    if (!test && filterBusinessTypes && !businessTypes.length) {
+    const isSelected = audience === 'selected';
+    if (!test && isSelected && !selectedEmails.length) {
+      onShowToast?.('Enter at least one valid email address', 'error');
+      return;
+    }
+    if (!test && !isSelected && filterBusinessTypes && !businessTypes.length) {
       onShowToast?.('Select at least one business type or turn off the filter', 'error');
       return;
     }
 
-    if (!test && !window.confirm(`Send this email to: ${selectedAudience.label}${filterBusinessTypes && businessTypes.length ? ` (${businessTypes.length} business type${businessTypes.length === 1 ? '' : 's'})` : ''}?`)) return;
+    const audienceLabel = isSelected
+      ? `${selectedEmails.length} specific ${selectedEmails.length === 1 ? 'person' : 'people'}`
+      : `${selectedAudience.label}${filterBusinessTypes && businessTypes.length ? ` (${businessTypes.length} business type${businessTypes.length === 1 ? '' : 's'})` : ''}`;
+    if (!test && !window.confirm(`Send this email to: ${audienceLabel}?`)) return;
 
     if (test) {
+      // A test is a self-preview with sample merge data + a [TEST] subject, so
+      // it must go to the admin — never to a real customer in the recipient list.
       const testEmail = adminEmail || window.prompt('Send test to email address:');
       if (!testEmail?.trim()) return;
       setTestSending(true);
@@ -292,7 +342,7 @@ export default function CustomerEmailModal({
           introText: introBody.trim(),
           htmlBlock: htmlBody.trim(),
           testEmail: testEmail.trim(),
-          businessTypes: filterBusinessTypes ? businessTypes : [],
+          businessTypes: filterBusinessTypes && !isSelected ? businessTypes : [],
         });
         onShowToast?.(`Test email sent to ${testEmail.trim()}`, 'success');
       } catch (err) {
@@ -310,10 +360,11 @@ export default function CustomerEmailModal({
         subject: subject.trim(),
         introText: introBody.trim(),
         htmlBlock: htmlBody.trim(),
-        businessTypes: filterBusinessTypes ? businessTypes : [],
+        businessTypes: filterBusinessTypes && !isSelected ? businessTypes : [],
+        ...(isSelected ? { recipients: selectedEmails } : {}),
       });
       onShowToast?.(
-        `Sent to ${result.sent} customer(s)${result.failed ? ` — ${result.failed} failed` : ''}`,
+        `Sent to ${result.sent} ${isSelected ? 'recipient' : 'customer'}(s)${result.failed ? ` — ${result.failed} failed` : ''}`,
         result.failed ? 'error' : 'success',
       );
       onClose?.();
@@ -385,6 +436,41 @@ export default function CustomerEmailModal({
             <span className="adm-email-field__hint">{selectedAudience.hint}</span>
           </label>
 
+          {audience === 'selected' && (
+            <label className="adm-email-field">
+              <span className="adm-email-field__label">
+                Recipients{selectedEmails.length ? ` — ${selectedEmails.length} valid` : ''}
+              </span>
+              <textarea
+                className="adm-field-input"
+                rows={3}
+                value={recipientsText}
+                onChange={(e) => setRecipientsText(e.target.value)}
+                placeholder="Enter email addresses, separated by commas, spaces or new lines"
+                style={{ resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }}
+              />
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 6 }}>
+                {adminEmail && (
+                  <button
+                    type="button"
+                    className="adm-btn-ghost adm-btn--sm"
+                    onClick={() => setRecipientsText((prev) => (
+                      parseEmailList(prev).includes(adminEmail.toLowerCase())
+                        ? prev
+                        : `${prev ? `${prev.trim()}\n` : ''}${adminEmail}`
+                    ))}
+                  >
+                    + Add my email ({adminEmail})
+                  </button>
+                )}
+                <span className="adm-email-field__hint" style={{ margin: 0 }}>
+                  Known customers get their {'{{name}}'} filled in; unknown addresses still send.
+                </span>
+              </div>
+            </label>
+          )}
+
+          {audience !== 'selected' && (
           <label className="adm-email-field">
             <span className="adm-email-field__label">Filter by business type?</span>
             <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -414,6 +500,7 @@ export default function CustomerEmailModal({
               </div>
             )}
           </label>
+          )}
 
           <div className="adm-email-field">
             <span className="adm-email-field__label">Subject</span>
@@ -572,26 +659,64 @@ export default function CustomerEmailModal({
             Cancel
           </button>
           <div className="adm-email-modal__footer-actions" style={{ flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
-            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
-              <CalendarClock size={14} />
-              <input
-                type="datetime-local"
-                className="adm-field-input"
-                style={{ padding: '6px 8px', fontSize: 12 }}
-                value={scheduledAt}
-                onChange={(e) => setScheduledAt(e.target.value)}
-                aria-label="Schedule send date and time"
-              />
-            </label>
-            <button
-              type="button"
-              className="adm-btn-ghost"
-              disabled={sending || testSending || scheduling || !scheduledAt}
-              onClick={() => void handleSchedule()}
-              title="Queue this email to send automatically at the chosen time"
-            >
-              {scheduling ? <><Loader2 size={14} className="spin" /> Scheduling…</> : <><CalendarClock size={14} /> Schedule send</>}
-            </button>
+            <div style={{ position: 'relative' }} ref={scheduleRef}>
+              <button
+                type="button"
+                className="adm-btn-ghost"
+                disabled={sending || testSending || scheduling}
+                onClick={() => setScheduleOpen((v) => !v)}
+                aria-haspopup="dialog"
+                aria-expanded={scheduleOpen}
+                title="Queue this email to send automatically at the chosen time"
+              >
+                <CalendarClock size={14} /> Schedule send{scheduledAt ? ' ✓' : ''}
+              </button>
+              {scheduleOpen && (
+                <div
+                  role="dialog"
+                  aria-label="Schedule send"
+                  onClick={(e) => e.stopPropagation()}
+                  style={{
+                    position: 'absolute',
+                    bottom: 'calc(100% + 8px)',
+                    left: 0,
+                    width: 268,
+                    background: '#fff',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: 10,
+                    boxShadow: '0 14px 36px rgba(0,0,0,0.20)',
+                    padding: 14,
+                    zIndex: 60,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 10,
+                  }}
+                >
+                  <span style={{ fontSize: 12, fontWeight: 700, color: '#374151' }}>Send date &amp; time</span>
+                  <input
+                    type="datetime-local"
+                    className="adm-field-input"
+                    style={{ fontSize: 13, width: '100%', padding: '8px 10px' }}
+                    value={scheduledAt}
+                    min={minScheduleValue}
+                    onChange={(e) => setScheduledAt(e.target.value)}
+                    aria-label="Schedule send date and time"
+                  />
+                  <button
+                    type="button"
+                    className="adm-btn-red"
+                    style={{ width: '100%', justifyContent: 'center' }}
+                    disabled={scheduling || !scheduledAt}
+                    onClick={() => void handleSchedule()}
+                  >
+                    {scheduling ? <><Loader2 size={14} className="spin" /> Scheduling…</> : <><CalendarClock size={14} /> Confirm schedule</>}
+                  </button>
+                  <span style={{ fontSize: 11, color: '#6b7280', lineHeight: 1.4 }}>
+                    Queues this exact email (subject, body, audience) to send automatically at the chosen time.
+                  </span>
+                </div>
+              )}
+            </div>
             <button
               type="button"
               className="adm-btn-ghost"
@@ -603,10 +728,10 @@ export default function CustomerEmailModal({
             <button
               type="button"
               className="adm-btn-red"
-              disabled={sending || testSending || scheduling}
+              disabled={sending || testSending || scheduling || (audience === 'selected' && !selectedEmails.length)}
               onClick={() => void handleSend(false)}
             >
-              {sending ? <><Loader2 size={14} className="spin" /> Sending…</> : <><Send size={14} /> Send now</>}
+              {sending ? <><Loader2 size={14} className="spin" /> Sending…</> : <><Send size={14} /> Send now{audience === 'selected' && selectedEmails.length ? ` (${selectedEmails.length})` : ''}</>}
             </button>
           </div>
         </div>

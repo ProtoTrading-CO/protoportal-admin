@@ -2886,8 +2886,19 @@ body.adm-is-reorder-dragging .adm-reorder-card--dragging {
 
 .adm-modal--form {
   padding: 0;
-  width: min(420px, 100%);
+  width: min(440px, 100%);
+  max-height: calc(100vh - 40px);
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
+}
+
+/* Header + footer stay pinned; the body scrolls so the action buttons are
+   always reachable even on short screens (was overflowing off-screen). */
+.adm-modal--form .adm-modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .adm-modal-header {

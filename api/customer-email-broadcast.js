@@ -25,11 +25,21 @@ export default async function handler(req, res) {
     textContent,
     testEmail,
     businessTypes,
+    recipients,
   } = req.body || {};
 
-  const aud = String(audience || '').trim();
-  if (!VALID_EMAIL_AUDIENCE.has(aud)) {
+  // "Specific people" send — an explicit email list instead of an audience.
+  const selectedEmails = Array.isArray(recipients)
+    ? [...new Set(recipients.map((r) => String(typeof r === 'string' ? r : r?.email || '').trim().toLowerCase()).filter((e) => e.includes('@')))]
+    : [];
+  const isSelected = String(audience || '').trim() === 'selected' || selectedEmails.length > 0;
+
+  const aud = isSelected ? 'selected' : String(audience || '').trim();
+  if (!isSelected && !VALID_EMAIL_AUDIENCE.has(aud)) {
     return res.status(400).json({ error: 'Invalid audience. Use requests, regular, proto-active, all-approved, or all-portal.' });
+  }
+  if (isSelected && !testEmail && !selectedEmails.length) {
+    return res.status(400).json({ error: 'Enter at least one valid email address to send to specific people.' });
   }
   const subj = String(subject || '').trim();
   if (!subj) return res.status(400).json({ error: 'Subject is required' });
@@ -62,6 +72,7 @@ export default async function handler(req, res) {
       introText: intro,
       htmlBlock: html,
       businessTypes: Array.isArray(businessTypes) ? businessTypes : [],
+      recipients: isSelected ? selectedEmails : null,
     });
     if (outcome.error && !outcome.total) {
       return res.status(400).json({ error: outcome.error });

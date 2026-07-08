@@ -34,6 +34,10 @@ async function reapInterruptedSends() {
 async function claimDueItem() {
   let claimed = null;
   await mutateSiteConfigJson(SCHEDULED_EMAILS_FILE, EMPTY_SCHEDULE, (store) => {
+    // Reset on every invocation: this callback re-runs on each optimistic-lock
+    // retry. Without the reset, a retry that finds the item already claimed by a
+    // concurrent run would still return the stale claim and double-send it.
+    claimed = null;
     const now = Date.now();
     const items = (store.items || []).map((item) => ({ ...item }));
     // Only pending items are ever claimed — a 'sending' item is never

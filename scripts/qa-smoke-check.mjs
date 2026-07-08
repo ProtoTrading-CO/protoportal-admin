@@ -128,6 +128,17 @@ console.log('✓ Item 3 Nutstore hardening (timeouts, parallelism, dedup, cache)
 const updateProductSrc = readSrc('api/update-product.js');
 assert.match(updateProductSrc, /verified\.archived_by === 'nutstore'/, 'update-product re-runs ERP lookup on Nutstore-archived rows');
 assert.match(updateProductSrc, /resolveProductLoaderMatch/, 'update-product imports resolveProductLoaderMatch');
+// Changing the code on ANY archived row lacking stock/price re-runs the Positill lookup
+assert.match(updateProductSrc, /const lacksErpData =/, 'update-product detects archived rows with no ERP data');
+assert.match(updateProductSrc, /verified\.archived_by === 'nutstore' \|\| lacksErpData/, 'relink runs for nutstore OR any archived row that needs SOH/price');
+// Archived edits never send a category path (selectors are hidden; set at Make live)
+assert.match(readSrc('src/pages/AdminPage.jsx'), /const sendCategory = categoryPath\.length > 0 && !editingProduct\?\.archivedBy/, 'archived product edits do not resend a (synthetic) category path');
+// Folder publish/archive run with bounded concurrency instead of one-at-a-time
+const plFolderSrc = readSrc('src/components/productLoader/ProductLoaderFolder.jsx');
+assert.match(plFolderSrc, /async function runWithConcurrency/, 'folder loader has a bounded-concurrency runner');
+assert.equal((plFolderSrc.match(/runWithConcurrency\(/g) || []).length, 3, 'runWithConcurrency defined once and used by both publish + archive');
+assert.doesNotMatch(plFolderSrc, /for \(let idx = 0; idx < ready\.length/, 'folder publish no longer processes one image at a time');
+assert.doesNotMatch(plFolderSrc, /for \(let idx = 0; idx < rows\.length/, 'folder archive no longer processes one image at a time');
 assert.equal(
   spawnSync('node', ['--check', join(REPO_ROOT, 'api/update-product.js')], { encoding: 'utf8' }).status,
   0,
@@ -302,6 +313,16 @@ assert.match(pmEngineArchiveSrc, /productListTitle/, 'archive list avoids sku-as
 assert.match(pmEngineArchiveSrc, /pm-code-ellipsis/, 'archive code display uses ellipsis');
 assert.match(pmEngineArchiveSrc, /makeLiveItem/, 'single make live opens category picker modal');
 assert.doesNotMatch(pmEngineArchiveSrc, /window\.confirm\(`Move "\$\{name\}" to the live website/, 'single make live no longer uses bare confirm');
+// Make-live pulls the current taxonomy on open (fresh ids survive renames) and offers deep subcategories
+assert.match(pmEngineArchiveSrc, /const makeLive = \(item\) => \{\s*\/\/[\s\S]*?onRefreshTaxonomy\?\.\(\)/, 'make-live refreshes the taxonomy when it opens');
+assert.match(pmEngineArchiveSrc, /Child category 2/, 'make-live modal offers deeper subcategory levels');
+// Schedule-send opens an in-view popover (not a footer picker clipped off-screen)
+const emailModalSrc = readSrc('src/components/CustomerEmailModal.jsx');
+assert.match(emailModalSrc, /scheduleOpen/, 'schedule send uses an in-view popover');
+assert.match(emailModalSrc, /bottom: 'calc\(100% \+ 8px\)'/, 'schedule popover opens upward so the picker stays in view');
+assert.match(emailModalSrc, /min=\{minScheduleValue\}/, 'schedule picker blocks past times');
+// Scheduled sends auto-refresh so failures surface without a manual reload
+assert.match(readSrc('src/components/ScheduledEmailsPanel.jsx'), /setInterval\(\(\) => \{ void load\(\); \}, 30_000\)/, 'scheduled panel polls while sends are active');
 
 const adminPageArchiveEditSrc = readSrc('src/pages/AdminPage.jsx');
 assert.match(adminPageArchiveEditSrc, /!editingProduct\?\.archivedBy/, 'archive edit modal hides category cascade');
@@ -414,6 +435,19 @@ assert.match(readSrc('src/components/AddCustomerModal.jsx'), /export default fun
 assert.match(readSrc('api/_customer-email-status.js'), /export async function markCustomerEmailed/, 'last-email marker present');
 assert.match(readSrc('api/_send-email-broadcast.js'), /markCustomersEmailed/, 'broadcast stamps last-email');
 assert.match(readSrc('src/pages/AdminPage.jsx'), /function LastEmailBadge/, 'last-email badge rendered');
+// Send to specific people (explicit email list) — for testing + a handful of customers
+assert.match(readSrc('api/_send-email-broadcast.js'), /'selected'/, 'broadcast audience allows a selected email list');
+assert.match(readSrc('api/_send-email-broadcast.js'), /fetchRecipientsByEmail/, 'broadcast can resolve an explicit recipient list');
+assert.match(readSrc('api/_brevo-email.js'), /export async function fetchRecipientsByEmail/, 'recipient-by-email resolver present (personalizes known customers)');
+assert.match(readSrc('api/customer-email-broadcast.js'), /const isSelected =/, 'send endpoint handles the specific-people path');
+assert.match(readSrc('src/components/CustomerEmailModal.jsx'), /Specific people \(enter emails\)/, 'email modal offers a specific-people audience');
+assert.match(readSrc('src/components/CustomerEmailModal.jsx'), /export function parseEmailList/, 'email modal parses a typed/pasted email list');
+{
+  const { parseEmailList } = await import('../src/components/CustomerEmailModal.jsx').catch(() => ({}));
+  if (parseEmailList) {
+    assert.deepEqual(parseEmailList('a@b.co, a@b.co\nbad  c@d.co'), ['a@b.co', 'c@d.co'], 'parseEmailList dedupes + drops invalid');
+  }
+}
 assert.ok(readSrc('migrations/042_customer_last_email.sql').includes('last_email_type'), 'migration 042 adds last-email columns');
 
 // Per-template test send + Brevo webhook robustness
@@ -582,6 +616,18 @@ assert.equal(birSlot2.imageNumber, 2);
 assert.equal(birSlot2.sourceSku, 'BASHEWS');
 assert.match(readSrc('api/bulk-image-replace.js'), /BULK_IMAGE_REPLACE_MAX/, 'bulk image replace API enforces cap');
 assert.match(readSrc('src/components/BulkImageReplacePanel.jsx'), /export default function BulkImageReplacePanel/, 'BulkImageReplacePanel export');
+// Image replace matches a labelled file by the product's SKU OR its barcode/code
+// (so an image named with the code still replaces after the code diverges from SKU).
+const birLibSrc = readSrc('src/lib/bulkImageReplace.js');
+assert.match(birLibSrc, /barcode: row\.barcode \|\| row\.code/, 'selection carries the product barcode/code');
+assert.match(birLibSrc, /skuByIdentifier/, 'preflight maps SKU + barcode to the owning product SKU');
+assert.match(readSrc('api/bulk-image-replace.js'), /fileSku === rowBarcode/, 'server accepts a filename that matches the row barcode');
+assert.match(readSrc('api/bulk-image-replace.js'), /select\('sku, archived_by, barcode'\)/, 'archived lookup fetches the barcode for matching');
+// Replaced image URL is cache-busted so the new picture actually shows (not the cached old one)
+assert.match(readSrc('api/bulk-image-replace.js'), /const bustedUrl = `\$\{publicUrl\}\?v=\$\{Date\.now\(\)\}`/, 'replaced image URL carries a version param to bust the cache');
+assert.match(readSrc('api/bulk-image-replace.js'), /\[col\]: bustedUrl/, 'the cache-busted URL is what gets stored');
+// Results step previews the new image so it can be confirmed before another run
+assert.match(readSrc('src/components/BulkImageReplacePanel.jsx'), /src=\{r\.url\}/, 'results show a preview of the replaced image');
 assert.match(sidebarSrc, /id: 'image-replace'/, 'sidebar has Image Replace nav');
 assert.match(adminPageSrc, /BulkImageReplacePanel/, 'AdminPage lazy-loads BulkImageReplacePanel');
 assert.doesNotMatch(readSrc('src/components/ProductLoaderPanel.jsx'), /image-replace/, 'Image Replace removed from Product Loader');
@@ -875,5 +921,46 @@ assert.match(readSrc('api/checkout-promo.js'), /Number\.isFinite\(rawPercent\)/,
 assert.match(readSrc('api/run-scheduled-broadcasts.js'), /claimDueItem/, 'WhatsApp broadcast cron claims items atomically (no re-blast)');
 assert.match(readSrc('api/run-scheduled-broadcasts.js'), /maxDuration: 300/, 'WhatsApp broadcast cron has a duration budget');
 console.log('✓ Order/promo/broadcast hardening');
+
+// Adversarial-review fixes (multi-agent review of PRs #107-#122)
+// 1. claimDueItem must reset the claim on every optimistic-lock retry (no double-blast)
+for (const f of ['api/run-scheduled-broadcasts.js', 'api/run-scheduled-emails.js']) {
+  assert.match(readSrc(f), /mutateSiteConfigJson\([^,]+,[^,]+,\s*\(store\)\s*=>\s*\{\s*(?:\/\/[^\n]*\n\s*)*claimed = null;/, `${f}: claim resets each mutator invocation`);
+}
+// 2. Email "Send test" always goes to the admin, never a typed customer
+assert.doesNotMatch(readSrc('src/components/CustomerEmailModal.jsx'), /isSelected \? selectedEmails\[0\] : adminEmail/, 'test send never targets a selected customer');
+// 3. ERP relink must not overwrite a name/description the admin typed in the same save
+assert.match(readSrc('api/update-product.js'), /const adminSetName = patch\.title !== undefined \|\| patch\.original_description !== undefined/, 'relink detects admin-typed name/description');
+assert.match(readSrc('api/update-product.js'), /matchedTitle && !adminSetName/, 'relink skips title overwrite when admin set it');
+// 4. Image-replace identifier map registers SKUs first so a barcode cannot shadow a real SKU
+assert.match(readSrc('src/lib/bulkImageReplace.js'), /Two passes so a SKU ALWAYS wins/, 'preflight builds SKU-first identifier map');
+// 5. Folder progress label cannot exceed the total
+assert.match(readSrc('src/components/productLoader/ProductLoaderFolder.jsx'), /Math\.min\(progress\.done \+ 1, progress\.total\)/, 'folder progress clamps to total');
+// 6. Archive run tracks its own elapsed time
+assert.match(readSrc('src/components/productLoader/ProductLoaderFolder.jsx'), /const archiveItems[\s\S]*?setElapsedMs\(Date\.now\(\) - start\)/, 'archive run updates elapsed time');
+// 7. Scheduling rejects the live-only "selected" audience
+assert.match(readSrc('api/scheduled-emails.js'), /audience === 'selected'/, 'scheduling rejects the specific-people mode');
+// 8. Chunk-reload guard clears after mount, not synchronously at boot
+assert.match(readSrc('src/Root.jsx'), /useEffect\(\(\) => \{ clearChunkReloadGuard\(\); \}, \[\]\)/, 'chunk guard cleared post-mount in Root');
+assert.doesNotMatch(readSrc('src/main.jsx'), /clearChunkReloadGuard\(\)/, 'main.jsx no longer clears the guard pre-mount');
+console.log('✓ Adversarial-review fixes (6 bugs + robustness)');
+
+// Add customer modal: eager (no stale-chunk reload) + scrollable so the button is always reachable
+const adminSrcForModal = readSrc('src/pages/AdminPage.jsx');
+assert.match(adminSrcForModal, /import AddCustomerModal from '\.\.\/components\/AddCustomerModal'/, 'AddCustomerModal is eager-imported (cannot trigger a chunk-reload)');
+assert.doesNotMatch(adminSrcForModal, /const AddCustomerModal = lazyRetry/, 'AddCustomerModal is no longer lazy');
+assert.match(readSrc('src/index.css'), /\.adm-modal--form \.adm-modal-body \{[\s\S]*?overflow-y: auto/, 'form modal body scrolls so the footer stays reachable');
+console.log('✓ Add customer modal eager + scrollable');
+
+// Add customer: styled inputs (adm-input is undefined) + pre-reg account_code must not be null (NOT NULL column)
+const addCustSrc = readSrc('src/components/AddCustomerModal.jsx');
+assert.doesNotMatch(addCustSrc, /className="adm-input"/, 'Add customer inputs use the real styled class, not the undefined adm-input');
+assert.match(addCustSrc, /className="adm-field-input"/, 'Add customer inputs use adm-field-input');
+// Every NOT NULL column in proto_active_customers gets a non-null value on manual add
+const adminCustPreReg = readSrc('api/admin-customers.js');
+assert.match(adminCustPreReg, /account_code: String\(b\.account_code \|\| ''\)\.trim\(\),/, 'pre-reg account_code is empty-string (not null)');
+assert.match(adminCustPreReg, /name: name \|\| email,/, 'pre-reg name falls back to email (NOT NULL)');
+assert.match(adminCustPreReg, /\? Number\(b\.sales_last_12_months\) \|\| 0 : 0,/, 'pre-reg sales_last_12_months defaults to 0 (NOT NULL)');
+console.log('✓ Add customer: styled inputs + all NOT NULL columns handled');
 
 console.log('\nAll smoke checks passed.');

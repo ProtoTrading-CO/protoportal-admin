@@ -1114,6 +1114,10 @@ export default function ProductManagerEngine({
   };
 
   const makeLive = (item) => {
+    // Categories get renamed/restructured often; pull the current tree so the
+    // dropdown shows live categories with ids the server will still resolve
+    // (a stale id is what triggers "Destination category changed").
+    onRefreshTaxonomy?.();
     setMakeLiveItem(item);
     setMakeLiveCategory(productCategoryRowFromItem(item));
   };
@@ -2026,6 +2030,37 @@ export default function ProductManagerEngine({
                   </select>
                 </label>
               )}
+              {[
+                { level: 2, key: 'childTwoId', parentKey: 'childOneId', label: 'Child category 2' },
+                { level: 3, key: 'childThreeId', parentKey: 'childTwoId', label: 'Child category 3' },
+                { level: 4, key: 'childFourId', parentKey: 'childThreeId', label: 'Child category 4' },
+              ].map(({ key, parentKey, label }) => {
+                const parentId = makeLiveCategory[parentKey];
+                if (!parentId) return null;
+                const options = withCurrentOption(childrenOfTree(tree, parentId), makeLiveCategory[key]);
+                if (!options.length && !makeLiveCategory[key]) return null;
+                // Reset deeper levels when this one changes.
+                const deeper = ['childOneId', 'childTwoId', 'childThreeId', 'childFourId'];
+                const resetBelow = deeper.slice(deeper.indexOf(key) + 1);
+                return (
+                  <label className="adm-field" key={key}>
+                    <span className="adm-field-label">{label}</span>
+                    <select
+                      value={makeLiveCategory[key]}
+                      onChange={(e) => setMakeLiveCategory((prev) => ({
+                        ...prev,
+                        [key]: e.target.value,
+                        ...Object.fromEntries(resetBelow.map((k) => [k, ''])),
+                      }))}
+                      className="adm-field-input"
+                      disabled={makeLiveSaving}
+                    >
+                      <option value="">— None —</option>
+                      {options.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+                    </select>
+                  </label>
+                );
+              })}
             </div>
             <div className="adm-modal-footer adm-modal-footer--end">
               <div className="adm-modal-footer__actions">

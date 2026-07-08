@@ -143,13 +143,13 @@ export async function pushPortalCustomersToBrevo() {
 }
 
 export async function sendCustomerEmailBroadcast({
-  audience, subject, introText, htmlBlock, testEmail, businessTypes,
+  audience, subject, introText, htmlBlock, testEmail, businessTypes, recipients,
 }) {
   const res = await fetch('/api/customer-email-broadcast', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      audience, subject, introText, htmlBlock, testEmail, businessTypes,
+      audience, subject, introText, htmlBlock, testEmail, businessTypes, recipients,
     }),
   });
   const json = await res.json();

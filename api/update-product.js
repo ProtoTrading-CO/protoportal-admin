@@ -173,15 +173,24 @@ export default async function handler(req, res) {
     } catch { /* non-fatal — snapshot refresh is best effort */ }
   }
 
-  // Nutstore-archived placeholders often have no ERP row yet. When the admin
-  // fixes the SKU or barcode on such a row, re-run the ERP/Positill lookup so
-  // the row can attach live stock/price on the next Archive refresh.
+  // Archived placeholders often have no ERP data yet. When the admin fixes the
+  // SKU or barcode on such a row, re-run the ERP/Positill lookup so the row can
+  // attach live description / stock / price. Runs for nutstore placeholders and
+  // for ANY archived row that currently has no price and no stock (the
+  // "Needs SOH/price" rows the admin is correcting) — a Positill match only
+  // overwrites when found, so rows that already carry good data are untouched.
   let relink = null;
   const changedIdentifier = patch.sku != null || patch.barcode != null;
+  const lacksErpData = (Number(verified.price) || 0) === 0
+    && (Number(verified.stock_qty) || 0) === 0
+    && (Number(verified.available_stock) || 0) === 0;
+  // If the admin typed a name/description in THIS save, the ERP relink must not
+  // overwrite it with the Positill title — it still pulls stock/price.
+  const adminSetName = patch.title !== undefined || patch.original_description !== undefined;
   if (
     changedIdentifier
     && table === 'archived_products'
-    && verified.archived_by === 'nutstore'
+    && (verified.archived_by === 'nutstore' || lacksErpData)
   ) {
     try {
       const identifier = verified.barcode || verified.sku;
@@ -206,7 +215,7 @@ export default async function handler(req, res) {
           available_stock: Number(match.sqlRow.available) ?? (Number(match.sqlRow.onhand) || 0),
         };
         const matchedTitle = String(match.sqlRow.title || '').trim();
-        if (matchedTitle) {
+        if (matchedTitle && !adminSetName) {
           relinkPatch.original_description = matchedTitle;
           relinkPatch.title = matchedTitle;
         }
@@ -239,7 +248,7 @@ export default async function handler(req, res) {
         const matchedTitle = String(
           match.websiteRow.original_description || match.websiteRow.title || '',
         ).trim();
-        if (matchedTitle) {
+        if (matchedTitle && !adminSetName) {
           relinkPatch.original_description = matchedTitle;
           relinkPatch.title = matchedTitle;
         }

@@ -132,7 +132,10 @@ function SectionSuspenseFallback({ label = 'Loading…' }) {
 
 // Modal-only — chunk downloads the first time the admin opens the dialog.
 const CustomerEmailModal = lazyRetry(() => import('../components/CustomerEmailModal'));
-const AddCustomerModal = lazyRetry(() => import('../components/AddCustomerModal'));
+// AddCustomerModal is tiny and eager (not lazy) so opening it can never hit a
+// stale-chunk load failure — which the recovery would resolve by reloading the
+// whole page (reads as "the button just refreshes").
+import AddCustomerModal from '../components/AddCustomerModal';
 import ActionMenu from '../components/ActionMenu';
 const CrmContactsModal = lazyRetry(() => import('../components/CrmContactsModal'));
 const FulfillmentSettingsModal = lazyRetry(() => import('../components/FulfillmentSettingsModal'));
@@ -1450,6 +1453,13 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
       return;
     }
 
+    // Archived rows keep whatever category they had (their category selector is
+    // hidden — a category is chosen at Make live). Their stored path is often a
+    // synthetic "Uncategorised › General" that the live taxonomy can't resolve,
+    // so sending it back would 409 ("Destination category changed") and block a
+    // plain code/price edit. Only live/new products send a category path.
+    const sendCategory = categoryPath.length > 0 && !editingProduct?.archivedBy;
+
     const payload = {
       code: productForm.code.trim(),
       name: productForm.name.trim(),
@@ -1460,7 +1470,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
       imageThree: productForm.imageThree.trim(),
       imageFour: productForm.imageFour.trim(),
       price: Number(productForm.price || 0),
-      ...(categoryPath.length ? { categoryPath } : {}),
+      ...(sendCategory ? { categoryPath } : {}),
       ...(editingProduct?.updatedAt ? { expectedUpdatedAt: editingProduct.updatedAt } : {}),
     };
     setSaving(editingProduct?.id || 'new-product');
@@ -2900,14 +2910,12 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
       )}
 
       {addCustomerOpen && (
-        <Suspense fallback={null}>
-          <AddCustomerModal
-            open={addCustomerOpen}
-            onClose={() => setAddCustomerOpen(false)}
-            onShowToast={showToast}
-            onAdded={() => { void loadCustomers(); }}
-          />
-        </Suspense>
+        <AddCustomerModal
+          open={addCustomerOpen}
+          onClose={() => setAddCustomerOpen(false)}
+          onShowToast={showToast}
+          onAdded={() => { void loadCustomers(); }}
+        />
       )}
 
       <TaxonomyModals
