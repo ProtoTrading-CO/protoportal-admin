@@ -1,22 +1,25 @@
 import { useState } from 'react';
-import { Loader2, UserPlus, X } from 'lucide-react';
+import { ClipboardList, Info, Loader2, Star, UserCheck, UserPlus, X } from 'lucide-react';
 import { addCustomerManually } from '../lib/customers';
 
 const SECTIONS = [
   {
     value: 'approved',
     label: 'Approved trade customer',
-    hint: 'Creates a login account, marked approved. A welcome email is sent with a link to set their password. No code is assigned.',
+    hint: 'Creates a login account, marked approved. A welcome email with a set-password link is sent. No code is assigned.',
+    Icon: UserCheck,
   },
   {
     value: 'approved-10000',
     label: 'Approved + 10000 club',
     hint: 'Same as approved, plus the “10000 club” tag.',
+    Icon: Star,
   },
   {
     value: 'pre-registration',
     label: 'Pre-registration (10000 club list)',
-    hint: 'Adds them to the allowlist. When they sign up they auto-approve, get tagged “10000 club” and receive the welcome email.',
+    hint: 'Adds them to the allowlist. When they sign up they auto-approve, get the “10000 club” tag and receive the welcome email.',
+    Icon: ClipboardList,
   },
 ];
 
@@ -61,39 +64,71 @@ export default function AddCustomerModal({ open, onClose, onAdded, onShowToast }
     }
   };
 
+  const fieldLabel = { display: 'block', fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 5 };
+
   return (
     <div className="adm-modal-backdrop" onClick={() => !saving && onClose?.()}>
       <div className="adm-modal adm-modal--form" onClick={(e) => e.stopPropagation()}>
-        <div className="adm-modal-header">
-          <h3 className="adm-modal-title"><UserPlus size={18} style={{ verticalAlign: '-3px', marginRight: 6 }} />Add customer</h3>
-          <button type="button" className="adm-modal-close" onClick={() => onClose?.()} aria-label="Close"><X size={18} /></button>
+        <div className="adm-modal-header" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 2, paddingBottom: 6 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+            <h3 className="adm-modal-title"><UserPlus size={18} style={{ verticalAlign: '-3px', marginRight: 6 }} />Add customer</h3>
+            <button type="button" className="adm-modal-close" onClick={() => onClose?.()} aria-label="Close"><X size={18} /></button>
+          </div>
+          <p style={{ margin: 0, fontSize: 13, color: '#6b7280' }}>Add someone manually and choose where they land.</p>
         </div>
-        <div className="adm-modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+
+        <div className="adm-modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div>
-            <label className="adm-field-label">Section</label>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 }}>
-              {SECTIONS.map((s) => (
-                <label key={s.value} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', cursor: 'pointer', padding: '8px 10px', border: `1.5px solid ${section === s.value ? '#8B1A1A' : '#e5e7eb'}`, background: section === s.value ? '#fdf3f3' : '#fff', borderRadius: 8, transition: 'border-color .12s, background .12s' }}>
-                  <input type="radio" name="add-section" checked={section === s.value} onChange={() => setSection(s.value)} style={{ marginTop: 3, accentColor: '#8B1A1A' }} />
-                  <span>
-                    <span style={{ fontWeight: 700 }}>{s.label}</span>
-                    <span style={{ display: 'block', fontSize: 12, color: '#6b7280', marginTop: 2 }}>{s.hint}</span>
-                  </span>
-                </label>
-              ))}
+            <label style={{ ...fieldLabel, marginBottom: 8 }}>Where should they go?</label>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {SECTIONS.map(({ value, label, hint, Icon }) => {
+                const active = section === value;
+                return (
+                  <button
+                    key={value}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => setSection(value)}
+                    style={{
+                      display: 'flex', gap: 12, alignItems: 'flex-start', textAlign: 'left', width: '100%',
+                      padding: '12px 14px', borderRadius: 10, cursor: 'pointer',
+                      border: `1.5px solid ${active ? '#8B1A1A' : '#e5e7eb'}`,
+                      background: active ? '#fdf2f2' : '#fff',
+                      boxShadow: active ? '0 1px 4px rgba(139,26,26,0.10)' : 'none',
+                      transition: 'border-color .12s, background .12s, box-shadow .12s',
+                    }}
+                  >
+                    <span style={{
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      width: 36, height: 36, borderRadius: 9, flexShrink: 0,
+                      background: active ? '#8B1A1A' : '#f3f4f6', color: active ? '#fff' : '#6b7280',
+                    }}>
+                      <Icon size={18} />
+                    </span>
+                    <span style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, color: '#111827', fontSize: 14 }}>
+                        {label}
+                        {active && <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#8B1A1A', flexShrink: 0 }} />}
+                      </span>
+                      <span style={{ display: 'block', fontSize: 12, color: '#6b7280', marginTop: 3, lineHeight: 1.45 }}>{hint}</span>
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <div style={{ gridColumn: '1 / -1' }}>
-              <label className="adm-field-label">Email *</label>
+              <label style={fieldLabel}>Email *</label>
               <input className="adm-input" type="email" value={form.email} onChange={set('email')} placeholder="customer@business.co.za" />
             </div>
             <div>
-              <label className="adm-field-label">Business name</label>
+              <label style={fieldLabel}>Business name</label>
               <input className="adm-input" value={form.business_name} onChange={set('business_name')} />
             </div>
             <div>
-              <label className="adm-field-label">Contact name</label>
+              <label style={fieldLabel}>Contact name</label>
               <input className="adm-input" value={form.contact_name} onChange={set('contact_name')} />
             </div>
             {/* Phone + monthly spend only apply to a real approved account —
@@ -101,32 +136,36 @@ export default function AddCustomerModal({ open, onClose, onAdded, onShowToast }
             {!isPreReg && (
               <>
                 <div>
-                  <label className="adm-field-label">Phone</label>
+                  <label style={fieldLabel}>Phone</label>
                   <input className="adm-input" value={form.phone} onChange={set('phone')} placeholder="+27…" />
                 </div>
                 <div>
-                  <label className="adm-field-label">Monthly spend</label>
+                  <label style={fieldLabel}>Monthly spend</label>
                   <input className="adm-input" value={form.monthly_spend} onChange={set('monthly_spend')} />
                 </div>
               </>
             )}
             {isPreReg && (
               <div style={{ gridColumn: '1 / -1' }}>
-                <label className="adm-field-label">Account reference (optional)</label>
+                <label style={fieldLabel}>Account reference (optional)</label>
                 <input className="adm-input" value={form.account_code} onChange={set('account_code')} placeholder="Positill account code — reference only, not a customer code" />
               </div>
             )}
           </div>
-          <p style={{ margin: '2px 0 0', fontSize: 12, color: '#6b7280' }}>
-            No customer code is set here. Allocate it later from the customer's profile — saving the code
-            is what sends the confirmation email.
-          </p>
+
+          <div style={{ display: 'flex', gap: 9, alignItems: 'flex-start', background: '#f8fafc', border: '1px solid #eef2f7', borderRadius: 9, padding: '10px 12px' }}>
+            <Info size={15} style={{ color: '#94a3b8', marginTop: 1, flexShrink: 0 }} />
+            <p style={{ margin: 0, fontSize: 12, color: '#6b7280', lineHeight: 1.5 }}>
+              No customer code is set here — allocate it later from the customer’s profile. Saving the code is what sends the confirmation email.
+            </p>
+          </div>
         </div>
+
         <div className="adm-modal-footer adm-modal-footer--end">
           <div className="adm-modal-footer__actions">
             <button type="button" className="adm-btn-ghost" onClick={() => onClose?.()} disabled={saving}>Cancel</button>
             <button type="button" className="adm-btn-red" onClick={() => void submit()} disabled={saving}>
-              {saving ? <><Loader2 size={14} className="spin" /> Adding…</> : 'Add customer'}
+              {saving ? <><Loader2 size={14} className="spin" /> Adding…</> : <><UserPlus size={14} /> Add customer</>}
             </button>
           </div>
         </div>
