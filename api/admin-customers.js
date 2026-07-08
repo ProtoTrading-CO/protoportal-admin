@@ -221,17 +221,17 @@ export default async function handler(req, res) {
     // welcome email when they sign up. account_code here is a REFERENCE only,
     // never copied into customers.customer_code.
     if (section === 'pre-registration' || section === '10000-club') {
+      // proto_active_customers has several NOT NULL columns (migration 021):
+      // name, account_code, and sales_last_12_months. Supply safe non-null
+      // values for all of them so a manual add never 400s on a blank field.
       const row = {
         email,
-        name: name || null,
+        name: name || email,
         contact_name: String(b.contact_name || '').trim() || null,
         first_name: String(b.first_name || '').trim() || null,
-        // account_code is NOT NULL in proto_active_customers (migration 021) and
-        // is a reference only (its unique index was dropped in 023/024), so an
-        // empty string is the safe "no reference" value — null would 400.
         account_code: String(b.account_code || '').trim(),
         sales_last_12_months: b.sales_last_12_months != null && b.sales_last_12_months !== ''
-          ? Number(b.sales_last_12_months) || 0 : null,
+          ? Number(b.sales_last_12_months) || 0 : 0,
       };
       const { error } = await supabase
         .from('proto_active_customers')
