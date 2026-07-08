@@ -4,6 +4,7 @@ import { queryClient } from './queryClient';
 import { queryKeys } from './queryKeys';
 import { readApiJson } from './apiError.js';
 import { enrichMotarroCategoryFields } from '../../lib/mottaro-category.mjs';
+import { parseExtraLabels } from '../../lib/taxonomy-match.mjs';
 
 function categoryMainIdMatches(productMainId, targetMainId) {
   if (!targetMainId || !productMainId) return false;
@@ -110,7 +111,10 @@ export function stockFromRow(row) {
 
 function adapt(row, { archived = false, tree = null } = {}) {
   const images = [row.image_url_one, row.image_url_two, row.image_url_three, row.image_url_four].filter(Boolean);
-  const subLabels = [row.subcategory_one, row.subcategory_two, row.subcategory_three, row.subcategory_four].filter(Boolean);
+  const subLabels = [
+    row.subcategory_one, row.subcategory_two, row.subcategory_three, row.subcategory_four,
+    ...parseExtraLabels(row.subcategory_extra),
+  ].filter(Boolean);
   const { categoryId, categoryPath } = resolveCategoryIdsFromTree(row, tree);
   const stock = stockFromRow(row);
   const base = {
@@ -454,12 +458,14 @@ function pathToWriteFields(categoryPath = []) {
   const label = (slug) => slugToLabelFromTree(slug, _liveTaxonomyTree);
   const category = label(categoryPath[0]) || '';
   const subs = categoryPath.slice(1).map((slug) => label(slug)).filter(Boolean);
+  const extra = subs.slice(4);
   return {
     category,
     subcategory_one: subs[0] || category,
     subcategory_two: subs[1] || null,
     subcategory_three: subs[2] || null,
     subcategory_four: subs[3] || null,
+    subcategory_extra: extra.length ? JSON.stringify(extra) : null,
   };
 }
 
@@ -469,7 +475,7 @@ export async function createProduct(payload) {
   const title = String(payload.name || '').trim();
   if (!sku || !barcode || !title) throw new Error('Barcode and product name are required');
 
-  const { category, subcategory_one, subcategory_two, subcategory_three, subcategory_four } = pathToWriteFields(payload.categoryPath);
+  const { category, subcategory_one, subcategory_two, subcategory_three, subcategory_four, subcategory_extra } = pathToWriteFields(payload.categoryPath);
   if (!category) throw new Error('Category is required');
 
   const row = {
@@ -486,6 +492,7 @@ export async function createProduct(payload) {
     subcategory_two,
     subcategory_three,
     subcategory_four,
+    subcategory_extra,
     price: Number(payload.price) || 0,
   };
 

@@ -159,6 +159,7 @@ async function bulkRemoveFromCategory(supabase, normalizedSkus, tree) {
     subcategory_two: null,
     subcategory_three: null,
     subcategory_four: null,
+    subcategory_extra: null,
   };
   const results = [];
   const stamp = new Date().toISOString();

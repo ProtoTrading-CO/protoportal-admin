@@ -24,20 +24,23 @@ function findNodePath(tree, targetId, path = []) {
   return null;
 }
 
-/** After creating a subcategory, return category field patch for the new node. */
+/**
+ * After creating a subcategory, return category field patch for the new node.
+ * parentPath is the ancestors of parentId (root..parentId's parent), so the
+ * full path down to the newly created node is [...parentPath, parentId, newId].
+ */
 function categoryPatchAfterNewSub(parentId, newId, tree) {
   const parentPath = findNodePath(tree, parentId) || [];
+  const fullPath = [...parentPath, parentId, newId];
   return {
-    categoryId: parentPath[0] || parentId,
-    childOneId: parentPath.length === 0 ? newId : (parentPath[1] || parentId),
-    childTwoId: parentPath.length === 1 ? newId : (parentPath.length >= 2 ? parentId : ''),
-    childThreeId: parentPath.length === 2 ? newId : (parentPath.length >= 3 ? parentId : ''),
-    childFourId: parentPath.length >= 3 ? newId : '',
+    categoryId: fullPath[0],
+    childIds: fullPath.slice(1),
   };
 }
 
 function deepestCategoryParent(row) {
-  return row.childFourId || row.childThreeId || row.childTwoId || row.childOneId || row.categoryId || '';
+  const childIds = row.childIds || [];
+  return childIds[childIds.length - 1] || row.categoryId || '';
 }
 
 function productToRow(product, tree) {
@@ -50,15 +53,12 @@ function productToRow(product, tree) {
     packDescription: product.packDescription || '',
     code: product.code || product.barcode || '',
     categoryId: path[0] || tree[0]?.id || '',
-    childOneId: path[1] || '',
-    childTwoId: path[2] || '',
-    childThreeId: path[3] || '',
-    childFourId: path[4] || '',
+    childIds: path.slice(1).filter(Boolean),
   };
 }
 
 function categoryPathFromRow(row) {
-  return [row.categoryId, row.childOneId, row.childTwoId, row.childThreeId, row.childFourId].filter(Boolean);
+  return [row.categoryId, ...(row.childIds || [])].filter(Boolean);
 }
 
 function rowSnapshot(row) {
@@ -94,11 +94,29 @@ function CategoryFields({
   compact = false,
   onCreateSubcategory,
 }) {
-  const child1Options = withCurrentOption(subcategoryOptionsFromTree(tree, row.categoryId), row.childOneId);
-  const child2Options = withCurrentOption(childrenOfTree(tree, row.childOneId), row.childTwoId);
-  const child3Options = withCurrentOption(childrenOfTree(tree, row.childTwoId), row.childThreeId);
-  const child4Options = withCurrentOption(childrenOfTree(tree, row.childThreeId), row.childFourId);
+  const childIds = row.childIds || [];
+  // Level 1 & 2 always render once a main category is picked (most products
+  // are categorised at least that deep); level 3+ is dynamic — as deep as
+  // the taxonomy tree goes — rendering only while there are options to pick
+  // or a stale value to preserve, disabled while its parent is unset.
+  const child1Options = withCurrentOption(subcategoryOptionsFromTree(tree, row.categoryId), childIds[0] || '');
+  const child2Options = withCurrentOption(childrenOfTree(tree, childIds[0]), childIds[1] || '');
+  const deeperFields = [];
+  {
+    let parentId = childIds[1] || '';
+    for (let level = 3; ; level += 1) {
+      const currentValue = childIds[level - 1] || '';
+      const options = withCurrentOption(childrenOfTree(tree, parentId), currentValue);
+      if (!options.length && !currentValue) break;
+      deeperFields.push({ level, options, currentValue, parentSet: !!parentId });
+      parentId = currentValue;
+    }
+  }
   const createParentId = deepestCategoryParent(row);
+
+  const setLevel = (level, value) => onChange({
+    childIds: [...childIds.slice(0, level - 1), value].filter(Boolean),
+  });
 
   return (
     <div className={`pm-bulk-cat${compact ? ' pm-bulk-cat--compact' : ''}`}>
@@ -106,13 +124,7 @@ function CategoryFields({
         <span>Main category</span>
         <select
           value={row.categoryId}
-          onChange={(e) => onChange({
-            categoryId: e.target.value,
-            childOneId: '',
-            childTwoId: '',
-            childThreeId: '',
-            childFourId: '',
-          })}
+          onChange={(e) => onChange({ categoryId: e.target.value, childIds: [] })}
           className="adm-select adm-select--enhanced"
         >
           {tree.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
@@ -124,13 +136,8 @@ function CategoryFields({
           <label className="pm-bulk-field">
             <span>Child category 1</span>
             <select
-              value={row.childOneId}
-              onChange={(e) => onChange({
-                childOneId: e.target.value,
-                childTwoId: '',
-                childThreeId: '',
-                childFourId: '',
-              })}
+              value={childIds[0] || ''}
+              onChange={(e) => setLevel(1, e.target.value)}
               className="adm-select adm-select--enhanced"
             >
               <option value="">— None —</option>
@@ -141,48 +148,32 @@ function CategoryFields({
           <label className="pm-bulk-field">
             <span>Child category 2</span>
             <select
-              value={row.childTwoId}
-              disabled={!row.childOneId}
-              onChange={(e) => onChange({ childTwoId: e.target.value, childThreeId: '', childFourId: '' })}
+              value={childIds[1] || ''}
+              disabled={!childIds[0]}
+              onChange={(e) => setLevel(2, e.target.value)}
               className="adm-select adm-select--enhanced"
-              title={!row.childOneId ? 'Select child category 1 first' : undefined}
+              title={!childIds[0] ? 'Select child category 1 first' : undefined}
             >
               <option value="">— None —</option>
               {child2Options.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
             </select>
           </label>
 
-          {(child3Options.length > 0 || row.childThreeId) && (
-          <label className="pm-bulk-field">
-            <span>Child category 3</span>
-            <select
-              value={row.childThreeId}
-              disabled={!row.childTwoId}
-              onChange={(e) => onChange({ childThreeId: e.target.value, childFourId: '' })}
-              className="adm-select adm-select--enhanced"
-              title={!row.childTwoId ? 'Select child category 2 first' : undefined}
-            >
-              <option value="">— None —</option>
-              {child3Options.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
-            </select>
-          </label>
-          )}
-
-          {(child4Options.length > 0 || row.childFourId) && (
-          <label className="pm-bulk-field">
-            <span>Child category 4</span>
-            <select
-              value={row.childFourId}
-              disabled={!row.childThreeId}
-              onChange={(e) => onChange({ childFourId: e.target.value })}
-              className="adm-select adm-select--enhanced"
-              title={!row.childThreeId ? 'Select child category 3 first' : undefined}
-            >
-              <option value="">— None —</option>
-              {child4Options.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
-            </select>
-          </label>
-          )}
+          {deeperFields.map(({ level, options, currentValue, parentSet }) => (
+            <label className="pm-bulk-field" key={level}>
+              <span>Child category {level}</span>
+              <select
+                value={currentValue}
+                disabled={!parentSet}
+                onChange={(e) => setLevel(level, e.target.value)}
+                className="adm-select adm-select--enhanced"
+                title={!parentSet ? `Select child category ${level - 1} first` : undefined}
+              >
+                <option value="">— None —</option>
+                {options.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+              </select>
+            </label>
+          ))}
         </>
       )}
 

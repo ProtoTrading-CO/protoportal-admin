@@ -30,7 +30,7 @@ both local branches sit on clean merged `main`.
 - **No production secrets in this container** (`VITE_SUPABASE_URL`,
   `SUPABASE_SERVICE_ROLE_KEY`, `ADMIN_DASH_KEY`, `BREVO_API_KEY`, `CRON_SECRET`
   all unset). Cannot query prod Supabase / Brevo / authed APIs from here. Verify
-  sends & data via the admin UI (Scheduled tab, Email Analytics).
+  sends & data via the admin UI (Email Analytics).
 - Two Supabase projects: **portal** (`VITE_SUPABASE_URL` — customers, orders,
   site-config bucket) and **stock** (`VITE_STOCK_SUPABASE_URL` — website_stock,
   archived_products).
@@ -53,7 +53,7 @@ both local branches sit on clean merged `main`.
   `lib/trade-application-email.mjs`).
 - **#122** — **"Specific people"** email send: paste/type emails in
   `CustomerEmailModal`; backend `fetchRecipientsByEmail` personalizes known
-  customers. Immediate-send only (scheduling blocked for it).
+  customers. Immediate-send only.
 - **Portal #133** — register.proto success page: "Your trade account is live.
   We'll notify you as soon as the site is launched." (no email promise).
 - **Portal #134** — Signup emails (`register-trade.js`): removed **all "log in
