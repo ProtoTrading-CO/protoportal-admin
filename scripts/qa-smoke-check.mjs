@@ -945,4 +945,11 @@ assert.match(readSrc('src/Root.jsx'), /useEffect\(\(\) => \{ clearChunkReloadGua
 assert.doesNotMatch(readSrc('src/main.jsx'), /clearChunkReloadGuard\(\)/, 'main.jsx no longer clears the guard pre-mount');
 console.log('✓ Adversarial-review fixes (6 bugs + robustness)');
 
+// Add customer modal: eager (no stale-chunk reload) + scrollable so the button is always reachable
+const adminSrcForModal = readSrc('src/pages/AdminPage.jsx');
+assert.match(adminSrcForModal, /import AddCustomerModal from '\.\.\/components\/AddCustomerModal'/, 'AddCustomerModal is eager-imported (cannot trigger a chunk-reload)');
+assert.doesNotMatch(adminSrcForModal, /const AddCustomerModal = lazyRetry/, 'AddCustomerModal is no longer lazy');
+assert.match(readSrc('src/index.css'), /\.adm-modal--form \.adm-modal-body \{[\s\S]*?overflow-y: auto/, 'form modal body scrolls so the footer stays reachable');
+console.log('✓ Add customer modal eager + scrollable');
+
 console.log('\nAll smoke checks passed.');

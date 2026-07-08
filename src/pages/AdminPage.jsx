@@ -132,7 +132,10 @@ function SectionSuspenseFallback({ label = 'Loading…' }) {
 
 // Modal-only — chunk downloads the first time the admin opens the dialog.
 const CustomerEmailModal = lazyRetry(() => import('../components/CustomerEmailModal'));
-const AddCustomerModal = lazyRetry(() => import('../components/AddCustomerModal'));
+// AddCustomerModal is tiny and eager (not lazy) so opening it can never hit a
+// stale-chunk load failure — which the recovery would resolve by reloading the
+// whole page (reads as "the button just refreshes").
+import AddCustomerModal from '../components/AddCustomerModal';
 import ActionMenu from '../components/ActionMenu';
 const CrmContactsModal = lazyRetry(() => import('../components/CrmContactsModal'));
 const FulfillmentSettingsModal = lazyRetry(() => import('../components/FulfillmentSettingsModal'));
@@ -2907,14 +2910,12 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
       )}
 
       {addCustomerOpen && (
-        <Suspense fallback={null}>
-          <AddCustomerModal
-            open={addCustomerOpen}
-            onClose={() => setAddCustomerOpen(false)}
-            onShowToast={showToast}
-            onAdded={() => { void loadCustomers(); }}
-          />
-        </Suspense>
+        <AddCustomerModal
+          open={addCustomerOpen}
+          onClose={() => setAddCustomerOpen(false)}
+          onShowToast={showToast}
+          onAdded={() => { void loadCustomers(); }}
+        />
       )}
 
       <TaxonomyModals
