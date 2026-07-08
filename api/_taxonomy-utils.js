@@ -7,6 +7,7 @@ import {
   escapeIlikePattern,
   matchesTaxonomyLabel,
   normalizeLabel,
+  parseExtraLabels,
   rowMatchesLabelScope,
 } from '../lib/taxonomy-match.mjs';
 
@@ -198,12 +199,14 @@ export function resolveLabelsForSubcategory(tree, categoryId, subcategoryId) {
 }
 
 export function labelsToDbFields(labels) {
+  const extra = labels.slice(5).filter((v) => v != null && String(v).trim());
   return {
     category: labels[0],
     subcategory_one: labels[1] || labels[0],
     subcategory_two: labels[2] || null,
     subcategory_three: labels[3] || null,
     subcategory_four: labels[4] || null,
+    subcategory_extra: extra.length ? JSON.stringify(extra) : null,
   };
 }
 
@@ -224,10 +227,19 @@ export function resolveCategoryIds(row, tree) {
     for (const col of SUB_COLS) {
       if (row[col]) ids.push(labelToSlug(row[col])); else break;
     }
+    if (ids.length === 1 + SUB_COLS.length) {
+      for (const label of parseExtraLabels(row.subcategory_extra)) {
+        if (!label) break;
+        ids.push(labelToSlug(label));
+      }
+    }
     return { categoryId: ids[0] || '', categoryPath: ids };
   }
 
-  const labels = [row.category, row.subcategory_one, row.subcategory_two, row.subcategory_three, row.subcategory_four];
+  const labels = [
+    row.category, row.subcategory_one, row.subcategory_two, row.subcategory_three, row.subcategory_four,
+    ...parseExtraLabels(row.subcategory_extra),
+  ];
   const ids = [];
   let level = tree;
   for (const rawLabel of labels) {
@@ -246,19 +258,41 @@ export function resolveCategoryIds(row, tree) {
 }
 
 const SUB_COLS = ['subcategory_one', 'subcategory_two', 'subcategory_three', 'subcategory_four'];
+const EXTRA_COL = 'subcategory_extra';
+
+/**
+ * Depth beyond the fixed subcategory_one..four columns (0 or negative means
+ * the depth is still within the fixed columns) is stored as a single JSON
+ * array in `subcategory_extra`, ordered from the first beyond-depth ancestor
+ * to the node itself. `ctx.ancestors` has length === ctx.depth (root at
+ * index 0), so ancestors[SUB_COLS.length] is the first node beyond the fixed
+ * columns.
+ */
+function buildAncestorFilters(ancestors, depth) {
+  const filters = { category: ancestors[0]?.label };
+  for (let i = 1; i < depth; i++) {
+    const label = ancestors[i]?.label;
+    if (i - 1 < SUB_COLS.length) filters[SUB_COLS[i - 1]] = label;
+    else (filters[EXTRA_COL] ||= []).push(label);
+  }
+  return filters;
+}
 
 export function buildRenameFilter(ctx, oldLabel) {
   const { depth, ancestors } = ctx;
   if (depth === 0) {
     return { column: 'category', filters: { category: oldLabel } };
   }
-  const col = SUB_COLS[depth - 1];
-  const filters = { category: ancestors[0]?.label };
-  for (let i = 1; i < depth; i++) {
-    filters[SUB_COLS[i - 1]] = ancestors[i]?.label;
+  const filters = buildAncestorFilters(ancestors, depth);
+  let column;
+  if (depth - 1 < SUB_COLS.length) {
+    column = SUB_COLS[depth - 1];
+    filters[column] = oldLabel;
+  } else {
+    column = EXTRA_COL;
+    (filters[EXTRA_COL] ||= []).push(oldLabel);
   }
-  filters[col] = oldLabel;
-  return { column: col, filters };
+  return { column, filters };
 }
 
 export function addCategoryNode(tree, label) {
@@ -334,16 +368,16 @@ export function buildNodeProductFilter(ctx) {
   if (depth === 0) {
     return { filters: { category: node.label } };
   }
-  const col = SUB_COLS[depth - 1];
-  const filters = { category: ancestors[0]?.label };
-  for (let i = 1; i < depth; i++) {
-    filters[SUB_COLS[i - 1]] = ancestors[i]?.label;
+  const filters = buildAncestorFilters(ancestors, depth);
+  if (depth - 1 < SUB_COLS.length) {
+    filters[SUB_COLS[depth - 1]] = node.label;
+  } else {
+    (filters[EXTRA_COL] ||= []).push(node.label);
   }
-  filters[col] = node.label;
   return { filters };
 }
 
-const SCOPE_FETCH_COLS = 'sku,category,subcategory_one,subcategory_two,subcategory_three,subcategory_four';
+const SCOPE_FETCH_COLS = 'sku,category,subcategory_one,subcategory_two,subcategory_three,subcategory_four,subcategory_extra';
 
 /**
  * Fetch rows belonging to a node scope with whitespace/case-tolerant matching.
@@ -352,7 +386,13 @@ const SCOPE_FETCH_COLS = 'sku,category,subcategory_one,subcategory_two,subcatego
  * ancestor scope in JS with the shared normalized matcher.
  */
 export async function fetchRowsMatchingNodeScope(supabase, table, { column, filters }) {
-  const label = String(filters[column] ?? '').trim();
+  const rawLabel = filters[column];
+  // subcategory_extra filters are an ordered label array; the deepest (last)
+  // element is the node's own label and the most selective ilike substring —
+  // exactness is still enforced afterwards by rowMatchesLabelScope.
+  const label = Array.isArray(rawLabel)
+    ? String(rawLabel[rawLabel.length - 1] ?? '').trim()
+    : String(rawLabel ?? '').trim();
   if (!label) return [];
   const pattern = `%${escapeIlikePattern(label)}%`;
   const rows = [];
@@ -377,7 +417,8 @@ export async function fetchRowsMatchingNodeScope(supabase, table, { column, filt
 
 /** Deepest column of a node scope — the column that names the node itself. */
 export function nodeScopeColumn(ctx) {
-  return ctx.depth === 0 ? 'category' : SUB_COLS[ctx.depth - 1];
+  if (ctx.depth === 0) return 'category';
+  return ctx.depth - 1 < SUB_COLS.length ? SUB_COLS[ctx.depth - 1] : EXTRA_COL;
 }
 
 export async function countProductsForNode(supabase, ctx) {
@@ -412,6 +453,35 @@ export async function renameNodeLabelInProducts(supabase, table, ctx, oldLabel, 
   const rows = await fetchRowsMatchingNodeScope(supabase, table, { column, filters });
   if (!rows.length) return { renamed: 0 };
   const stamp = new Date().toISOString();
+
+  if (column === EXTRA_COL) {
+    // Rows under an extras-depth node can each carry a different NUMBER of
+    // deeper descendant elements after the renamed position, so (unlike the
+    // fixed-column case) one uniform patch can't be applied to every matched
+    // row — each row's extras array must be read and spliced individually.
+    const extraIndex = ctx.depth - 1 - SUB_COLS.length;
+    let renamed = 0;
+    const CONCURRENCY = 8;
+    let cursor = 0;
+    async function worker() {
+      while (cursor < rows.length) {
+        const row = rows[cursor];
+        cursor += 1;
+        const currentExtra = parseExtraLabels(row.subcategory_extra);
+        if (!matchesTaxonomyLabel(currentExtra[extraIndex], oldLabel)) continue;
+        const nextExtra = [...currentExtra];
+        nextExtra[extraIndex] = newLabel;
+        const { error } = await supabase
+          .from(table)
+          .update({ subcategory_extra: JSON.stringify(nextExtra), updated_at: stamp })
+          .eq('sku', row.sku);
+        if (!error) renamed += 1;
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, rows.length) }, () => worker()));
+    return { renamed };
+  }
+
   const needsSubOne = (row) => ctx.depth === 0 && matchesTaxonomyLabel(row.subcategory_one, oldLabel);
   const dualSkus = rows.filter((r) => needsSubOne(r)).map((r) => r.sku).filter(Boolean);
   const singleSkus = rows.filter((r) => !needsSubOne(r)).map((r) => r.sku).filter(Boolean);
@@ -441,6 +511,14 @@ export function buildClearLabelsPatch(ctx) {
   for (let i = firstSub; i < SUB_COLS.length; i += 1) {
     patch[SUB_COLS[i]] = SUB_COLS[i] === 'subcategory_one' ? '' : null;
   }
+  // Deleting a node clears its own position and everything deeper. Positions
+  // within subcategory_extra above ctx's own depth are ancestors and must
+  // survive — matched rows all share that same ancestor prefix (that's the
+  // node-scope match criterion), so it can be derived from ctx alone rather
+  // than read per-row. ctx.ancestors[0..3] map onto the fixed columns above;
+  // ancestors[4:] map onto subcategory_extra.
+  const preservedExtra = (ctx.ancestors || []).slice(SUB_COLS.length + 1).map((a) => a.label);
+  patch[EXTRA_COL] = preservedExtra.length ? JSON.stringify(preservedExtra) : null;
   return patch;
 }
 
@@ -499,7 +577,7 @@ export async function archiveProductsForDeletedNode(supabase, ctx, by = CATEGORY
 
 export const MOTTARO_DELETED_ARCHIVED_BY = 'mottaro-deleted';
 
-const MOTTARO_SCAN_COLS = 'sku,title,category,subcategory_one,subcategory_two,subcategory_three,subcategory_four,mottaro_path';
+const MOTTARO_SCAN_COLS = 'sku,title,category,subcategory_one,subcategory_two,subcategory_three,subcategory_four,subcategory_extra,mottaro_path';
 
 /**
  * Live Motarro product SKUs whose virtual Motarro path passes through `nodeId`
@@ -576,7 +654,7 @@ export function resolveLabelsFromPathIds(tree, pathIds = []) {
 }
 
 // Requires migration 038 (mottaro_path) to be applied before deploy.
-const COUNT_ROW_COLS = 'category,subcategory_one,subcategory_two,subcategory_three,subcategory_four,title,available_stock,stock_qty,mottaro_path,keep_live_when_oos';
+const COUNT_ROW_COLS = 'category,subcategory_one,subcategory_two,subcategory_three,subcategory_four,subcategory_extra,title,available_stock,stock_qty,mottaro_path,keep_live_when_oos';
 
 /**
  * Count live products per taxonomy node (includes all descendants).

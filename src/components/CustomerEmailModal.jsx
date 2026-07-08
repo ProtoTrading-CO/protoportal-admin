@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { BarChart2, CalendarClock, Code2, ImagePlus, Loader2, Mail, Send } from 'lucide-react';
-import { scheduleCustomerEmail } from '../lib/customers';
+import { BarChart2, Code2, ImagePlus, Loader2, Mail, Send } from 'lucide-react';
 import EmailTemplateTests from './EmailTemplateTests';
 import { PROTO_URLS } from '../lib/protoUrls';
 import { BUSINESS_TYPES } from '../lib/businessTypes';
@@ -111,27 +110,6 @@ export default function CustomerEmailModal({
   const [uploadingImage, setUploadingImage] = useState(false);
   const [recipientsText, setRecipientsText] = useState('');
   const selectedEmails = useMemo(() => parseEmailList(recipientsText), [recipientsText]);
-  const [scheduledAt, setScheduledAt] = useState('');
-  const [scheduleOpen, setScheduleOpen] = useState(false);
-  const scheduleRef = useRef(null);
-
-  // Close the schedule popover on outside click / Escape.
-  useEffect(() => {
-    if (!scheduleOpen) return undefined;
-    const onDoc = (e) => { if (scheduleRef.current && !scheduleRef.current.contains(e.target)) setScheduleOpen(false); };
-    const onKey = (e) => { if (e.key === 'Escape') setScheduleOpen(false); };
-    document.addEventListener('mousedown', onDoc);
-    document.addEventListener('keydown', onKey);
-    return () => { document.removeEventListener('mousedown', onDoc); document.removeEventListener('keydown', onKey); };
-  }, [scheduleOpen]);
-
-  // Local-time "YYYY-MM-DDTHH:mm" for the datetime-local min (no past times).
-  const minScheduleValue = useMemo(() => {
-    const d = new Date(Date.now() + 60_000);
-    const pad = (n) => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  }, [scheduleOpen]);
-  const [scheduling, setScheduling] = useState(false);
 
   const subjectRef = useRef(null);
   const introRef = useRef(null);
@@ -261,47 +239,6 @@ export default function CustomerEmailModal({
     setBusinessTypes((prev) => (
       prev.includes(type) ? prev.filter((t) => t !== type) : [...prev, type]
     ));
-  };
-
-  const handleSchedule = async () => {
-    if (audience === 'selected') {
-      onShowToast?.('Scheduling isn’t available for specific people — use Send now, or pick an audience to schedule.', 'error');
-      return;
-    }
-    if (!subject.trim()) {
-      onShowToast?.('Subject is required', 'error');
-      return;
-    }
-    if (!introBody.trim() && !htmlBody.trim()) {
-      onShowToast?.('Write a message body and/or HTML block', 'error');
-      return;
-    }
-    if (!scheduledAt) {
-      onShowToast?.('Pick a date and time to schedule the send', 'error');
-      return;
-    }
-    const when = new Date(scheduledAt);
-    if (Number.isNaN(when.getTime()) || when.getTime() < Date.now()) {
-      onShowToast?.('Scheduled time must be in the future', 'error');
-      return;
-    }
-    setScheduling(true);
-    try {
-      await scheduleCustomerEmail({
-        scheduledAt: when.toISOString(),
-        audience,
-        subject: subject.trim(),
-        introText: introBody.trim(),
-        htmlBlock: htmlBody.trim(),
-        businessTypes: filterBusinessTypes ? businessTypes : [],
-      });
-      onShowToast?.(`Email scheduled for ${when.toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} — see the Scheduled tab`, 'success');
-      onClose?.();
-    } catch (err) {
-      onShowToast?.(err.message || 'Scheduling failed', 'error');
-    } finally {
-      setScheduling(false);
-    }
   };
 
   const handleSend = async (test = false) => {
@@ -659,68 +596,10 @@ export default function CustomerEmailModal({
             Cancel
           </button>
           <div className="adm-email-modal__footer-actions" style={{ flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
-            <div style={{ position: 'relative' }} ref={scheduleRef}>
-              <button
-                type="button"
-                className="adm-btn-ghost"
-                disabled={sending || testSending || scheduling}
-                onClick={() => setScheduleOpen((v) => !v)}
-                aria-haspopup="dialog"
-                aria-expanded={scheduleOpen}
-                title="Queue this email to send automatically at the chosen time"
-              >
-                <CalendarClock size={14} /> Schedule send{scheduledAt ? ' ✓' : ''}
-              </button>
-              {scheduleOpen && (
-                <div
-                  role="dialog"
-                  aria-label="Schedule send"
-                  onClick={(e) => e.stopPropagation()}
-                  style={{
-                    position: 'absolute',
-                    bottom: 'calc(100% + 8px)',
-                    left: 0,
-                    width: 268,
-                    background: '#fff',
-                    border: '1px solid #e5e7eb',
-                    borderRadius: 10,
-                    boxShadow: '0 14px 36px rgba(0,0,0,0.20)',
-                    padding: 14,
-                    zIndex: 60,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 10,
-                  }}
-                >
-                  <span style={{ fontSize: 12, fontWeight: 700, color: '#374151' }}>Send date &amp; time</span>
-                  <input
-                    type="datetime-local"
-                    className="adm-field-input"
-                    style={{ fontSize: 13, width: '100%', padding: '8px 10px' }}
-                    value={scheduledAt}
-                    min={minScheduleValue}
-                    onChange={(e) => setScheduledAt(e.target.value)}
-                    aria-label="Schedule send date and time"
-                  />
-                  <button
-                    type="button"
-                    className="adm-btn-red"
-                    style={{ width: '100%', justifyContent: 'center' }}
-                    disabled={scheduling || !scheduledAt}
-                    onClick={() => void handleSchedule()}
-                  >
-                    {scheduling ? <><Loader2 size={14} className="spin" /> Scheduling…</> : <><CalendarClock size={14} /> Confirm schedule</>}
-                  </button>
-                  <span style={{ fontSize: 11, color: '#6b7280', lineHeight: 1.4 }}>
-                    Queues this exact email (subject, body, audience) to send automatically at the chosen time.
-                  </span>
-                </div>
-              )}
-            </div>
             <button
               type="button"
               className="adm-btn-ghost"
-              disabled={sending || testSending || scheduling}
+              disabled={sending || testSending}
               onClick={() => void handleSend(true)}
             >
               {testSending ? <><Loader2 size={14} className="spin" /> Sending test…</> : 'Send test'}
@@ -728,7 +607,7 @@ export default function CustomerEmailModal({
             <button
               type="button"
               className="adm-btn-red"
-              disabled={sending || testSending || scheduling || (audience === 'selected' && !selectedEmails.length)}
+              disabled={sending || testSending || (audience === 'selected' && !selectedEmails.length)}
               onClick={() => void handleSend(false)}
             >
               {sending ? <><Loader2 size={14} className="spin" /> Sending…</> : <><Send size={14} /> Send now{audience === 'selected' && selectedEmails.length ? ` (${selectedEmails.length})` : ''}</>}

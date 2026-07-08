@@ -12,7 +12,6 @@ import {
   ChevronLeft,
   ChevronRight,
   ClipboardList,
-  Clock,
   DollarSign,
   Download,
   Eye,
@@ -115,7 +114,6 @@ const ProductLoaderPanel = lazyRetry(() => import('../components/ProductLoaderPa
 const BulkImageReplacePanel = lazyRetry(() => import('../components/BulkImageReplacePanel'));
 const WhatsappPanel = lazyRetry(() => import('../components/WhatsappPanel'));
 const EmailAnalyticsPanel = lazyRetry(() => import('../components/EmailAnalyticsPanel'));
-const ScheduledEmailsPanel = lazyRetry(() => import('../components/ScheduledEmailsPanel'));
 const BannerPanel = lazyRetry(() => import('../components/BannerPanel'));
 const FeaturedPanel = lazyRetry(() => import('../components/FeaturedPanel'));
 const SpecialsPanel = lazyRetry(() => import('../components/SpecialsPanel'));
@@ -305,10 +303,7 @@ const emptyForm = {
   price: '0',
   stockOnHand: '1',
   categoryId: categories[0]?.id || '',
-  childOneId: categories[0]?.children?.[0]?.id || '',
-  childTwoId: '',
-  childThreeId: '',
-  childFourId: '',
+  childIds: categories[0]?.children?.[0]?.id ? [categories[0].children[0].id] : [],
 };
 
 function categoryLabel(id, tree = categories) {
@@ -358,10 +353,7 @@ function categoryFormFromPath(categoryPath = [], tree = categories) {
   const categoryId = categoryPath[0] || tree[0]?.id || '';
   return {
     categoryId,
-    childOneId: categoryPath[1] || '',
-    childTwoId: categoryPath[2] || '',
-    childThreeId: categoryPath[3] || '',
-    childFourId: categoryPath[4] || '',
+    childIds: categoryPath.slice(1).filter(Boolean),
   };
 }
 
@@ -1314,10 +1306,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     setProductForm({
       ...emptyForm,
       categoryId: firstCategory,
-      childOneId: firstChild,
-      childTwoId: '',
-      childThreeId: '',
-      childFourId: '',
+      childIds: firstChild ? [firstChild] : [],
     });
     setEditorError('');
     setEditorImageUploading(false);
@@ -1440,13 +1429,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   };
 
   const saveProduct = async () => {
-    const categoryPath = [
-      productForm.categoryId,
-      productForm.childOneId,
-      productForm.childTwoId,
-      productForm.childThreeId,
-      productForm.childFourId,
-    ].filter(Boolean);
+    const categoryPath = [productForm.categoryId, ...(productForm.childIds || [])].filter(Boolean);
 
     if (!categoryPath.length && !editingProduct?.archivedBy) {
       setEditorError('Pick a main category before saving — every product needs a category.');
@@ -2084,7 +2067,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                   onShowToast={showToast}
                   onRefreshStats={refreshDashboardStats}
                   initialStatus="archived"
-                  statuses={['archived']}
+                  statuses={['archived', 'recycle']}
                   showCategorySidebar={false}
                   title="Archive"
                   note="Archived products — set them live from here or fix codes/images before publishing."
@@ -2266,14 +2249,10 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                     <BarChart2 size={14} style={{ marginRight: 6, verticalAlign: -2 }} />
                     Email Analytics
                   </button>
-                  <button onClick={() => setCustomerTab('scheduled')} className={`adm-tab${customerTab === 'scheduled' ? ' adm-tab--active' : ''}`}>
-                    <Clock size={14} style={{ marginRight: 6, verticalAlign: -2 }} />
-                    Scheduled
-                  </button>
-                  {customerTab !== 'email-analytics' && customerTab !== 'scheduled' && (
+                  {customerTab !== 'email-analytics' && (
                     <label className="adm-search adm-search--inline"><Search size={14} /><input value={customerSearch} onChange={(e) => setCustomerSearch(e.target.value)} placeholder="Search…" className="adm-search-input" /></label>
                   )}
-                  {customerTab !== 'proto-active' && customerTab !== 'email-analytics' && customerTab !== 'scheduled' && (
+                  {customerTab !== 'proto-active' && customerTab !== 'email-analytics' && (
                     <select
                       className="adm-select"
                       value={customerBusinessType}
@@ -2295,11 +2274,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                   </p>
                 )}
 
-                {customerTab === 'scheduled' ? (
-                  <Suspense fallback={<LazySectionFallback label="Loading Scheduled Emails…" />}>
-                    <ScheduledEmailsPanel onShowToast={showToast} />
-                  </Suspense>
-                ) : customerTab === 'email-analytics' ? (
+                {customerTab === 'email-analytics' ? (
                   <Suspense fallback={<LazySectionFallback label="Loading Email Analytics…" />}>
                     <EmailAnalyticsPanel onShowToast={showToast} />
                   </Suspense>
@@ -3410,7 +3385,12 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
               {/* SOH comes from the ERP sync — an editable field here silently discarded input. */}
               <AdminField label="Stock on hand (synced from ERP)"><input type="text" value={productForm.stockOnHand} readOnly disabled className="adm-field-input" title="Stock on hand is synced from the ERP and cannot be edited here" /></AdminField>
               {/*
-                Cascading category pickers — Main → Child 1 → Child 2 → Child 3 → Child 4.
+                Cascading category pickers — Main, then Child 1..N as deep as the
+                taxonomy tree goes (no fixed depth cap). Each level renders only
+                while its parent has a value and there are options to choose (or
+                a stale value to preserve) — the loop stops the moment a level
+                would render nothing, which also naturally offers exactly one
+                more empty picker at the deepest populated level.
                 Hidden for archived products — category is chosen at Make live instead.
               */}
               {!editingProduct?.archivedBy && (
@@ -3424,10 +3404,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                     setProductForm((p) => ({
                       ...p,
                       categoryId: nextId,
-                      childOneId: firstChild,
-                      childTwoId: '',
-                      childThreeId: '',
-                      childFourId: '',
+                      childIds: firstChild ? [firstChild] : [],
                     }));
                   }}
                   className="adm-field-input"
@@ -3437,88 +3414,34 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
               </AdminField>
 
               {(() => {
-                const rawOptions = subcategoryOptions(productForm.categoryId, taxonomyTree);
-                const childOneOptions = withCurrentOption(rawOptions, productForm.childOneId);
-                if (!childOneOptions.length) return null;
-                return (
-                  <AdminField label="Child category 1">
+                const childIds = productForm.childIds || [];
+                const fields = [];
+                let parentId = productForm.categoryId;
+                for (let level = 1; parentId; level += 1) {
+                  const rawOptions = level === 1
+                    ? subcategoryOptions(productForm.categoryId, taxonomyTree)
+                    : childrenOf(taxonomyTree, parentId);
+                  const currentValue = childIds[level - 1] || '';
+                  const options = withCurrentOption(rawOptions, currentValue);
+                  if (!options.length) break;
+                  fields.push({ level, options, currentValue });
+                  parentId = currentValue;
+                }
+                return fields.map(({ level, options, currentValue }) => (
+                  <AdminField key={level} label={`Child category ${level}`}>
                     <select
-                      value={productForm.childOneId}
+                      value={currentValue}
                       onChange={(e) => setProductForm((p) => ({
                         ...p,
-                        childOneId: e.target.value,
-                        childTwoId: '',
-                        childThreeId: '',
-                        childFourId: '',
+                        childIds: [...(p.childIds || []).slice(0, level - 1), e.target.value].filter(Boolean),
                       }))}
                       className="adm-field-input"
                     >
                       <option value="">— None —</option>
-                      {childOneOptions.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+                      {options.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
                     </select>
                   </AdminField>
-                );
-              })()}
-
-              {(() => {
-                const rawOptions = childrenOf(taxonomyTree, productForm.childOneId);
-                const childTwoOptions = withCurrentOption(rawOptions, productForm.childTwoId);
-                if (!productForm.childOneId || !childTwoOptions.length) return null;
-                return (
-                  <AdminField label="Child category 2">
-                    <select
-                      value={productForm.childTwoId}
-                      onChange={(e) => setProductForm((p) => ({
-                        ...p,
-                        childTwoId: e.target.value,
-                        childThreeId: '',
-                        childFourId: '',
-                      }))}
-                      className="adm-field-input"
-                    >
-                      <option value="">— None —</option>
-                      {childTwoOptions.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
-                    </select>
-                  </AdminField>
-                );
-              })()}
-
-              {(() => {
-                const rawOptions = childrenOf(taxonomyTree, productForm.childTwoId);
-                const childThreeOptions = withCurrentOption(rawOptions, productForm.childThreeId);
-                if (!productForm.childTwoId) return null;
-                if (!childThreeOptions.length && !productForm.childThreeId) return null;
-                return (
-                  <AdminField label="Child category 3">
-                    <select
-                      value={productForm.childThreeId}
-                      onChange={(e) => setProductForm((p) => ({ ...p, childThreeId: e.target.value, childFourId: '' }))}
-                      className="adm-field-input"
-                    >
-                      <option value="">— None —</option>
-                      {childThreeOptions.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
-                    </select>
-                  </AdminField>
-                );
-              })()}
-
-              {(() => {
-                const rawOptions = childrenOf(taxonomyTree, productForm.childThreeId);
-                const childFourOptions = withCurrentOption(rawOptions, productForm.childFourId);
-                if (!productForm.childThreeId) return null;
-                if (!childFourOptions.length && !productForm.childFourId) return null;
-                return (
-                  <AdminField label="Child category 4">
-                    <select
-                      value={productForm.childFourId}
-                      onChange={(e) => setProductForm((p) => ({ ...p, childFourId: e.target.value }))}
-                      className="adm-field-input"
-                    >
-                      <option value="">— None —</option>
-                      {childFourOptions.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
-                    </select>
-                  </AdminField>
-                );
+                ));
               })()}
               </>
               )}

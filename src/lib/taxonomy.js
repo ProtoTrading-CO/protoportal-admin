@@ -1,5 +1,6 @@
 import categories from '../data/categories.json';
 import { inferMotarroPathFromRow, isMotarroBrowsePath, isMotarroProduct, motarroPathMatchesFilter } from '../../lib/mottaro-category.mjs';
+import { parseExtraLabels } from '../../lib/taxonomy-match.mjs';
 
 // IMPORTANT: this MUST stay identical to labelToSlug in scripts/lib/master.mjs.
 // The category generator fails on slug collisions, which guarantees this is a
@@ -187,12 +188,19 @@ export function resolveCategoryIdsFromTree(row, tree) {
     for (const col of SUB_COLS) {
       if (row[col]) ids.push(labelToSlug(row[col])); else break;
     }
+    if (ids.length === 1 + SUB_COLS.length) {
+      for (const label of parseExtraLabels(row.subcategory_extra)) {
+        if (!label) break;
+        ids.push(labelToSlug(label));
+      }
+    }
     return { categoryId: ids[0] || '', categoryPath: ids };
   };
 
   if (!Array.isArray(tree) || !tree.length) return fallback();
 
-  const labels = [row.category, ...SUB_COLS.map((f) => row[f])].filter((v) => v != null && String(v).trim());
+  const labels = [row.category, ...SUB_COLS.map((f) => row[f]), ...parseExtraLabels(row.subcategory_extra)]
+    .filter((v) => v != null && String(v).trim());
   if (!labels.length) return { categoryId: '', categoryPath: [] };
 
   const main = tree.find((c) => normalizeLabel(c.label) === normalizeLabel(labels[0]));
@@ -233,19 +241,13 @@ export function productMatchesNavPath(product, tree, navPath) {
     return motarroPathMatchesFilter(mottaroPath, navPath);
   }
 
-  const row = {
-    category: product.categoryLabel || '',
-    subcategory_one: product.subcategoryLabels?.[0] ?? null,
-    subcategory_two: product.subcategoryLabels?.[1] ?? null,
-    subcategory_three: product.subcategoryLabels?.[2] ?? null,
-    subcategory_four: product.subcategoryLabels?.[3] ?? null,
-  };
-
   const main = findMainNode(tree, navPath[0]);
   if (!main) return false;
-  if (normalizeLabel(row.category) !== normalizeLabel(main.label)) return false;
+  if (normalizeLabel(product.categoryLabel || '') !== normalizeLabel(main.label)) return false;
 
-  const rowSubs = SUB_COLS.map((f) => row[f]).filter((v) => v != null && String(v).trim());
+  // subcategoryLabels already holds the full depth (fixed columns + any
+  // subcategory_extra overflow) in order — no fixed-length cap here.
+  const rowSubs = (product.subcategoryLabels || []).filter((v) => v != null && String(v).trim());
   let children = main.children || [];
 
   for (let i = 1; i < navPath.length; i += 1) {

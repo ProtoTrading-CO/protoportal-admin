@@ -28,13 +28,14 @@ npm run build
 `orders` (Order Requests) · `product-loader` · `image-replace` · `apollo`
 (conversational analyst — **no image gen**) · `catalogue` (Product Manager,
 live only) · `archive` (archived products, no category sidebar) · `reorder`
-(Reorder Grid) · `customers` (incl. Scheduled emails + Email Analytics tabs)
+(Reorder Grid) · `customers` (incl. Email Analytics tab)
 · `site-content` (Featured + Specials + Banner Editor) · `crm` (WhatsApp) ·
 `analytics` · `pricing` · `team` (opens fulfillment team modal).
 
 Removed features — do NOT reintroduce: Apollo image generation, Cost
 Tracking, product approval tab, reorder mode inside Product Manager,
-recycle-bin buttons, product-type dropdown in the edit modal.
+product-type dropdown in the edit modal, scheduled
+send for email/WhatsApp broadcasts (immediate-send only for both).
 
 ## Customers & email
 - **Customer codes are NEVER auto-generated** — always null or an admin-typed
