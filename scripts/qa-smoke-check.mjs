@@ -952,4 +952,11 @@ assert.doesNotMatch(adminSrcForModal, /const AddCustomerModal = lazyRetry/, 'Add
 assert.match(readSrc('src/index.css'), /\.adm-modal--form \.adm-modal-body \{[\s\S]*?overflow-y: auto/, 'form modal body scrolls so the footer stays reachable');
 console.log('✓ Add customer modal eager + scrollable');
 
+// Add customer: styled inputs (adm-input is undefined) + pre-reg account_code must not be null (NOT NULL column)
+const addCustSrc = readSrc('src/components/AddCustomerModal.jsx');
+assert.doesNotMatch(addCustSrc, /className="adm-input"/, 'Add customer inputs use the real styled class, not the undefined adm-input');
+assert.match(addCustSrc, /className="adm-field-input"/, 'Add customer inputs use adm-field-input');
+assert.match(readSrc('api/admin-customers.js'), /account_code: String\(b\.account_code \|\| ''\)\.trim\(\),/, 'pre-reg account_code is empty-string (not null) for the NOT NULL column');
+console.log('✓ Add customer: styled inputs + account_code NOT NULL fix');
+
 console.log('\nAll smoke checks passed.');
