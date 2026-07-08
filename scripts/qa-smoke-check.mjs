@@ -956,7 +956,11 @@ console.log('✓ Add customer modal eager + scrollable');
 const addCustSrc = readSrc('src/components/AddCustomerModal.jsx');
 assert.doesNotMatch(addCustSrc, /className="adm-input"/, 'Add customer inputs use the real styled class, not the undefined adm-input');
 assert.match(addCustSrc, /className="adm-field-input"/, 'Add customer inputs use adm-field-input');
-assert.match(readSrc('api/admin-customers.js'), /account_code: String\(b\.account_code \|\| ''\)\.trim\(\),/, 'pre-reg account_code is empty-string (not null) for the NOT NULL column');
-console.log('✓ Add customer: styled inputs + account_code NOT NULL fix');
+// Every NOT NULL column in proto_active_customers gets a non-null value on manual add
+const adminCustPreReg = readSrc('api/admin-customers.js');
+assert.match(adminCustPreReg, /account_code: String\(b\.account_code \|\| ''\)\.trim\(\),/, 'pre-reg account_code is empty-string (not null)');
+assert.match(adminCustPreReg, /name: name \|\| email,/, 'pre-reg name falls back to email (NOT NULL)');
+assert.match(adminCustPreReg, /\? Number\(b\.sales_last_12_months\) \|\| 0 : 0,/, 'pre-reg sales_last_12_months defaults to 0 (NOT NULL)');
+console.log('✓ Add customer: styled inputs + all NOT NULL columns handled');
 
 console.log('\nAll smoke checks passed.');
