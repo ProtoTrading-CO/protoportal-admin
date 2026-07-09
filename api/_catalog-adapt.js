@@ -5,15 +5,27 @@ import {
   isMotarroBrowsePath,
   isMotarroProduct,
 } from './_mottaro-category.js';
+import { escapeIlikePattern, parseExtraLabels } from '../lib/taxonomy-match.mjs';
 import { isExactlyZeroStock, isPublishableOnWebsite, isNegativeStock } from '../lib/catalog-stock.mjs';
 
 const SUB_FIELDS = ['subcategory_one', 'subcategory_two', 'subcategory_three', 'subcategory_four'];
+
+/**
+ * True when a browse path descends past the fixed subcategory columns (i.e.
+ * into `subcategory_extra` territory). SQL `.eq()` filters can only match the
+ * fixed columns exactly; deeper paths need the JS `filterByCategoryPath`
+ * refine for an exact result, so callers that need an exact COUNT must route
+ * these through the full-scan path rather than a paginated SQL count.
+ */
+export function categoryPathExceedsFixedColumns(categoryPath) {
+  return Array.isArray(categoryPath) && categoryPath.length > SUB_FIELDS.length + 1;
+}
 
 /** Stable taxonomy node ids for a DB row (falls back to slug-of-label when orphaned). */
 export function rowCategoryPath(row, tree = null) {
   const { categoryPath } = resolveCategoryIds(row, tree);
   if (categoryPath.length) return categoryPath;
-  const parts = [row.category, ...SUB_FIELDS.map((f) => row[f])].filter(Boolean);
+  const parts = [row.category, ...SUB_FIELDS.map((f) => row[f]), ...parseExtraLabels(row.subcategory_extra)].filter(Boolean);
   return parts.map(labelToSlug);
 }
 
@@ -31,7 +43,15 @@ export function resolveCategoryFilters(tree, categoryPath) {
     const slug = categoryPath[i];
     const node = nodes.find((n) => n.id === slug || labelToSlug(n.label) === slug);
     if (!node) break;
-    filters[SUB_FIELDS[i - 1]] = node.label;
+    if (i - 1 < SUB_FIELDS.length) {
+      filters[SUB_FIELDS[i - 1]] = node.label;
+    } else {
+      // Depth beyond subcategory_four lives in the JSON `subcategory_extra`
+      // column. SQL can only coarsely narrow it (ilike on the deepest label);
+      // the exact ordered-prefix match is enforced by filterByCategoryPath in
+      // JS. Only the deepest label is needed for the coarse SQL narrow.
+      filters.subcategoryExtraDeepest = node.label;
+    }
     nodes = node.children || [];
   }
   return filters;
@@ -44,6 +64,9 @@ export function applyCategoryFiltersToQuery(q, filters) {
   if (filters.subcategory_two) q = q.eq('subcategory_two', filters.subcategory_two);
   if (filters.subcategory_three) q = q.eq('subcategory_three', filters.subcategory_three);
   if (filters.subcategory_four) q = q.eq('subcategory_four', filters.subcategory_four);
+  if (filters.subcategoryExtraDeepest) {
+    q = q.ilike('subcategory_extra', `%${escapeIlikePattern(filters.subcategoryExtraDeepest)}%`);
+  }
   return q;
 }
 
@@ -71,7 +94,7 @@ export function applySearchFilter(rows, search) {
   const safe = q.replace(/[%',()]/g, ' ').trim();
   if (!safe) return rows;
   return rows.filter((r) => {
-    const hay = [r.sku, r.barcode, r.title, r.category, ...SUB_FIELDS.map((f) => r[f])]
+    const hay = [r.sku, r.barcode, r.title, r.category, ...SUB_FIELDS.map((f) => r[f]), ...parseExtraLabels(r.subcategory_extra)]
       .filter(Boolean)
       .join(' ')
       .toLowerCase();
@@ -81,7 +104,7 @@ export function applySearchFilter(rows, search) {
 
 export function adaptCatalogRow(row, tree, { archived = false } = {}) {
   const images = [row.image_url_one, row.image_url_two, row.image_url_three, row.image_url_four].filter(Boolean);
-  const subLabels = SUB_FIELDS.map((f) => row[f]).filter(Boolean);
+  const subLabels = [...SUB_FIELDS.map((f) => row[f]), ...parseExtraLabels(row.subcategory_extra)].filter(Boolean);
   const { categoryId, categoryPath } = resolveCategoryIds(row, tree);
   const soh = row.available_stock ?? row.stock_qty;
   const stockNum = soh !== null && soh !== undefined && soh !== ''
