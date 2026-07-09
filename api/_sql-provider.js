@@ -7,21 +7,37 @@ export function isSqlConfigured() {
 }
 
 export async function getProductByCode(code) {
-  const normalized = String(code || '').trim().toUpperCase();
-  if (!normalized) return null;
+  const { product } = await resolveProductByCode(code);
+  return product;
+}
 
-  // 1. Bridge / direct SQL (when STOCK_SQL_BRIDGE_URL or SQL_PASSWORD is configured)
-  if (isStmastAccessConfigured()) {
+/**
+ * Resolve product from live ERP (bridge/direct SQL) or stmast_cache fallback.
+ * @returns {Promise<{ product: object|null, dataSource: 'erp_sql'|'stmast_cache'|null, bridgeAttempted: boolean }>}
+ */
+export async function resolveProductByCode(code) {
+  const normalized = String(code || '').trim().toUpperCase();
+  if (!normalized) return { product: null, dataSource: null, bridgeAttempted: false };
+
+  const bridgeAttempted = isStmastAccessConfigured();
+
+  if (bridgeAttempted) {
     try {
       const row = await fetchStmastRow(normalized);
-      if (row) return toSqlPreview(row);
-    } catch (_) {
+      if (row) {
+        return { product: toSqlPreview(row), dataSource: 'erp_sql', bridgeAttempted: true };
+      }
+    } catch {
       // bridge unavailable — fall through to cache
     }
   }
 
-  // 2. Supabase stmast_cache (imported from Proto Master Items CSV)
-  return fetchFromCache(normalized);
+  const cached = await fetchFromCache(normalized);
+  if (cached) {
+    return { product: cached, dataSource: 'stmast_cache', bridgeAttempted };
+  }
+
+  return { product: null, dataSource: null, bridgeAttempted };
 }
 
 export async function searchProducts(_term) {

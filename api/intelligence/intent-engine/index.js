@@ -8,3 +8,4 @@ export {
   formatClarifyReply,
 } from './entities.js';
 export { resolveIntent, resolutionToRoute, detectExperienceRoute } from './resolve.js';
+export { resolveEntity, entityResolutionToRoute, ENTITY_REGISTRY } from '../entity-registry/index.js';

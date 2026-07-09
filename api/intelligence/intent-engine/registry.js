@@ -119,29 +119,41 @@ export const INTENT_REGISTRY = {
     id: 'customer_lookup',
     biIntent: 'customer.context',
     exact: [],
-    synonyms: [
-      /^(?:show|find|lookup|look\s*up)\s+customer\s+(.+)[?.!]*$/i,
-      /^customer\s+(.+)[?.!]*$/i,
-      /^tell me about\s+(.+)[?.!]*$/i,
-    ],
+    synonyms: [],
     priority: 88,
-    paramsFromQuery: (q) => {
-      const patterns = [
-        /^(?:show|find|lookup|look\s*up)\s+customer\s+(.+)$/i,
-        /^customer\s+(.+)$/i,
-        /^tell me about\s+(.+)$/i,
-        /^show\s+([A-Za-z][\w\s&'.-]{1,80})$/i,
-      ];
-      for (const re of patterns) {
-        const m = q.match(re);
-        if (!m) continue;
-        const term = m[1].trim();
-        if (!term || /\d{8,14}/.test(term)) continue;
-        if (/product|stock|inventory|order|website|brief/i.test(term)) continue;
-        return { q: term };
-      }
-      return null;
-    },
+  },
+
+  supplier_lookup: {
+    id: 'supplier_lookup',
+    biIntent: 'supplier.context',
+    exact: [],
+    synonyms: [],
+    priority: 87,
+  },
+
+  container_lookup: {
+    id: 'container_lookup',
+    biIntent: 'container.context',
+    exact: [],
+    synonyms: [],
+    priority: 86,
+  },
+
+  sales_analysis: {
+    id: 'sales_analysis',
+    biIntent: 'sales.context',
+    exact: [],
+    synonyms: [
+      /(?:best|top)\s+sell(?:ing|er)/i,
+      /most\s+sold/i,
+      /highest\s+sales/i,
+      /fast\s+movers?/i,
+      /worst\s+sell(?:ing|er)/i,
+      /today'?s\s+sales/i,
+      /sales\s+today/i,
+      /revenue\s+today/i,
+    ],
+    priority: 94,
   },
 
   inventory_attention: {
@@ -177,6 +189,9 @@ export const BI_INTENT_ALIASES = {
   'brief.morning': 'daily_brief',
   'product.context': 'product_lookup',
   'customer.context': 'customer_lookup',
+  'supplier.context': 'supplier_lookup',
+  'container.context': 'container_lookup',
+  'sales.context': 'sales_analysis',
   'inventory.attention': 'inventory_attention',
   'inventory.context': 'inventory_attention',
 };

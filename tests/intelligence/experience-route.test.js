@@ -39,6 +39,19 @@ describe('apollo-experience routing (intent engine)', () => {
     expect(route?.reply).toMatch(/Leather/i);
   });
 
+  it('routes Motarro to supplier context', () => {
+    const route = detectExperienceRoute('Motarro');
+    expect(route?.intent).toBe('supplier.context');
+    expect(route?.entityType).toBe('supplier');
+    expect(route?.params.name).toBe('Motarro');
+  });
+
+  it('routes Container 57 to container context', () => {
+    const route = detectExperienceRoute('Container 57');
+    expect(route?.intent).toBe('container.context');
+    expect(route?.params.number).toBe('57');
+  });
+
   it('returns null for unrelated queries', () => {
     expect(detectExperienceRoute('orders this week')).toBeNull();
   });

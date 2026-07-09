@@ -4,6 +4,7 @@ import { displayNameFromEmail } from '../lib/apolloTodayPresentation.js';
 import { getVerifiedSession } from '../lib/auth.js';
 import { Bot, ChevronDown, ChevronUp, FileDown, Loader2, MessageSquare, Send, Sparkles, User, Wrench } from 'lucide-react';
 import ApolloToday from './ApolloToday.jsx';
+import ApolloCurriculumReport from './ApolloCurriculumReport.jsx';
 
 const STARTERS = [
   'Show product 8610100001',
@@ -407,6 +408,7 @@ export default function ApolloPanel({ onShowToast }) {
       </div>
 
       <div className="apollo-today-page">
+        <ApolloCurriculumReport />
         <ApolloToday
           context={briefContext}
           meta={briefMeta}

@@ -3,13 +3,16 @@ import { resolveIntent, resolutionToRoute } from '../../api/intelligence/intent-
 import { INTENT_REGISTRY } from '../../api/intelligence/intent-engine/registry.js';
 
 describe('intent registry', () => {
-  it('defines seven core business intents', () => {
+  it('defines core business intents including entity lookups', () => {
     expect(Object.keys(INTENT_REGISTRY).sort()).toEqual([
       'business_health',
+      'container_lookup',
       'customer_lookup',
       'daily_brief',
       'inventory_attention',
       'product_lookup',
+      'sales_analysis',
+      'supplier_lookup',
       'website_summary',
       'yesterday_summary',
     ]);
@@ -68,6 +71,26 @@ describe('resolveIntent — customer_lookup', () => {
     const r = resolveIntent('Tell me about ABC Stationers');
     expect(r?.intentId).toBe('customer_lookup');
     expect(r.params.q).toBe('ABC Stationers');
+    expect(r.entityType).toBe('customer');
+  });
+
+  it('resolves bare SKU with entity metadata', () => {
+    const r = resolveIntent('8614001234');
+    expect(r?.entityType).toBe('product');
+    expect(r?.entityId).toBe('8614001234');
+  });
+
+  it('resolves supplier Motarro', () => {
+    const r = resolveIntent('Motarro');
+    expect(r?.intentId).toBe('supplier_lookup');
+    expect(r?.biIntent).toBe('supplier.context');
+    expect(r?.entityType).toBe('supplier');
+  });
+
+  it('resolves Container 57', () => {
+    const r = resolveIntent('Container 57');
+    expect(r?.intentId).toBe('container_lookup');
+    expect(r?.params.number).toBe('57');
   });
 });
 

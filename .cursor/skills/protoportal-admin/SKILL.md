@@ -50,7 +50,7 @@ npm run build
 | `orders` | Order Requests (workflow tabs, Rand amounts, notify gate) |
 | `product-loader` | Product Loader (Nutstore PTR Photos, single/folder upload) |
 | `image-replace` | Image Replace (live + archived scope) |
-| `apollo` | Apollo — conversational analyst chat only (NO image gen) |
+| `apollo` | Apollo — Understand · Remember · Advise (read-only; NO image gen) |
 | `catalogue` | Product Manager (live products only) |
 | `archive` | Archive (archived products, no category sidebar) |
 | `reorder` | Reorder Grid (`ReorderPanel.jsx` + `ReorderGrid.jsx`) |
@@ -79,6 +79,16 @@ Taxonomy tree loaded dynamically (`taxonomyTree`), not only static JSON.
 
 - Vercel project: **protoportal-admin**
 - Do not deploy protoportal-main to this URL
+
+## Apollo (Intelligence — `apollo-core` branch)
+
+**Mission (canonical, frozen):** Apollo preserves, improves, and extends human judgement — never replaces it. See `docs/APOLLO_MISSION.md`.
+
+**Education:** `docs/APOLLO_EDUCATION_PLAN.md` · **Integration (build):** `docs/APOLLO_INTEGRATION_LAYER.md`
+
+**Rule:** Architecture frozen v1.0. Next build: Entity Registry + Product Context (Capability 1). Apollo requests Contexts — never SQL directly.
+
+**Pipeline:** NL → Intent Engine → Business Context → Query Engine → SQL/Supabase → evidence → answer. Work on branch `apollo-core`; do not merge Intelligence to `main` without explicit approval.
 
 ## Common mistakes to avoid
 

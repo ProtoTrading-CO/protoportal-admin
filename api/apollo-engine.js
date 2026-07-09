@@ -147,6 +147,10 @@ export function executeIntent(intent, data, terms = '', { limit = null, skus = [
     }
 
     case 'product_search': {
+      const term = String(terms || '').trim();
+      if (/^\d{8,14}$/.test(term)) {
+        return null;
+      }
       const hits = searchIndex(data.index, terms, { domain: 'product', limit: 10 });
       if (!hits.length) {
         return { source: 'live-index', intent, reply: `No products matched **"${terms}"**. Try a SKU or title keyword.` };

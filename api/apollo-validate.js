@@ -26,7 +26,8 @@ export function validateIntent(query, parsed) {
   if (blocked?.some((re) => re.test(q))) return false;
 
   if (intent === 'product_search') {
-    const t = String(terms || '').toLowerCase().trim();
+    const t = String(terms || '').trim();
+    if (/^\d{8,14}$/.test(t)) return false;
     if (!t || t.length < 2) return false;
     const words = t.split(/\s+/);
     if (words.every((w) => STOP_TERMS.has(w))) return false;

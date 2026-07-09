@@ -30,6 +30,10 @@ export function parseIntentHint(query) {
   const q = String(query || '').trim();
   const wantsChart = /chart|barograph|bar graph|bar chart|graph|visual/i.test(q);
 
+  if (/^\d{8,14}[?.!]*$/.test(q) || /tell me about\s+(?:sku\s+)?\d{8,14}/i.test(q)) {
+    return { intent: 'product_lookup', confidence: 1, wantsChart: false, forceProductContext: true };
+  }
+
   let best = { id: 'freeform', score: 0 };
   for (const intent of INTENTS) {
     let score = 0;

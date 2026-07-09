@@ -5,6 +5,7 @@ import { validateIntent, validateAnswer } from './apollo-validate.js';
 import { executeIntent, parseLimit } from './apollo-engine.js';
 import { detectExperienceRoute, resolveIntent, resolutionToRoute } from './apollo-experience.js';
 import { biRun, biFormat, buildDailyBriefContext, formatDailyBriefContext } from './intelligence/bi/facade.js';
+import { tryProductContextRoute } from './apollo-product-route.js';
 
 const MODEL = 'google/gemini-2.5-flash';
 
@@ -53,15 +54,26 @@ async function answerFromExperience(userQuery, actorEmail) {
   const ctx = { actorEmail: actorEmail || 'apollo' };
   const envelope = await biRun(route.intent, route.params, ctx);
   if (!envelope.ok) {
+    if (route.intent === 'product.context') {
+      const code = route.params?.code || '';
+      return {
+        reply: `## Product ${code}\n\nCould not load product context: ${envelope.error?.message || 'unknown error'}.`,
+        source: 'product.context',
+        intent: 'product.context',
+        businessIntent: 'product_lookup',
+      };
+    }
     throw new Error(envelope.error?.message || 'Experience query failed');
   }
+
+  const source = route.intent === 'product.context' ? 'product.context' : 'experience';
 
   return {
     reply: biFormat(route.intent, envelope, {
       type: route.formatType || route.params?.type,
       formatSection: route.formatSection,
     }),
-    source: 'live-index',
+    source,
     intent: route.intent,
     businessIntent: route.businessIntent || route.intent,
     resolution: {
@@ -122,6 +134,16 @@ function answerFromData(data, parsed, userQuery) {
 }
 
 async function resolveQuery(userQuery, data, apiKey, { rejectIntent = '', badReply = '' } = {}) {
+  const productRoute = await tryProductContextRoute(userQuery, 'apollo');
+  if (productRoute) {
+    return {
+      reply: productRoute.reply,
+      source: productRoute.source,
+      intent: productRoute.intent,
+      batchAction: null,
+    };
+  }
+
   const hint = parseIntentHint(userQuery);
 
   let parsed = await classifyIntent(userQuery, apiKey, { rejectIntent, badReply, regexHint: hint });
@@ -271,6 +293,21 @@ export default async function handler(req, res) {
 
   try {
     const actorEmail = req.headers['x-admin-email'] || 'apollo';
+
+    const productRoute = await tryProductContextRoute(userQuery, actorEmail);
+    if (productRoute) {
+      const data = await getApolloData();
+      return res.status(200).json({
+        reply: productRoute.reply,
+        source: productRoute.source,
+        intent: productRoute.intent,
+        businessIntent: productRoute.businessIntent || productRoute.intent,
+        resolution: productRoute.resolution || null,
+        indexedAt: data.generatedAt,
+        indexSize: data.index.length,
+      });
+    }
+
     const experience = await answerFromExperience(userQuery, actorEmail);
     if (experience) {
       const data = await getApolloData();

@@ -1,4 +1,4 @@
-import { getProductByCode } from '../../../_sql-provider.js';
+import { resolveProductByCode } from '../../../_sql-provider.js';
 import { isStmastAccessConfigured } from '../../../_sql-stmast.js';
 import { WARNING_CODES } from '../envelope.js';
 
@@ -17,29 +17,24 @@ export default {
     const warnings = [];
     const bridgeConfigured = isStmastAccessConfigured();
 
-    let product = null;
-    let source = ['stmast_cache'];
+    const { product, dataSource, bridgeAttempted } = await resolveProductByCode(code);
 
-    try {
-      product = await getProductByCode(code);
-    } catch {
+    if (bridgeAttempted && dataSource !== 'erp_sql') {
       warnings.push(WARNING_CODES.BRIDGE_OFFLINE);
     }
 
     if (!product) {
       return {
-        data: { product: null, code },
-        source: bridgeConfigured ? ['erp_sql', 'stmast_cache'] : ['stmast_cache'],
+        data: { product: null, code, dataSource: null },
+        source: bridgeConfigured ? ['stmast_cache', 'erp_sql'] : ['stmast_cache'],
         warnings: [...warnings, WARNING_CODES.ERP_NOT_FOUND],
       };
     }
 
-    if (bridgeConfigured && product) {
-      source = ['erp_sql'];
-    }
+    const source = dataSource === 'erp_sql' ? ['erp_sql'] : ['stmast_cache'];
 
     return {
-      data: { product, code },
+      data: { product, code, dataSource },
       source,
       warnings,
     };
