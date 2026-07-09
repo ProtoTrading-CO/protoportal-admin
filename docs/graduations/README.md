@@ -24,7 +24,7 @@ Education does not stall on infrastructure. Engineering graduates when the capab
 | **1.1** Live Product Truth | [1.1-live-product-truth.md](./1.1-live-product-truth.md) | Graduated 2026-07-09 | Verified LAN 2026-07-09 |
 | **1.1A** Product Context Routing | [1.1a-intent-first-routing.md](./1.1a-intent-first-routing.md) | Graduated 2026-07-09 | Graduated 2026-07-09 |
 | **1.2** Product Profitability | [1.2-product-profitability.md](./1.2-product-profitability.md) | Teaching | — |
-| 1.3 Sales Intelligence | — | Not started | — |
+| **1.3** Sales Intelligence | [1.3-sales-intelligence.md](./1.3-sales-intelligence.md) | Deployed 2026-07-09 | Ceremony pending |
 | 1.4 Product Behaviour | — | Not started | — |
 | 1.5 Product Judgement | — | Not started | — |
 | 2.x Customers | — | Not started | — |

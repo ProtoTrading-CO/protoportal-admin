@@ -1,11 +1,9 @@
 /**
  * Read-only STMAST lookup — same query as product_image_intake.py / Bladerunner sync.
- *
- * Vercel cannot reach BLADERUNNER-PC on the office LAN. Use one of:
- * 1. STOCK_SQL_BRIDGE_URL — sql-stmast-bridge.py on BLADERUNNER (port 8765), via tunnel
- * 2. IMAGE_INTAKE_SERVICE_URL — full image_intake_http_server.py (port 8766)
- * 3. SQL_PASSWORD — only when the function runs on a machine that can reach SQL Server
+ * **Never write to Positill — SELECT only.**
  */
+
+import { assertReadOnlySql, mssqlReadOnlyConfig } from './_sql-readonly.js';
 
 export function isStmastAccessConfigured() {
   return Boolean(
@@ -25,15 +23,13 @@ export function stmastSetupMessage() {
   );
 }
 
-const FORBIDDEN_SQL_TOKENS = new Set([
-  'INSERT', 'UPDATE', 'DELETE', 'ALTER', 'DROP', 'CREATE', 'MERGE', 'TRUNCATE', 'EXEC', 'EXECUTE', 'BACKUP',
-]);
-
 const STMAST_QUERY = `
   SELECT TOP 1 CODE, DESCR, PRICE_A, ONHAND, BOOKED, DEPT
   FROM dbo.STMAST
   WHERE CODE = @code
 `;
+
+assertReadOnlySql(STMAST_QUERY);
 
 function normalizeRow(row) {
   if (!row) return null;
@@ -86,31 +82,12 @@ async function fetchViaBridge(sku) {
 }
 
 async function fetchViaMssql(sku) {
-  const password = String(process.env.SQL_PASSWORD || '').trim();
-  if (!password) {
+  const config = mssqlReadOnlyConfig({ requestTimeout: 20000 });
+  if (!config) {
     throw new Error(stmastSetupMessage());
   }
 
   const sql = (await import('mssql')).default;
-  const config = {
-    server: process.env.SQL_SERVER || 'BLADERUNNER-PC',
-    database: process.env.SQL_DATABASE || 'POSWINSQL',
-    user: process.env.SQL_USER || 'ProtoSyncReadOnly',
-    password,
-    options: {
-      encrypt: false,
-      trustServerCertificate: true,
-      readOnlyIntent: true,
-    },
-    connectionTimeout: 20000,
-    requestTimeout: 20000,
-  };
-
-  const upper = STMAST_QUERY.trim().toUpperCase();
-  if (!upper.startsWith('SELECT')) throw new Error('Blocked SQL');
-  for (const token of FORBIDDEN_SQL_TOKENS) {
-    if (upper.includes(token)) throw new Error(`Blocked SQL token: ${token}`);
-  }
 
   const pool = await sql.connect(config);
   try {

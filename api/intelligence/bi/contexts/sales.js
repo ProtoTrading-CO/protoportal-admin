@@ -3,24 +3,80 @@ import { trustField } from '../shared/trust.js';
 import { contextEnvelope, mergeContextMeta } from './_helpers.js';
 
 const ERP_NOT_AVAILABLE = [
-  'erp.top_sellers_today',
   'erp.sales_revenue',
   'erp.fast_movers',
+  'erp.growth',
 ];
 
+function effectivePeriod(period) {
+  return period === 'general' ? 'general' : period;
+}
+
 /**
- * Sales Context — portal order aggregates (Capability 1.3 partial).
- * ERP POS sales queries remain backlog; website orders are evidence-backed truth.
+ * Sales Context — Positill POS by default; website portal orders only when asked.
  */
 export async function buildSalesContext(params = {}, ctx = {}) {
   const scope = String(params.scope || 'top_sellers');
-  const period = String(params.period || 'general');
+  const period = effectivePeriod(String(params.period || 'general'));
+  const channel = String(params.channel || 'positill');
   const query = String(params.query || '').trim();
-  const limit = scope === 'worst_sellers' ? 10 : 10;
+  const limit = 10;
 
-  const res = await executeQuery('portal.top_line_items', { period, scope, limit }, ctx);
-  if (!res.ok) return res;
+  if (channel === 'website') {
+    const portalRes = await executeQuery('portal.top_line_items', { period, scope, limit }, ctx);
+    if (!portalRes.ok) return portalRes;
+    return buildFromPortal(portalRes, { scope, period, query });
+  }
 
+  const erpRes = await executeQuery('erp.top_line_items', { period, scope, limit }, ctx);
+  if (!erpRes.ok) return erpRes;
+  return buildFromErp(erpRes, { scope, period, query });
+}
+
+function buildFromErp(res, { scope, period, query }) {
+  const { items = [], invoiceHeaderCount = 0, periodLabel = period } = res.data || {};
+  const ts = res.meta?.generatedAt || new Date().toISOString();
+  const hasResults = items.length > 0;
+
+  const evidence = {
+    invoiceCount: trustField(invoiceHeaderCount, { source: 'erp_sql', timestamp: ts }),
+    period: trustField(periodLabel, { source: 'erp_sql', timestamp: ts }),
+  };
+
+  if (items[0]) {
+    evidence.topItem = trustField(
+      `${items[0].name || items[0].title} (${items[0].code}) — ${items[0].totalQty} units`,
+      { source: 'erp_sql', timestamp: ts },
+    );
+  }
+
+  return contextEnvelope('sales', {
+    scope,
+    period,
+    periodLabel,
+    query,
+    channel: 'positill',
+    orderCount: invoiceHeaderCount,
+    invoiceCount: invoiceHeaderCount,
+    results: items,
+    top: items[0] || null,
+    taught: true,
+    dataSource: 'positill_erp',
+    status: {
+      code: hasResults ? 'ok' : 'no_sales',
+      label: hasResults ? 'Positill POS sales' : 'No Positill sales in period',
+    },
+    evidence,
+    notAvailable: [...ERP_NOT_AVAILABLE],
+  }, {
+    ...mergeContextMeta([res.meta]),
+    source: res.meta?.source || ['erp_sql'],
+    partial: false,
+    warnings: hasResults ? [] : ['NO_SALES_IN_PERIOD'],
+  }, 'sales.context');
+}
+
+function buildFromPortal(res, { scope, period, query }) {
   const { items = [], orderCount = 0, periodLabel = period } = res.data || {};
   const ts = res.meta?.generatedAt || new Date().toISOString();
   const hasResults = items.length > 0;
@@ -37,14 +93,12 @@ export async function buildSalesContext(params = {}, ctx = {}) {
     );
   }
 
-  const notAvailable = [...ERP_NOT_AVAILABLE];
-  if (res.meta?.partial) notAvailable.push('complete_order_history');
-
   return contextEnvelope('sales', {
     scope,
     period,
     periodLabel,
     query,
+    channel: 'website',
     orderCount,
     results: items,
     top: items[0] || null,
@@ -52,13 +106,14 @@ export async function buildSalesContext(params = {}, ctx = {}) {
     dataSource: 'portal_orders',
     status: {
       code: hasResults ? 'ok' : 'no_orders',
-      label: hasResults ? 'Portal order aggregates' : 'No orders in period',
+      label: hasResults ? 'Website portal orders' : 'No website orders in period',
     },
     evidence,
-    notAvailable,
-  }, mergeContextMeta([res.meta], {
+    notAvailable: [...ERP_NOT_AVAILABLE],
+  }, {
+    ...mergeContextMeta([res.meta]),
     source: res.meta?.source || ['portal_supabase'],
     partial: Boolean(res.meta?.partial) || period === 'general',
     warnings: hasResults ? [] : ['NO_ORDERS_IN_PERIOD'],
-  }), 'sales.context');
+  }, 'sales.context');
 }

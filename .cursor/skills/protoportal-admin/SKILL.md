@@ -90,6 +90,8 @@ Taxonomy tree loaded dynamically (`taxonomyTree`), not only static JSON.
 
 **Pipeline:** NL → Intent Engine → Business Context → Query Engine → SQL/Supabase → evidence → answer. Work on branch `apollo-core`; do not merge Intelligence to `main` without explicit approval.
 
+**ERP / Positill:** read-only forever — hardcoded SELECT only, `ProtoSyncReadOnly`, `readOnlyIntent`. Never write to POSWINSQL from Apollo or the SQL bridge.
+
 ## Common mistakes to avoid
 
 1. Editing `protoportal-main/src/pages/AdminPage.jsx` — wrong app, fewer features, deprecated

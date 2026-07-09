@@ -1,5 +1,4 @@
 import { provenanceFootnote, fmtDateTime } from '../shared/format.js';
-import { readTrust } from '../shared/trust.js';
 
 function formatEvidenceLine(label, field) {
   if (!field || field.value == null || field.value === '') return null;
@@ -7,6 +6,21 @@ function formatEvidenceLine(label, field) {
   const conf = field.confidence != null ? `${Math.round(field.confidence * 100)}%` : '—';
   const at = field.timestamp ? fmtDateTime(field.timestamp) : '—';
   return `- **${label}:** ${field.value} _(${src} · ${conf} · ${at})_`;
+}
+
+function sourceLabel(data) {
+  if (data.dataSource === 'positill_erp') {
+    return '_Source: Positill POS (live ERP invoices on BLADERUNNER)_';
+  }
+  return '_Source: website portal orders (you asked for website sales)_';
+}
+
+function countLabel(data) {
+  if (data.dataSource === 'positill_erp') {
+    const n = data.invoiceCount ?? data.orderCount ?? 0;
+    return `Based on **${n}** Positill invoice${n === 1 ? '' : 's'}.`;
+  }
+  return `Based on **${data.orderCount}** portal order${data.orderCount === 1 ? '' : 's'}.`;
 }
 
 export function formatSalesContext(envelope) {
@@ -18,14 +32,19 @@ export function formatSalesContext(envelope) {
   }
 
   const periodLabel = data.periodLabel || String(data.period || '').replace(/_/g, ' ');
-  const scopeLabel = String(data.scope || 'top_sellers').replace(/_/g, ' ');
   const lines = ['## Sales intelligence', ''];
 
-  lines.push('_Source: website portal orders (not ERP POS totals yet)_', '');
+  lines.push(sourceLabel(data), '');
 
-  if (data.status?.code === 'no_orders' || !data.results?.length) {
-    lines.push(`No portal orders found for **${periodLabel}**.`, '');
-    lines.push('Try a wider period, or check that orders are flowing into the admin database.');
+  const empty = data.status?.code === 'no_sales' || data.status?.code === 'no_orders' || !data.results?.length;
+  if (empty) {
+    const noun = data.dataSource === 'positill_erp' ? 'Positill sales' : 'portal orders';
+    lines.push(`No ${noun} found for **${periodLabel}**.`, '');
+    if (data.dataSource === 'positill_erp') {
+      lines.push('This reflects live POS invoices. Ask for **website sales** if you want portal orders.');
+    } else {
+      lines.push('Try a wider period.');
+    }
     lines.push('', provenanceFootnote(meta));
     return lines.join('\n');
   }
@@ -35,19 +54,24 @@ export function formatSalesContext(envelope) {
     : `### Top sellers — ${periodLabel}`;
 
   lines.push(heading, '');
-  lines.push(`Based on **${data.orderCount}** portal order${data.orderCount === 1 ? '' : 's'}.`, '');
+  lines.push(countLabel(data), '');
 
   for (const [i, item] of data.results.entries()) {
-    lines.push(`${i + 1}. **${item.name}** (${item.code}) — **${item.totalQty}** units · ${item.orderCount} order${item.orderCount === 1 ? '' : 's'}`);
+    const name = item.name || item.title || item.code;
+    const inv = item.invoiceCount ?? item.orderCount;
+    const invPart = inv != null ? ` · ${inv} invoice${inv === 1 ? '' : 's'}` : '';
+    lines.push(`${i + 1}. **${name}** (${item.code}) — **${item.totalQty}** units${invPart}`);
   }
 
   if (data.top && data.scope !== 'worst_sellers') {
-    lines.push('', `**Best seller${periodLabel.includes('today') ? ' today' : ''}:** **${data.top.name}** (${data.top.code}) — **${data.top.totalQty}** units.`);
+    const topName = data.top.name || data.top.title || data.top.code;
+    lines.push('', `**Best seller${periodLabel.includes('today') ? ' today' : ''}:** **${topName}** (${data.top.code}) — **${data.top.totalQty}** units.`);
   }
 
   const ev = data.evidence || {};
+  const countField = data.dataSource === 'positill_erp' ? ev.invoiceCount : ev.orderCount;
   const evidenceLines = [
-    formatEvidenceLine('Orders in period', ev.orderCount),
+    formatEvidenceLine(data.dataSource === 'positill_erp' ? 'Invoices in period' : 'Orders in period', countField),
     formatEvidenceLine('Period', ev.period),
     formatEvidenceLine('Top item', ev.topItem),
   ].filter(Boolean);

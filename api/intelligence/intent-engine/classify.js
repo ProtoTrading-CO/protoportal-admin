@@ -23,7 +23,7 @@ export function matchesSalesAnalysis(query) {
 }
 
 /**
- * @returns {{ scope?: string, period?: string }}
+ * @returns {{ scope?: string, period?: string, channel?: string, query?: string }}
  */
 export function parseSalesParams(query) {
   const q = normalizeQuery(query);
@@ -38,7 +38,12 @@ export function parseSalesParams(query) {
   else if (/revenue/i.test(q)) scope = 'revenue';
   else if (/growth/i.test(q)) scope = 'growth';
 
-  return { scope, period, query: q };
+  let channel = 'positill';
+  if (/\b(?:website|portal|online(?:\s+orders?)?|web\s+sales|protoportal)\b/i.test(q)) {
+    channel = 'website';
+  }
+
+  return { scope, period, channel, query: q };
 }
 
 /**

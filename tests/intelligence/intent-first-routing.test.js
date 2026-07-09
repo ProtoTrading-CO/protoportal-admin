@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { resolveIntent, resolutionToRoute } from '../../api/intelligence/intent-engine/resolve.js';
+import { parseSalesParams } from '../../api/intelligence/intent-engine/classify.js';
 import { biRun, biFormat } from '../../api/intelligence/bi/facade.js';
 
 describe('Capability 1.1A — intent-first routing', () => {
@@ -11,25 +12,43 @@ describe('Capability 1.1A — intent-first routing', () => {
     expect(r.biIntent).toBe('sales.context');
     expect(r.entityType).toBeUndefined();
     expect(r.method).toBe('intent');
+    expect(r.params.channel).toBe('positill');
+  });
+
+  it('routes website sales to portal channel when specified', () => {
+    const r = resolveIntent('What was the best seller on the website today?');
+    expect(r?.intentId).toBe('sales_analysis');
+    expect(r.params.channel).toBe('website');
+    expect(r.params.period).toBe('today');
+  });
+
+  it('parseSalesParams defaults to positill without website keywords', () => {
+    expect(parseSalesParams('best seller today').channel).toBe('positill');
   });
 
   beforeEach(() => {
     vi.resetModules();
   });
 
-  it('returns portal top sellers for best selling question', async () => {
+  it('returns Positill top sellers for best selling question', async () => {
     vi.doMock('../../api/intelligence/query-engine/execute.js', () => ({
-      executeQuery: vi.fn(async () => ({
-        ok: true,
-        data: {
-          period: 'today',
-          periodLabel: 'today (SAST)',
-          scope: 'top_sellers',
-          orderCount: 3,
-          items: [{ code: '8610100001', name: 'Test Widget', totalQty: 12, orderCount: 2 }],
-        },
-        meta: { source: ['portal_supabase'], generatedAt: '2026-07-09T12:00:00.000Z', partial: false },
-      })),
+      executeQuery: vi.fn(async (queryId) => {
+        if (queryId === 'erp.top_line_items') {
+          return {
+            ok: true,
+            data: {
+              period: 'today',
+              periodLabel: 'today (Positill · SAST)',
+              scope: 'top_sellers',
+              invoiceHeaderCount: 34,
+              items: [{ code: '8610100001', name: 'Test Widget', title: 'Test Widget', totalQty: 12, invoiceCount: 8 }],
+              dataSource: 'erp_sql',
+            },
+            meta: { source: ['erp_sql'], generatedAt: '2026-07-09T12:00:00.000Z', partial: false, warnings: [] },
+          };
+        }
+        throw new Error(`unexpected query: ${queryId}`);
+      }),
     }));
 
     const { biRun: run, biFormat: format } = await import('../../api/intelligence/bi/facade.js');
@@ -40,11 +59,11 @@ describe('Capability 1.1A — intent-first routing', () => {
     const env = await run(route.intent, route.params, {});
     expect(env.ok).toBe(true);
     expect(env.data.taught).toBe(true);
-    expect(env.data.dataSource).toBe('portal_orders');
+    expect(env.data.dataSource).toBe('positill_erp');
 
     const md = format(route.intent, env);
     expect(md).toMatch(/Sales intelligence/i);
-    expect(md).toMatch(/portal orders/i);
+    expect(md).toMatch(/Positill/i);
     expect(md).toMatch(/Test Widget/);
     expect(md).not.toMatch(/has not graduated yet/i);
     expect(md).not.toMatch(/No customer found/i);

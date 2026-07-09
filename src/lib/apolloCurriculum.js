@@ -14,7 +14,7 @@ export const APOLLO_CURRICULUM_ROWS = [
   { id: '1.1', name: 'Live Product Truth', status: 'graduated', graduation: 'Graduated (LAN)' },
   { id: '1.1A', name: 'Intent-first Routing', status: 'graduated', graduation: 'Graduated' },
   { id: '1.2', name: 'Product Profitability', status: 'not_started' },
-  { id: '1.3', name: 'Sales Intelligence', status: 'not_started' },
+  { id: '1.3', name: 'Sales Intelligence', status: 'learning', graduation: 'Deployed — ceremony pending' },
   { id: '1.4', name: 'Product Behaviour', status: 'not_started' },
   { id: '1.5', name: 'Product Judgement', status: 'not_started' },
 ];

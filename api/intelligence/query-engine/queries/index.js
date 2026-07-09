@@ -14,6 +14,7 @@ import stockHighStockList from './stock.high_stock_list.js';
 import stockStmastCacheByCode from './stock.stmast_cache_by_code.js';
 import stockProductsSohBySkus from './stock.products_soh_by_skus.js';
 import erpProductByCode from './erp.product_by_code.js';
+import erpTopLineItems from './erp.top_line_items.js';
 
 const REGISTERED_QUERIES = [
   portalCustomerById,
@@ -31,6 +32,7 @@ const REGISTERED_QUERIES = [
   stockStmastCacheByCode,
   stockProductsSohBySkus,
   erpProductByCode,
+  erpTopLineItems,
 ];
 
 let bootstrapped = false;

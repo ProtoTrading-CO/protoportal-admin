@@ -1,6 +1,8 @@
 # BLADERUNNER SQL Bridge — Production Setup
 
-Expose read-only STMAST lookups to **protoportal-admin** on Vercel.
+Expose **read-only** ERP lookups to **protoportal-admin** on Vercel.
+
+**Hard rule:** SELECT only — STMAST product lookups and Positill sales aggregates (`/stmast`, `/top-sellers`). Never INSERT, UPDATE, DELETE, or DDL. Use `ProtoSyncReadOnly` + `ApplicationIntent=ReadOnly`.
 
 | Machine | Role |
 |---------|------|
