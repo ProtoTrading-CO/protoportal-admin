@@ -11,7 +11,7 @@ const PAGE_SIZE = 1000;
 /** Columns needed for admin catalogue adapt() — avoids select('*') timeouts on ~5k rows. */
 const LIVE_LIST_COLS = [
   'sku', 'barcode', 'title', 'category',
-  'subcategory_one', 'subcategory_two', 'subcategory_three', 'subcategory_four',
+  'subcategory_one', 'subcategory_two', 'subcategory_three', 'subcategory_four', 'subcategory_extra',
   'image_url_one', 'image_url_two', 'image_url_three', 'image_url_four',
   'price', 'stock_qty', 'available_stock', 'is_new_arrival',
   'original_description', 'pack_description', 'units_of_issue',
@@ -94,7 +94,7 @@ export default async function handler(req, res) {
       }
       const ALLOWED = new Set([
         'sku', 'barcode', 'title', 'original_description', 'price', 'category',
-        'subcategory_one', 'subcategory_two', 'subcategory_three', 'subcategory_four',
+        'subcategory_one', 'subcategory_two', 'subcategory_three', 'subcategory_four', 'subcategory_extra',
         'image_url_one', 'image_url_two', 'image_url_three', 'image_url_four',
       ]);
       const clean = Object.fromEntries(Object.entries(row).filter(([k]) => ALLOWED.has(k)));

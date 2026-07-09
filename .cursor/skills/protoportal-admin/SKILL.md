@@ -54,7 +54,7 @@ npm run build
 | `catalogue` | Product Manager (live products only) |
 | `archive` | Archive (archived products, no category sidebar) |
 | `reorder` | Reorder Grid (`ReorderPanel.jsx` + `ReorderGrid.jsx`) |
-| `customers` | Customer Management (requests / pre-registration / approved / email analytics / scheduled emails) |
+| `customers` | Customer Management (requests / pre-registration / approved / email analytics) |
 | `site-content` | Site Content — Featured + Specials + Banner Editor sub-tabs |
 | `crm` | WhatsApp |
 | `analytics` | Analytics |

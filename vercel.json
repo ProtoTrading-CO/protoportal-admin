@@ -36,9 +36,6 @@
     "api/customer-email-broadcast.js": {
       "maxDuration": 300
     },
-    "api/run-scheduled-emails.js": {
-      "maxDuration": 300
-    },
     "api/nutstore-batch-lookup.js": {
       "maxDuration": 30
     },
@@ -55,8 +52,6 @@
   },
   "crons": [
     { "path": "/api/order-notify-sweep", "schedule": "*/10 * * * *" },
-    { "path": "/api/run-scheduled-emails", "schedule": "*/10 * * * *" },
-    { "path": "/api/run-scheduled-broadcasts", "schedule": "0 * * * *" },
     { "path": "/api/brevo-sync", "schedule": "*/15 * * * *" },
     { "path": "/api/purge-expired-staging", "schedule": "0 3 * * *" }
   ]

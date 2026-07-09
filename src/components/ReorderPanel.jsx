@@ -94,10 +94,9 @@ const ReorderPanel = forwardRef(function ReorderPanel({
 
   const [moveModalOpen, setMoveModalOpen] = useState(false);
   const [moveCategoryId, setMoveCategoryId] = useState('');
-  const [moveChild1Id, setMoveChild1Id] = useState('');
-  const [moveChild2Id, setMoveChild2Id] = useState('');
-  const [moveChild3Id, setMoveChild3Id] = useState('');
-  const [moveChild4Id, setMoveChild4Id] = useState('');
+  // ids for Child 1, Child 2, ... as deep as the taxonomy tree goes — no fixed
+  // depth cap. Always a contiguous, non-empty prefix.
+  const [moveChildIds, setMoveChildIds] = useState([]);
   const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false);
   const [bulkFieldEditOpen, setBulkFieldEditOpen] = useState(false);
   const [bulkFieldEditType, setBulkFieldEditType] = useState('description');
@@ -345,16 +344,13 @@ const ReorderPanel = forwardRef(function ReorderPanel({
 
   const openMoveModal = () => {
     setMoveCategoryId(mainId || mainCategories[0]?.id || '');
-    setMoveChild1Id('');
-    setMoveChild2Id('');
-    setMoveChild3Id('');
-    setMoveChild4Id('');
+    setMoveChildIds([]);
     setMoveModalOpen(true);
   };
 
   const confirmBulkMove = async () => {
-    const categoryPathIds = [moveCategoryId, moveChild1Id, moveChild2Id, moveChild3Id, moveChild4Id].filter(Boolean);
-    const finalSubId = moveChild4Id || moveChild3Id || moveChild2Id || moveChild1Id;
+    const categoryPathIds = [moveCategoryId, ...moveChildIds].filter(Boolean);
+    const finalSubId = moveChildIds[moveChildIds.length - 1] || '';
     if (!selectedIds.size || categoryPathIds.length < 2) {
       toast('Choose a main category and at least one subcategory', 'error');
       return;
@@ -445,13 +441,13 @@ const ReorderPanel = forwardRef(function ReorderPanel({
 
   const applySubcategoryCreated = useCallback((json, parentId) => {
     if (!json.node?.id) return;
+    // Ancestors of parentId (root..parentId's parent), so the full path down
+    // to the newly created node is [...parentPath, parentId, newId].
     const parentPath = findNodePath(taxonomyTree, parentId) || [];
     const newId = json.node.id;
-    setMoveCategoryId(parentPath[0] || parentId);
-    setMoveChild1Id(parentPath.length === 0 ? newId : (parentPath[1] || parentId));
-    setMoveChild2Id(parentPath.length === 1 ? newId : (parentPath.length >= 2 ? parentId : ''));
-    setMoveChild3Id(parentPath.length === 2 ? newId : (parentPath.length >= 3 ? parentId : ''));
-    setMoveChild4Id(parentPath.length >= 3 ? newId : '');
+    const fullPath = [...parentPath, parentId, newId];
+    setMoveCategoryId(fullPath[0]);
+    setMoveChildIds(fullPath.slice(1));
     if (selectedIdsRef.current.size > 0) setMoveModalOpen(true);
   }, [taxonomyTree]);
 
@@ -471,12 +467,25 @@ const ReorderPanel = forwardRef(function ReorderPanel({
     patchProduct,
   }), [loadProducts, applySubcategoryCreated, onPathNodeDeleted, patchProduct]);
 
-  const child1Options = subcategoryOptions(moveCategoryId, taxonomyTree);
-  const child2Options = childrenOf(taxonomyTree, moveChild1Id);
-  const child3Options = childrenOf(taxonomyTree, moveChild2Id);
-  const child4Options = childrenOf(taxonomyTree, moveChild3Id);
-  const deepestId = moveChild4Id || moveChild3Id || moveChild2Id || moveChild1Id;
-  const movePreviewPath = [moveCategoryId, moveChild1Id, moveChild2Id, moveChild3Id, moveChild4Id].filter(Boolean);
+  // Render one picker per level for as long as the previous level has a
+  // value AND there are options to choose — stops one level past the
+  // deepest populated selection, offering exactly one empty picker to go
+  // deeper. No fixed depth cap.
+  const moveChildFields = [];
+  {
+    let parentId = moveCategoryId;
+    for (let level = 1; parentId; level += 1) {
+      const options = level === 1
+        ? subcategoryOptions(moveCategoryId, taxonomyTree)
+        : childrenOf(taxonomyTree, parentId);
+      if (!options.length) break;
+      const currentValue = moveChildIds[level - 1] || '';
+      moveChildFields.push({ level, options, currentValue });
+      parentId = currentValue;
+    }
+  }
+  const deepestId = moveChildIds[moveChildIds.length - 1] || '';
+  const movePreviewPath = [moveCategoryId, ...moveChildIds].filter(Boolean);
   const movePreviewLabel = movePreviewPath.length >= 2
     ? resolvePathLabels(taxonomyTree, movePreviewPath).join(' › ')
     : 'Select a main category and subcategory';
@@ -644,64 +653,25 @@ const ReorderPanel = forwardRef(function ReorderPanel({
                   <span className="adm-field-label">Main category</span>
                   <select
                     value={moveCategoryId}
-                    onChange={(e) => { setMoveCategoryId(e.target.value); setMoveChild1Id(''); setMoveChild2Id(''); setMoveChild3Id(''); setMoveChild4Id(''); }}
+                    onChange={(e) => { setMoveCategoryId(e.target.value); setMoveChildIds([]); }}
                     className="adm-select adm-select--enhanced"
                   >
                     {mainCategories.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
                   </select>
                 </label>
-                {child1Options.length > 0 && (
-                  <label className="adm-field">
-                    <span className="adm-field-label">Child category 1</span>
+                {moveChildFields.map(({ level, options, currentValue }) => (
+                  <label className="adm-field" key={level}>
+                    <span className="adm-field-label">Child category {level}</span>
                     <select
-                      value={moveChild1Id}
-                      onChange={(e) => { setMoveChild1Id(e.target.value); setMoveChild2Id(''); setMoveChild3Id(''); setMoveChild4Id(''); }}
+                      value={currentValue}
+                      onChange={(e) => setMoveChildIds((ids) => [...ids.slice(0, level - 1), e.target.value].filter(Boolean))}
                       className="adm-select adm-select--enhanced"
                     >
                       <option value="">— None —</option>
-                      {child1Options.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+                      {options.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
                     </select>
                   </label>
-                )}
-                {moveChild1Id && child2Options.length > 0 && (
-                  <label className="adm-field">
-                    <span className="adm-field-label">Child category 2</span>
-                    <select
-                      value={moveChild2Id}
-                      onChange={(e) => { setMoveChild2Id(e.target.value); setMoveChild3Id(''); setMoveChild4Id(''); }}
-                      className="adm-select adm-select--enhanced"
-                    >
-                      <option value="">— None —</option>
-                      {child2Options.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
-                    </select>
-                  </label>
-                )}
-                {moveChild2Id && child3Options.length > 0 && (
-                  <label className="adm-field">
-                    <span className="adm-field-label">Child category 3</span>
-                    <select
-                      value={moveChild3Id}
-                      onChange={(e) => { setMoveChild3Id(e.target.value); setMoveChild4Id(''); }}
-                      className="adm-select adm-select--enhanced"
-                    >
-                      <option value="">— None —</option>
-                      {child3Options.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
-                    </select>
-                  </label>
-                )}
-                {moveChild3Id && child4Options.length > 0 && (
-                  <label className="adm-field">
-                    <span className="adm-field-label">Child category 4</span>
-                    <select
-                      value={moveChild4Id}
-                      onChange={(e) => setMoveChild4Id(e.target.value)}
-                      className="adm-select adm-select--enhanced"
-                    >
-                      <option value="">— None —</option>
-                      {child4Options.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
-                    </select>
-                  </label>
-                )}
+                ))}
               </div>
               <div className="adm-modal-footer">
                 <button

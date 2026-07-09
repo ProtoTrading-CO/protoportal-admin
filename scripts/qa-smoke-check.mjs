@@ -19,7 +19,7 @@ import {
   parseStoredMotarroPath,
 } from '../lib/mottaro-category.mjs';
 import { matchesTaxonomyLabel, normalizeLabel, rowMatchesLabelScope, escapeIlikePattern } from '../lib/taxonomy-match.mjs';
-import { buildClearLabelsPatch } from '../api/_taxonomy-utils.js';
+import { buildClearLabelsPatch, buildNodeProductFilter, labelsToDbFields, nodeScopeColumn, resolveCategoryIds } from '../api/_taxonomy-utils.js';
 import { BULK_CHUNK_SIZE, MOVE_UPDATE_CHUNK_SIZE, runInChunks } from '../lib/bulk-chunk.mjs';
 import { codeLookupCandidates, firstCodeToken } from '../lib/code-normalize.mjs';
 import { catalogueDisplayTitle, catalogueDescription, loaderCodeLabel } from '../lib/product-loader-display.mjs';
@@ -316,14 +316,6 @@ assert.doesNotMatch(pmEngineArchiveSrc, /window\.confirm\(`Move "\$\{name\}" to 
 // Make-live pulls the current taxonomy on open (fresh ids survive renames) and offers deep subcategories
 assert.match(pmEngineArchiveSrc, /const makeLive = \(item\) => \{\s*\/\/[\s\S]*?onRefreshTaxonomy\?\.\(\)/, 'make-live refreshes the taxonomy when it opens');
 assert.match(pmEngineArchiveSrc, /Child category 2/, 'make-live modal offers deeper subcategory levels');
-// Schedule-send opens an in-view popover (not a footer picker clipped off-screen)
-const emailModalSrc = readSrc('src/components/CustomerEmailModal.jsx');
-assert.match(emailModalSrc, /scheduleOpen/, 'schedule send uses an in-view popover');
-assert.match(emailModalSrc, /bottom: 'calc\(100% \+ 8px\)'/, 'schedule popover opens upward so the picker stays in view');
-assert.match(emailModalSrc, /min=\{minScheduleValue\}/, 'schedule picker blocks past times');
-// Scheduled sends auto-refresh so failures surface without a manual reload
-assert.match(readSrc('src/components/ScheduledEmailsPanel.jsx'), /setInterval\(\(\) => \{ void load\(\); \}, 30_000\)/, 'scheduled panel polls while sends are active');
-
 const adminPageArchiveEditSrc = readSrc('src/pages/AdminPage.jsx');
 assert.match(adminPageArchiveEditSrc, /!editingProduct\?\.archivedBy/, 'archive edit modal hides category cascade');
 assert.match(adminPageArchiveEditSrc, /!categoryPath\.length && !editingProduct\?\.archivedBy/, 'archive edit save skips category requirement');
@@ -669,19 +661,75 @@ assert.deepEqual(buildClearLabelsPatch({ depth: 0 }), {
   subcategory_two: null,
   subcategory_three: null,
   subcategory_four: null,
+  subcategory_extra: null,
 }, 'main-category delete clears category + all sub columns (shallow duplicate included)');
 assert.deepEqual(buildClearLabelsPatch({ depth: 1 }), {
   subcategory_one: '',
   subcategory_two: null,
   subcategory_three: null,
   subcategory_four: null,
+  subcategory_extra: null,
 }, 'depth-1 delete clears subcategory_one to empty string (NOT NULL column)');
 assert.deepEqual(buildClearLabelsPatch({ depth: 2 }), {
   subcategory_two: null,
   subcategory_three: null,
   subcategory_four: null,
+  subcategory_extra: null,
 }, 'depth-2 delete clears column 2 and deeper only');
 console.log('✓ A2 buildClearLabelsPatch depth-aware clearing');
+
+// Unlimited category depth (subcategory_extra overflow beyond subcategory_four)
+{
+  const c6 = { id: 'c6', label: 'C6', children: [] };
+  const c5 = { id: 'c5', label: 'C5', children: [c6] };
+  const c4 = { id: 'c4', label: 'C4', children: [c5] };
+  const c3 = { id: 'c3', label: 'C3', children: [c4] };
+  const c2 = { id: 'c2', label: 'C2', children: [c3] };
+  const c1 = { id: 'c1', label: 'C1', children: [c2] };
+  const main = { id: 'main', label: 'Main', children: [c1] };
+  const deepTree = [main];
+
+  const deepLabels = ['Main', 'C1', 'C2', 'C3', 'C4', 'C5', 'C6'];
+  const deepDbFields = labelsToDbFields(deepLabels);
+  assert.equal(deepDbFields.subcategory_extra, JSON.stringify(['C5', 'C6']), 'labelsToDbFields stores depth beyond 4 as subcategory_extra');
+
+  const deepRow = {
+    category: deepDbFields.category,
+    subcategory_one: deepDbFields.subcategory_one,
+    subcategory_two: deepDbFields.subcategory_two,
+    subcategory_three: deepDbFields.subcategory_three,
+    subcategory_four: deepDbFields.subcategory_four,
+    subcategory_extra: deepDbFields.subcategory_extra,
+  };
+  const deepResolved = resolveCategoryIds(deepRow, deepTree);
+  assert.deepEqual(deepResolved.categoryPath, ['main', 'c1', 'c2', 'c3', 'c4', 'c5', 'c6'], 'resolveCategoryIds round-trips depth-6 paths through subcategory_extra');
+
+  function findDeepCtx(tree, id, parent = null, depth = 0, ancestors = []) {
+    for (const node of tree) {
+      if (node.id === id) return { node, parent, depth, ancestors: [...ancestors] };
+      if (node.children?.length) {
+        const hit = findDeepCtx(node.children, id, node, depth + 1, [...ancestors, node]);
+        if (hit) return hit;
+      }
+    }
+    return null;
+  }
+  const ctxC6 = findDeepCtx(deepTree, 'c6');
+  assert.equal(nodeScopeColumn(ctxC6), 'subcategory_extra', 'depth-6 node scope column is subcategory_extra');
+  const clearC6 = buildClearLabelsPatch(ctxC6);
+  assert.equal(clearC6.subcategory_extra, JSON.stringify(['C5']), 'deleting a depth-6 node preserves its depth-5 ancestor in subcategory_extra');
+  assert.ok(rowMatchesLabelScope(deepRow, buildNodeProductFilter(ctxC6).filters), 'buildNodeProductFilter matches the row it was derived from');
+  assert.ok(
+    rowMatchesLabelScope({ ...deepRow, subcategory_extra: JSON.stringify(['C5', 'C6', 'C7']) }, buildNodeProductFilter(ctxC6).filters),
+    'a depth-7 descendant still matches its depth-6 ancestor scope',
+  );
+
+  // depth <= 4 behaviour must stay byte-identical to before subcategory_extra existed
+  const ctxC4 = findDeepCtx(deepTree, 'c4');
+  assert.ok(!('subcategory_extra' in buildNodeProductFilter(ctxC4).filters), 'depth<=4 node filters never reference subcategory_extra');
+  assert.equal(nodeScopeColumn(ctxC4), 'subcategory_four', 'depth-4 node scope column unchanged');
+}
+console.log('✓ Unlimited category depth via subcategory_extra overflow');
 
 // A1 — count/content parity
 assert.match(taxonomyUtilsSrc2, /onlyInStock && !isPublishableOnWebsite/, 'counts stock gate only when onlyInStock');
@@ -918,15 +966,9 @@ console.log('✓ Full-review pass (perf + serious-bug fixes)');
 assert.match(readSrc('api/send-order-email.js'), /order link can only email the order's own customer/, 'order-token send is restricted to the order customer');
 assert.match(readSrc('api/admin-orders.js'), /Not allowed to change .* from an order link/, 'order-token cannot write payment/total columns');
 assert.match(readSrc('api/checkout-promo.js'), /Number\.isFinite\(rawPercent\)/, 'promo percent keeps a deliberate 0%');
-assert.match(readSrc('api/run-scheduled-broadcasts.js'), /claimDueItem/, 'WhatsApp broadcast cron claims items atomically (no re-blast)');
-assert.match(readSrc('api/run-scheduled-broadcasts.js'), /maxDuration: 300/, 'WhatsApp broadcast cron has a duration budget');
 console.log('✓ Order/promo/broadcast hardening');
 
 // Adversarial-review fixes (multi-agent review of PRs #107-#122)
-// 1. claimDueItem must reset the claim on every optimistic-lock retry (no double-blast)
-for (const f of ['api/run-scheduled-broadcasts.js', 'api/run-scheduled-emails.js']) {
-  assert.match(readSrc(f), /mutateSiteConfigJson\([^,]+,[^,]+,\s*\(store\)\s*=>\s*\{\s*(?:\/\/[^\n]*\n\s*)*claimed = null;/, `${f}: claim resets each mutator invocation`);
-}
 // 2. Email "Send test" always goes to the admin, never a typed customer
 assert.doesNotMatch(readSrc('src/components/CustomerEmailModal.jsx'), /isSelected \? selectedEmails\[0\] : adminEmail/, 'test send never targets a selected customer');
 // 3. ERP relink must not overwrite a name/description the admin typed in the same save
@@ -938,8 +980,6 @@ assert.match(readSrc('src/lib/bulkImageReplace.js'), /Two passes so a SKU ALWAYS
 assert.match(readSrc('src/components/productLoader/ProductLoaderFolder.jsx'), /Math\.min\(progress\.done \+ 1, progress\.total\)/, 'folder progress clamps to total');
 // 6. Archive run tracks its own elapsed time
 assert.match(readSrc('src/components/productLoader/ProductLoaderFolder.jsx'), /const archiveItems[\s\S]*?setElapsedMs\(Date\.now\(\) - start\)/, 'archive run updates elapsed time');
-// 7. Scheduling rejects the live-only "selected" audience
-assert.match(readSrc('api/scheduled-emails.js'), /audience === 'selected'/, 'scheduling rejects the specific-people mode');
 // 8. Chunk-reload guard clears after mount, not synchronously at boot
 assert.match(readSrc('src/Root.jsx'), /useEffect\(\(\) => \{ clearChunkReloadGuard\(\); \}, \[\]\)/, 'chunk guard cleared post-mount in Root');
 assert.doesNotMatch(readSrc('src/main.jsx'), /clearChunkReloadGuard\(\)/, 'main.jsx no longer clears the guard pre-mount');

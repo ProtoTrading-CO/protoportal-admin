@@ -1,6 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { Check, Eye, Loader2, Megaphone, Search, Send } from 'lucide-react';
-import { fetchBroadcastSchedule } from '../lib/broadcastSchedule';
 
 function Chip({ active, onClick, children }) {
   return (
@@ -38,30 +37,9 @@ export default function WhatsappPanel({
   onViewContacts,
   onRefresh,
 }) {
-  const [scheduled, setScheduled] = useState([]);
-  const [schedLoading, setSchedLoading] = useState(true);
-
-  useEffect(() => {
-    let cancelled = false;
-    setSchedLoading(true);
-    fetchBroadcastSchedule()
-      .then((data) => { if (!cancelled) setScheduled(data.items || []); })
-      .catch(() => { if (!cancelled) setScheduled([]); })
-      .finally(() => { if (!cancelled) setSchedLoading(false); });
-    return () => { cancelled = true; };
-  }, [sentCount]);
-
   const template = useMemo(
     () => templates.find((t) => t.name === selectedTemplate) || templates[0] || null,
     [templates, selectedTemplate],
-  );
-
-  const upcoming = useMemo(
-    () => scheduled
-      .filter((item) => item.status === 'pending' && item.scheduledAt)
-      .sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt))
-      .slice(0, 5),
-    [scheduled],
   );
 
   const toggleBusinessType = (type) => {
@@ -246,24 +224,6 @@ export default function WhatsappPanel({
             {sending ? <Loader2 size={16} className="spin" /> : <Send size={16} />}
             {sending ? 'Sending…' : `Send to ${totalFiltered} contact${totalFiltered === 1 ? '' : 's'}`}
           </button>
-
-          {upcoming.length > 0 && (
-            <div className="wa-scheduled">
-              <div className="wa-scheduled__head">Upcoming scheduled</div>
-              <ul className="wa-scheduled__list">
-                {schedLoading ? (
-                  <li className="adm-muted">Loading…</li>
-                ) : (
-                  upcoming.map((item) => (
-                    <li key={item.id}>
-                      <strong>{item.templateName}</strong>
-                      <span>{new Date(item.scheduledAt).toLocaleString('en-ZA', { dateStyle: 'medium', timeStyle: 'short' })}</span>
-                    </li>
-                  ))
-                )}
-              </ul>
-            </div>
-          )}
         </section>
       </div>
     </div>
