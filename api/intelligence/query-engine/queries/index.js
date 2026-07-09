@@ -4,6 +4,7 @@ import portalCustomersPending from './portal.customers_pending.js';
 import portalCustomersSearch from './portal.customers_search.js';
 import portalOrdersByCustomer from './portal.orders_by_customer.js';
 import portalOrdersRecent from './portal.orders_recent.js';
+import portalTopLineItems from './portal.top_line_items.js';
 import stockWebsiteStockBySku from './stock.website_stock_by_sku.js';
 import stockListingsSince from './stock.listings_since.js';
 import stockNegativeStockList from './stock.negative_stock_list.js';
@@ -20,6 +21,7 @@ const REGISTERED_QUERIES = [
   portalCustomersSearch,
   portalOrdersByCustomer,
   portalOrdersRecent,
+  portalTopLineItems,
   stockWebsiteStockBySku,
   stockListingsSince,
   stockNegativeStockList,

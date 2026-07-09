@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { resolveIntent, resolutionToRoute } from '../../api/intelligence/intent-engine/resolve.js';
 import { biRun, biFormat } from '../../api/intelligence/bi/facade.js';
 
@@ -13,23 +13,40 @@ describe('Capability 1.1A — intent-first routing', () => {
     expect(r.method).toBe('intent');
   });
 
-  it('returns helpful capability-not-taught message for sales context', async () => {
-    const route = resolutionToRoute(resolveIntent('Tell me about the best selling item today.'));
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  it('returns portal top sellers for best selling question', async () => {
+    vi.doMock('../../api/intelligence/query-engine/execute.js', () => ({
+      executeQuery: vi.fn(async () => ({
+        ok: true,
+        data: {
+          period: 'today',
+          periodLabel: 'today (SAST)',
+          scope: 'top_sellers',
+          orderCount: 3,
+          items: [{ code: '8610100001', name: 'Test Widget', totalQty: 12, orderCount: 2 }],
+        },
+        meta: { source: ['portal_supabase'], generatedAt: '2026-07-09T12:00:00.000Z', partial: false },
+      })),
+    }));
+
+    const { biRun: run, biFormat: format } = await import('../../api/intelligence/bi/facade.js');
+    const route = resolutionToRoute(resolveIntent('What was the best seller today?'));
     expect(route.intent).toBe('sales.context');
+    expect(route.params.period).toBe('today');
 
-    const env = await biRun(route.intent, route.params, {});
+    const env = await run(route.intent, route.params, {});
     expect(env.ok).toBe(true);
-    expect(env.data.taught).toBe(false);
-    expect(env.data.status.code).toBe('not_taught');
+    expect(env.data.taught).toBe(true);
+    expect(env.data.dataSource).toBe('portal_orders');
 
-    const md = biFormat(route.intent, env);
-    expect(md).toMatch(/Sales Intelligence/i);
-    expect(md).toMatch(/don't yet have the knowledge/i);
-    expect(md).toMatch(/Rather than guess/i);
-    expect(md).toMatch(/has not graduated yet/i);
-    expect(md).toMatch(/Capability 1\.3/);
-    expect(md).toMatch(/Product lookups/i);
-    expect(md).toMatch(/What sold best today/i);
+    const md = format(route.intent, env);
+    expect(md).toMatch(/Sales intelligence/i);
+    expect(md).toMatch(/portal orders/i);
+    expect(md).toMatch(/Test Widget/);
+    expect(md).not.toMatch(/has not graduated yet/i);
     expect(md).not.toMatch(/No customer found/i);
   });
 
