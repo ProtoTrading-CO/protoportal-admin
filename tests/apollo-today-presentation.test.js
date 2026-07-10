@@ -8,6 +8,7 @@ import {
   buildBuyingOps,
   buildOrderOps,
   buildSupplierOps,
+  displaySeverity,
 } from '../src/lib/apolloTodayPresentation.js';
 
 const sampleContext = {
@@ -52,6 +53,28 @@ describe('apolloTodayPresentation', () => {
     }, { userName: 'Gee', hour: 9 });
     expect(lines[1]).toMatch(/danger of being forgotten/i);
     expect(lines[2]).toMatch(/commitment overdue/i);
+  });
+
+  it('leads with noticed exceptions when Release 1.2 exception alerts are present', () => {
+    const lines = buildExecutiveSummary({
+      ...sampleContext,
+      notifications: { counts: { total: 1 } },
+      exceptionAlerts: {
+        items: [{ category: 'sales_anomaly', title: 'Wallet sales spiked' }],
+      },
+      focusToday: [
+        { type: 'notification_sales_anomaly', title: 'Wallet sales spiked' },
+      ],
+    }, { userName: 'Gee', hour: 9 });
+    expect(lines[1]).toMatch(/Apollo noticed one meaningful business exception/i);
+    expect(lines[2]).toMatch(/wallet sales spiked/i);
+  });
+
+  it('maps Release 1.2 severity values onto existing visual classes', () => {
+    expect(displaySeverity('critical')).toBe('urgent');
+    expect(displaySeverity('action')).toBe('attention');
+    expect(displaySeverity('review')).toBe('attention');
+    expect(displaySeverity('info')).toBe('info');
   });
 
   it('adds CRM pulse from customer alerts', () => {

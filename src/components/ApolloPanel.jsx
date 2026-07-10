@@ -367,6 +367,23 @@ export default function ApolloPanel({ onShowToast }) {
     void send(query);
   }, [send]);
 
+  const reviewNotification = useCallback(async (item, feedback) => {
+    if (!item?.notificationDbId || !feedback) return;
+    try {
+      const res = await fetch('/api/apollo-notifications', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: item.notificationDbId, feedback }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(formatErrorMessage(json?.error, 'Could not record feedback'));
+      onShowToast?.('Apollo feedback recorded', 'success');
+      await loadIndexStatus(true);
+    } catch (err) {
+      onShowToast?.(formatErrorMessage(err, 'Could not record Apollo feedback'), 'error');
+    }
+  }, [loadIndexStatus, onShowToast]);
+
   const fixLastReply = useCallback(() => {
     void send('', { fix: true });
   }, [send]);
@@ -415,6 +432,7 @@ export default function ApolloPanel({ onShowToast }) {
           loading={!indexStatus && !indexError}
           onAsk={askFromToday}
           onRefresh={() => void rebuildIndex()}
+          onReviewNotification={(item, feedback) => void reviewNotification(item, feedback)}
           refreshing={rebuildingIndex}
           userName={userName}
         />

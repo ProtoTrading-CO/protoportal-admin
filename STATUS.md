@@ -6,7 +6,7 @@
 
 ## Current Release
 
-Apollo Operational Release 1.1
+Apollo Operational Release 1.2
 
 ## Current Branch
 
@@ -14,13 +14,13 @@ Apollo Operational Release 1.1
 
 ## Current Focus
 
-Notifications + Daily Brief + Buying/Supplier advisory signals
+Exception Engine + Daily Brief exception routing
 
 ## Next Milestone
 
-Apollo Operational Release 1.2
+Apollo Operational Release 1.3
 
 ## Guiding Question
 
-> "What is in danger of being forgotten today?"
+> "What changed that I would not have noticed?"
 

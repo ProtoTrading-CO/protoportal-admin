@@ -112,7 +112,7 @@ export async function buildDailyBriefContext(ctx = {}) {
     },
     focusToday,
     notifications: {
-      guidingQuestion: 'What is in danger of being forgotten today?',
+      guidingQuestion: 'What changed that I would not have noticed?',
       businessHealthScore: combinedNotifications.businessHealthScore,
       counts: combinedNotifications.counts,
       items: combinedNotifications.items.slice(0, 20),
@@ -142,6 +142,9 @@ export async function buildDailyBriefContext(ctx = {}) {
     },
     supplierAlerts: {
       items: combinedNotifications.items.filter((item) => item.category === 'supplier_followups').slice(0, 10),
+    },
+    exceptionAlerts: {
+      items: combinedNotifications.items.filter((item) => item.payload?.release === 'apollo-operational-v1.2').slice(0, 10),
     },
     quietSignals,
     workspaces: {
@@ -179,7 +182,7 @@ async function loadOperationalNotifications() {
   try {
     return await generateApolloNotifications({
       supabase: getPortalAdminClient(),
-      persist: false,
+      persist: true,
       includeAdvisory: true,
     });
   } catch (err) {
@@ -193,19 +196,24 @@ async function loadOperationalNotifications() {
 }
 
 function countNotifications(items = []) {
-  const counts = { total: items.length, urgent: 0, attention: 0, byCategory: {} };
+  const counts = { total: items.length, urgent: 0, attention: 0, critical: 0, action: 0, review: 0, byCategory: {}, bySeverity: {} };
   for (const item of items) {
-    if (item.severity === 'urgent') counts.urgent += 1;
-    if (item.severity === 'attention') counts.attention += 1;
+    if (item.severity === 'urgent' || item.severity === 'critical') counts.urgent += 1;
+    if (['attention', 'review', 'action'].includes(item.severity)) counts.attention += 1;
+    if (item.severity === 'critical') counts.critical += 1;
+    if (item.severity === 'action') counts.action += 1;
+    if (item.severity === 'review') counts.review += 1;
     counts.byCategory[item.category] = (counts.byCategory[item.category] || 0) + 1;
+    counts.bySeverity[item.severity] = (counts.bySeverity[item.severity] || 0) + 1;
   }
   return counts;
 }
 
 function scoreNotifications(items = []) {
   const penalty = items.reduce((sum, item) => {
-    if (item.severity === 'urgent') return sum + 0.45;
-    if (item.severity === 'attention') return sum + 0.22;
+    if (item.severity === 'critical') return sum + 0.6;
+    if (item.severity === 'urgent' || item.severity === 'action') return sum + 0.45;
+    if (item.severity === 'attention' || item.severity === 'review') return sum + 0.22;
     return sum + 0.08;
   }, 0);
   return Math.max(0, Math.round((10 - penalty) * 10) / 10);
@@ -293,11 +301,15 @@ function buildBusinessHealth({ ordersYesterday, ordersYesterdayTotal, customerAl
 
   const notifCount = combinedNotifications?.counts?.total || 0;
   const urgent = combinedNotifications?.counts?.urgent || 0;
+  const exceptions = (combinedNotifications?.items || []).filter((item) => item.payload?.release === 'apollo-operational-v1.2').length;
   let memoryStatus = 'Nothing at risk';
   let memorySeverity = 'healthy';
   if (urgent) {
-    memoryStatus = `${urgent} urgent reminder${urgent === 1 ? '' : 's'}`;
+    memoryStatus = `${urgent} urgent item${urgent === 1 ? '' : 's'}`;
     memorySeverity = 'urgent';
+  } else if (exceptions) {
+    memoryStatus = `${exceptions} exception${exceptions === 1 ? '' : 's'} noticed`;
+    memorySeverity = 'attention';
   } else if (notifCount) {
     memoryStatus = `${notifCount} item${notifCount === 1 ? '' : 's'} to remember`;
     memorySeverity = 'attention';

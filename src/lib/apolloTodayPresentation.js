@@ -43,8 +43,14 @@ function summarizeFocusItem(item) {
   }
 }
 
+export function displaySeverity(severity) {
+  if (severity === 'critical') return 'urgent';
+  if (severity === 'action' || severity === 'review') return 'attention';
+  return severity || 'info';
+}
+
 function healthIsCalm(health = []) {
-  return health.every((h) => h.severity === 'healthy' || h.severity === 'info');
+  return health.every((h) => ['healthy', 'info'].includes(displaySeverity(h.severity)));
 }
 
 /**
@@ -60,8 +66,20 @@ export function buildExecutiveSummary(context, { userName, hour = new Date().get
   const health = context.businessHealth || [];
   const changed = context.whatChangedSinceYesterday || [];
   const notifications = context.notifications?.counts?.total || 0;
+  const exceptions = context.exceptionAlerts?.items?.length || 0;
 
   const sentences = [`${greeting} ${name}.`];
+
+  if (exceptions > 0) {
+    sentences.push(
+      exceptions === 1
+        ? 'Apollo noticed one meaningful business exception since yesterday.'
+        : `Apollo noticed ${exceptions} meaningful business exceptions since yesterday.`,
+    );
+    const highlights = focus.slice(0, 2).map(summarizeFocusItem);
+    if (highlights.length) sentences.push(`${highlights.join(', ')}.`);
+    return sentences.slice(0, 3);
+  }
 
   if (notifications > 0) {
     sentences.push(
@@ -207,7 +225,7 @@ export function buildOrderOps(context, focusTypes) {
       id: item.id || item.dedupeKey,
       title: item.title,
       meta: item.detail || item.category,
-      severity: item.severity,
+      severity: displaySeverity(item.severity),
       query: null,
       url: item.actionUrl,
     }));
@@ -231,7 +249,7 @@ export function buildBuyingOps(context) {
       id: item.id || item.dedupeKey,
       title: item.title,
       meta: item.detail,
-      severity: item.severity,
+      severity: displaySeverity(item.severity),
       query: item.payload?.query || null,
       url: item.actionUrl || '',
     }));
@@ -246,7 +264,7 @@ export function buildSupplierOps(context) {
       id: item.id || item.dedupeKey,
       title: item.title,
       meta: item.detail,
-      severity: item.severity,
+      severity: displaySeverity(item.severity),
       query: item.payload?.query || item.title.replace(/^Supplier follow-up:\s*/i, ''),
       url: item.actionUrl || '',
     }));

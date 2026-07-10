@@ -6,6 +6,7 @@ import {
   notificationCounts,
   notificationToFocus,
 } from '../../api/_apollo-notifications-core.js';
+import { buildValidationReport } from '../../api/apollo-notifications.js';
 
 const now = new Date('2026-07-10T09:00:00.000Z');
 
@@ -59,6 +60,22 @@ describe('Apollo notification engine', () => {
     expect(businessHealthScore(items)).toBeLessThan(10);
   });
 
+  it('counts Release 1.2 exception severities', () => {
+    const counts = notificationCounts([
+      { severity: 'critical', category: 'stock_cover_risk' },
+      { severity: 'action', category: 'sales_anomaly' },
+      { severity: 'review', category: 'erp_website_exception' },
+    ]);
+    expect(counts).toMatchObject({
+      total: 3,
+      urgent: 1,
+      attention: 2,
+      critical: 1,
+      action: 1,
+      review: 1,
+    });
+  });
+
   it('converts notifications into focus cards with stable workspace URLs', () => {
     const [item] = buildOrderWorkspaceNotifications([workspace({ due_date: '2026-07-09' })], { now });
     expect(notificationToFocus(item, 1)).toMatchObject({
@@ -66,6 +83,80 @@ describe('Apollo notification engine', () => {
       url: '/apollo/orders/11111111-1111-4111-8111-111111111111',
       workspace: 'orders',
     });
+  });
+
+  it('converts exception notifications into Apollo focus cards with evidence', () => {
+    const item = {
+      id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      dedupeKey: 'exception:sales_anomaly:SKU1:spike',
+      category: 'sales_anomaly',
+      severity: 'action',
+      title: 'Wallet sales spiked',
+      detail: 'SKU1 is 42% above recent trend',
+      recommendation: 'Review stock cover before demand outruns supply.',
+      actionUrl: '',
+      payload: {
+        release: 'apollo-operational-v1.2',
+        confidence: 94,
+        businessImpact: 'high',
+        evidence: [{ label: 'Sales', value: '+42%' }, { label: 'Stock cover', value: '9 days' }],
+        query: 'Show product SKU1',
+      },
+    };
+
+    expect(notificationToFocus(item, 1)).toMatchObject({
+      type: 'notification_sales_anomaly',
+      workspace: 'apollo',
+      query: 'Show product SKU1',
+      confidence: 94,
+      businessImpact: 'high',
+      evidence: 'Sales: +42% · Stock cover: 9 days',
+      notificationDbId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    });
+  });
+
+  it('builds validation reports from reviewed exceptions', () => {
+    const report = buildValidationReport([
+      {
+        category: 'sales_anomaly',
+        confidence: 94,
+        business_impact: 'high',
+        feedback_status: 'useful',
+        payload: { release: 'apollo-operational-v1.2' },
+      },
+      {
+        category: 'stock_cover_risk',
+        confidence: 82,
+        business_impact: 'critical',
+        feedback_status: 'false_positive',
+        payload: { release: 'apollo-operational-v1.2' },
+      },
+      {
+        category: 'stock_cover_risk',
+        confidence: 78,
+        business_impact: 'medium',
+        feedback_status: 'needs_threshold_adjustment',
+        payload: { release: 'apollo-operational-v1.2' },
+      },
+      {
+        category: 'orders_overdue',
+        confidence: null,
+        business_impact: null,
+        feedback_status: 'useful',
+        payload: {},
+      },
+    ]);
+
+    expect(report).toMatchObject({
+      totalExceptions: 3,
+      usefulExceptions: 1,
+      falsePositives: 1,
+      needsThresholdAdjustment: 1,
+      reviewedExceptions: 3,
+      averageConfidence: 84.7,
+      averageBusinessImpact: 'high',
+    });
+    expect(report.topRecurringExceptionTypes[0]).toEqual({ type: 'stock_cover_risk', count: 2 });
   });
 
   it('generates buying and supplier notifications from stock risk and sales overlap', () => {

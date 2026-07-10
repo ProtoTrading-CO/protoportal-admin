@@ -23,6 +23,7 @@ import {
   buildOrderOps,
   buildSupplierOps,
   buildWebsiteOps,
+  displaySeverity,
 } from '../lib/apolloTodayPresentation.js';
 
 function freshnessLabel(meta) {
@@ -33,7 +34,7 @@ function freshnessLabel(meta) {
 }
 
 function SeverityDot({ severity }) {
-  return <span className={`apollo-today-dot apollo-today-dot--${severity || 'info'}`} aria-hidden="true" />;
+  return <span className={`apollo-today-dot apollo-today-dot--${displaySeverity(severity)}`} aria-hidden="true" />;
 }
 
 function SectionLabel({ n, children }) {
@@ -59,11 +60,12 @@ function ExecutiveSummary({ lines }) {
   );
 }
 
-function FocusCard({ item, onAsk }) {
+function FocusCard({ item, onAsk, onReview }) {
   const viewAll = focusShowsViewAll(item);
   const viewAllQuery = focusViewAllQuery(item);
   const askQuery = viewAll ? viewAllQuery : focusViewAllQuery(item);
   const openUrl = item.url || '';
+  const canReview = Boolean(item.notificationDbId && item.businessImpact);
   const handleAction = () => {
     if (openUrl) {
       window.location.href = openUrl;
@@ -73,7 +75,7 @@ function FocusCard({ item, onAsk }) {
   };
 
   return (
-    <article className={`apollo-today-focus-card apollo-today-focus-card--${item.severity || 'attention'}`}>
+    <article className={`apollo-today-focus-card apollo-today-focus-card--${displaySeverity(item.severity || 'attention')}`}>
       <div className="apollo-today-focus-head">
         <SeverityDot severity={item.severity} />
         <h4>{item.title || item.label}</h4>
@@ -88,6 +90,12 @@ function FocusCard({ item, onAsk }) {
         <span className="apollo-today-kicker">Why</span>
         {item.why}
       </p>
+      {item.evidence && (
+        <p className="apollo-today-focus-what">
+          <span className="apollo-today-kicker">Evidence</span>
+          {item.evidence}
+        </p>
+      )}
       <p className="apollo-today-focus-action">
         <span className="apollo-today-kicker">Do</span>
         {item.action}
@@ -107,6 +115,14 @@ function FocusCard({ item, onAsk }) {
           </button>
         ) : <span />}
       </div>
+      {canReview && (
+        <div className="apollo-today-feedback" aria-label="Exception feedback">
+          <button type="button" onClick={() => onReview?.(item, 'useful')} disabled={item.feedbackStatus === 'useful'}>Useful</button>
+          <button type="button" onClick={() => onReview?.(item, 'false_positive')} disabled={item.feedbackStatus === 'false_positive'}>Not useful</button>
+          <button type="button" onClick={() => onReview?.(item, 'needs_threshold_adjustment')} disabled={item.feedbackStatus === 'needs_threshold_adjustment'}>Adjust threshold</button>
+          <button type="button" onClick={() => onReview?.(item, 'ignore_permanently')} disabled={item.feedbackStatus === 'ignore_permanently'}>Ignore</button>
+        </div>
+      )}
     </article>
   );
 }
@@ -122,7 +138,7 @@ function HealthPulse({ item }) {
   };
   const Icon = icons[item.key] || Package;
   return (
-    <div className={`apollo-today-health apollo-today-health--${item.severity || 'info'}`}>
+    <div className={`apollo-today-health apollo-today-health--${displaySeverity(item.severity || 'info')}`}>
       <div className="apollo-today-health-head">
         <Icon size={13} />
         <span>{item.label}</span>
@@ -135,7 +151,7 @@ function HealthPulse({ item }) {
 
 function ChangedLine({ line }) {
   return (
-    <li className={`apollo-today-changed-line apollo-today-changed-line--${line.severity || 'info'}`}>
+    <li className={`apollo-today-changed-line apollo-today-changed-line--${displaySeverity(line.severity || 'info')}`}>
       <SeverityDot severity={line.severity} />
       <span>{line.text}</span>
     </li>
@@ -165,7 +181,7 @@ function OpsRow({ title, meta, severity, onClick, url }) {
     onClick?.();
   };
   return (
-    <button type="button" className={`apollo-today-row apollo-today-row--${severity || 'info'}`} onClick={handleClick}>
+    <button type="button" className={`apollo-today-row apollo-today-row--${displaySeverity(severity || 'info')}`} onClick={handleClick}>
       <SeverityDot severity={severity} />
       <span className="apollo-today-row-title">{title}</span>
       <span className="apollo-today-row-meta">{meta}</span>
@@ -173,7 +189,7 @@ function OpsRow({ title, meta, severity, onClick, url }) {
   );
 }
 
-export default function ApolloToday({ context, meta, loading, onAsk, onRefresh, refreshing, userName }) {
+export default function ApolloToday({ context, meta, loading, onAsk, onRefresh, onReviewNotification, refreshing, userName }) {
   const generatedAt = meta?.generatedAt
     ? new Date(meta.generatedAt).toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
     : null;
@@ -246,7 +262,7 @@ export default function ApolloToday({ context, meta, loading, onAsk, onRefresh, 
         {focus.length ? (
           <div className="apollo-today-focus-grid">
             {focus.map((item) => (
-              <FocusCard key={`${item.type}-${item.priority}`} item={item} onAsk={onAsk} />
+              <FocusCard key={`${item.type}-${item.priority}`} item={item} onAsk={onAsk} onReview={onReviewNotification} />
             ))}
           </div>
         ) : (

@@ -276,26 +276,44 @@ export function notificationCounts(items = []) {
     total: items.length,
     urgent: 0,
     attention: 0,
+    critical: 0,
+    action: 0,
+    review: 0,
     byCategory: {},
+    bySeverity: {},
   };
   for (const item of items) {
-    if (item.severity === 'urgent') counts.urgent += 1;
-    if (item.severity === 'attention') counts.attention += 1;
+    const severity = item.severity;
+    if (severity === 'urgent' || severity === 'critical') counts.urgent += 1;
+    if (severity === 'attention' || severity === 'review' || severity === 'action') counts.attention += 1;
+    if (severity === 'critical') counts.critical += 1;
+    if (severity === 'action') counts.action += 1;
+    if (severity === 'review') counts.review += 1;
     counts.byCategory[item.category] = (counts.byCategory[item.category] || 0) + 1;
+    counts.bySeverity[severity] = (counts.bySeverity[severity] || 0) + 1;
   }
   return counts;
 }
 
 export function businessHealthScore(items = []) {
   const penalty = items.reduce((sum, item) => {
-    if (item.severity === 'urgent') return sum + 0.45;
-    if (item.severity === 'attention') return sum + 0.22;
+    if (item.severity === 'critical') return sum + 0.6;
+    if (item.severity === 'urgent' || item.severity === 'action') return sum + 0.45;
+    if (item.severity === 'attention' || item.severity === 'review') return sum + 0.22;
     return sum + 0.08;
   }, 0);
   return Math.max(0, Math.round((10 - penalty) * 10) / 10);
 }
 
 export function notificationToFocus(item, priority) {
+  const confidence = item.payload?.confidence ?? item.confidence;
+  const impact = item.payload?.businessImpact || item.businessImpact || item.business_impact;
+  const evidence = item.payload?.evidence || item.evidence || [];
+  const isException = String(item.dedupeKey || item.dedupe_key || '').startsWith('exception:')
+    || item.payload?.release === 'apollo-operational-v1.2';
+  const evidenceText = Array.isArray(evidence) && evidence.length
+    ? evidence.slice(0, 2).map((row) => `${row.label}: ${row.value}`).join(' · ')
+    : item.detail;
   return {
     type: `notification_${item.category}`,
     priority,
@@ -303,12 +321,19 @@ export function notificationToFocus(item, priority) {
     title: item.title,
     label: item.title,
     detail: item.detail,
-    why: 'Apollo found an operational item that may be forgotten.',
+    why: isException
+      ? `Apollo detected a meaningful business exception${confidence ? ` with ${confidence}% confidence` : ''}${impact ? ` · impact ${impact}` : ''}.`
+      : 'Apollo found an operational item that may be forgotten.',
     action: item.recommendation || item.actionLabel,
-    workspace: 'orders',
+    evidence: evidenceText,
+    confidence,
+    businessImpact: impact,
+    workspace: item.workspaceId ? 'orders' : 'apollo',
     url: item.actionUrl,
     query: item.payload?.query || item.actionQuery || null,
     notificationId: item.id || item.dedupeKey,
+    notificationDbId: item.id || null,
+    feedbackStatus: item.feedbackStatus || item.feedback_status || null,
   };
 }
 
