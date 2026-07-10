@@ -7,14 +7,25 @@ import {
   notificationCounts,
 } from './_apollo-notifications-core.js';
 import { buildBusinessExceptions } from './_apollo-exception-engine.js';
+import {
+  buildAuditSnapshot,
+  buildDailyBriefScore,
+  buildValidationReport,
+  partitionRowsByDay,
+} from './_apollo-validation-metrics.js';
 import { executeQuery } from './intelligence/query-engine/execute.js';
 import { buildInventoryContext } from './intelligence/bi/contexts/inventory.js';
+
+export { buildValidationReport } from './_apollo-validation-metrics.js';
+
+const VALIDATION_ROW_SELECT = 'id,category,dedupe_key,title,recommendation,confidence,business_impact,feedback_status,feedback_note,business_value,decision_outcome,audit_snapshot,payload,created_at,detected_at';
 
 const WORKSPACE_SELECT = 'id,status,priority,command,due_date,supplier,notes,created_at,updated_at';
 const ACTIVE_NOTIFICATION_STATUSES = ['open', 'acknowledged'];
 const SUPPRESSED_NOTIFICATION_STATUSES = ['resolved', 'dismissed'];
 const FEEDBACK_STATUSES = ['useful', 'false_positive', 'needs_threshold_adjustment', 'ignore_permanently'];
-const IMPACT_SCORE = { low: 1, medium: 2, high: 3, critical: 4 };
+const BUSINESS_VALUES = ['high', 'medium', 'low', 'none'];
+const DECISION_OUTCOMES = ['no_action_taken', 'investigated', 'action_taken', 'escalated'];
 
 function migrationError(err) {
   return /apollo_notifications|order_workspace|does not exist|Could not find the table/i.test(String(err?.message || ''));
@@ -223,7 +234,7 @@ async function loadExistingNotifications(supabase, dedupeKeys = []) {
   if (!dedupeKeys.length) return new Map();
   const { data, error } = await supabase
     .from('apollo_notifications')
-    .select('id,dedupe_key,status,feedback_status,feedback_note,feedback_by,feedback_at')
+    .select('id,dedupe_key,status,feedback_status,feedback_note,feedback_by,feedback_at,business_value,decision_outcome,audit_snapshot,confidence,business_impact,evidence,recommendation,detail,title,category')
     .in('dedupe_key', dedupeKeys);
   if (error) throw error;
   return new Map((data || []).map((row) => [row.dedupe_key, row]));
@@ -239,11 +250,13 @@ function withExistingState(item, existing) {
     feedbackNote: existing.feedback_note || '',
     feedbackBy: existing.feedback_by || '',
     feedbackAt: existing.feedback_at || null,
+    businessValue: existing.business_value || null,
+    decisionOutcome: existing.decision_outcome || null,
   };
 }
 
 function notificationRow(item, status = 'open') {
-  return {
+  const row = {
     dedupe_key: item.dedupeKey,
     source_type: item.sourceType,
     source_id: item.sourceId,
@@ -264,6 +277,19 @@ function notificationRow(item, status = 'open') {
     business_impact: item.payload?.businessImpact || null,
     evidence: item.payload?.evidence || [],
   };
+  if (item.payload?.release === 'apollo-operational-v1.2' || String(item.dedupeKey || '').startsWith('exception:')) {
+    row.audit_snapshot = buildAuditSnapshot(item);
+  }
+  return row;
+}
+
+function mutableNotificationPatch(item, existing) {
+  return {
+    id: existing.id,
+    priority_score: item.priorityScore,
+    last_seen_at: new Date().toISOString(),
+    status: existing.status,
+  };
 }
 
 async function persistGeneratedNotifications(supabase, generated, existingByKey) {
@@ -278,7 +304,7 @@ async function persistGeneratedNotifications(supabase, generated, existingByKey)
       continue;
     }
     if (SUPPRESSED_NOTIFICATION_STATUSES.includes(existing.status) || existing.feedback_status === 'ignore_permanently') continue;
-    updateRows.push({ id: existing.id, ...notificationRow(item, existing.status) });
+    updateRows.push(mutableNotificationPatch(item, existing));
   }
 
   if (newRows.length) {
@@ -291,6 +317,20 @@ async function persistGeneratedNotifications(supabase, generated, existingByKey)
     const { error } = await supabase.from('apollo_notifications').update(patch).eq('id', id);
     if (error) throw error;
   }
+}
+
+export async function loadDailyBriefValidationScore(supabase = getPortalAdminClient()) {
+  const since = new Date();
+  since.setUTCDate(since.getUTCDate() - 2);
+  const { data, error } = await supabase
+    .from('apollo_notifications')
+    .select(VALIDATION_ROW_SELECT)
+    .gte('detected_at', since.toISOString())
+    .order('detected_at', { ascending: false })
+    .limit(500);
+  if (error) throw error;
+  const { todayRows, yesterdayRows } = partitionRowsByDay(data || []);
+  return buildDailyBriefScore({ todayRows, yesterdayRows });
 }
 
 export async function generateApolloNotifications({ supabase = getPortalAdminClient(), persist = false, now = new Date(), includeAdvisory = persist, includeExceptions = true } = {}) {
@@ -317,57 +357,17 @@ export async function generateApolloNotifications({ supabase = getPortalAdminCli
   };
 }
 
-export function buildValidationReport(rows = []) {
-  const exceptionRows = rows.filter((row) => row.payload?.release === 'apollo-operational-v1.2');
-  const feedbackRows = exceptionRows.filter((row) => row.feedback_status);
-  const falsePositiveCount = feedbackRows.filter((row) => row.feedback_status === 'false_positive').length;
-  const usefulCount = feedbackRows.filter((row) => row.feedback_status === 'useful').length;
-  const thresholdCount = feedbackRows.filter((row) => row.feedback_status === 'needs_threshold_adjustment').length;
-  const ignoredCount = feedbackRows.filter((row) => row.feedback_status === 'ignore_permanently').length;
-  const avg = (values) => {
-    const nums = values.map(Number).filter(Number.isFinite);
-    if (!nums.length) return null;
-    return Math.round((nums.reduce((sum, value) => sum + value, 0) / nums.length) * 10) / 10;
-  };
-  const impactAvg = avg(exceptionRows.map((row) => IMPACT_SCORE[row.business_impact]));
-  const impactLabel = impactAvg == null
-    ? null
-    : impactAvg >= 3.5 ? 'critical'
-      : impactAvg >= 2.5 ? 'high'
-        : impactAvg >= 1.5 ? 'medium'
-          : 'low';
-  const byType = exceptionRows.reduce((map, row) => {
-    const key = row.category || 'unknown';
-    map[key] = (map[key] || 0) + 1;
-    return map;
-  }, {});
-  return {
-    totalExceptions: exceptionRows.length,
-    usefulExceptions: usefulCount,
-    falsePositives: falsePositiveCount,
-    needsThresholdAdjustment: thresholdCount,
-    ignoredPermanently: ignoredCount,
-    reviewedExceptions: feedbackRows.length,
-    falsePositiveRate: feedbackRows.length ? Math.round((falsePositiveCount / feedbackRows.length) * 1000) / 10 : null,
-    topRecurringExceptionTypes: Object.entries(byType)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 5)
-      .map(([type, count]) => ({ type, count })),
-    averageConfidence: avg(exceptionRows.map((row) => row.confidence)),
-    averageBusinessImpact: impactLabel,
-  };
-}
-
 async function validationReport(supabase, days = 7) {
-  const since = new Date(Date.now() - Math.min(31, Math.max(1, Number(days) || 7)) * 86_400_000).toISOString();
+  const periodDays = Math.min(31, Math.max(1, Number(days) || 7));
+  const since = new Date(Date.now() - periodDays * 86_400_000).toISOString();
   const { data, error } = await supabase
     .from('apollo_notifications')
-    .select('id,category,severity,confidence,business_impact,feedback_status,payload,created_at,detected_at')
+    .select(VALIDATION_ROW_SELECT)
     .gte('detected_at', since)
     .order('detected_at', { ascending: false })
     .limit(500);
   if (error) throw error;
-  return buildValidationReport(data || []);
+  return buildValidationReport(data || [], { days: periodDays });
 }
 
 async function listOpenNotifications(supabase, limit = 50) {
@@ -410,7 +410,14 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'PATCH') {
-      const { id, status, feedback, note = '' } = req.body || {};
+      const {
+        id,
+        status,
+        feedback,
+        businessValue,
+        decisionOutcome,
+        note = '',
+      } = req.body || {};
       if (!id) return res.status(400).json({ error: 'id required' });
       const patch = { updated_at: new Date().toISOString() };
       if (status != null) {
@@ -425,7 +432,38 @@ export default async function handler(req, res) {
         patch.feedback_at = new Date().toISOString();
         if (feedback === 'ignore_permanently') patch.status = 'dismissed';
       }
-      if (status == null && feedback == null) return res.status(400).json({ error: 'status or feedback required' });
+      if (businessValue != null) {
+        if (!BUSINESS_VALUES.includes(businessValue)) return res.status(400).json({ error: 'Invalid business value' });
+        patch.business_value = businessValue;
+      }
+      if (decisionOutcome != null) {
+        if (!DECISION_OUTCOMES.includes(decisionOutcome)) return res.status(400).json({ error: 'Invalid decision outcome' });
+        patch.decision_outcome = decisionOutcome;
+      }
+      if (status == null && feedback == null && businessValue == null && decisionOutcome == null) {
+        return res.status(400).json({ error: 'status, feedback, businessValue, or decisionOutcome required' });
+      }
+      if (feedback != null && !String(note || '').trim()) {
+        return res.status(400).json({ error: 'Explanation required when recording feedback' });
+      }
+      const { data: existing, error: existingError } = await supabase
+        .from('apollo_notifications')
+        .select('*')
+        .eq('id', id)
+        .single();
+      if (existingError) throw existingError;
+      if (!existing.audit_snapshot && (feedback != null || businessValue != null || decisionOutcome != null)) {
+        patch.audit_snapshot = buildAuditSnapshot({
+          category: existing.category,
+          title: existing.title,
+          detail: existing.detail,
+          recommendation: existing.recommendation,
+          confidence: existing.confidence,
+          business_impact: existing.business_impact,
+          evidence: existing.evidence,
+          payload: existing.payload,
+        });
+      }
       const { data, error } = await supabase
         .from('apollo_notifications')
         .update(patch)

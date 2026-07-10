@@ -4,7 +4,7 @@ import { buildInventoryContext } from './inventory.js';
 import { buildCustomerAlertsContext } from './customer.js';
 import { startOfToday, startOfYesterday } from '../shared/format.js';
 import { getPortalAdminClient } from '../../../_site-config.js';
-import { generateApolloNotifications } from '../../../apollo-notifications.js';
+import { generateApolloNotifications, loadDailyBriefValidationScore } from '../../../apollo-notifications.js';
 import { notificationToFocus } from '../../../_apollo-notifications-core.js';
 
 const REVIEW_STATUSES = new Set(['pending', 'order in progress']);
@@ -23,12 +23,14 @@ export async function buildDailyBriefContext(ctx = {}) {
     inventoryEnv,
     customerAlertsEnv,
     notificationsEnv,
+    validationScoreEnv,
   ] = await Promise.all([
     executeQuery('portal.orders_recent', { limit: 100 }, qCtx),
     executeQuery('stock.listings_since', { since: yesterday.toISOString(), limit: 50 }, qCtx),
     buildInventoryContext({ type: 'all', limit: 10, threshold: 10 }, qCtx),
     buildCustomerAlertsContext({ limit: 25 }, qCtx),
     loadOperationalNotifications(),
+    loadValidationScore(),
   ]);
 
   if (!ordersRes.ok) return ordersRes;
@@ -146,6 +148,7 @@ export async function buildDailyBriefContext(ctx = {}) {
     exceptionAlerts: {
       items: combinedNotifications.items.filter((item) => item.payload?.release === 'apollo-operational-v1.2').slice(0, 10),
     },
+    validationScore: validationScoreEnv,
     quietSignals,
     workspaces: {
       tabs: [
@@ -176,6 +179,15 @@ export async function buildDailyBriefContext(ctx = {}) {
   ]);
 
   return contextEnvelope('daily_brief', context, meta, 'brief.morning');
+}
+
+async function loadValidationScore() {
+  try {
+    return await loadDailyBriefValidationScore(getPortalAdminClient());
+  } catch (err) {
+    console.warn('daily-brief validation score unavailable:', err?.message || err);
+    return null;
+  }
 }
 
 async function loadOperationalNotifications() {

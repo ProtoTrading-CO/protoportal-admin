@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import {
   AlertTriangle,
   ArrowRight,
@@ -24,6 +25,7 @@ import {
   buildSupplierOps,
   buildWebsiteOps,
   displaySeverity,
+  isApolloOwner,
 } from '../lib/apolloTodayPresentation.js';
 
 function freshnessLabel(meta) {
@@ -57,6 +59,140 @@ function ExecutiveSummary({ lines }) {
         ))}
       </div>
     </section>
+  );
+}
+
+function formatScore(value) {
+  return value == null ? '—' : `${value}`;
+}
+
+function DailyBriefScore({ score }) {
+  if (!score) return null;
+  return (
+    <section className="apollo-today-validation" aria-label="Release 1.2 validation score">
+      <SectionLabel n="·">Validation week</SectionLabel>
+      <div className="apollo-today-validation-grid">
+        <div className="apollo-today-validation-stat">
+          <span className="apollo-today-validation-label">Notifications today</span>
+          <strong>{score.notificationsGeneratedToday}</strong>
+        </div>
+        <div className="apollo-today-validation-stat">
+          <span className="apollo-today-validation-label">Exceptions today</span>
+          <strong>{score.exceptionsGeneratedToday}</strong>
+        </div>
+        <div className="apollo-today-validation-stat">
+          <span className="apollo-today-validation-label">Useful yesterday</span>
+          <strong>{score.usefulExceptionsYesterday}</strong>
+        </div>
+        <div className="apollo-today-validation-stat">
+          <span className="apollo-today-validation-label">False positives yesterday</span>
+          <strong>{score.falsePositivesYesterday}</strong>
+        </div>
+        <div className="apollo-today-validation-stat">
+          <span className="apollo-today-validation-label">Threshold adjustments</span>
+          <strong>{score.thresholdAdjustmentsYesterday}</strong>
+        </div>
+        <div className="apollo-today-validation-stat">
+          <span className="apollo-today-validation-label">Ignored permanently</span>
+          <strong>{score.ignoredPermanentlyYesterday}</strong>
+        </div>
+        <div className="apollo-today-validation-stat apollo-today-validation-stat--highlight">
+          <span className="apollo-today-validation-label">Useful rate</span>
+          <strong>{score.usefulRate == null ? '—' : `${score.usefulRate}%`}</strong>
+        </div>
+        <div className="apollo-today-validation-stat apollo-today-validation-stat--highlight">
+          <span className="apollo-today-validation-label">Trust score</span>
+          <strong>{formatScore(score.trustScore)}</strong>
+        </div>
+        <div className="apollo-today-validation-stat apollo-today-validation-stat--highlight">
+          <span className="apollo-today-validation-label">Business value score</span>
+          <strong>{formatScore(score.businessValueScore)}</strong>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function ExceptionReview({ item, onReview }) {
+  const [feedback, setFeedback] = useState(item.feedbackStatus || '');
+  const [businessValue, setBusinessValue] = useState(item.businessValue || '');
+  const [decisionOutcome, setDecisionOutcome] = useState(item.decisionOutcome || 'no_action_taken');
+  const [note, setNote] = useState(item.feedbackNote || '');
+  const [saving, setSaving] = useState(false);
+  const reviewed = Boolean(item.feedbackStatus);
+
+  const submit = async () => {
+    if (!feedback || !note.trim()) return;
+    setSaving(true);
+    try {
+      await onReview?.(item, {
+        feedback,
+        businessValue: businessValue || null,
+        decisionOutcome: decisionOutcome || null,
+        note: note.trim(),
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (reviewed) {
+    return (
+      <div className="apollo-today-review-done" aria-label="Exception review recorded">
+        <span>Reviewed: {item.feedbackStatus?.replace(/_/g, ' ')}</span>
+        {item.businessValue && <span>Value: {item.businessValue}</span>}
+        {item.decisionOutcome && <span>Outcome: {item.decisionOutcome.replace(/_/g, ' ')}</span>}
+      </div>
+    );
+  }
+
+  return (
+    <div className="apollo-today-review" aria-label="Exception review">
+      <div className="apollo-today-feedback">
+        <button type="button" onClick={() => setFeedback('useful')} className={feedback === 'useful' ? 'is-active' : ''}>Useful</button>
+        <button type="button" onClick={() => setFeedback('false_positive')} className={feedback === 'false_positive' ? 'is-active' : ''}>False positive</button>
+        <button type="button" onClick={() => setFeedback('needs_threshold_adjustment')} className={feedback === 'needs_threshold_adjustment' ? 'is-active' : ''}>Adjust threshold</button>
+        <button type="button" onClick={() => setFeedback('ignore_permanently')} className={feedback === 'ignore_permanently' ? 'is-active' : ''}>Ignore</button>
+      </div>
+      <div className="apollo-today-review-fields">
+        <label>
+          Business value
+          <select value={businessValue} onChange={(e) => setBusinessValue(e.target.value)}>
+            <option value="">Select…</option>
+            <option value="high">High</option>
+            <option value="medium">Medium</option>
+            <option value="low">Low</option>
+            <option value="none">None</option>
+          </select>
+        </label>
+        <label>
+          Decision outcome
+          <select value={decisionOutcome} onChange={(e) => setDecisionOutcome(e.target.value)}>
+            <option value="no_action_taken">No action taken</option>
+            <option value="investigated">Investigated</option>
+            <option value="action_taken">Action taken</option>
+            <option value="escalated">Escalated</option>
+          </select>
+        </label>
+      </div>
+      <label className="apollo-today-review-note">
+        Explanation
+        <textarea
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          placeholder="What did you do with this exception?"
+          rows={2}
+        />
+      </label>
+      <button
+        type="button"
+        className="apollo-today-review-save"
+        onClick={() => void submit()}
+        disabled={saving || !feedback || !note.trim()}
+      >
+        {saving ? 'Saving…' : 'Record review'}
+      </button>
+    </div>
   );
 }
 
@@ -115,14 +251,7 @@ function FocusCard({ item, onAsk, onReview }) {
           </button>
         ) : <span />}
       </div>
-      {canReview && (
-        <div className="apollo-today-feedback" aria-label="Exception feedback">
-          <button type="button" onClick={() => onReview?.(item, 'useful')} disabled={item.feedbackStatus === 'useful'}>Useful</button>
-          <button type="button" onClick={() => onReview?.(item, 'false_positive')} disabled={item.feedbackStatus === 'false_positive'}>Not useful</button>
-          <button type="button" onClick={() => onReview?.(item, 'needs_threshold_adjustment')} disabled={item.feedbackStatus === 'needs_threshold_adjustment'}>Adjust threshold</button>
-          <button type="button" onClick={() => onReview?.(item, 'ignore_permanently')} disabled={item.feedbackStatus === 'ignore_permanently'}>Ignore</button>
-        </div>
-      )}
+      {canReview && <ExceptionReview item={item} onReview={onReview} />}
     </article>
   );
 }
@@ -189,7 +318,7 @@ function OpsRow({ title, meta, severity, onClick, url }) {
   );
 }
 
-export default function ApolloToday({ context, meta, loading, onAsk, onRefresh, onReviewNotification, refreshing, userName }) {
+export default function ApolloToday({ context, meta, loading, onAsk, onRefresh, onReviewNotification, refreshing, userName, userEmail }) {
   const generatedAt = meta?.generatedAt
     ? new Date(meta.generatedAt).toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
     : null;
@@ -228,6 +357,7 @@ export default function ApolloToday({ context, meta, loading, onAsk, onRefresh, 
   const buyingRows = buildBuyingOps(context);
   const supplierRows = buildSupplierOps(context);
   const websiteRows = buildWebsiteOps(context, focusTypes);
+  const showValidation = isApolloOwner(userEmail);
 
   return (
     <div className="apollo-today apollo-today--executive">
@@ -256,6 +386,8 @@ export default function ApolloToday({ context, meta, loading, onAsk, onRefresh, 
       )}
 
       <ExecutiveSummary lines={executiveLines} />
+
+      {showValidation && context.validationScore && <DailyBriefScore score={context.validationScore} />}
 
       <section className="apollo-today-focus" aria-label="Focus today">
         <SectionLabel n="2">Focus today</SectionLabel>

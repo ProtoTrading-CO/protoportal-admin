@@ -14,6 +14,12 @@ export function displayNameFromEmail(email) {
   return local.charAt(0).toUpperCase() + local.slice(1);
 }
 
+const APOLLO_OWNERS = new Set(['george@proto.co.za', 'danieljoffeinfo@gmail.com']);
+
+export function isApolloOwner(email) {
+  return APOLLO_OWNERS.has(String(email || '').trim().toLowerCase());
+}
+
 export function greetingForHour(h) {
   if (h < 12) return 'Good morning';
   if (h < 17) return 'Good afternoon';

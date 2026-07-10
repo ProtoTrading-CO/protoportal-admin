@@ -122,6 +122,7 @@ describe('Apollo notification engine', () => {
         confidence: 94,
         business_impact: 'high',
         feedback_status: 'useful',
+        decision_outcome: 'action_taken',
         payload: { release: 'apollo-operational-v1.2' },
       },
       {
@@ -136,6 +137,8 @@ describe('Apollo notification engine', () => {
         confidence: 78,
         business_impact: 'medium',
         feedback_status: 'needs_threshold_adjustment',
+        business_value: 'low',
+        decision_outcome: 'investigated',
         payload: { release: 'apollo-operational-v1.2' },
       },
       {
@@ -153,10 +156,15 @@ describe('Apollo notification engine', () => {
       falsePositives: 1,
       needsThresholdAdjustment: 1,
       reviewedExceptions: 3,
-      averageConfidence: 84.7,
-      averageBusinessImpact: 'high',
+      trustScore: expect.any(Number),
+      businessValueScore: 33,
+      topValuableDetector: 'sales_anomaly',
+      topNoisyDetector: 'stock_cover_risk',
+      detectorWithHighestDecisionImpact: 'sales_anomaly',
     });
-    expect(report.topRecurringExceptionTypes[0]).toEqual({ type: 'stock_cover_risk', count: 2 });
+    expect(['tune_thresholds', 'extend_validation', 'tag_release_1_2']).toContain(report.recommendation);
+    expect(report.averageConfidenceByDetector.length).toBeGreaterThan(0);
+    expect(report.averageBusinessImpactByDetector.length).toBeGreaterThan(0);
   });
 
   it('generates buying and supplier notifications from stock risk and sales overlap', () => {

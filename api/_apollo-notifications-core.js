@@ -334,6 +334,9 @@ export function notificationToFocus(item, priority) {
     notificationId: item.id || item.dedupeKey,
     notificationDbId: item.id || null,
     feedbackStatus: item.feedbackStatus || item.feedback_status || null,
+    businessValue: item.businessValue || item.business_value || null,
+    decisionOutcome: item.decisionOutcome || item.decision_outcome || null,
+    feedbackNote: item.feedbackNote || item.feedback_note || '',
   };
 }
 

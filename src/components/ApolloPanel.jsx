@@ -240,12 +240,15 @@ export default function ApolloPanel({ onShowToast }) {
   const [rebuildingIndex, setRebuildingIndex] = useState(false);
   const [chatExpanded, setChatExpanded] = useState(messages.length > 0);
   const [userName, setUserName] = useState(null);
+  const [userEmail, setUserEmail] = useState(null);
   const scrollRef = useRef(null);
   const askRef = useRef(null);
 
   useEffect(() => {
     void getVerifiedSession().then((session) => {
-      const name = displayNameFromEmail(session?.user?.email);
+      const email = session?.user?.email || null;
+      const name = displayNameFromEmail(email);
+      if (email) setUserEmail(email);
       if (name) setUserName(name);
     });
   }, []);
@@ -367,13 +370,19 @@ export default function ApolloPanel({ onShowToast }) {
     void send(query);
   }, [send]);
 
-  const reviewNotification = useCallback(async (item, feedback) => {
-    if (!item?.notificationDbId || !feedback) return;
+  const reviewNotification = useCallback(async (item, review) => {
+    if (!item?.notificationDbId || !review?.feedback) return;
     try {
       const res = await fetch('/api/apollo-notifications', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: item.notificationDbId, feedback }),
+        body: JSON.stringify({
+          id: item.notificationDbId,
+          feedback: review.feedback,
+          businessValue: review.businessValue || undefined,
+          decisionOutcome: review.decisionOutcome || undefined,
+          note: review.note || '',
+        }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(formatErrorMessage(json?.error, 'Could not record feedback'));
@@ -432,9 +441,10 @@ export default function ApolloPanel({ onShowToast }) {
           loading={!indexStatus && !indexError}
           onAsk={askFromToday}
           onRefresh={() => void rebuildIndex()}
-          onReviewNotification={(item, feedback) => void reviewNotification(item, feedback)}
+          onReviewNotification={(item, review) => void reviewNotification(item, review)}
           refreshing={rebuildingIndex}
           userName={userName}
+          userEmail={userEmail}
         />
 
         <section className="apollo-ask" id="ask-apollo" ref={askRef}>

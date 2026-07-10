@@ -14,11 +14,11 @@ Apollo Operational Release 1.2
 
 ## Current Focus
 
-Exception Engine + Daily Brief exception routing
+Release 1.2 Validation Week — measure Trust Score and Business Value Score (no new detectors, no threshold tuning)
 
 ## Next Milestone
 
-Apollo Operational Release 1.3
+Tag `apollo-operational-v1.2` after one week of production evidence, then Apollo Operational Release 1.3
 
 ## Guiding Question
 
