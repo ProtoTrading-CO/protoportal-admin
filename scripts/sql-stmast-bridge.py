@@ -5,7 +5,7 @@ Minimal read-only SQL API for Vercel admin (STMAST + Positill sales aggregates).
 **READ ONLY — SELECT queries only. Never add write endpoints.**
 
 Run on BLADERUNNER-PC:
-  pip install pyodbc python-dotenv
+  pip install pyodbc
   python scripts/sql-stmast-bridge.py
 
 Set on Vercel (protoportal-admin):
@@ -17,14 +17,38 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+from typing import Any
 
 import pyodbc
-from dotenv import load_dotenv
 
-load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+BRIDGE_VERSION = "1.2.0"
+BUILD_GIT_COMMIT = "not-stamped"
+BUILD_DATE_UTC = "not-stamped"
+STARTED_AT_UTC = datetime.now(timezone.utc)
+LAST_QUERY_AT_UTC: datetime | None = None
+
+
+def load_env_file(path: Path) -> None:
+    """Minimal .env reader so the deployed bridge has no helper dependency."""
+    if not path.exists():
+        return
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+load_env_file(Path(__file__).resolve().parent.parent / ".env")
 
 SQL_SERVER = os.getenv("SQL_SERVER", "BLADERUNNER-PC")
 SQL_DATABASE = os.getenv("SQL_DATABASE", "POSWINSQL")
@@ -38,6 +62,69 @@ SAST = timezone(timedelta(hours=2))
 ALLOWED_PERIODS = frozenset({"today", "yesterday", "last_week", "general"})
 ALLOWED_SCOPES = frozenset({"top_sellers", "worst_sellers", "revenue"})
 
+STMAST_SELECT = """
+    SELECT TOP 1 CODE, DESCR, PRICE_A, ONHAND, BOOKED, DEPT
+    FROM dbo.STMAST
+    WHERE CODE = ?
+"""
+
+
+def json_safe_value(value: Any) -> Any:
+    """Convert pyodbc values to JSON-native scalars."""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, Decimal):
+        numeric = float(value)
+        return int(numeric) if numeric.is_integer() else numeric
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if hasattr(value, "isoformat"):  # SQL date values
+        return value.isoformat()
+    if isinstance(value, (bytes, bytearray)):
+        return value.decode("utf-8", errors="replace")
+    return value
+
+
+def row_to_dict(columns, row) -> dict:
+    return {column: json_safe_value(value) for column, value in zip(columns, row)}
+
+
+def sanitize_for_json(value: Any) -> Any:
+    """Recursively remove SQL/Python values that JSON cannot encode."""
+    if isinstance(value, dict):
+        return {str(key): sanitize_for_json(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [sanitize_for_json(item) for item in value]
+    return json_safe_value(value)
+
+
+def json_default_handler(value: Any) -> Any:
+    converted = json_safe_value(value)
+    if converted is value:
+        raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
+    return converted
+
+
+def encode_json_payload(payload: dict) -> bytes:
+    return json.dumps(
+        sanitize_for_json(payload),
+        default=json_default_handler,
+        ensure_ascii=False,
+    ).encode("utf-8")
+
+
+def build_info() -> dict[str, str]:
+    return {
+        "bridge": "Apollo SQL Bridge",
+        "version": BRIDGE_VERSION,
+        "gitCommit": os.getenv("SQL_BRIDGE_BUILD_COMMIT", BUILD_GIT_COMMIT),
+        "buildDate": os.getenv("SQL_BRIDGE_BUILD_DATE_UTC", BUILD_DATE_UTC),
+        "python": f"{sys.version_info.major}.{sys.version_info.minor}",
+        "sqlServer": SQL_SERVER,
+        "database": SQL_DATABASE,
+        "connection": "ReadOnly",
+    }
+
 
 def connection_string() -> str:
     return (
@@ -49,6 +136,47 @@ def connection_string() -> str:
         "ApplicationIntent=ReadOnly;"
         "Encrypt=no;"
     )
+
+
+def utc_iso(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def uptime_string() -> str:
+    elapsed_seconds = max(0, int((datetime.now(timezone.utc) - STARTED_AT_UTC).total_seconds()))
+    hours, remainder = divmod(elapsed_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+
+def verify_database_connection() -> bool:
+    """Health check only: run a read-only scalar query against POSWINSQL."""
+    global LAST_QUERY_AT_UTC
+    with pyodbc.connect(connection_string(), timeout=10) as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT 1")
+        is_connected = cur.fetchone()[0] == 1
+    if is_connected:
+        LAST_QUERY_AT_UTC = datetime.now(timezone.utc)
+    return is_connected
+
+
+def health_info() -> dict[str, Any]:
+    try:
+        connected = verify_database_connection()
+    except Exception:  # noqa: BLE001
+        connected = False
+
+    return {
+        "status": "healthy" if connected else "unhealthy",
+        "database": "connected" if connected else "unavailable",
+        "readOnly": True,
+        "bridge": "running",
+        "lastQuery": utc_iso(LAST_QUERY_AT_UTC),
+        "uptime": uptime_string(),
+    }
 
 
 def sast_period_bounds(period: str, now: datetime | None = None) -> tuple[datetime, datetime, str]:
@@ -76,24 +204,20 @@ def order_clause(scope: str) -> str:
 
 
 def fetch_row(sku: str) -> dict | None:
+    global LAST_QUERY_AT_UTC
     with pyodbc.connect(connection_string(), timeout=20) as conn:
         cur = conn.cursor()
-        cur.execute(
-            """
-            SELECT TOP 1 CODE, DESCR, PRICE_A, ONHAND, BOOKED, DEPT
-            FROM dbo.STMAST
-            WHERE CODE = ?
-            """,
-            sku,
-        )
+        cur.execute(STMAST_SELECT, sku)
         row = cur.fetchone()
+        LAST_QUERY_AT_UTC = datetime.now(timezone.utc)
         if not row:
             return None
         cols = [c[0] for c in cur.description]
-        return dict(zip(cols, row))
+        return row_to_dict(cols, row)
 
 
 def fetch_top_sellers(period: str, scope: str, limit: int) -> dict:
+    global LAST_QUERY_AT_UTC
     safe_period = period if period in ALLOWED_PERIODS else "today"
     safe_scope = scope if scope in ALLOWED_SCOPES else "top_sellers"
     start, end, label = sast_period_bounds(safe_period)
@@ -128,7 +252,8 @@ def fetch_top_sellers(period: str, scope: str, limit: int) -> dict:
 
         cur.execute(top_sql, start, end)
         cols = [c[0] for c in cur.description]
-        items = [dict(zip(cols, row)) for row in cur.fetchall()]
+        items = [row_to_dict(cols, row) for row in cur.fetchall()]
+        LAST_QUERY_AT_UTC = datetime.now(timezone.utc)
 
     return {
         "items": items,
@@ -144,20 +269,48 @@ class Handler(BaseHTTPRequestHandler):
         return self.headers.get("x-api-key") == BRIDGE_KEY
 
     def _json(self, code: int, payload: dict) -> None:
-        body = json.dumps(payload).encode("utf-8")
+        body = encode_json_payload(payload)
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
 
-    def do_POST(self) -> None:
+    def _version(self) -> None:
+        health = health_info()
+        status_code = 200 if health["status"] == "healthy" else 503
+        self._json(status_code, {**build_info(), "status": health["status"], "uptime": health["uptime"]})
+
+    def _health(self) -> None:
+        health = health_info()
+        self._json(200 if health["status"] == "healthy" else 503, health)
+
+    def do_GET(self) -> None:
         path = self.path.rstrip("/")
-        if path not in ("/stmast", "/top-sellers"):
+        if path not in ("/version", "/health"):
             self._json(404, {"error": "Not found"})
             return
         if not self._auth_ok():
             self._json(401, {"error": "Unauthorized"})
+            return
+        if path == "/version":
+            self._version()
+        else:
+            self._health()
+
+    def do_POST(self) -> None:
+        path = self.path.rstrip("/")
+        if path not in ("/stmast", "/top-sellers", "/version", "/health"):
+            self._json(404, {"error": "Not found"})
+            return
+        if not self._auth_ok():
+            self._json(401, {"error": "Unauthorized"})
+            return
+        if path == "/version":
+            self._version()
+            return
+        if path == "/health":
+            self._health()
             return
         length = int(self.headers.get("Content-Length", "0"))
         raw = self.rfile.read(length) if length else b"{}"
@@ -193,7 +346,13 @@ def main() -> None:
     if not SQL_PASSWORD:
         raise SystemExit("SQL_PASSWORD required")
     server = HTTPServer(("0.0.0.0", PORT), Handler)
-    print(f"SQL bridge listening on :{PORT} (/stmast, /top-sellers)")
+    info = build_info()
+    print(
+        "Proto SQL Bridge "
+        f"version={info['version']} gitCommit={info['gitCommit']} buildDate={info['buildDate']}",
+        flush=True,
+    )
+    print(f"SQL bridge listening on :{PORT} (/version, /health, /stmast, /top-sellers)")
     server.serve_forever()
 
 

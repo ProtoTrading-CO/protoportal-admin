@@ -23,10 +23,11 @@ Vercel → STOCK_SQL_BRIDGE_URL → tunnel → :8765 → SQL Server (POSWINSQL)
 - Windows PC with SQL Server (`BLADERUNNER-PC` / `POSWINSQL`)
 - Python 3.10+ with ODBC Driver 17 for SQL Server
 - Read-only SQL login: `ProtoSyncReadOnly`
-- This repo cloned on BLADERUNNER (or copy `scripts/sql-stmast-bridge.py` + `.env`)
+- `C:\Users\BladeRunner\Desktop\Script3\sql-stmast-bridge.py` — the only
+  deployed bridge code file
 
 ```powershell
-pip install pyodbc python-dotenv
+pip install pyodbc
 ```
 
 ---
@@ -65,7 +66,7 @@ cd C:\path\to\protoportal-admin
 python scripts\sql-stmast-bridge.py
 ```
 
-Expected: `STMAST bridge listening on :8765`
+Expected: `SQL bridge listening on :8765 (/stmast, /top-sellers)`
 
 Or double-click: `scripts\start-sql-bridge.bat`
 
@@ -85,7 +86,64 @@ Or from the repo on any machine with env set:
 # STOCK_SQL_BRIDGE_KEY=<same secret>
 
 node scripts/test-bridge.mjs 8626100145
+node scripts/test-bridge-top-sellers.mjs today 10
 ```
+
+**Note:** Both endpoints use **POST + JSON body**, not GET query strings.
+
+### Version check
+
+`/version` uses the same API key protection as the query endpoints and reports
+the deployed bridge version, source commit, and deployment build timestamp:
+
+```powershell
+Invoke-RestMethod -Uri "http://127.0.0.1:8765/version" -Headers $headers
+```
+
+---
+
+## One-command bridge deployment (recommended)
+
+Run this from the admin repo on **George-PC**. It uses PowerShell remoting to
+copy exactly one file to BLADERUNNER, stops only a process whose command line
+contains `sql-stmast-bridge.py`, starts that copied file, then verifies
+`/version`, `/stmast`, and `/top-sellers`.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\deploy_bridge.ps1
+```
+
+If your current Windows account cannot remote to BLADERUNNER, supply a
+credential:
+
+```powershell
+$credential = Get-Credential
+powershell -ExecutionPolicy Bypass -File .\scripts\deploy_bridge.ps1 -Credential $credential
+```
+
+The deployment reports `PASS` only when all three requests succeed. It does
+not reboot BLADERUNNER, restart SQL Server, or touch POS/till processes.
+
+---
+
+## Capability 1.3 — upgrade bridge for Positill sales
+
+If Apollo product lookup works but *"What was the best seller today?"* returns `SQL bridge failed (520)`, the bridge on BLADERUNNER is running an **old script without `/top-sellers`**.
+
+Run the one-command deployment from **George-PC**:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\deploy_bridge.ps1
+```
+
+The deployment script:
+
+1. Copies the one self-contained `sql-stmast-bridge.py`
+2. Validates `.env` on BLADERUNNER (read-only `ProtoSyncReadOnly`)
+3. Restarts only the bridge process on port 8765
+4. Tests `/version`, `/stmast`, and `/top-sellers` locally
+
+Then re-test production Apollo: *"What was the best seller today?"* — expect Positill ERP, invoice count, evidence.
 
 ---
 
@@ -234,7 +292,7 @@ Expect: `dataSource: erp_sql`, `Operational: VERIFIED ✓`
 - [ ] `STOCK_SQL_BRIDGE_KEY` set on BLADERUNNER (bridge rejects unauthenticated calls)
 - [ ] Same key on Vercel — never in git
 - [ ] Tunnel uses HTTPS only
-- [ ] Bridge is read-only (`SELECT` on STMAST only)
+- [ ] Bridge is read-only (`SELECT` on STMAST + Positill sales aggregates only)
 - [ ] SQL user is `ProtoSyncReadOnly` with read-only intent
 - [ ] Do not expose SQL port 1433 to the public internet
 
@@ -247,6 +305,7 @@ Expect: `dataSource: erp_sql`, `Operational: VERIFIED ✓`
 | `Login failed for user 'ProtoSyncReadOnly'` | Check `SQL_PASSWORD` in BLADERUNNER `.env` |
 | `401 Unauthorized` from bridge | `x-api-key` must match `STOCK_SQL_BRIDGE_KEY` |
 | Vercel: bridge unreachable | Tunnel running? Hostname correct? Redeploy after env change |
+| Vercel: `/stmast` works, sales returns 520 | Bridge on BLADERUNNER is old — run `scripts\deploy_bridge.ps1` from George-PC |
 | `BRIDGE_OFFLINE` in Apollo | Bridge down or wrong URL; falls back to `stmast_cache` |
 | LAN works, Vercel fails | Tunnel not configured or firewall — Vercel needs public HTTPS |
 | Port 8765 in use | Change `STOCK_SQL_BRIDGE_PORT` and tunnel target |
