@@ -101,6 +101,8 @@ customer behaviour, product knowledge, and outcomes.
 
 ## Orders Workspace benchmark
 
+Canonical v1 spec: `docs/ORDERS_WORKSPACE_V1_SPEC.md`.
+
 The first Workspace succeeds when:
 
 - `/order Addie` creates a durable Order Workspace.

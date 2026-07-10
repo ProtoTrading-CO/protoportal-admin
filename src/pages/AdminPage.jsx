@@ -119,6 +119,12 @@ const FeaturedPanel = lazyRetry(() => import('../components/FeaturedPanel'));
 const SpecialsPanel = lazyRetry(() => import('../components/SpecialsPanel'));
 const PricingPanel = lazyRetry(() => import('../components/PricingPanel'));
 const ReorderPanel = lazyRetry(() => import('../components/ReorderPanel'));
+const OrdersWorkspacePanel = lazyRetry(() => import('../components/OrdersWorkspacePanel'));
+
+function orderWorkspaceIdFromPath() {
+  const match = window.location.pathname.match(/^\/apollo\/orders\/([^/?#]+)/i);
+  return match ? decodeURIComponent(match[1]) : '';
+}
 
 function SectionSuspenseFallback({ label = 'Loading…' }) {
   return (
@@ -472,7 +478,8 @@ function WhatsappOptIn({ value }) {
 }
 
 export default function AdminPage({ customer, onViewPortal, onSignOut }) {
-  const [activeSection, setActiveSection] = useState('catalogue');
+  const initialOrderWorkspaceId = useMemo(() => orderWorkspaceIdFromPath(), []);
+  const [activeSection, setActiveSection] = useState(initialOrderWorkspaceId ? 'orders' : 'catalogue');
   // Apollo panel keeps its own state (chat, staged image ops). Track when it
   // was first opened so we can lazily mount it once and then keep it in the
   // DOM via CSS display, matching the pre-lazy behaviour.
@@ -2450,6 +2457,12 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
             {/* ORDERS */}
             {activeSection === 'orders' && (
               <SectionErrorBoundary name="orders" title="Order Requests crashed" resetKey={activeSection}>
+              <Suspense fallback={<LazySectionFallback label="Loading Orders Workspace…" />}>
+                <OrdersWorkspacePanel
+                  initialWorkspaceId={initialOrderWorkspaceId}
+                  onShowToast={showToast}
+                />
+              </Suspense>
               <div className="adm-panel">
                 <div className="adm-section-head">
                   <div>

@@ -44,6 +44,196 @@
   --shadow-premium: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
 }
 
+/* Orders Workspace v1 */
+.ow-panel {
+  margin-bottom: 18px;
+}
+.ow-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 14px;
+}
+.ow-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) minmax(420px, 1fr) minmax(240px, 300px);
+  gap: 14px;
+  align-items: start;
+}
+.ow-left,
+.ow-centre,
+.ow-right {
+  display: grid;
+  gap: 12px;
+}
+.ow-card {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 14px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+.ow-card h3 {
+  margin: 0 0 10px;
+  font-size: 15px;
+  font-family: Outfit, sans-serif;
+}
+.ow-label {
+  font-size: 11px;
+  font-weight: 800;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 7px;
+}
+.ow-command,
+.ow-line-form,
+.ow-form-grid {
+  display: grid;
+  gap: 8px;
+}
+.ow-line-form {
+  grid-template-columns: minmax(110px, 0.7fr) minmax(180px, 1.4fr) 90px auto;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.ow-line-form--task {
+  grid-template-columns: minmax(180px, 1fr) minmax(120px, 0.7fr) 150px auto;
+}
+.ow-line-form--promise {
+  grid-template-columns: minmax(220px, 1fr) 150px auto;
+}
+.ow-form-grid {
+  grid-template-columns: 170px 1fr;
+  margin-bottom: 10px;
+}
+.ow-form-grid label,
+.ow-notes {
+  display: grid;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #475569;
+}
+.ow-notes {
+  margin-bottom: 10px;
+}
+.ow-list {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+  max-height: 420px;
+  overflow: auto;
+}
+.ow-list-row {
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  text-align: left;
+  border-radius: 10px;
+  padding: 10px;
+  display: grid;
+  gap: 3px;
+  cursor: pointer;
+}
+.ow-list-row span,
+.ow-action-row span,
+.ow-timeline-row span {
+  font-size: 12px;
+  color: #64748b;
+}
+.ow-list-row--active {
+  border-color: #8B1A1A;
+  background: #fff7f7;
+}
+.ow-empty {
+  min-height: 260px;
+  border: 1px dashed #cbd5e1;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  color: #64748b;
+  background: #f8fafc;
+}
+.ow-summary {
+  display: grid;
+  grid-template-columns: 1fr 190px;
+  gap: 12px;
+  align-items: start;
+}
+.ow-summary h3 {
+  margin: 0;
+  font-size: 22px;
+}
+.ow-summary p {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: #64748b;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.ow-table {
+  display: grid;
+  gap: 6px;
+}
+.ow-table-row {
+  display: grid;
+  grid-template-columns: 120px 1fr 80px 110px;
+  gap: 10px;
+  align-items: center;
+  border-top: 1px solid #f1f5f9;
+  padding: 8px 0;
+  font-size: 13px;
+}
+.ow-action-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  border-top: 1px solid #f1f5f9;
+  padding: 9px 0;
+}
+.ow-action-row > div {
+  display: grid;
+  gap: 2px;
+}
+.ow-timeline {
+  display: grid;
+  gap: 9px;
+}
+.ow-timeline-row,
+.ow-mini-row,
+.ow-metric {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+}
+.ow-timeline-row {
+  border-left: 2px solid #e5e7eb;
+  padding-left: 10px;
+}
+.ow-timeline-row > div {
+  display: grid;
+  gap: 2px;
+}
+.ow-reminder-form {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+@media (max-width: 1180px) {
+  .ow-grid {
+    grid-template-columns: 1fr;
+  }
+  .ow-line-form,
+  .ow-line-form--task,
+  .ow-line-form--promise,
+  .ow-form-grid,
+  .ow-summary {
+    grid-template-columns: 1fr;
+  }
+}
+
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 html {
