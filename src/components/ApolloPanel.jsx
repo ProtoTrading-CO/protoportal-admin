@@ -330,7 +330,8 @@ export default function ApolloPanel({ onShowToast }) {
     }
 
     try {
-      const apiMessages = nextMessages.map(({ role, content }) => ({ role, content }));
+      const apiMessages = nextMessages.map(({ role, content, intent }) => ({ role, content, intent: intent || null }));
+      const lastAssistant = [...nextMessages].reverse().find((m) => m.role === 'assistant');
       const res = await fetch('/api/apollo', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -340,6 +341,11 @@ export default function ApolloPanel({ onShowToast }) {
           badReply,
           previousIntent,
           proposedAction: proposedActionRef.current,
+          conversationContext: {
+            messages: apiMessages.slice(-8),
+            proposedAction: proposedActionRef.current,
+            lastIntent: lastAssistant?.intent || previousIntent || null,
+          },
         }),
       });
       const json = await res.json();

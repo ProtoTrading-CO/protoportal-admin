@@ -318,7 +318,7 @@ export default async function handler(req, res) {
 
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { messages = [], fix = false, badReply = '', previousIntent = '', proposedAction = null, confirmAction = false } = req.body || {};
+  const { messages = [], fix = false, badReply = '', previousIntent = '', proposedAction = null, confirmAction = false, conversationContext = null } = req.body || {};
   if (!Array.isArray(messages) || !messages.length) {
     return res.status(400).json({ error: 'messages array required' });
   }
@@ -335,6 +335,15 @@ export default async function handler(req, res) {
       confirmAction,
       supabase: getPortalAdminClient(),
       actor: actorEmail,
+      conversationContext: conversationContext || {
+        messages: messages.slice(-8).map(({ role, content, intent }) => ({
+          role,
+          content,
+          intent: intent || null,
+        })),
+        proposedAction,
+        lastIntent: previousIntent || null,
+      },
     });
     if (actionResponse) {
       return res.status(200).json(actionResponse);

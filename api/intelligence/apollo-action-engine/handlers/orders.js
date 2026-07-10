@@ -10,8 +10,9 @@ import {
   formatOrderWorkspaceCreated,
   formatUnknownCustomer,
 } from '../format.js';
-import { normalizeLine, resolveCustomerMatch } from '../../../_order-workspace-core.js';
-import { createWorkspace, findCustomers, addWorkspaceLine } from '../../../order-workspaces.js';
+import { normalizeLine } from '../../../_order-workspace-core.js';
+import { createWorkspace, addWorkspaceLine } from '../../../order-workspaces.js';
+import { getCustomerForAction } from '../context/customer.js';
 
 const ACTION_SOURCE = 'apollo-action';
 
@@ -74,7 +75,6 @@ export function detectOrderCreateIntent(query) {
 }
 
 export async function proposeOrderWorkspaceCreate(ctx, parsed) {
-  const { supabase } = ctx;
   if (!parsed.customerQuery) {
     return {
       reply: formatMissingCustomerQuery(),
@@ -83,8 +83,7 @@ export async function proposeOrderWorkspaceCreate(ctx, parsed) {
     };
   }
 
-  const matches = await findCustomers(supabase, parsed.customerQuery);
-  const resolved = resolveCustomerMatch(matches, parsed.customerQuery);
+  const resolved = getCustomerForAction(ctx, parsed.customerQuery);
 
   if (resolved.ambiguous) {
     const proposedAction = buildProposedAction({

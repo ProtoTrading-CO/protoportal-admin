@@ -31,9 +31,48 @@ vi.mock('../../api/order-workspaces.js', () => ({
   findCustomers: vi.fn(),
   createWorkspace: vi.fn(),
   addWorkspaceLine: vi.fn(),
+  loadWorkspace: vi.fn(),
 }));
 
-import { findCustomers, createWorkspace, addWorkspaceLine } from '../../api/order-workspaces.js';
+import { findCustomers, createWorkspace, addWorkspaceLine, loadWorkspace } from '../../api/order-workspaces.js';
+
+function createSupabaseMock(workspaces = []) {
+  const chain = {
+    select: vi.fn(function select() { return chain; }),
+    not: vi.fn(function not() { return chain; }),
+    is: vi.fn(function is() { return chain; }),
+    order: vi.fn(function order() { return chain; }),
+    limit: vi.fn(async () => ({ data: workspaces, error: null })),
+    eq: vi.fn(function eq() { return chain; }),
+    maybeSingle: vi.fn(async () => ({ data: null, error: null })),
+  };
+  return { from: vi.fn(() => chain) };
+}
+
+function ctxWithCustomerResolution(customer, customerQuery, { ambiguous = false, matches = null } = {}) {
+  const resolvedMatches = matches || (ambiguous
+    ? [
+      { id: '1', business_name: 'Addie Gifts', name: 'Addie Gifts Ltd', email: 'a@example.com' },
+      { id: '2', business_name: 'Addie Wholesale', name: 'Addie Wholesale Pty', email: 'b@example.com' },
+    ]
+    : [customer]);
+
+  return {
+    supabase: createSupabaseMock(),
+    actor: 'george@proto.co.za',
+    actionContext: {
+      customerResolution: {
+        customerQuery,
+        customer: ambiguous ? null : customer,
+        ambiguous,
+        matches: resolvedMatches,
+      },
+      activeCustomer: ambiguous ? {} : customer,
+      confidence: ambiguous ? 0.55 : 0.99,
+      sources: ['entity_registry'],
+    },
+  };
+}
 
 describe('Apollo Action Engine — ABL order-create phrases', () => {
   it('supports natural-language order-create phrases', () => {
@@ -75,14 +114,13 @@ describe('Apollo Action Engine — ABL order-create phrases', () => {
 });
 
 describe('Apollo Action Engine — order workspace proposals', () => {
-  const ctx = { supabase: {}, actor: 'george@proto.co.za' };
-
   beforeEach(() => {
     vi.clearAllMocks();
+    loadWorkspace.mockResolvedValue(null);
   });
 
   it('proposes confirmation for a resolved customer with confidence', async () => {
-    findCustomers.mockResolvedValue([addie]);
+    const ctx = ctxWithCustomerResolution(addie, 'Addie');
     const parsed = parseOrderCreatePhrase('Create an order for Addie');
     const result = await proposeOrderWorkspaceCreate(ctx, parsed);
 
@@ -101,10 +139,7 @@ describe('Apollo Action Engine — order workspace proposals', () => {
   });
 
   it('asks for clarification when multiple customers match', async () => {
-    findCustomers.mockResolvedValue([
-      { id: '1', business_name: 'Addie Gifts', name: 'Addie Gifts Ltd', email: 'a@example.com' },
-      { id: '2', business_name: 'Addie Wholesale', name: 'Addie Wholesale Pty', email: 'b@example.com' },
-    ]);
+    const ctx = ctxWithCustomerResolution(null, 'Addie', { ambiguous: true });
     const parsed = parseOrderCreatePhrase('Create an order for Addie');
     const result = await proposeOrderWorkspaceCreate(ctx, parsed);
 
@@ -116,7 +151,7 @@ describe('Apollo Action Engine — order workspace proposals', () => {
   });
 
   it('reports unknown customers instead of creating a weak match', async () => {
-    findCustomers.mockResolvedValue([]);
+    const ctx = ctxWithCustomerResolution(null, 'Unknown Co', { matches: [] });
     const parsed = parseOrderCreatePhrase('Create an order for Unknown Co');
     const result = await proposeOrderWorkspaceCreate(ctx, parsed);
 
@@ -127,10 +162,12 @@ describe('Apollo Action Engine — order workspace proposals', () => {
 });
 
 describe('Apollo Action Engine — confirmation and execution', () => {
-  const ctx = { supabase: {}, actor: 'george@proto.co.za' };
+  const ctx = { supabase: createSupabaseMock(), actor: 'george@proto.co.za' };
 
   beforeEach(() => {
     vi.clearAllMocks();
+    findCustomers.mockResolvedValue([addie]);
+    loadWorkspace.mockResolvedValue(null);
     createWorkspace.mockResolvedValue({ row: workspaceRow });
     addWorkspaceLine.mockResolvedValue({
       ...workspaceRow,
@@ -139,10 +176,9 @@ describe('Apollo Action Engine — confirmation and execution', () => {
   });
 
   it('requires explicit confirmation before execution', async () => {
-    findCustomers.mockResolvedValue([addie]);
     const proposed = await handleApolloAction({
       query: 'Create an order for Addie',
-      supabase: {},
+      supabase: createSupabaseMock(),
       actor: ctx.actor,
     });
     expect(proposed.intent).toBe('order_workspace_confirm');
@@ -151,7 +187,7 @@ describe('Apollo Action Engine — confirmation and execution', () => {
     const confirmed = await handleApolloAction({
       query: 'confirm',
       proposedAction: proposed.proposedAction,
-      supabase: {},
+      supabase: createSupabaseMock(),
       actor: ctx.actor,
     });
     expect(confirmed.intent).toBe('order_workspace_create');
@@ -160,21 +196,18 @@ describe('Apollo Action Engine — confirmation and execution', () => {
   });
 
   it('executes slash and natural-language proposals through the same path', async () => {
-    findCustomers.mockResolvedValue([addie]);
-
-    const slash = await handleApolloAction({ query: '/order Addie', supabase: {}, actor: ctx.actor });
+    const slash = await handleApolloAction({ query: '/order Addie', supabase: createSupabaseMock(), actor: ctx.actor });
     expect(slash.intent).toBe('order_workspace_confirm');
 
-    const natural = await handleApolloAction({ query: 'New order from Addie', supabase: {}, actor: ctx.actor });
+    const natural = await handleApolloAction({ query: 'New order from Addie', supabase: createSupabaseMock(), actor: ctx.actor });
     expect(natural.intent).toBe('order_workspace_confirm');
     expect(natural.proposedAction.customerId).toBe(slash.proposedAction.customerId);
   });
 
   it('adds high-confidence product lines after confirmed execution', async () => {
-    findCustomers.mockResolvedValue([addie]);
     const proposed = await handleApolloAction({
       query: 'Addie ordered another 500 wallets',
-      supabase: {},
+      supabase: createSupabaseMock(),
       actor: ctx.actor,
     });
     expect(proposed.proposedAction.proposedLines).toEqual([{ requestedQty: 500, description: 'wallets' }]);
@@ -182,13 +215,17 @@ describe('Apollo Action Engine — confirmation and execution', () => {
     await handleApolloAction({
       query: 'confirm',
       proposedAction: proposed.proposedAction,
-      supabase: {},
+      supabase: createSupabaseMock(),
       actor: ctx.actor,
     });
 
-    expect(addWorkspaceLine).toHaveBeenCalledWith({}, 'ws-1', expect.objectContaining({
-      line: expect.objectContaining({ description: 'wallets', requestedQty: 500 }),
-    }));
+    expect(addWorkspaceLine).toHaveBeenCalledWith(
+      expect.objectContaining({ from: expect.any(Function) }),
+      'ws-1',
+      expect.objectContaining({
+        line: expect.objectContaining({ description: 'wallets', requestedQty: 500 }),
+      }),
+    );
   });
 
   it('does not execute the same proposed action twice', async () => {
@@ -227,9 +264,17 @@ describe('Apollo Action Engine — architecture guards', () => {
     expect(resolved?.intentId).toBe('customer_lookup');
   });
 
-  it('stores proposedAction in ApolloPanel chat requests', () => {
+  it('stores proposedAction and conversationContext in ApolloPanel chat requests', () => {
     const source = readFileSync('src/components/ApolloPanel.jsx', 'utf8');
     expect(source).toMatch(/proposedActionRef/);
     expect(source).toMatch(/proposedAction: proposedActionRef\.current/);
+    expect(source).toMatch(/conversationContext/);
+  });
+
+  it('routes action input through Context Resolver before handlers', () => {
+    const source = readFileSync('api/intelligence/apollo-action-engine/index.js', 'utf8');
+    expect(source).toMatch(/resolveActionContext/);
+    expect(source).toMatch(/inferActionContext/);
+    expect(source).not.toMatch(/findCustomers/);
   });
 });
