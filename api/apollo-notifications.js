@@ -10,6 +10,8 @@ import { executeQuery } from './intelligence/query-engine/execute.js';
 import { buildInventoryContext } from './intelligence/bi/contexts/inventory.js';
 
 const WORKSPACE_SELECT = 'id,status,priority,command,due_date,supplier,notes,created_at,updated_at';
+const ACTIVE_NOTIFICATION_STATUSES = ['open', 'acknowledged'];
+const SUPPRESSED_NOTIFICATION_STATUSES = ['resolved', 'dismissed'];
 
 function migrationError(err) {
   return /apollo_notifications|order_workspace|does not exist|Could not find the table/i.test(String(err?.message || ''));
@@ -70,6 +72,64 @@ async function loadBuyingSupplierNotificationSource(ctx = {}) {
   }
 }
 
+async function loadExistingNotifications(supabase, dedupeKeys = []) {
+  if (!dedupeKeys.length) return new Map();
+  const { data, error } = await supabase
+    .from('apollo_notifications')
+    .select('id,dedupe_key,status')
+    .in('dedupe_key', dedupeKeys);
+  if (error) throw error;
+  return new Map((data || []).map((row) => [row.dedupe_key, row]));
+}
+
+function notificationRow(item, status = 'open') {
+  return {
+    dedupe_key: item.dedupeKey,
+    source_type: item.sourceType,
+    source_id: item.sourceId,
+    workspace_id: item.workspaceId,
+    category: item.category,
+    severity: item.severity,
+    title: item.title,
+    detail: item.detail,
+    recommendation: item.recommendation,
+    action_label: item.actionLabel,
+    action_url: item.actionUrl,
+    status,
+    priority_score: item.priorityScore,
+    due_at: item.dueAt || null,
+    last_seen_at: new Date().toISOString(),
+    payload: item.payload || {},
+  };
+}
+
+async function persistGeneratedNotifications(supabase, generated, existingByKey) {
+  if (!generated.length) return;
+  const newRows = [];
+  const updateRows = [];
+
+  for (const item of generated) {
+    const existing = existingByKey.get(item.dedupeKey);
+    if (!existing) {
+      newRows.push(notificationRow(item));
+      continue;
+    }
+    if (SUPPRESSED_NOTIFICATION_STATUSES.includes(existing.status)) continue;
+    updateRows.push({ id: existing.id, ...notificationRow(item, existing.status) });
+  }
+
+  if (newRows.length) {
+    const { error } = await supabase.from('apollo_notifications').insert(newRows);
+    if (error) throw error;
+  }
+
+  for (const row of updateRows) {
+    const { id, ...patch } = row;
+    const { error } = await supabase.from('apollo_notifications').update(patch).eq('id', id);
+    if (error) throw error;
+  }
+}
+
 export async function generateApolloNotifications({ supabase = getPortalAdminClient(), persist = false, now = new Date(), includeAdvisory = persist } = {}) {
   const source = await loadWorkspaceNotificationSource(supabase);
   const generated = [
@@ -77,35 +137,14 @@ export async function generateApolloNotifications({ supabase = getPortalAdminCli
     ...(includeAdvisory ? await loadBuyingSupplierNotificationSource({ bypassCache: true }) : []),
   ].sort((a, b) => b.priorityScore - a.priorityScore || String(a.title).localeCompare(String(b.title)));
 
-  if (persist && generated.length) {
-    const rows = generated.map((item) => ({
-      dedupe_key: item.dedupeKey,
-      source_type: item.sourceType,
-      source_id: item.sourceId,
-      workspace_id: item.workspaceId,
-      category: item.category,
-      severity: item.severity,
-      title: item.title,
-      detail: item.detail,
-      recommendation: item.recommendation,
-      action_label: item.actionLabel,
-      action_url: item.actionUrl,
-      status: 'open',
-      priority_score: item.priorityScore,
-      due_at: item.dueAt || null,
-      last_seen_at: new Date().toISOString(),
-      payload: item.payload || {},
-    }));
-    const { error } = await supabase
-      .from('apollo_notifications')
-      .upsert(rows, { onConflict: 'dedupe_key' });
-    if (error) throw error;
-  }
+  const existingByKey = await loadExistingNotifications(supabase, generated.map((item) => item.dedupeKey));
+  if (persist) await persistGeneratedNotifications(supabase, generated, existingByKey);
+  const visible = generated.filter((item) => !SUPPRESSED_NOTIFICATION_STATUSES.includes(existingByKey.get(item.dedupeKey)?.status));
 
   return {
-    items: generated,
-    counts: notificationCounts(generated),
-    businessHealthScore: businessHealthScore(generated),
+    items: visible,
+    counts: notificationCounts(visible),
+    businessHealthScore: businessHealthScore(visible),
   };
 }
 
@@ -113,7 +152,7 @@ async function listOpenNotifications(supabase, limit = 50) {
   const { data, error } = await supabase
     .from('apollo_notifications')
     .select('*')
-    .eq('status', 'open')
+    .in('status', ACTIVE_NOTIFICATION_STATUSES)
     .order('priority_score', { ascending: false })
     .order('detected_at', { ascending: false })
     .limit(Math.min(100, Math.max(1, Number(limit) || 50)));
@@ -146,7 +185,7 @@ export default async function handler(req, res) {
     if (req.method === 'PATCH') {
       const { id, status } = req.body || {};
       if (!id) return res.status(400).json({ error: 'id required' });
-      if (!['open', 'resolved', 'dismissed'].includes(status)) return res.status(400).json({ error: 'Invalid notification status' });
+      if (![...ACTIVE_NOTIFICATION_STATUSES, ...SUPPRESSED_NOTIFICATION_STATUSES].includes(status)) return res.status(400).json({ error: 'Invalid notification status' });
       const { data, error } = await supabase
         .from('apollo_notifications')
         .update({ status, updated_at: new Date().toISOString() })

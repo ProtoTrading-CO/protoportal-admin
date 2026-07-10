@@ -92,5 +92,30 @@ describe('Apollo notification engine', () => {
     expect(items.find((item) => item.dedupeKey === 'buying:8616700111:zero')?.priorityScore).toBeGreaterThan(84);
     expect(items.find((item) => item.category === 'supplier_followups')?.payload).toMatchObject({ supplier: 'Motarro' });
   });
+
+  it('does not duplicate stable dedupe keys for repeated generation', () => {
+    const first = buildBuyingSupplierNotifications({
+      inventory: {
+        lists: {
+          negative: [],
+          zero: [{ sku: '8616700111', title: 'Leather Wallet', stockQty: 0, supplier: 'Motarro' }],
+          low: [],
+        },
+      },
+      sales: { results: [] },
+    });
+    const second = buildBuyingSupplierNotifications({
+      inventory: {
+        lists: {
+          negative: [],
+          zero: [{ sku: '8616700111', title: 'Leather Wallet', stockQty: 0, supplier: 'Motarro' }],
+          low: [],
+        },
+      },
+      sales: { results: [] },
+    });
+
+    expect(second.map((item) => item.dedupeKey)).toEqual(first.map((item) => item.dedupeKey));
+  });
 });
 

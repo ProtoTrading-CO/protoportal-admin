@@ -5,7 +5,7 @@ import { buildCustomerAlertsContext } from './customer.js';
 import { startOfToday, startOfYesterday } from '../shared/format.js';
 import { getPortalAdminClient } from '../../../_site-config.js';
 import { generateApolloNotifications } from '../../../apollo-notifications.js';
-import { buildBuyingSupplierNotifications, notificationToFocus } from '../../../_apollo-notifications-core.js';
+import { notificationToFocus } from '../../../_apollo-notifications-core.js';
 
 const REVIEW_STATUSES = new Set(['pending', 'order in progress']);
 const LARGE_ORDER_ZAR = 10_000;
@@ -52,9 +52,8 @@ export async function buildDailyBriefContext(ctx = {}) {
   const customerInsights = buildCustomerInsights(orders);
   const productItems = buildProductItems(listingsUpdated, inventory);
   const customerItems = buildCustomerItems(customerAlerts, customerInsights, ordersYesterday);
-  const buyingSupplierNotifications = await loadBuyingSupplierNotifications(inventory, qCtx);
   const combinedNotifications = {
-    items: [...(notifications.items || []), ...buyingSupplierNotifications]
+    items: [...(notifications.items || [])]
       .sort((a, b) => (b.priorityScore || 0) - (a.priorityScore || 0)),
   };
   combinedNotifications.counts = countNotifications(combinedNotifications.items);
@@ -181,6 +180,7 @@ async function loadOperationalNotifications() {
     return await generateApolloNotifications({
       supabase: getPortalAdminClient(),
       persist: false,
+      includeAdvisory: true,
     });
   } catch (err) {
     console.warn('daily-brief notifications unavailable:', err?.message || err);
@@ -190,17 +190,6 @@ async function loadOperationalNotifications() {
       businessHealthScore: 10,
     };
   }
-}
-
-async function loadBuyingSupplierNotifications(inventory, ctx) {
-  let sales = null;
-  try {
-    const res = await executeQuery('erp.top_line_items', { period: 'last_week', scope: 'top_sellers', limit: 15 }, ctx);
-    if (res.ok) sales = res.data;
-  } catch (err) {
-    console.warn('daily-brief buying sales signals unavailable:', err?.message || err);
-  }
-  return buildBuyingSupplierNotifications({ inventory, sales });
 }
 
 function countNotifications(items = []) {
