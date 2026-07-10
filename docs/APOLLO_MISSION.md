@@ -16,6 +16,8 @@ Features evolve. Capabilities evolve. Implementation evolves. **Apollo's purpose
 **Freeze:** No new philosophy unless implementation proves something is fundamentally wrong. Educate Apollo — see `docs/APOLLO_EDUCATION_PLAN.md`.
 
 Related (frozen specs): `docs/APOLLO_MEMORY_MODEL.md` · `docs/APOLLO_PROMOTION_ENGINE.md` · `docs/APOLLO_MEMORY_ENGINE.md`  
+Related (development covenant): `APOLLO_DEVELOPMENT_COVENANT.md`
+Related (product governance): `docs/APOLLO_PRODUCT_CHARTER.md` · `docs/BUSINESS_AUTOMATION_SCOREBOARD.md`
 Related (living): `docs/CURRENT_APOLLO_CAPABILITIES.md` · `docs/APOLLO_EDUCATION_PLAN.md`
 
 ---

@@ -72,8 +72,8 @@ export function classifyEntityIntent(query) {
     if (extractSku(subject) || /^sku\s+\d{8,14}/i.test(subject)) return 'product_lookup';
     if (/^container\s*#?\s*\d+/i.test(subject)) return 'container_lookup';
     if (/^supplier\s+/i.test(subject) || looksLikeSupplierSubject(subject)) return 'supplier_lookup';
-    if (looksLikeProductTitleSubject(subject)) return 'product_lookup';
     if (looksLikeCustomerSubject(subject)) return 'customer_lookup';
+    if (looksLikeProductTitleSubject(subject)) return 'product_lookup';
     return null;
   }
 
@@ -167,15 +167,15 @@ function looksLikeCustomerSubject(term) {
   return false;
 }
 
-/** Product catalogue titles (e.g. "Playing Cards Animal") — not customer names. */
+/** Product catalogue titles (e.g. "Playing Cards Animal") — not customer names or admin questions. */
 export function looksLikeProductTitleSubject(term) {
   const t = String(term || '').trim();
   if (!t || /\d{8,14}/.test(t)) return false;
-  if (/^(?:why|how|what|when|where|should|can|could|would|tell)\b/i.test(t)) return false;
+  if (/^(?:why|how|what|when|where|should|can|could|would|tell|give)\b/i.test(t)) return false;
+  if (/\b(overview|system|business|portal|summary|brief|main)\b/i.test(t)) return false;
   if (/\b(this|that|these|those|it)\b/i.test(t)) return false;
   if (/[?]/.test(t)) return false;
   const words = t.split(/\s+/).filter(Boolean);
-  if (words.length >= 3) return true;
   const productWords = new Set([
     'cards', 'card', 'animal', 'canvas', 'paint', 'paper', 'glue', 'puzzle', 'game',
     'brush', 'pen', 'pencil', 'marker', 'scissors', 'tape', 'ribbon', 'beads', 'wood',
@@ -183,5 +183,6 @@ export function looksLikeProductTitleSubject(term) {
   ]);
   const lower = words.map((w) => w.toLowerCase());
   if (lower.some((w) => productWords.has(w))) return true;
+  if (words.length === 3 && lower.filter((w) => productWords.has(w)).length >= 1) return true;
   return false;
 }

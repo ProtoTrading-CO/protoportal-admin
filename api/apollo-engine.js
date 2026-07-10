@@ -28,6 +28,69 @@ function fmtDate(iso) {
   return new Date(iso).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
+function formatNegativeStockLines(rows, { limit = 5 } = {}) {
+  if (!rows.length) return '_No negative stock in the website catalogue._';
+  const shown = rows.slice(0, limit);
+  const lines = shown.map((p, i) => `${i + 1}. **${p.title}** (${p.sku}) — **${p.stockOnHand}** units`);
+  const rest = rows.length - shown.length;
+  const sameLevel = rows.length > 1 && rows.every((p) => p.stockOnHand === rows[0].stockOnHand);
+  const dupNote = sameLevel
+    ? `\n\n_${rows.length} listings share the same website stock level (${rows[0].stockOnHand}) — often variant SKUs on one allocation._`
+    : rest > 0
+      ? `\n\n_+${rest} more with negative stock. Ask "which products have negative stock?" for the full list._`
+      : '';
+  return `${lines.join('\n')}${dupNote}`;
+}
+
+function formatPortalOverview(data) {
+  const { customers, orders, products, search } = data;
+  const recentCustomers = customers.list.slice(0, 5).map((c) => {
+    const label = c.business ? `**${c.name}** from ${c.business}` : `**${c.name}**`;
+    return `- ${label}, joined ${fmtDate(c.joined)}${c.approved ? '' : ' _(pending)_'}`;
+  });
+
+  const topSearch = search.topSearches.slice(0, 5).map((r, i) => {
+    const conv = search.searchesToOrders.find((s) => s.normalized_search_term === r.normalized_search_term);
+    const convNote = conv?.orders ? ` (${conv.orders} orders, ${conv.conversion}% conversion)` : '';
+    return `${i + 1}. **${r.normalized_search_term}** — ${r.searches} searches${convNote}`;
+  });
+
+  const zeroSearch = search.searchesToOrders
+    .filter((r) => !r.orders)
+    .slice(0, 5)
+    .map((r) => `- **${r.normalized_search_term}** — ${r.searches} searches, 0 orders`);
+
+  const negLines = formatNegativeStockLines(products.negativeStock || [], { limit: 5 });
+
+  return `## Proto Trading — admin snapshot
+
+_Website catalogue · trade portal customers · website search — not Positill ERP. For live ERP sales ask **"What was the best seller today?"** For a SKU ask the product code._
+
+### Products (website catalogue)
+- **Live listings:** ${products.liveCount.toLocaleString('en-ZA')}
+- **Archived:** ${products.archivedCount != null ? products.archivedCount.toLocaleString('en-ZA') : '—'}
+- **With stock linked:** ${products.stockLinkedCount.toLocaleString('en-ZA')}
+
+### Customers (trade portal registrations)
+- **Registered:** ${customers.total.toLocaleString('en-ZA')} (${customers.pending} pending approval)
+${recentCustomers.length ? `\n**Recent:**\n${recentCustomers.join('\n')}` : ''}
+
+### Stock attention (website SOH)
+${products.negativeStock?.length
+    ? `**${products.negativeStock.length}** listing${products.negativeStock.length === 1 ? '' : 's'} with negative stock:\n\n${negLines}`
+    : '_No negative stock in the website catalogue._'}
+
+### Search trends (website, last 30 days)
+${topSearch.length ? topSearch.join('\n') : '_No search data yet._'}
+${zeroSearch.length ? `\n\n**Searched, no orders yet:**\n${zeroSearch.join('\n')}` : ''}
+
+### Portal orders (not POS)
+- **Total in system:** ${orders.total.toLocaleString('en-ZA')}
+- **Last 30 days:** ${orders.last30Count.toLocaleString('en-ZA')}
+
+_Apollo Today above is your decision brief. This snapshot is the portal index — ask specific questions for Positill ERP truth._`;
+}
+
 /** Creative instructions after subcategory phrase in natural-language batch requests. */
 function extractCreativePrompt(userQuery) {
   const q = String(userQuery || '').trim();
@@ -207,6 +270,13 @@ export function executeIntent(intent, data, terms = '', { limit = null, skus = [
         reply: `## Most ordered items\n\n${top.map((item, i) => `${i + 1}. **${item.name}** (${item.code}) — **${item.totalQty}** units · ${item.orderCount} orders`).join('\n')}${chartBlock('Top ordered (qty)', top.map((t) => t.code.slice(0, 12)), top.map((t) => t.totalQty))}`,
       };
     }
+
+    case 'portal_overview':
+      return {
+        source: 'live-index',
+        intent,
+        reply: formatPortalOverview(data),
+      };
 
     case 'order_summary':
       return {

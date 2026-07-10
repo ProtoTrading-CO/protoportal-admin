@@ -1,8 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { isSkuProductQuery, tryProductContextRoute } from '../../api/apollo-product-route.js';
+import { looksLikeProductTitleSubject } from '../../api/intelligence/intent-engine/classify.js';
 import { executeIntent } from '../../api/apollo-engine.js';
 import { validateIntent } from '../../api/apollo-validate.js';
-import { parseIntentHint } from '../../api/apollo-intent.js';
+import { isPortalOverviewQuery, parseIntentHint } from '../../api/apollo-intent.js';
+import { createRoutingTrace } from '../../api/apollo.js';
 
 describe('apollo chat — SKU product routing', () => {
   it('detects SKU-shaped queries', () => {
@@ -62,5 +64,114 @@ describe('apollo chat — SKU product routing', () => {
     expect(result?.intent).toBe('product.context');
     expect(result?.reply).toMatch(/PLAYING CARDS ANIMAL/);
     expect(result?.reply).not.toMatch(/No products matched/i);
+  });
+});
+
+describe('apollo chat — portal overview', () => {
+  const stubData = {
+    customers: { total: 42, pending: 3, list: [{ name: 'Derek', business: 'THE LITTLE NEST', joined: '2026-07-09', approved: true, orderCount: 0 }] },
+    orders: { total: 120, last30Count: 15, statusBreakdown: {}, recent: [] },
+    products: {
+      liveCount: 5374,
+      archivedCount: 527,
+      stockLinkedCount: 5000,
+      negativeStock: [
+        { sku: 'GEL-JBM', title: 'GELO JELLY BEARS', stockOnHand: -1033 },
+        { sku: 'GEL-BLA', title: 'GELO SOFT SWEETS BLACKBERRY', stockOnHand: -1033 },
+      ],
+      byCategory: [],
+    },
+    search: {
+      topSearches: [{ normalized_search_term: 'scarf', searches: 27 }],
+      zeroResultTerms: [],
+      searchesToOrders: [{ normalized_search_term: 'motarro', searches: 3, orders: 0, conversion: 0 }],
+    },
+  };
+
+  const overviewPrompts = [
+    'Give me a quick overview',
+    'overview',
+    'system status',
+    'dashboard',
+    'admin overview',
+    'system overview',
+    'system health',
+    "what's happening today",
+  ];
+
+  it.each(overviewPrompts)('routes "%s" to portal_overview', (query) => {
+    expect(isPortalOverviewQuery(query)).toBe(true);
+    expect(parseIntentHint(query).intent).toBe('portal_overview');
+  });
+
+  it('portal_overview uses admin framing not public website copy', () => {
+    const result = executeIntent('portal_overview', stubData);
+    expect(result.reply).toMatch(/admin snapshot/i);
+    expect(result.reply).not.toMatch(/This website is for/i);
+    expect(result.reply).toMatch(/website catalogue/i);
+    expect(result.reply).toMatch(/Positill ERP/i);
+    expect(result.reply).toMatch(/share the same website stock level/i);
+  });
+
+  it.each(overviewPrompts)('does not treat "%s" as a product title', (query) => {
+    expect(looksLikeProductTitleSubject(query)).toBe(false);
+  });
+
+  it.each(overviewPrompts)('keeps "%s" out of Product Context', async (query) => {
+    const result = await tryProductContextRoute(query, 'teacher@test.com');
+    expect(result).toBeNull();
+  });
+
+  it('does not use Product Context as an unknown-query fallback', async () => {
+    const result = await tryProductContextRoute('What should I focus on next?', 'teacher@test.com');
+    expect(result).toBeNull();
+  });
+
+  it('emits a structured routing trace without returning it to the user', () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+    const now = vi.fn()
+      .mockReturnValueOnce(100)
+      .mockReturnValueOnce(102)
+      .mockReturnValueOnce(105);
+    const trace = createRoutingTrace('Give me a quick overview', {
+      traceId: '9b2f6e5c-1234-4567-89ab-1234567890ab',
+      startedAt: '2026-07-10T09:44:00.000Z',
+      now,
+    });
+    trace.addDecision({
+      context: 'Product Context',
+      outcome: 'declined',
+      reason: 'no product entity',
+      confidence: 0.04,
+    });
+    trace.addDecision({
+      context: 'Overview Context',
+      outcome: 'accepted',
+      reason: 'portal_overview intent',
+      confidence: 0.99,
+      startedAt: 100,
+    });
+    trace.finish('portal_overview');
+
+    expect(info).toHaveBeenCalledOnce();
+    expect(info.mock.calls[0][0]).toBe('[apollo-routing]');
+    const payload = JSON.parse(info.mock.calls[0][1]);
+    expect(payload.traceId).toBe('9b2f6e5c-1234-4567-89ab-1234567890ab');
+    expect(payload.startedAt).toBe('2026-07-10T09:44:00.000Z');
+    expect(payload.final).toBe('portal_overview');
+    expect(payload.totalDurationMs).toBe(5);
+    expect(payload.decisions[0]).toMatchObject({
+      context: 'Product Context',
+      outcome: 'declined',
+      confidence: 0.04,
+      durationMs: 0,
+    });
+    expect(payload.decisions[1]).toMatchObject({
+      context: 'Overview Context',
+      outcome: 'accepted',
+      confidence: 0.99,
+      durationMs: 2,
+    });
+    info.mockRestore();
   });
 });

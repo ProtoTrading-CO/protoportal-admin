@@ -48,4 +48,25 @@ describe('formatProductContext evidence', () => {
     expect(md).toContain('erp sql');
     expect(md).toContain('98%');
   });
+
+  it('explains conflicting ERP and website stock instead of only presenting it', () => {
+    const md = formatProductContext({
+      data: {
+        code: 'ES-A-AMET',
+        liveErp: true,
+        erpDataSource: 'erp_sql',
+        erp: { title: 'EARTH STONE BEADS', onhand: 0, booked: 0, available: 0 },
+        website: { sku: 'ES-A-AMET', title: 'EARTH STONE BEADS' },
+        stock: { onHand: -29, source: 'website_stock' },
+        supplier: {},
+        status: { code: 'live', label: 'Live' },
+        evidence: {},
+        notAvailable: [],
+      },
+      meta: { source: ['erp_sql', 'website_stock'], generatedAt: '2026-07-10T09:00:00.000Z', warnings: [] },
+    });
+    expect(md).toContain('### Inventory reconciliation');
+    expect(md).toMatch(/out of sync or oversold/i);
+    expect(md).toMatch(/investigate inventory synchronisation/i);
+  });
 });

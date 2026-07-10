@@ -4,11 +4,24 @@
 import { extractSku } from './intelligence/entity-registry/detect.js';
 import { looksLikeProductTitleSubject } from './intelligence/intent-engine/classify.js';
 import { resolveIntent, resolutionToRoute } from './apollo-experience.js';
+import { isPortalOverviewQuery } from './apollo-intent.js';
 import { biRun, biFormat } from './intelligence/bi/facade.js';
 import { getApolloData, searchIndex } from './apollo-data.js';
 import { searchCacheByTitle, scoreTitleMatch } from './_stmast-cache.js';
 
 const SKU_ONLY_RE = /^\d{8,14}[?.!]*$/i;
+
+function isHighConfidenceTitleMatch(query, title, score) {
+  const q = String(query || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const candidate = String(title || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  if (!q || !candidate || !score) return false;
+  if (q === candidate) return true;
+
+  // A Product Context request must name a specific product, not merely share
+  // one weak token with a catalogue result.
+  const queryTokens = q.split(' ').filter((token) => token.length > 2);
+  return queryTokens.length >= 2 && queryTokens.every((token) => candidate.includes(token));
+}
 
 /** Queries that must never hit the keyword index first. */
 export function isSkuProductQuery(query) {
@@ -46,7 +59,8 @@ export async function resolveTitleToSku(title) {
   if (!candidates.length) return null;
 
   candidates.sort((a, b) => b.score - a.score);
-  return candidates[0].code;
+  const winner = candidates[0];
+  return isHighConfidenceTitleMatch(term, winner.title, winner.score) ? winner.code : null;
 }
 
 export async function runProductContextByCode(code, actorEmail, meta = {}) {
@@ -81,6 +95,8 @@ export async function runProductContextByCode(code, actorEmail, meta = {}) {
  * @returns {Promise<object|null>}
  */
 export async function tryProductContextRoute(userQuery, actorEmail) {
+  if (isPortalOverviewQuery(userQuery)) return null;
+
   const resolved = resolveIntent(userQuery);
 
   if (resolved?.ok && resolved.intentId === 'product_lookup') {

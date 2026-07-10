@@ -1,6 +1,8 @@
 import { requireAdminKey } from './_admin-auth.js';
+import { randomUUID } from 'node:crypto';
+import { performance } from 'node:perf_hooks';
 import { getApolloData } from './apollo-data.js';
-import { parseIntentHint, classifyIntent } from './apollo-intent.js';
+import { parseIntentHint, classifyIntent, isPortalOverviewQuery } from './apollo-intent.js';
 import { validateIntent, validateAnswer } from './apollo-validate.js';
 import { executeIntent, parseLimit } from './apollo-engine.js';
 import { detectExperienceRoute, resolveIntent, resolutionToRoute } from './apollo-experience.js';
@@ -8,6 +10,58 @@ import { biRun, biFormat, buildDailyBriefContext, formatDailyBriefContext } from
 import { tryProductContextRoute } from './apollo-product-route.js';
 
 const MODEL = 'google/gemini-2.5-flash';
+
+export function createRoutingTrace(question, {
+  traceId = randomUUID(),
+  now = () => performance.now(),
+  startedAt = new Date().toISOString(),
+} = {}) {
+  const startedAtMs = now();
+  const decisions = [];
+
+  return {
+    traceId,
+    startDecision() {
+      return now();
+    },
+    addDecision({ context, outcome, reason, confidence, startedAt: decisionStartedAt = null }) {
+      const numericConfidence = Number(confidence);
+      decisions.push({
+        context,
+        outcome,
+        reason,
+        confidence: Number.isFinite(numericConfidence)
+          ? Math.max(0, Math.min(1, numericConfidence))
+          : null,
+        durationMs: decisionStartedAt == null
+          ? 0
+          : Math.max(0, Math.round(now() - decisionStartedAt)),
+      });
+    },
+    finish(final) {
+      const payload = {
+        question: String(question || '').slice(0, 240),
+        traceId,
+        startedAt,
+        decisions,
+        final,
+        totalDurationMs: Math.max(0, Math.round(now() - startedAtMs)),
+      };
+      console.info('[apollo-routing]', JSON.stringify(payload));
+      return payload;
+    },
+  };
+}
+
+function contextName(intent) {
+  if (intent === 'product.context' || intent === 'product_lookup') return 'Product Context';
+  if (intent === 'customer.context' || intent === 'customer_lookup') return 'Customer Context';
+  if (intent === 'supplier.context' || intent === 'supplier_lookup') return 'Supplier Context';
+  if (intent === 'container.context' || intent === 'container_lookup') return 'Container Context';
+  if (intent === 'portal_overview') return 'Overview Context';
+  if (intent === 'clarify') return 'Clarification';
+  return 'Business Context';
+}
 
 function isGreeting(query) {
   const q = String(query || '').trim();
@@ -134,16 +188,6 @@ function answerFromData(data, parsed, userQuery) {
 }
 
 async function resolveQuery(userQuery, data, apiKey, { rejectIntent = '', badReply = '' } = {}) {
-  const productRoute = await tryProductContextRoute(userQuery, 'apollo');
-  if (productRoute) {
-    return {
-      reply: productRoute.reply,
-      source: productRoute.source,
-      intent: productRoute.intent,
-      batchAction: null,
-    };
-  }
-
   const hint = parseIntentHint(userQuery);
 
   let parsed = await classifyIntent(userQuery, apiKey, { rejectIntent, badReply, regexHint: hint });
@@ -211,7 +255,9 @@ async function fallbackAnswer(userQuery, data, apiKey) {
       messages: [
         {
           role: 'system',
-          content: `You are Apollo for Proto Trading admin. Answer ONLY from the live data below. Never invent numbers.
+          content: `You are Apollo for Proto Trading admin — not the public website. Answer ONLY from the live data below. Never invent numbers.
+Label each section's source: website catalogue, trade portal customers, portal orders, or website search analytics. Never open with "This website is for Proto Trading."
+For Positill ERP sales or live BLADERUNNER stock, say you need a specific question (e.g. best seller today, SKU lookup) — this snapshot is portal data only.
 Use ## headings and bullets. Do NOT include chart blocks unless the user explicitly asks for data, stats, stock levels, orders, or searches.
 When charts are requested, use:
 \`\`\`chart
@@ -293,10 +339,55 @@ export default async function handler(req, res) {
 
   try {
     const actorEmail = req.headers['x-admin-email'] || 'apollo';
+    const routingTrace = createRoutingTrace(userQuery);
 
+    // System-level prompts are deterministic. Route them before any entity
+    // resolver so a loose title match can never produce a random product.
+    if (isPortalOverviewQuery(userQuery)) {
+      routingTrace.addDecision({
+        context: 'Product Context',
+        outcome: 'declined',
+        reason: 'no product entity',
+        confidence: 0,
+      });
+      const overviewStartedAt = routingTrace.startDecision();
+      const data = await getApolloData();
+      const result = answerFromData(data, {
+        intent: 'portal_overview',
+        terms: '',
+        skus: [],
+        wantsChart: false,
+      }, userQuery);
+      routingTrace.addDecision({
+        context: 'Overview Context',
+        outcome: 'accepted',
+        reason: 'portal_overview intent',
+        confidence: 1,
+        startedAt: overviewStartedAt,
+      });
+      routingTrace.finish('portal_overview');
+      return res.status(200).json({
+        reply: result.reply,
+        source: 'live-index',
+        intent: 'portal_overview',
+        batchAction: null,
+        indexedAt: data.generatedAt,
+        indexSize: data.index.length,
+      });
+    }
+
+    const productStartedAt = routingTrace.startDecision();
     const productRoute = await tryProductContextRoute(userQuery, actorEmail);
     if (productRoute) {
+      routingTrace.addDecision({
+        context: 'Product Context',
+        outcome: 'accepted',
+        reason: productRoute.resolution?.method || 'recognized product entity',
+        confidence: productRoute.resolution?.confidence ?? 1,
+        startedAt: productStartedAt,
+      });
       const data = await getApolloData();
+      routingTrace.finish(productRoute.businessIntent || productRoute.intent);
       return res.status(200).json({
         reply: productRoute.reply,
         source: productRoute.source,
@@ -307,10 +398,26 @@ export default async function handler(req, res) {
         indexSize: data.index.length,
       });
     }
+    routingTrace.addDecision({
+      context: 'Product Context',
+      outcome: 'declined',
+      reason: 'no high-confidence product entity',
+      confidence: 0,
+      startedAt: productStartedAt,
+    });
 
+    const experienceStartedAt = routingTrace.startDecision();
     const experience = await answerFromExperience(userQuery, actorEmail);
     if (experience) {
+      routingTrace.addDecision({
+        context: contextName(experience.businessIntent || experience.intent),
+        outcome: 'accepted',
+        reason: experience.resolution?.method || 'recognized business intent/entity',
+        confidence: experience.resolution?.confidence ?? 1,
+        startedAt: experienceStartedAt,
+      });
       const data = await getApolloData();
+      routingTrace.finish(experience.businessIntent || experience.intent);
       return res.status(200).json({
         reply: experience.reply,
         source: experience.source,
@@ -321,14 +428,30 @@ export default async function handler(req, res) {
         indexSize: data.index.length,
       });
     }
+    routingTrace.addDecision({
+      context: 'Entity/Context Resolver',
+      outcome: 'declined',
+      reason: 'no recognized entity or deterministic context',
+      confidence: 0,
+      startedAt: experienceStartedAt,
+    });
 
     const data = await getApolloData();
     const rejectIntent = fix ? (previousIntent || '') : '';
+    const assistantStartedAt = routingTrace.startDecision();
     const { reply, source, intent, batchAction } = await resolveQuery(userQuery, data, apiKey, {
       rejectIntent,
       badReply: fix ? badReply : '',
     });
 
+    routingTrace.addDecision({
+      context: contextName(intent),
+      outcome: 'accepted',
+      reason: source === 'ai' ? 'general assistant fallback' : 'classified intent',
+      confidence: source === 'ai' ? 0.5 : 0.85,
+      startedAt: assistantStartedAt,
+    });
+    routingTrace.finish(intent);
     return res.status(200).json({
       reply,
       source: fix ? 'fixed' : source,

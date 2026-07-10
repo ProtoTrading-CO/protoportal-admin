@@ -11,6 +11,7 @@ const INTENTS = [
   { id: 'product_by_category', weight: 8, patterns: [/by category/i, /category breakdown/i] },
   { id: 'customer_list', weight: 10, patterns: [/who are (my|our) customers/i, /list customers/i, /all customers/i, /my customers/i] },
   { id: 'customer_pending', weight: 10, patterns: [/pending approval/i, /awaiting approval/i] },
+  { id: 'portal_overview', weight: 11, patterns: [/overview/i, /main system/i, /quick overview/i, /tell me about (?:the |proto |our )?(?:business|system)/i, /how is (?:the )?(?:business|portal) doing/i, /summary of (?:the )?(?:business|portal|system)/i] },
   { id: 'order_summary', weight: 9, patterns: [/order activity/i, /recent orders/i, /how many orders/i] },
   { id: 'search_top', weight: 9, patterns: [/top searches/i, /what are.*searching/i] },
   { id: 'search_zero', weight: 9, patterns: [/no results/i, /zero results/i, /couldn't find/i] },
@@ -22,13 +23,30 @@ const INTENTS = [
 const VALID_INTENTS = new Set([
   'order_top_items', 'product_count', 'product_negative_stock', 'product_low_stock',
   'product_high_stock', 'product_by_category', 'product_search', 'customer_list',
-  'customer_pending', 'customer_search', 'order_summary', 'search_top',
+  'customer_pending', 'customer_search', 'order_summary', 'portal_overview', 'search_top',
   'search_zero', 'search_to_orders', 'freeform',
 ]);
+
+const PORTAL_OVERVIEW_RE = /^(?:(?:give|show)\s+me\s+(?:a\s+)?)?(?:quick\s+)?(?:(?:admin|portal|system)\s+)?(?:overview|dashboard|status|health)(?:\s+please)?[?.!]*$/i;
+
+/**
+ * Narrow, deterministic system-level prompts. These must never become a
+ * product title lookup merely because a catalogue search finds a weak match.
+ */
+export function isPortalOverviewQuery(query) {
+  const q = String(query || '').trim();
+  return PORTAL_OVERVIEW_RE.test(q)
+    || /^(?:give|show)\s+me\s+(?:a\s+)?quick\s+overview(?:\s+of\s+the\s+(?:main\s+)?(?:system|portal|business))?[?.!]*$/i.test(q)
+    || /^(?:(?:what's|what\s+is)\s+happening\s+today|how\s+is\s+(?:the\s+)?(?:business|portal)\s+doing|summary\s+of\s+(?:the\s+)?(?:business|portal|system)|tell\s+me\s+about\s+(?:the\s+|proto\s+|our\s+)?(?:business|system))[?.!]*$/i.test(q);
+}
 
 export function parseIntentHint(query) {
   const q = String(query || '').trim();
   const wantsChart = /chart|barograph|bar graph|bar chart|graph|visual/i.test(q);
+
+  if (isPortalOverviewQuery(q)) {
+    return { intent: 'portal_overview', confidence: 1, wantsChart: false };
+  }
 
   if (/^\d{8,14}[?.!]*$/.test(q) || /tell me about\s+(?:sku\s+)?\d{8,14}/i.test(q)) {
     return { intent: 'product_lookup', confidence: 1, wantsChart: false, forceProductContext: true };
@@ -95,6 +113,7 @@ Known subcategory labels (match terms to these): ${subcategoryHints}
 • "how many products / catalogue size / total products" ONLY → product_count
 • "negative stock / below zero / give me N products with negative stock" → product_negative_stock (NOT product_search)
 • "lowest / least stock" → product_low_stock
+• "overview / main system / tell me about the business" → portal_overview (NOT freeform)
 • "who are customers / list customers" → customer_list
 • "pending approval" → customer_pending
 • product_search ONLY when user names a specific SKU or product keyword for lookup (NOT image editing) (terms = that keyword)
@@ -119,7 +138,7 @@ Examples:
 "who are my customers" → {"intent":"customer_list","terms":"","wantsChart":false}
 "search for drill" → {"intent":"product_search","terms":"drill","wantsChart":false}
 
-Valid intents: order_top_items, product_count, product_negative_stock, product_low_stock, product_high_stock, product_by_category, product_search, customer_list, customer_pending, customer_search, order_summary, search_top, search_zero, search_to_orders, batch_fix_images, freeform`,
+Valid intents: order_top_items, product_count, product_negative_stock, product_low_stock, product_high_stock, product_by_category, product_search, customer_list, customer_pending, customer_search, order_summary, portal_overview, search_top, search_zero, search_to_orders, batch_fix_images, freeform`,
         },
         { role: 'user', content: query },
       ],

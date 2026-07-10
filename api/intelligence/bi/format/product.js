@@ -9,6 +9,22 @@ function formatEvidenceLine(label, field) {
   return `- **${label}:** ${field.value} _(${src} · ${conf} · ${at})_`;
 }
 
+function stockReconciliationInsight(data) {
+  const erpOnHand = Number(data.erp?.onhand);
+  const websiteStock = Number(data.stock?.onHand);
+  if (!Number.isFinite(erpOnHand) || !Number.isFinite(websiteStock)) return null;
+
+  if (erpOnHand === 0 && websiteStock < 0) {
+    return 'ERP reports zero stock while website inventory is negative. This suggests website inventory is out of sync or oversold; investigate inventory synchronisation before relying on the website figure.';
+  }
+
+  if (erpOnHand !== websiteStock) {
+    return `ERP on hand (${erpOnHand}) and website inventory (${websiteStock}) differ. Confirm the inventory synchronisation before acting on the website stock figure.`;
+  }
+
+  return null;
+}
+
 export function formatProductContext(envelope) {
   const { data, meta } = envelope;
   if (!data) return 'No product code provided.';
@@ -50,6 +66,11 @@ export function formatProductContext(envelope) {
     lines.push(`- **Stock on hand:** **${data.stock.onHand}** units`);
   } else {
     lines.push('- **Stock on hand:** not linked');
+  }
+
+  const reconciliation = stockReconciliationInsight(data);
+  if (reconciliation) {
+    lines.push('', '### Inventory reconciliation', reconciliation);
   }
 
   if (data.supplier?.name) lines.push(`- **Supplier:** ${data.supplier.name}`);
