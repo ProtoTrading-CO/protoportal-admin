@@ -19,7 +19,9 @@ import {
   focusTypesPresent,
   focusViewAllQuery,
   focusShowsViewAll,
+  buildBuyingOps,
   buildOrderOps,
+  buildSupplierOps,
   buildWebsiteOps,
 } from '../lib/apolloTodayPresentation.js';
 
@@ -61,6 +63,14 @@ function FocusCard({ item, onAsk }) {
   const viewAll = focusShowsViewAll(item);
   const viewAllQuery = focusViewAllQuery(item);
   const askQuery = viewAll ? viewAllQuery : focusViewAllQuery(item);
+  const openUrl = item.url || '';
+  const handleAction = () => {
+    if (openUrl) {
+      window.location.href = openUrl;
+      return;
+    }
+    if (askQuery) onAsk?.(askQuery);
+  };
 
   return (
     <article className={`apollo-today-focus-card apollo-today-focus-card--${item.severity || 'attention'}`}>
@@ -83,12 +93,16 @@ function FocusCard({ item, onAsk }) {
         {item.action}
       </p>
       <div className="apollo-today-focus-foot">
-        {viewAll && viewAllQuery ? (
-          <button type="button" className="apollo-today-link-btn" onClick={() => onAsk?.(viewAllQuery)}>
+        {openUrl ? (
+          <button type="button" className="apollo-today-link-btn" onClick={handleAction}>
+            Open <ArrowRight size={12} />
+          </button>
+        ) : viewAll && viewAllQuery ? (
+          <button type="button" className="apollo-today-link-btn" onClick={handleAction}>
             View all <ArrowRight size={12} />
           </button>
         ) : askQuery ? (
-          <button type="button" className="apollo-today-link-btn" onClick={() => onAsk?.(askQuery)}>
+          <button type="button" className="apollo-today-link-btn" onClick={handleAction}>
             Ask Apollo <ArrowRight size={12} />
           </button>
         ) : <span />}
@@ -104,6 +118,7 @@ function HealthPulse({ item }) {
     inventory: Package,
     website: Globe,
     crm: Users,
+    memory: Clock,
   };
   const Icon = icons[item.key] || Package;
   return (
@@ -141,9 +156,16 @@ function OpsCard({ title, icon: Icon, empty, children }) {
   );
 }
 
-function OpsRow({ title, meta, severity, onClick }) {
+function OpsRow({ title, meta, severity, onClick, url }) {
+  const handleClick = () => {
+    if (url) {
+      window.location.href = url;
+      return;
+    }
+    onClick?.();
+  };
   return (
-    <button type="button" className={`apollo-today-row apollo-today-row--${severity || 'info'}`} onClick={onClick}>
+    <button type="button" className={`apollo-today-row apollo-today-row--${severity || 'info'}`} onClick={handleClick}>
       <SeverityDot severity={severity} />
       <span className="apollo-today-row-title">{title}</span>
       <span className="apollo-today-row-meta">{meta}</span>
@@ -187,6 +209,8 @@ export default function ApolloToday({ context, meta, loading, onAsk, onRefresh, 
   const productItems = filterProductOps(context.productAlerts?.items || [], focusTypes);
   const inventoryRows = filterInventoryOps(inv, focusTypes);
   const orderRows = buildOrderOps(context, focusTypes);
+  const buyingRows = buildBuyingOps(context);
+  const supplierRows = buildSupplierOps(context);
   const websiteRows = buildWebsiteOps(context, focusTypes);
 
   return (
@@ -297,7 +321,34 @@ export default function ApolloToday({ context, meta, loading, onAsk, onRefresh, 
                 title={o.title}
                 meta={o.meta}
                 severity={o.severity}
+                url={o.url}
                 onClick={() => onAsk?.(o.query)}
+              />
+            ))}
+          </OpsCard>
+
+          <OpsCard title="Buying" icon={Package} empty={!buyingRows.length ? 'No buying reviews due.' : null}>
+            {buyingRows.map((b) => (
+              <OpsRow
+                key={b.id}
+                title={b.title}
+                meta={b.meta}
+                severity={b.severity}
+                url={b.url}
+                onClick={() => onAsk?.(b.query)}
+              />
+            ))}
+          </OpsCard>
+
+          <OpsCard title="Suppliers" icon={Users} empty={!supplierRows.length ? 'No supplier follow-ups due.' : null}>
+            {supplierRows.map((s) => (
+              <OpsRow
+                key={s.id}
+                title={s.title}
+                meta={s.meta}
+                severity={s.severity}
+                url={s.url}
+                onClick={() => onAsk?.(s.query)}
               />
             ))}
           </OpsCard>

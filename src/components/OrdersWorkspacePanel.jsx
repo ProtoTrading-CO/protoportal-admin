@@ -178,7 +178,7 @@ export default function OrdersWorkspacePanel({ initialWorkspaceId = '', onShowTo
       const row = await addOrderWorkspacePromise(workspace.id, promise);
       selectWorkspace(row, { replace: true });
       setPromise({ text: '', dueDate: todayPlus(1) });
-      toast('Promise recorded');
+      toast('Commitment recorded');
     } catch (err) {
       toast(err.message || 'Could not record promise', 'error');
     } finally {
@@ -339,11 +339,11 @@ export default function OrdersWorkspacePanel({ initialWorkspaceId = '', onShowTo
               </section>
 
               <section className="ow-card">
-                <h3>Promises</h3>
+                <h3>Commitments</h3>
                 <div className="ow-line-form ow-line-form--promise">
                   <input className="adm-field-input" placeholder="We'll quote tomorrow..." value={promise.text} onChange={(e) => setPromise((v) => ({ ...v, text: e.target.value }))} />
                   <input className="adm-field-input" type="date" value={promise.dueDate} onChange={(e) => setPromise((v) => ({ ...v, dueDate: e.target.value }))} />
-                  <button type="button" className="adm-btn-green" onClick={() => void addPromise()} disabled={saving === 'promise'}>Record promise</button>
+                  <button type="button" className="adm-btn-green" onClick={() => void addPromise()} disabled={saving === 'promise'}>Record commitment</button>
                 </div>
                 {(workspace.promises || []).map((item) => (
                   <div key={item.id} className="ow-action-row"><div><strong>{item.promise_text}</strong><span>Due {fmtDate(item.due_date)} · {item.status}</span></div></div>
@@ -376,7 +376,7 @@ export default function OrdersWorkspacePanel({ initialWorkspaceId = '', onShowTo
           <section className="ow-card">
             <h3>Outstanding Actions</h3>
             <div className="ow-metric"><CheckCircle size={15} /> {outstanding.tasks.length} open tasks</div>
-            <div className="ow-metric"><ShieldCheck size={15} /> {outstanding.promises.length} open promises</div>
+            <div className="ow-metric"><ShieldCheck size={15} /> {outstanding.promises.length} open commitments</div>
             <div className="ow-metric"><Bell size={15} /> {outstanding.reminders.length} open reminders</div>
           </section>
           <section className="ow-card">

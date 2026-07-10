@@ -22,6 +22,9 @@ export function greetingForHour(h) {
 
 function summarizeFocusItem(item) {
   const title = item.title || item.label || '';
+  if (String(item.type || '').startsWith('notification_')) {
+    return title.charAt(0).toLowerCase() + title.slice(1);
+  }
   switch (item.type) {
     case 'negative_stock':
       return title.toLowerCase().includes('negative') ? title.charAt(0).toLowerCase() + title.slice(1) : `negative stock needs review (${title})`;
@@ -56,8 +59,20 @@ export function buildExecutiveSummary(context, { userName, hour = new Date().get
   const focus = context.focusToday || [];
   const health = context.businessHealth || [];
   const changed = context.whatChangedSinceYesterday || [];
+  const notifications = context.notifications?.counts?.total || 0;
 
   const sentences = [`${greeting} ${name}.`];
+
+  if (notifications > 0) {
+    sentences.push(
+      notifications === 1
+        ? 'One operational item is in danger of being forgotten today.'
+        : `${notifications} operational items are in danger of being forgotten today.`,
+    );
+    const highlights = focus.slice(0, 2).map(summarizeFocusItem);
+    if (highlights.length) sentences.push(`${highlights.join(', ')}.`);
+    return sentences.slice(0, 3);
+  }
 
   if (!focus.length) {
     sentences.push(
@@ -128,6 +143,7 @@ const FOCUS_VIEW_ALL = {
 };
 
 export function focusViewAllQuery(item) {
+  if (item.query) return item.query;
   const mapped = FOCUS_VIEW_ALL[item.type];
   if (typeof mapped === 'function') return mapped(item);
   return mapped || null;
@@ -182,6 +198,20 @@ export function filterProductOps(items, focusTypes) {
 }
 
 export function buildOrderOps(context, focusTypes) {
+  const focusNotificationIds = new Set((context?.focusToday || []).map((item) => item.notificationId).filter(Boolean));
+  const notificationRows = (context?.notifications?.items || [])
+    .filter((item) => ['orders_overdue', 'inactive_orders', 'open_tasks', 'overdue_commitments', 'due_reminders', 'approaching_due_dates'].includes(item.category))
+    .filter((item) => !focusNotificationIds.has(item.id || item.dedupeKey))
+    .slice(0, 4)
+    .map((item) => ({
+      id: item.id || item.dedupeKey,
+      title: item.title,
+      meta: item.detail || item.category,
+      severity: item.severity,
+      query: null,
+      url: item.actionUrl,
+    }));
+  if (notificationRows.length) return notificationRows;
   if (focusTypes.has('orders_review')) return [];
   return (context?.orderAlerts?.needingReview || []).slice(0, 4).map((o) => ({
     id: o.id,
@@ -190,6 +220,36 @@ export function buildOrderOps(context, focusTypes) {
     severity: 'attention',
     query: 'Orders needing review',
   }));
+}
+
+export function buildBuyingOps(context) {
+  const focusNotificationIds = new Set((context?.focusToday || []).map((item) => item.notificationId).filter(Boolean));
+  return (context?.buyingAlerts?.items || [])
+    .filter((item) => !focusNotificationIds.has(item.id || item.dedupeKey))
+    .slice(0, 4)
+    .map((item) => ({
+      id: item.id || item.dedupeKey,
+      title: item.title,
+      meta: item.detail,
+      severity: item.severity,
+      query: item.payload?.query || null,
+      url: item.actionUrl || '',
+    }));
+}
+
+export function buildSupplierOps(context) {
+  const focusNotificationIds = new Set((context?.focusToday || []).map((item) => item.notificationId).filter(Boolean));
+  return (context?.supplierAlerts?.items || [])
+    .filter((item) => !focusNotificationIds.has(item.id || item.dedupeKey))
+    .slice(0, 4)
+    .map((item) => ({
+      id: item.id || item.dedupeKey,
+      title: item.title,
+      meta: item.detail,
+      severity: item.severity,
+      query: item.payload?.query || item.title.replace(/^Supplier follow-up:\s*/i, ''),
+      url: item.actionUrl || '',
+    }));
 }
 
 export function buildWebsiteOps(context, focusTypes) {

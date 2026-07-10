@@ -5,6 +5,9 @@ import {
   displayNameFromEmail,
   focusShowsViewAll,
   filterInventoryOps,
+  buildBuyingOps,
+  buildOrderOps,
+  buildSupplierOps,
 } from '../src/lib/apolloTodayPresentation.js';
 
 const sampleContext = {
@@ -39,6 +42,18 @@ describe('apolloTodayPresentation', () => {
     expect(lines[2]).toMatch(/\./);
   });
 
+  it('leads with danger-of-forgetting notifications when present', () => {
+    const lines = buildExecutiveSummary({
+      ...sampleContext,
+      notifications: { counts: { total: 2 } },
+      focusToday: [
+        { type: 'notification_overdue_commitments', title: 'Commitment overdue: quote Addie' },
+      ],
+    }, { userName: 'Gee', hour: 9 });
+    expect(lines[1]).toMatch(/danger of being forgotten/i);
+    expect(lines[2]).toMatch(/commitment overdue/i);
+  });
+
   it('adds CRM pulse from customer alerts', () => {
     const health = businessHealthWithCrm({
       businessHealth: sampleContext.businessHealth,
@@ -57,5 +72,72 @@ describe('apolloTodayPresentation', () => {
     const focusTypes = new Set(['negative_stock']);
     const rows = filterInventoryOps(sampleContext.inventoryAlerts, focusTypes);
     expect(rows.every((r) => r.kind !== 'negative')).toBe(true);
+  });
+
+  it('turns notifications into order ops with workspace URLs', () => {
+    const rows = buildOrderOps({
+      notifications: {
+        items: [{
+          id: 'n1',
+          category: 'inactive_orders',
+          title: 'Addie order inactive',
+          detail: 'Last updated 2 days ago',
+          severity: 'attention',
+          actionUrl: '/apollo/orders/abc',
+        }],
+      },
+      focusToday: [],
+      orderAlerts: { needingReview: [] },
+    }, new Set());
+    expect(rows[0]).toMatchObject({
+      title: 'Addie order inactive',
+      url: '/apollo/orders/abc',
+    });
+  });
+
+  it('keeps buying and supplier advisory rows separate from orders', () => {
+    const context = {
+      focusToday: [],
+      notifications: {
+        items: [{
+          id: 'order-risk',
+          category: 'inactive_orders',
+          title: 'Addie order inactive',
+          detail: 'Last updated 2 days ago',
+          severity: 'attention',
+          actionUrl: '/apollo/orders/abc',
+        }, {
+          id: 'buying-risk',
+          category: 'buying_review_due',
+          title: 'Buying review: Leather Wallet',
+          detail: '8616700111 · Motarro · stock 0',
+          severity: 'attention',
+          payload: { query: 'Show product 8616700111' },
+        }],
+      },
+      buyingAlerts: {
+        items: [{
+          id: 'buying-risk',
+          title: 'Buying review: Leather Wallet',
+          detail: '8616700111 · Motarro · stock 0',
+          severity: 'attention',
+          payload: { query: 'Show product 8616700111' },
+        }],
+      },
+      supplierAlerts: {
+        items: [{
+          id: 'supplier-risk',
+          title: 'Supplier follow-up: Motarro',
+          detail: '3 products need stock or buying attention',
+          severity: 'attention',
+          payload: { supplier: 'Motarro', query: 'Motarro' },
+        }],
+      },
+      orderAlerts: { needingReview: [] },
+    };
+
+    expect(buildOrderOps(context, new Set()).map((row) => row.id)).toEqual(['order-risk']);
+    expect(buildBuyingOps(context)[0]).toMatchObject({ id: 'buying-risk', query: 'Show product 8616700111' });
+    expect(buildSupplierOps(context)[0]).toMatchObject({ id: 'supplier-risk', query: 'Motarro' });
   });
 });

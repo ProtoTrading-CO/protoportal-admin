@@ -6,7 +6,7 @@
 
 ## Current Release
 
-Apollo Operational Release 1.0
+Apollo Operational Release 1.1
 
 ## Current Branch
 
@@ -14,11 +14,11 @@ Apollo Operational Release 1.0
 
 ## Current Focus
 
-Orders Workspace
+Notifications + Daily Brief + Buying/Supplier advisory signals
 
 ## Next Milestone
 
-Apollo Operational Release 1.1
+Apollo Operational Release 1.2
 
 ## Guiding Question
 

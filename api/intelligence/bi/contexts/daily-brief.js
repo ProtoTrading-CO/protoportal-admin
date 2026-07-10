@@ -3,6 +3,9 @@ import { contextEnvelope, daysSince, mergeContextMeta } from './_helpers.js';
 import { buildInventoryContext } from './inventory.js';
 import { buildCustomerAlertsContext } from './customer.js';
 import { startOfToday, startOfYesterday } from '../shared/format.js';
+import { getPortalAdminClient } from '../../../_site-config.js';
+import { generateApolloNotifications } from '../../../apollo-notifications.js';
+import { buildBuyingSupplierNotifications, notificationToFocus } from '../../../_apollo-notifications-core.js';
 
 const REVIEW_STATUSES = new Set(['pending', 'order in progress']);
 const LARGE_ORDER_ZAR = 10_000;
@@ -19,11 +22,13 @@ export async function buildDailyBriefContext(ctx = {}) {
     listingsRes,
     inventoryEnv,
     customerAlertsEnv,
+    notificationsEnv,
   ] = await Promise.all([
     executeQuery('portal.orders_recent', { limit: 100 }, qCtx),
     executeQuery('stock.listings_since', { since: yesterday.toISOString(), limit: 50 }, qCtx),
     buildInventoryContext({ type: 'all', limit: 10, threshold: 10 }, qCtx),
     buildCustomerAlertsContext({ limit: 25 }, qCtx),
+    loadOperationalNotifications(),
   ]);
 
   if (!ordersRes.ok) return ordersRes;
@@ -41,19 +46,34 @@ export async function buildDailyBriefContext(ctx = {}) {
 
   const inventory = inventoryEnv.data;
   const customerAlerts = customerAlertsEnv.data;
+  const notifications = notificationsEnv;
   const listingsUpdated = listingsRes.data?.listings || [];
 
   const customerInsights = buildCustomerInsights(orders);
   const productItems = buildProductItems(listingsUpdated, inventory);
   const customerItems = buildCustomerItems(customerAlerts, customerInsights, ordersYesterday);
+  const buyingSupplierNotifications = await loadBuyingSupplierNotifications(inventory, qCtx);
+  const combinedNotifications = {
+    items: [...(notifications.items || []), ...buyingSupplierNotifications]
+      .sort((a, b) => (b.priorityScore || 0) - (a.priorityScore || 0)),
+  };
+  combinedNotifications.counts = countNotifications(combinedNotifications.items);
+  combinedNotifications.businessHealthScore = scoreNotifications(combinedNotifications.items);
 
-  const focusToday = buildFocusToday({
+  const notificationFocus = (combinedNotifications.items || [])
+    .slice(0, 4)
+    .map((item, index) => notificationToFocus(item, index + 1));
+
+  const focusToday = [
+    ...notificationFocus,
+    ...buildFocusToday({
     inventory,
     customerAlerts,
     needsReview,
     customerInsights,
     listingsUpdated,
-  }).slice(0, 5);
+    }).map((item) => ({ ...item, priority: item.priority + notificationFocus.length })),
+  ].slice(0, 5);
 
   const quietSignals = buildQuietSignals({
     ordersYesterday,
@@ -76,6 +96,8 @@ export async function buildDailyBriefContext(ctx = {}) {
     inventory,
     needsReview,
     listingsUpdated,
+    notifications,
+    combinedNotifications,
   });
 
   const context = {
@@ -90,6 +112,12 @@ export async function buildDailyBriefContext(ctx = {}) {
       summary: buildYesterdaySummary(ordersYesterday, listingsUpdated, customerAlerts),
     },
     focusToday,
+    notifications: {
+      guidingQuestion: 'What is in danger of being forgotten today?',
+      businessHealthScore: combinedNotifications.businessHealthScore,
+      counts: combinedNotifications.counts,
+      items: combinedNotifications.items.slice(0, 20),
+    },
     inventoryAlerts: {
       negative: inventory.lists.negative,
       low: inventory.lists.low,
@@ -108,6 +136,13 @@ export async function buildDailyBriefContext(ctx = {}) {
       needingReview: needsReview.slice(0, 10),
       count: needsReview.length,
       largeRecent: customerInsights.largeRecent,
+      notifications: combinedNotifications.items.filter((item) => item.category?.includes('order')).slice(0, 10),
+    },
+    buyingAlerts: {
+      items: combinedNotifications.items.filter((item) => item.category === 'buying_review_due').slice(0, 10),
+    },
+    supplierAlerts: {
+      items: combinedNotifications.items.filter((item) => item.category === 'supplier_followups').slice(0, 10),
     },
     quietSignals,
     workspaces: {
@@ -135,9 +170,56 @@ export async function buildDailyBriefContext(ctx = {}) {
     listingsRes,
     inventoryEnv,
     customerAlertsEnv,
+    { meta: { source: ['apollo_notifications'], generatedAt: new Date().toISOString(), warnings: [] } },
   ]);
 
   return contextEnvelope('daily_brief', context, meta, 'brief.morning');
+}
+
+async function loadOperationalNotifications() {
+  try {
+    return await generateApolloNotifications({
+      supabase: getPortalAdminClient(),
+      persist: false,
+    });
+  } catch (err) {
+    console.warn('daily-brief notifications unavailable:', err?.message || err);
+    return {
+      items: [],
+      counts: { total: 0, urgent: 0, attention: 0, byCategory: {} },
+      businessHealthScore: 10,
+    };
+  }
+}
+
+async function loadBuyingSupplierNotifications(inventory, ctx) {
+  let sales = null;
+  try {
+    const res = await executeQuery('erp.top_line_items', { period: 'last_week', scope: 'top_sellers', limit: 15 }, ctx);
+    if (res.ok) sales = res.data;
+  } catch (err) {
+    console.warn('daily-brief buying sales signals unavailable:', err?.message || err);
+  }
+  return buildBuyingSupplierNotifications({ inventory, sales });
+}
+
+function countNotifications(items = []) {
+  const counts = { total: items.length, urgent: 0, attention: 0, byCategory: {} };
+  for (const item of items) {
+    if (item.severity === 'urgent') counts.urgent += 1;
+    if (item.severity === 'attention') counts.attention += 1;
+    counts.byCategory[item.category] = (counts.byCategory[item.category] || 0) + 1;
+  }
+  return counts;
+}
+
+function scoreNotifications(items = []) {
+  const penalty = items.reduce((sum, item) => {
+    if (item.severity === 'urgent') return sum + 0.45;
+    if (item.severity === 'attention') return sum + 0.22;
+    return sum + 0.08;
+  }, 0);
+  return Math.max(0, Math.round((10 - penalty) * 10) / 10);
 }
 
 function buildWhatChangedSinceYesterday({ ordersYesterday, ordersYesterdayTotal, listingsUpdated, customerAlerts }) {
@@ -180,7 +262,7 @@ function buildWhatChangedSinceYesterday({ ordersYesterday, ordersYesterdayTotal,
   return lines;
 }
 
-function buildBusinessHealth({ ordersYesterday, ordersYesterdayTotal, customerAlerts, inventory, needsReview, listingsUpdated }) {
+function buildBusinessHealth({ ordersYesterday, ordersYesterdayTotal, customerAlerts, inventory, needsReview, listingsUpdated, combinedNotifications }) {
   const neg = (inventory.lists.negative || []).length;
   const low = (inventory.lists.low || []).length;
   const zero = (inventory.lists.zero || []).length;
@@ -220,11 +302,24 @@ function buildBusinessHealth({ ordersYesterday, ordersYesterdayTotal, customerAl
     : 'No changes';
   const websiteSeverity = listingsUpdated.length ? 'info' : 'healthy';
 
+  const notifCount = combinedNotifications?.counts?.total || 0;
+  const urgent = combinedNotifications?.counts?.urgent || 0;
+  let memoryStatus = 'Nothing at risk';
+  let memorySeverity = 'healthy';
+  if (urgent) {
+    memoryStatus = `${urgent} urgent reminder${urgent === 1 ? '' : 's'}`;
+    memorySeverity = 'urgent';
+  } else if (notifCount) {
+    memoryStatus = `${notifCount} item${notifCount === 1 ? '' : 's'} to remember`;
+    memorySeverity = 'attention';
+  }
+
   return [
     { key: 'sales', label: 'Sales', status: salesStatus, hint: salesHint, severity: ordersYesterday.length ? 'healthy' : 'info' },
     { key: 'customers', label: 'Customers', status: customerStatus, severity: customerSeverity },
     { key: 'inventory', label: 'Inventory', status: inventoryStatus, severity: inventorySeverity },
     { key: 'website', label: 'Website', status: websiteStatus, severity: websiteSeverity },
+    { key: 'memory', label: 'Memory', status: memoryStatus, hint: combinedNotifications?.businessHealthScore != null ? `${combinedNotifications.businessHealthScore}/10` : null, severity: memorySeverity },
   ];
 }
 
