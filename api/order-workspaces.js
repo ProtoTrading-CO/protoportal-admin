@@ -145,6 +145,35 @@ export async function createWorkspace(supabase, { actor, command = '', customerQ
   return { row: await loadWorkspace(supabase, workspace.id) };
 }
 
+export async function addWorkspaceLine(supabase, workspaceId, { actor, line }) {
+  const normalized = normalizeLine(line);
+  if (!normalized.sku && !normalized.description) {
+    throw new Error('Product line needs SKU or description');
+  }
+  const { data, error } = await supabase.from('order_workspace_lines').insert({
+    workspace_id: workspaceId,
+    sku: normalized.sku,
+    description: normalized.description,
+    requested_qty: normalized.requestedQty,
+    confirmed_qty: normalized.confirmedQty,
+    status: normalized.status,
+    supplier: normalized.supplier,
+    price: normalized.price,
+    availability: normalized.availability,
+    created_by: actor,
+  }).select('id').single();
+  if (error) throw error;
+  await touchWorkspace(supabase, workspaceId);
+  await writeTimeline(supabase, workspaceId, {
+    actor,
+    eventType: 'line_added',
+    summary: `Product line added: ${normalized.sku || normalized.description}`,
+    refTable: 'order_workspace_lines',
+    refId: data.id,
+  });
+  return loadWorkspace(supabase, workspaceId);
+}
+
 async function touchWorkspace(supabase, id, patch = {}) {
   const { error } = await supabase
     .from('order_workspaces')

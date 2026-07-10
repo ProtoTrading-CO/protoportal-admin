@@ -243,6 +243,7 @@ export default function ApolloPanel({ onShowToast }) {
   const [userEmail, setUserEmail] = useState(null);
   const scrollRef = useRef(null);
   const askRef = useRef(null);
+  const proposedActionRef = useRef(null);
 
   useEffect(() => {
     void getVerifiedSession().then((session) => {
@@ -295,6 +296,7 @@ export default function ApolloPanel({ onShowToast }) {
   const clearChat = useCallback(() => {
     setMessages([]);
     setChatExpanded(false);
+    proposedActionRef.current = null;
     try { sessionStorage.removeItem(APOLLO_STORAGE_KEY); } catch {}
   }, []);
 
@@ -337,6 +339,7 @@ export default function ApolloPanel({ onShowToast }) {
           fix,
           badReply,
           previousIntent,
+          proposedAction: proposedActionRef.current,
         }),
       });
       const json = await res.json();
@@ -351,7 +354,14 @@ export default function ApolloPanel({ onShowToast }) {
         content: replyText,
         source: json.source,
         intent: json.intent,
+        proposedAction: json.proposedAction || null,
       };
+
+      if (json.intent === 'order_workspace_cancelled') {
+        proposedActionRef.current = null;
+      } else if (json.proposedAction) {
+        proposedActionRef.current = json.proposedAction;
+      }
 
       setMessages((prev) => (
         fix || replaceLast ? [...prev.slice(0, -1), assistantMsg] : [...prev, assistantMsg]

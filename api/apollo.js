@@ -9,8 +9,7 @@ import { detectExperienceRoute, resolveIntent, resolutionToRoute } from './apoll
 import { biRun, biFormat, buildDailyBriefContext, formatDailyBriefContext } from './intelligence/bi/facade.js';
 import { tryProductContextRoute } from './apollo-product-route.js';
 import { getPortalAdminClient } from './_site-config.js';
-import { createWorkspace } from './order-workspaces.js';
-import { parseOrderCommand } from './_order-workspace-core.js';
+import { handleApolloAction } from './intelligence/apollo-action-engine/index.js';
 
 const MODEL = 'google/gemini-2.5-flash';
 
@@ -54,33 +53,6 @@ export function createRoutingTrace(question, {
       return payload;
     },
   };
-}
-
-function formatOrderWorkspaceCreated(row) {
-  const customer = row?.customer?.customer_name || 'the customer';
-  const link = `/apollo/orders/${row.id}`;
-  return `## Order Workspace created
-
-Draft workspace created for **${customer}**.
-
-- **Status:** ${row.status}
-- **Workspace:** ${link}
-
-Apollo will now remember tasks, promises, reminders, product lines, notes, and every timeline event for this order.`;
-}
-
-function formatOrderAmbiguity(matches = []) {
-  const lines = matches.slice(0, 6).map((c, i) => {
-    const name = c.business_name || c.name || c.email || c.id;
-    const contact = c.contact_name ? ` — ${c.contact_name}` : '';
-    const email = c.email ? ` (${c.email})` : '';
-    return `${i + 1}. **${name}**${contact}${email}`;
-  });
-  return `## Which customer?
-
-I found more than one possible customer. Choose the customer before I create the order workspace:
-
-${lines.join('\n')}`;
 }
 
 function contextName(intent) {
@@ -346,7 +318,7 @@ export default async function handler(req, res) {
 
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { messages = [], fix = false, badReply = '', previousIntent = '' } = req.body || {};
+  const { messages = [], fix = false, badReply = '', previousIntent = '', proposedAction = null, confirmAction = false } = req.body || {};
   if (!Array.isArray(messages) || !messages.length) {
     return res.status(400).json({ error: 'messages array required' });
   }
@@ -355,32 +327,20 @@ export default async function handler(req, res) {
   const userQuery = String(lastUser?.content || '').trim();
   if (!userQuery) return res.status(400).json({ error: 'Empty question' });
 
-  const orderCommand = parseOrderCommand(userQuery);
-  if (orderCommand) {
-    try {
-      const actorEmail = req.headers['x-admin-email'] || 'apollo';
-      const result = await createWorkspace(getPortalAdminClient(), {
-        actor: actorEmail,
-        command: orderCommand.command,
-        customerQuery: orderCommand.customerQuery,
-      });
-      if (result.ambiguous) {
-        return res.status(200).json({
-          reply: formatOrderAmbiguity(result.matches),
-          source: 'order.workspace',
-          intent: 'order_workspace_disambiguation',
-          matches: result.matches,
-        });
-      }
-      return res.status(200).json({
-        reply: formatOrderWorkspaceCreated(result.row),
-        source: 'order.workspace',
-        intent: 'order_workspace_create',
-        workspace: result.row,
-      });
-    } catch (err) {
-      return res.status(400).json({ error: err.message || 'Could not create order workspace' });
+  try {
+    const actorEmail = req.headers['x-admin-email'] || 'apollo';
+    const actionResponse = await handleApolloAction({
+      query: userQuery,
+      proposedAction,
+      confirmAction,
+      supabase: getPortalAdminClient(),
+      actor: actorEmail,
+    });
+    if (actionResponse) {
+      return res.status(200).json(actionResponse);
     }
+  } catch (err) {
+    return res.status(400).json({ error: err.message || 'Apollo action failed' });
   }
 
   const apiKey = process.env.OPENROUTER_API_KEY;
