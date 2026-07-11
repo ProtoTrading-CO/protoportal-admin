@@ -9,7 +9,7 @@ const SEVERITY = {
 };
 
 const REASONS = {
-  negative: 'Stock below zero — fulfilment risk',
+  negative: 'May be temporary during GRV processing — investigate only if it persists',
   low: 'Stock at or below reorder threshold',
   zero: 'Live on website with zero stock',
   high: 'Excess stock — consider promotion or transfer',

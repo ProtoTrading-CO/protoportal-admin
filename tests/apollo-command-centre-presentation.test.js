@@ -291,8 +291,16 @@ describe('apolloCommandCentrePresentation', () => {
   });
 
   it('maps stock and supplier events to scan-friendly badges', () => {
-    expect(buildEventBadge({ title: '4+ products with negative stock', category: 'negative_stock' })?.label)
-      .toBe('NEGATIVE STOCK');
+    expect(buildEventBadge({
+      title: 'Stock awaiting GRV: 8612300456 · BALL',
+      category: 'stock_timing',
+      payload: { negativeStockClass: 'temporary_timing', stockBucket: 'negative_timing' },
+    })?.label).toBe('STOCK AWAITING GRV');
+    expect(buildEventBadge({
+      title: 'Stock discrepancy: 8612300456 · BALL',
+      category: 'negative_stock_investigation',
+      payload: { negativeStockClass: 'investigate' },
+    })?.label).toBe('INVENTORY INVESTIGATION');
     expect(buildEventBadge({ title: '8612300456 · BALL low stock', payload: { stockBucket: 'low' } })?.label)
       .toBe('LOW STOCK');
     expect(buildEventBadge({ title: 'Supplier follow-up: Motarro', category: 'supplier_followups' })?.label)

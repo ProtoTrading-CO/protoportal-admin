@@ -6,6 +6,7 @@ import { startOfToday, startOfYesterday } from '../shared/format.js';
 import { getPortalAdminClient } from '../../../_site-config.js';
 import { generateApolloNotifications, loadDailyBriefValidationScore } from '../../../apollo-notifications.js';
 import { notificationToFocus } from '../../../_apollo-notifications-core.js';
+import { summarizeNegativeStock } from '../../../_apollo-negative-stock-rules.js';
 
 const REVIEW_STATUSES = new Set(['pending', 'order in progress']);
 const LARGE_ORDER_ZAR = 10_000;
@@ -298,9 +299,13 @@ function buildBusinessHealth({ ordersYesterday, ordersYesterdayTotal, customerAl
 
   let inventoryStatus = 'Stable';
   let inventorySeverity = 'healthy';
-  if (neg) {
-    inventoryStatus = `${neg} negative stock`;
+  const negativeSummary = summarizeNegativeStock(inventory.lists?.negative || []);
+  if (negativeSummary.investigate.length) {
+    inventoryStatus = `${negativeSummary.investigate.length} stock discrepanc${negativeSummary.investigate.length === 1 ? 'y' : 'ies'} need investigation`;
     inventorySeverity = 'urgent';
+  } else if (negativeSummary.timing.length) {
+    inventoryStatus = `${negativeSummary.timing.length} product${negativeSummary.timing.length === 1 ? '' : 's'} awaiting GRV`;
+    inventorySeverity = 'info';
   } else if (invAlerts) {
     inventoryStatus = `${invAlerts} stock alert${invAlerts === 1 ? '' : 's'}`;
     inventorySeverity = 'attention';
@@ -491,25 +496,31 @@ function buildCustomerItems(customerAlerts, customerInsights, ordersYesterday) {
   return items.slice(0, 8);
 }
 
-function buildFocusToday({ inventory, customerAlerts, needsReview, customerInsights, listingsUpdated = [] }) {
+function buildFocusToday({ inventory, customerAlerts, needsReview, customerInsights, listingsUpdated = [], sales = null }) {
   const focus = [];
   const neg = inventory.lists.negative || [];
   const zero = inventory.lists.zero || [];
   const pending = customerAlerts.pending || [];
   const inactive = customerInsights.inactiveHighValue[0];
+  const negativeSummary = summarizeNegativeStock(neg, { sales });
 
-  if (neg.length) {
-    const title = `${neg.length}+ products with negative stock`;
+  if (negativeSummary.investigate.length) {
+    const first = negativeSummary.investigate[0];
+    const count = negativeSummary.investigate.length;
+    const title = count === 1
+      ? `${first.code} · stock discrepancy needs investigation`
+      : `${count} products need inventory investigation`;
     focus.push({
-      type: 'negative_stock',
+      type: 'negative_stock_investigation',
       priority: 1,
       severity: 'urgent',
       title,
       label: title,
-      detail: neg[0] ? `${neg[0].title} (${neg[0].sku}) at ${neg[0].stockQty}` : '',
-      why: 'Negative stock risks overselling and fulfilment failures.',
-      action: 'Review levels and reorder or adjust the website listing.',
+      detail: first.detail,
+      why: first.recommendation,
+      action: 'Investigate inventory and reconcile stock with GRV history.',
       workspace: 'inventory',
+      payload: { negativeStockClass: 'investigate', code: first.code },
     });
   }
 

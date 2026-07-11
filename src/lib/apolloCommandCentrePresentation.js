@@ -240,6 +240,12 @@ export function buildWhyToday(item) {
   if (badge?.key === 'customer_quiet') return 'Customer is quieter than usual.';
   if (badge?.key === 'buying_review' || badge?.key === 'stock_cover') return 'Stock cover needs a decision today.';
   if (badge?.key === 'negative_stock') return 'Stock went negative in ERP.';
+  if (badge?.key === 'stock_awaiting_grv' || badge?.key === 'grv_in_progress' || badge?.key === 'stock_timing') {
+    return 'GRV is still being processed.';
+  }
+  if (badge?.key === 'inventory_investigation' || badge?.key === 'stock_discrepancy') {
+    return 'Negative stock persisted without a matching GRV.';
+  }
   if (badge?.key === 'low_stock' || badge?.key === 'zero_stock') return 'On-hand stock is running low.';
   if (badge?.key === 'order_overdue') return 'A commitment date passed.';
   if (badge?.key === 'awaiting_approval') return 'Waiting on your approval.';
@@ -367,6 +373,11 @@ const EVENT_BADGE_CATALOG = {
   sales_spike: { emoji: '🟢', label: 'SALES SPIKE', tone: 'green' },
   sales_drop: { emoji: '🔴', label: 'SALES DROP', tone: 'red' },
   negative_stock: { emoji: '🔴', label: 'NEGATIVE STOCK', tone: 'red' },
+  stock_awaiting_grv: { emoji: '🟡', label: 'STOCK AWAITING GRV', tone: 'amber' },
+  grv_in_progress: { emoji: '🟡', label: 'GRV IN PROGRESS', tone: 'amber' },
+  stock_timing: { emoji: '🟡', label: 'STOCK TIMING DIFFERENCE', tone: 'amber' },
+  stock_discrepancy: { emoji: '🔴', label: 'STOCK DISCREPANCY', tone: 'red' },
+  inventory_investigation: { emoji: '🔴', label: 'INVENTORY INVESTIGATION', tone: 'red' },
   zero_stock: { emoji: '🔴', label: 'ZERO STOCK', tone: 'red' },
   low_stock: { emoji: '🟡', label: 'LOW STOCK', tone: 'amber' },
   buying_review: { emoji: '🟡', label: 'BUYING REVIEW', tone: 'amber' },
@@ -432,8 +443,18 @@ function resolveEventBadgeKey(item, headline) {
   const category = String(item?.category || item?.type || '').toLowerCase();
   const title = String(item?.title || '').toLowerCase();
   const stockBucket = item?.payload?.stockBucket;
+  const negativeClass = item?.payload?.negativeStockClass;
 
-  if (stockBucket === 'negative' || category.includes('negative_stock') || /negative stock/.test(title)) {
+  if (negativeClass === 'investigate' || stockBucket === 'negative_investigate' || category.includes('negative_stock_investigation')) {
+    return 'inventory_investigation';
+  }
+  if (negativeClass === 'grv_in_progress' || item?.payload?.pendingGrv) return 'grv_in_progress';
+  if (negativeClass === 'temporary_timing' || stockBucket === 'negative_timing' || category.includes('stock_timing')) {
+    return 'stock_awaiting_grv';
+  }
+  if (stockBucket === 'negative' || category.includes('negative_stock') || /negative stock|stock discrepancy|stock awaiting grv|grv in progress/i.test(title)) {
+    if (/grv|awaiting grv|timing/i.test(title)) return 'stock_awaiting_grv';
+    if (/discrepancy|investigat/i.test(title)) return 'inventory_investigation';
     return 'negative_stock';
   }
   if (stockBucket === 'zero' || category.includes('zero_stock')) return 'zero_stock';
@@ -931,6 +952,9 @@ export function buildApolloRecommends(focus = []) {
 
 function notificationUrgencyBucket(item) {
   const sev = displaySeverity(item.severity);
+  if (item.category === 'stock_timing' || item.payload?.negativeStockClass === 'temporary_timing' || item.payload?.negativeStockClass === 'grv_in_progress') {
+    return 'info';
+  }
   if (sev === 'urgent' || item.severity === 'critical') return 'immediate';
   if (sev === 'attention' || item.severity === 'action' || item.severity === 'review') return 'today';
   return 'info';
