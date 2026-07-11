@@ -132,7 +132,7 @@ export default function ProductLoaderSingleImage({
   return (
     <div className="pl-section">
       <p className="pl-section-note">
-        Name the file with the product code — e.g. <code>ME039-2.jpg</code>, <code>ME039 (1).jpg</code>, or <code>ME039 FRONT.jpg</code>.
+        Name the file with the product code — e.g. <code>ME039.2.jpg</code>, <code>ME039 (1).jpg</code>, or <code>ME039 FRONT.jpg</code>.
       </p>
 
       <div

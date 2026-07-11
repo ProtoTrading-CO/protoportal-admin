@@ -1,7 +1,7 @@
 import { codeLookupCandidates, firstCodeToken } from '../lib/code-normalize.mjs';
 
 const IMAGE_EXT = /\.(jpe?g|png|webp)$/i;
-const SLOT_SUFFIX = /^(?<sku>.+)-(?<slot>[1-4])$/i;
+const SLOT_SUFFIX = /^(?<sku>.+)\.(?<slot>[2-4])$/i;
 const NOISE_PATTERNS = [
   /\s+copy$/i,
   /\s*\(\d+\)$/,
@@ -34,6 +34,15 @@ export function parseLoaderFilename(filename) {
     working = working.replace(/\s*\(\d+\)$/, '').trim();
   }
 
+  // The full code KEEPS the slot suffix (only the copy marker + noise are
+  // stripped). A real variant SKU that literally ends in .2/.3/.4 can then be
+  // matched exactly by the resolver before the slot suffix is interpreted.
+  let fullWorking = working;
+  for (const pattern of NOISE_PATTERNS) {
+    fullWorking = fullWorking.replace(pattern, '').trim();
+  }
+  const fullCode = fullWorking.toUpperCase();
+
   let imageSlot = 1;
   const slotMatch = working.match(SLOT_SUFFIX);
   if (slotMatch?.groups?.sku) {
@@ -61,6 +70,7 @@ export function parseLoaderFilename(filename) {
   // stem first so clean codes still win.
   return {
     code,
+    fullCode,
     displayCode,
     imageSlot,
     copyIndex,

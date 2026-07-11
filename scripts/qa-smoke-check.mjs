@@ -177,8 +177,20 @@ for (const name of ['LSL36(2).jpg', 'LSL36 (2).jpg']) {
   assert.equal(v.sourceSku, 'LSL36', `${name} resolves the base code`);
   assert.equal(v.copyIndex, 2, `${name} is copy #2`);
 }
-assert.equal(parseIntakeFilename('LSL36-2.jpg').sourceSku, 'LSL36', 'dash slot still resolves base code');
-assert.equal(parseIntakeFilename('LSL36-2.jpg').imageNumber, 2, 'dash suffix stays an image slot');
+assert.equal(parseIntakeFilename('LSL36.2.jpg').sourceSku, 'LSL36', 'dot slot resolves base code');
+assert.equal(parseIntakeFilename('LSL36.2.jpg').imageNumber, 2, 'dot suffix is the image slot');
+// The dash is NO LONGER a slot suffix — a code ending in "-2" is just a code.
+assert.equal(parseIntakeFilename('LSL36-2.jpg').imageNumber, 1, 'dash suffix is no longer a slot');
+assert.equal(parseIntakeFilename('LSL36-2.jpg').sourceSku, 'LSL36-2', 'dash stays part of the code');
+// Exact-product-match-first: a real variant SKU ending in .2/.3/.4 keeps its
+// slot suffix in fullCode so the resolver can prefer the real SKU over slot 2.
+const mktVariant = parseIntakeFilename('MKT822662.2.jpg');
+assert.equal(mktVariant.fullCode, 'MKT822662.2', 'fullCode keeps the .2 for exact-match-first');
+assert.equal(mktVariant.sourceSku, 'MKT822662', 'stripped sourceSku drops the slot suffix');
+assert.equal(mktVariant.imageNumber, 2, 'stripped slot is 2');
+// ".1" is NEVER a slot suffix — a code ending in .1 is just a code.
+assert.equal(parseIntakeFilename('CODE.1.jpg').imageNumber, 1, '.1 is not a slot');
+assert.equal(parseIntakeFilename('CODE.1.jpg').sourceSku, 'CODE.1', '.1 stays part of the code');
 const batchLookupSrc = readSrc('api/product-loader-batch-lookup.js');
 assert.match(batchLookupSrc, /parsed\.copyIndex > 1 && \(match\.websiteRow \|\| match\.sqlRow\)/, 'batch lookup treats a resolved copy as a variant');
 assert.match(batchLookupSrc, /code: siblingSku/, 'variant publishes to the sibling SKU (no parent overwrite)');
@@ -316,7 +328,7 @@ assert.match(pmEngineArchiveSrc, /makeLiveItem/, 'single make live opens categor
 assert.doesNotMatch(pmEngineArchiveSrc, /window\.confirm\(`Move "\$\{name\}" to the live website/, 'single make live no longer uses bare confirm');
 // Make-live pulls the current taxonomy on open (fresh ids survive renames) and offers deep subcategories
 assert.match(pmEngineArchiveSrc, /const makeLive = \(item\) => \{\s*\/\/[\s\S]*?onRefreshTaxonomy\?\.\(\)/, 'make-live refreshes the taxonomy when it opens');
-assert.match(pmEngineArchiveSrc, /Child category 2/, 'make-live modal offers deeper subcategory levels');
+assert.match(pmEngineArchiveSrc, /Child category \{level\}/, 'make-live modal offers dynamic deeper subcategory levels (unlimited depth)');
 const adminPageArchiveEditSrc = readSrc('src/pages/AdminPage.jsx');
 assert.match(adminPageArchiveEditSrc, /!editingProduct\?\.archivedBy/, 'archive edit modal hides category cascade');
 assert.match(adminPageArchiveEditSrc, /!categoryPath\.length && !editingProduct\?\.archivedBy/, 'archive edit save skips category requirement');
@@ -482,9 +494,13 @@ assert.match(orderDocsSrc, /drawAddressBlock\('Delivery Address'/, 'order confir
   assert.ok(deliveryAddressLines({ customers: {} }).length > 0, 'delivery block always has a fallback line');
 }
 
-const apolloSrc = readSrc('src/components/ApolloPanel.jsx');
-assert.doesNotMatch(apolloSrc, /^import \{ jsPDF \} from 'jspdf'/m, 'ApolloPanel does not statically import jspdf');
-assert.match(apolloSrc, /loadJsPDF/, 'ApolloPanel uses lazy jspdf loader');
+// PDF export moved from ApolloPanel to ApolloChatPanel in the Apollo Command
+// Centre refactor; the lazy-jspdf perf guard follows the code there. ApolloPanel
+// itself no longer references jspdf at all (better than lazy-loading it).
+const apolloPdfSrc = readSrc('src/components/ApolloChatPanel.jsx');
+assert.doesNotMatch(apolloPdfSrc, /^import \{ jsPDF \} from 'jspdf'/m, 'ApolloChatPanel does not statically import jspdf');
+assert.match(apolloPdfSrc, /loadJsPDF/, 'ApolloChatPanel uses lazy jspdf loader');
+assert.doesNotMatch(readSrc('src/components/ApolloPanel.jsx'), /jspdf/i, 'ApolloPanel no longer references jspdf');
 
 const lazyJsPdfSrc = readSrc('src/lib/lazyJspdf.js');
 assert.match(lazyJsPdfSrc, /_jspdfPromise/, 'lazyJspdf caches the dynamic import');
@@ -604,7 +620,7 @@ assert.match(readSrc('src/lib/bulkImageReplace.js'), /BULK_IMAGE_REPLACE_MAX = 5
 const birSlot1 = parseIntakeFilename('BASHEWS.jpg');
 assert.equal(birSlot1.sourceSku, 'BASHEWS');
 assert.equal(birSlot1.imageNumber, 1);
-const birSlot2 = parseIntakeFilename('BASHEWS-2.jpg');
+const birSlot2 = parseIntakeFilename('BASHEWS.2.jpg');
 assert.equal(birSlot2.imageNumber, 2);
 assert.equal(birSlot2.sourceSku, 'BASHEWS');
 assert.match(readSrc('api/bulk-image-replace.js'), /BULK_IMAGE_REPLACE_MAX/, 'bulk image replace API enforces cap');
@@ -785,6 +801,37 @@ assert.deepEqual(parseExtraLabels(null), []);
 assert.deepEqual(parseExtraLabels('not json'), []);
 assert.deepEqual(parseExtraLabels('["X","Y"]'), ['X', 'Y']);
 console.log('✓ parseExtraLabels is null/garbage tolerant');
+
+// Product lists default to most-recently-edited first (updated_at desc) so an
+// edited / archived / restored product surfaces at the top. api/catalog.js maps
+// sort='updated' → updated_at desc, and the archive RPCs stamp updated_at.
+{
+  const useCatalogSrc = readSrc('src/hooks/useCatalog.js');
+  assert.match(useCatalogSrc, /sort = 'updated'/, 'buildCatalogParams defaults to updated (recently-edited first)');
+  assert.match(useCatalogSrc, /params\.sort \|\| 'updated'/, 'fetchCatalog falls back to updated, not title');
+  const catalogApiSrc = readSrc('api/catalog.js');
+  assert.match(catalogApiSrc, /sort === 'updated'[\s\S]*?updated_at[\s\S]*?ascending: false/, "catalog maps 'updated' → updated_at desc");
+  const sidebarSrc = readSrc('src/components/GroupedSidebar.jsx');
+  assert.match(sidebarSrc, /sort: 'updated'/, 'sidebar prefetch matches the updated-first default so it primes the same cache entry');
+}
+console.log('✓ Catalog lists default to recently-edited-first');
+
+// Make-live: an explicit publish must survive the auto-OOS visibility rule, and
+// the category picker must allocate the FULL subcategory depth (subcategory_extra).
+{
+  const ensureSrc = readSrc('api/_ensure-product.js');
+  assert.match(ensureSrc, /keepLiveWhenOos = true/, 'restoreArchivedToLive defaults keepLiveWhenOos true');
+  // keep-live flag is set BEFORE the visibility sync RPC so the publish sticks.
+  const keepIdx = ensureSrc.indexOf('keep_live_when_oos: true');
+  const syncIdx = ensureSrc.indexOf("rpc('sync_website_from_products')");
+  assert.ok(keepIdx > 0 && syncIdx > keepIdx, 'keep_live_when_oos is stamped before sync_website_from_products re-archives OOS rows');
+
+  const pmSrc = readSrc('src/components/ProductManagerEngine.jsx');
+  assert.doesNotMatch(pmSrc, /makeLiveCategory\.childOneId|childFourId/, 'make-live picker no longer uses fixed child slots');
+  assert.match(pmSrc, /makeLiveCategory\.childIds/, 'make-live picker uses the dynamic childIds array');
+  assert.match(pmSrc, /\[makeLiveCategory\.categoryId, \.\.\.\(makeLiveCategory\.childIds \|\| \[\]\)\]/, 'confirmMakeLive builds the full-depth path from childIds');
+}
+console.log('✓ Make-live keeps products visible + allocates full subcategory depth');
 
 // A1 — count/content parity
 assert.match(taxonomyUtilsSrc2, /onlyInStock && !isPublishableOnWebsite/, 'counts stock gate only when onlyInStock');

@@ -8,7 +8,7 @@ export const CLIENT_REQUEST_BATCH = 8;
 export function slotFilenameExample(sku, slot) {
   const s = String(sku || 'BASHEWS').trim().toUpperCase();
   if (slot === 1) return `${s}.jpg`;
-  return `${s}-${slot}.jpg`;
+  return `${s}.${slot}.jpg`;
 }
 
 export function catalogRowToSelection(row) {
@@ -67,12 +67,22 @@ export function buildPreflightMatch(selectedProducts, slot, fileList) {
       invalid.push({ file, reason: parsed.parseError || 'invalid' });
       continue;
     }
-    if (parsed.imageNumber !== slot) {
-      wrongSlot.push({ file, sku: fileCode, fileSlot: parsed.imageNumber });
+    // Exact-product-match-first: if the file's FULL code (slot suffix kept)
+    // is itself a selected product (a real variant SKU ending in .2/.3/.4),
+    // this file is slot 1 of THAT product — never a slot suffix of the base.
+    let exactSku = null;
+    if (parsed.fullCode && parsed.fullCode !== parsed.sourceSku) {
+      exactSku = resolveSku(parsed.fullCode);
+    }
+    const effectiveSlot = exactSku ? 1 : parsed.imageNumber;
+    if (effectiveSlot !== slot) {
+      wrongSlot.push({ file, sku: exactSku || fileCode, fileSlot: effectiveSlot });
       continue;
     }
     let sku;
-    if (parsed.copyIndex > 1) {
+    if (exactSku) {
+      sku = exactSku;
+    } else if (parsed.copyIndex > 1) {
       // A duplicate "CODE (2).jpg" targets ONLY the sibling record CODE-2.
       // If that sibling isn't selected, it has no valid target — never fall
       // back to the base SKU (that would overwrite the base's image).

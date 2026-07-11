@@ -52,7 +52,9 @@ function prefetchSection(sectionId) {
     queryClient.prefetchQuery({
       queryKey: queryKeys.catalog(buildCatalogParams({ status: 'live', page: 1 })),
       queryFn: async () => {
-        const qs = new URLSearchParams({ status: 'live', page: '1', pageSize: '50', sort: 'title' });
+        // Match the default sort (most-recently-edited first) so this prefetch
+        // primes the same cache entry the Product Manager query reads.
+        const qs = new URLSearchParams({ status: 'live', page: '1', pageSize: '50', sort: 'updated' });
         const res = await fetch(`/api/catalog?${qs}`);
         return res.json();
       },
