@@ -91,6 +91,11 @@ export function useCatalogMutations() {
     onSettled: () => invalidateCatalogAndStats(queryClient, ['live', 'archived']),
   });
 
+  const setToOrder = useMutation({
+    mutationFn: ({ sku, toOrder }) => stockMutate({ action: 'setToOrder', sku, toOrder: !!toOrder }),
+    onSettled: () => invalidateCatalogAndStats(queryClient, ['live', 'archived']),
+  });
+
   const bulkArchive = useMutation({
     mutationFn: (skus) => bulkArchiveProducts(skus),
     onSettled: () => invalidateCatalogAndStats(queryClient, ['live', 'archived']),
@@ -112,5 +117,6 @@ export function useCatalogMutations() {
     permanentDelete,
     discardPreview,
     setNewArrival,
+    setToOrder,
   };
 }

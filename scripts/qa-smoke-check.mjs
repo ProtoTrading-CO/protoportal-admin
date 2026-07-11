@@ -833,6 +833,32 @@ console.log('✓ Catalog lists default to recently-edited-first');
 }
 console.log('✓ Make-live keeps products visible + allocates full subcategory depth');
 
+// "To order": admin can flag a product orderable at zero stock (button + filter),
+// written via a real stock-actions handler and surfaced on adapted rows.
+{
+  const stockActionsSrc = readSrc('api/stock-actions.js');
+  assert.match(stockActionsSrc, /action === 'setToOrder'/, 'stock-actions has a setToOrder handler');
+  assert.match(stockActionsSrc, /to_order: !!toOrder/, 'setToOrder writes the to_order column');
+  assert.match(stockActionsSrc, /'is_new_arrival', 'to_order'/, 'live list selects to_order');
+  const prodSrc = readSrc('src/lib/products.js');
+  assert.match(prodSrc, /export async function setToOrder/, 'products lib exposes setToOrder');
+  assert.match(prodSrc, /toOrder: !!row\.to_order/, 'adapt surfaces toOrder');
+  const catSrc = readSrc('api/catalog.js');
+  assert.match(catSrc, /toOrderOnly/, 'catalog supports the to-order-only filter');
+  assert.match(catSrc, /q\.eq\('to_order', true\)/, 'to-order filter narrows on the column');
+  const pmSrc2 = readSrc('src/components/ProductManagerEngine.jsx');
+  assert.match(pmSrc2, /setToOrder\.mutate/, 'PM has a To order toggle button');
+  assert.match(pmSrc2, /To order only/, 'PM has a To order filter chip');
+  // Search input is isolated so keystrokes don't re-render the product list.
+  assert.match(pmSrc2, /const PmSearchField = memo\(/, 'search input isolated into a memoized field');
+  assert.doesNotMatch(pmSrc2, /value=\{searchInput\}/, 'parent no longer binds the raw search value');
+}
+console.log('✓ To-order admin toggle/filter + isolated search input');
+
+// Pick up in store delivery method flows through the shared formatter.
+assert.match(readSrc('lib/order-format.mjs'), /pick.?up|collect|in.?store/i, 'order-format recognises the pickup delivery method');
+console.log('✓ Pick up in store delivery method');
+
 // A1 — count/content parity
 assert.match(taxonomyUtilsSrc2, /onlyInStock && !isPublishableOnWebsite/, 'counts stock gate only when onlyInStock');
 assert.match(taxonomyApiSrc, /onlyInStock/, 'taxonomy counts endpoint accepts onlyInStock');

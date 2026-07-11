@@ -13,7 +13,7 @@ const LIVE_LIST_COLS = [
   'sku', 'barcode', 'title', 'category',
   'subcategory_one', 'subcategory_two', 'subcategory_three', 'subcategory_four', 'subcategory_extra',
   'image_url_one', 'image_url_two', 'image_url_three', 'image_url_four',
-  'price', 'stock_qty', 'available_stock', 'is_new_arrival',
+  'price', 'stock_qty', 'available_stock', 'is_new_arrival', 'to_order',
   'original_description', 'pack_description', 'units_of_issue',
   'created_at', 'updated_at', 'keep_live_when_oos',
 ].join(', ');
@@ -120,6 +120,23 @@ export default async function handler(req, res) {
       if (!sku) return res.status(400).json({ error: 'sku required' });
       const result = await restoreArchivedToLive(supabase, sku);
       return res.status(200).json(result);
+    }
+
+    if (action === 'setToOrder') {
+      // Mark a product orderable at zero stock (with a storefront lead-time
+      // disclaimer). Updates whichever table the SKU lives in so it works from
+      // the live catalogue and the archive.
+      const { sku, toOrder } = req.body;
+      if (!sku) return res.status(400).json({ error: 'sku required' });
+      const patch = { to_order: !!toOrder, updated_at: new Date().toISOString() };
+      const live = await supabase.from('website_stock').update(patch).eq('sku', sku).select('sku');
+      if (live.error) throw live.error;
+      if (!live.data?.length) {
+        const arch = await supabase.from('archived_products').update(patch).eq('sku', sku).select('sku');
+        if (arch.error) throw arch.error;
+        if (!arch.data?.length) return res.status(404).json({ error: 'Product not found' });
+      }
+      return res.status(200).json({ ok: true, toOrder: !!toOrder });
     }
 
     if (action === 'recycleFromArchive') {
