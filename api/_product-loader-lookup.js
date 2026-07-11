@@ -84,6 +84,7 @@ export function resolveWebsiteStatus({ websiteRow, sqlRow, dormantSkus, code }) 
 
 export async function resolveProductLoaderMatch(sb, {
   code,
+  fullCode = null,
   displayCode,
   imageSlot = 1,
   dormantSkus = null,
@@ -109,24 +110,39 @@ export async function resolveProductLoaderMatch(sb, {
     };
   }
 
-  const candidates = codeLookupCandidates(code);
+  const clampedSlot = Math.min(4, Math.max(1, Number(imageSlot) || 1));
+  // Exact-product-match-first: if the file's FULL code (slot suffix kept)
+  // differs from the stripped code, try it as slot 1 of a real variant SKU
+  // (e.g. MKT822662.2) BEFORE interpreting the .2 as a slot suffix.
+  const upperFull = String(fullCode || '').trim().toUpperCase();
+  const upperCode = String(code || '').trim().toUpperCase();
+  const attempts = [];
+  if (upperFull && upperFull !== upperCode) {
+    attempts.push({ candidate: fullCode, slot: 1 });
+  }
+  for (const candidate of codeLookupCandidates(code)) {
+    attempts.push({ candidate, slot: clampedSlot });
+  }
+
   let websiteRow = null;
   let webMatch = null;
   let sqlRow = null;
   let positillMatch = null;
   let matchedCandidate = null;
+  let matchedSlot = clampedSlot;
 
-  for (const candidate of candidates) {
+  for (const attempt of attempts) {
     const [webResult, positill] = await Promise.all([
-      lookupWebsiteStock(sb, candidate, displayCode),
-      lookupPositill(sb, candidate, displayCode),
+      lookupWebsiteStock(sb, attempt.candidate, displayCode),
+      lookupPositill(sb, attempt.candidate, displayCode),
     ]);
     if (webResult.row || positill.sqlRow) {
       websiteRow = webResult.row;
       webMatch = webResult.matchedBy;
       sqlRow = positill.sqlRow;
       positillMatch = positill.matchedBy;
-      matchedCandidate = candidate;
+      matchedCandidate = attempt.candidate;
+      matchedSlot = attempt.slot;
       break;
     }
   }
@@ -139,7 +155,9 @@ export async function resolveProductLoaderMatch(sb, {
   const upperEffective = String(effectiveCode || '').trim().toUpperCase();
   const title = rawTitle && rawTitle.toUpperCase() !== upperEffective ? rawTitle : '';
   const price = Number(sqlRow?.price ?? websiteRow?.price ?? 0);
-  const slot = Math.min(4, Math.max(1, Number(imageSlot) || 1));
+  // The effective slot reflects the winning attempt: an exact full-code hit
+  // publishes to slot 1; otherwise the stripped slot from the filename.
+  const slot = matchedSlot;
   const warnings = [];
   const websiteStatus = resolveWebsiteStatus({
     websiteRow,

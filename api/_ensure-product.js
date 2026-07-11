@@ -65,8 +65,17 @@ export function groupCatalogueRowsByErpKey(rows, { preferLiveSkus = null } = {})
   return byKey;
 }
 
-/** Move archived_products row → website_stock with ERP + SOH bridge wired up. */
-export async function restoreArchivedToLive(supabase, sku) {
+/**
+ * Move archived_products row → website_stock with ERP + SOH bridge wired up.
+ *
+ * keepLiveWhenOos (default true): an explicit make-live is a deliberate decision
+ * to publish, so we stamp keep_live_when_oos = true before the visibility sync
+ * runs. Otherwise sync_website_from_products (migration 018's auto-OOS rule)
+ * re-archives any just-restored row whose ERP stock isn't positive yet —
+ * silently undoing the publish so the product never becomes viewable to
+ * customers. Pass false only for callers that want the auto-OOS rule to apply.
+ */
+export async function restoreArchivedToLive(supabase, sku, { keepLiveWhenOos = true } = {}) {
   const cleanSku = String(sku || '').trim();
   if (!cleanSku) throw new Error('sku required');
 
@@ -94,6 +103,17 @@ export async function restoreArchivedToLive(supabase, sku) {
 
   const { error: upsertErr } = await supabase.rpc('upsert_website_product_from_stock', { p_website_sku: cleanSku });
   if (upsertErr) console.warn('upsert_website_product_from_stock:', upsertErr.message);
+
+  // Set the keep-live flag AFTER the upsert (which could reset it) and BEFORE
+  // the visibility sync (which reads it), so an explicit publish survives the
+  // auto-OOS rule even when the product has no ERP stock yet.
+  if (keepLiveWhenOos) {
+    const { error: keepErr } = await supabase
+      .from('website_stock')
+      .update({ keep_live_when_oos: true, updated_at: new Date().toISOString() })
+      .eq('sku', cleanSku);
+    if (keepErr) console.warn('restoreArchivedToLive keep_live_when_oos:', keepErr.message);
+  }
 
   const { data: syncResult, error: syncErr } = await supabase.rpc('sync_website_from_products');
   if (syncErr) console.warn('sync_website_from_products:', syncErr.message);

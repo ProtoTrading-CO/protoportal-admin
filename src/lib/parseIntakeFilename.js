@@ -3,7 +3,7 @@ import { codeLookupCandidates, firstCodeToken } from '../../lib/code-normalize.m
 
 const IMAGE_COLUMNS = ['image_url_one', 'image_url_two', 'image_url_three', 'image_url_four'];
 const IMAGE_EXT = /\.(jpe?g|png|webp)$/i;
-const SLOT_SUFFIX = /^(?<sku>.+)-(?<slot>[1-4])$/i;
+const SLOT_SUFFIX = /^(?<sku>.+)\.(?<slot>[2-4])$/i;
 const NOISE_PATTERNS = [
   /\s+copy$/i,
   /\s*\(\d+\)$/,
@@ -38,6 +38,15 @@ export function parseIntakeFilename(filename) {
     working = working.replace(/\s*\(\d+\)$/, '').trim();
   }
 
+  // The full code KEEPS the slot suffix (only the copy marker + noise are
+  // stripped). A real variant SKU that literally ends in .2/.3/.4 can then be
+  // matched exactly by the resolver before the slot suffix is interpreted.
+  let fullWorking = working;
+  for (const pattern of NOISE_PATTERNS) {
+    fullWorking = fullWorking.replace(pattern, '').trim();
+  }
+  const fullCode = fullWorking.toUpperCase();
+
   let imageNumber = 1;
   const slotMatch = working.match(SLOT_SUFFIX);
   if (slotMatch?.groups?.sku) {
@@ -54,6 +63,7 @@ export function parseIntakeFilename(filename) {
 
   return {
     sourceSku,
+    fullCode,
     displayCode,
     imageNumber,
     copyIndex,

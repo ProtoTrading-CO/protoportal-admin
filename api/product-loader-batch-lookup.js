@@ -53,6 +53,7 @@ export default async function handler(req, res) {
 
     const match = await resolveProductLoaderMatch(sb, {
       code: parsed.code,
+      fullCode: parsed.fullCode,
       displayCode: parsed.displayCode,
       imageSlot: parsed.imageSlot,
       dormantSkus,

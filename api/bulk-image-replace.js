@@ -103,11 +103,19 @@ async function replaceOneItem(supabase, raw, allowedSet, slot, scope) {
   }
 
   const parsed = parseLoaderFilename(filename);
-  const fileSlot = parsed.imageSlot || 1;
+  // Exact-product-match-first: if the file's FULL code (slot suffix kept)
+  // is itself an allowed SKU (a real variant ending in .2/.3/.4), this file
+  // is slot 1 of THAT product — never a slot suffix of the base code.
+  const fullCodeUpper = String(parsed.fullCode || '').trim().toUpperCase();
+  const strippedCodeUpper = String(parsed.code || '').trim().toUpperCase();
+  const exactMatch = fullCodeUpper
+    && fullCodeUpper !== strippedCodeUpper
+    && allowedSet.has(fullCodeUpper);
+  const fileSlot = exactMatch ? 1 : (parsed.imageSlot || 1);
   if (fileSlot !== slot) {
     return { sku, ok: false, error: `wrong_slot_expected_${slot}_got_${fileSlot}` };
   }
-  const fileSku = String(parsed.code || '').trim().toUpperCase();
+  const fileSku = exactMatch ? fullCodeUpper : strippedCodeUpper;
   const fileCandidates = (parsed.codeCandidates || []).map((c) => String(c || '').trim().toUpperCase());
   // A duplicate "CODE (2).jpg" legitimately targets the sibling record CODE-2.
   const siblingSku = siblingSkuForCopy(parsed.code, parsed.copyIndex);

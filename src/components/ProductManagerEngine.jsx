@@ -389,10 +389,7 @@ function productCategoryRowFromItem(item) {
   const path = item.categoryPath || [];
   return {
     categoryId: path[0] || '',
-    childOneId: path[1] || '',
-    childTwoId: path[2] || '',
-    childThreeId: path[3] || '',
-    childFourId: path[4] || '',
+    childIds: path.slice(1).filter(Boolean),
   };
 }
 
@@ -470,13 +467,10 @@ export default function ProductManagerEngine({
   const [selectingAll, setSelectingAll] = useState(false);
   const [bulkActionPending, setBulkActionPending] = useState(false);
   const [makeLiveItem, setMakeLiveItem] = useState(null);
-  const [makeLiveCategory, setMakeLiveCategory] = useState({
-    categoryId: '',
-    childOneId: '',
-    childTwoId: '',
-    childThreeId: '',
-    childFourId: '',
-  });
+  // childIds holds Child 1, Child 2, … as deep as the taxonomy tree goes — no
+  // fixed level cap, so a product can be made live into a subcategory nested
+  // past subcategory_four (stored in subcategory_extra).
+  const [makeLiveCategory, setMakeLiveCategory] = useState({ categoryId: '', childIds: [] });
   const [makeLiveSaving, setMakeLiveSaving] = useState(false);
   const [categoryDrawerOpen, setCategoryDrawerOpen] = useState(false);
   const [categoryStackNav, setCategoryStackNav] = useState(null);
@@ -1128,13 +1122,7 @@ export default function ProductManagerEngine({
 
   const confirmMakeLive = async () => {
     if (!makeLiveItem || makeLiveSaving) return;
-    const path = [
-      makeLiveCategory.categoryId,
-      makeLiveCategory.childOneId,
-      makeLiveCategory.childTwoId,
-      makeLiveCategory.childThreeId,
-      makeLiveCategory.childFourId,
-    ].filter(Boolean);
+    const path = [makeLiveCategory.categoryId, ...(makeLiveCategory.childIds || [])].filter(Boolean);
     if (!path.length) {
       onShowToast?.('Pick a main category before making live', 'error');
       return;
@@ -1149,7 +1137,7 @@ export default function ProductManagerEngine({
       const zeroStock = (makeLiveItem.stockOnHand ?? makeLiveItem.stockQty ?? 0) === 0;
       onShowToast?.(
         zeroStock
-          ? `"${name}" is live with 0 stock — set price and stock on hand to complete.`
+          ? `"${name}" is live and will stay visible at 0 stock — set price and stock on hand when ready.`
           : `"${name}" is now live on the website`,
         'success',
       );
@@ -2002,13 +1990,7 @@ export default function ProductManagerEngine({
                   onChange={(e) => {
                     const categoryId = e.target.value;
                     const firstChild = subcategoryOptionsFromTree(tree, categoryId)[0]?.id || '';
-                    setMakeLiveCategory({
-                      categoryId,
-                      childOneId: firstChild,
-                      childTwoId: '',
-                      childThreeId: '',
-                      childFourId: '',
-                    });
+                    setMakeLiveCategory({ categoryId, childIds: firstChild ? [firstChild] : [] });
                   }}
                   className="adm-field-input"
                   disabled={makeLiveSaving}
@@ -2017,53 +1999,35 @@ export default function ProductManagerEngine({
                   {tree.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
                 </select>
               </label>
-              {withCurrentOption(
-                subcategoryOptionsFromTree(tree, makeLiveCategory.categoryId),
-                makeLiveCategory.childOneId,
-              ).length > 0 && (
-                <label className="adm-field">
-                  <span className="adm-field-label">Child category 1</span>
-                  <select
-                    value={makeLiveCategory.childOneId}
-                    onChange={(e) => setMakeLiveCategory((prev) => ({
-                      ...prev,
-                      childOneId: e.target.value,
-                      childTwoId: '',
-                      childThreeId: '',
-                      childFourId: '',
-                    }))}
-                    className="adm-field-input"
-                    disabled={makeLiveSaving}
-                  >
-                    <option value="">— None —</option>
-                    {withCurrentOption(
-                      subcategoryOptionsFromTree(tree, makeLiveCategory.categoryId),
-                      makeLiveCategory.childOneId,
-                    ).map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
-                  </select>
-                </label>
-              )}
-              {[
-                { level: 2, key: 'childTwoId', parentKey: 'childOneId', label: 'Child category 2' },
-                { level: 3, key: 'childThreeId', parentKey: 'childTwoId', label: 'Child category 3' },
-                { level: 4, key: 'childFourId', parentKey: 'childThreeId', label: 'Child category 4' },
-              ].map(({ key, parentKey, label }) => {
-                const parentId = makeLiveCategory[parentKey];
-                if (!parentId) return null;
-                const options = withCurrentOption(childrenOfTree(tree, parentId), makeLiveCategory[key]);
-                if (!options.length && !makeLiveCategory[key]) return null;
-                // Reset deeper levels when this one changes.
-                const deeper = ['childOneId', 'childTwoId', 'childThreeId', 'childFourId'];
-                const resetBelow = deeper.slice(deeper.indexOf(key) + 1);
-                return (
-                  <label className="adm-field" key={key}>
-                    <span className="adm-field-label">{label}</span>
+              {/*
+                Dynamic child pickers — Child 1, Child 2, … as deep as the tree
+                goes (no fixed cap), so a product can be made live into a
+                subcategory nested past subcategory_four. Each level renders only
+                while its parent has a value and options exist; the loop stops one
+                level past the deepest selection, offering exactly one more picker.
+              */}
+              {(() => {
+                const childIds = makeLiveCategory.childIds || [];
+                const fields = [];
+                let parentId = makeLiveCategory.categoryId;
+                for (let level = 1; parentId; level += 1) {
+                  const rawOptions = level === 1
+                    ? subcategoryOptionsFromTree(tree, makeLiveCategory.categoryId)
+                    : childrenOfTree(tree, parentId);
+                  const currentValue = childIds[level - 1] || '';
+                  const options = withCurrentOption(rawOptions, currentValue);
+                  if (!options.length) break;
+                  fields.push({ level, options, currentValue });
+                  parentId = currentValue;
+                }
+                return fields.map(({ level, options, currentValue }) => (
+                  <label className="adm-field" key={level}>
+                    <span className="adm-field-label">Child category {level}</span>
                     <select
-                      value={makeLiveCategory[key]}
+                      value={currentValue}
                       onChange={(e) => setMakeLiveCategory((prev) => ({
                         ...prev,
-                        [key]: e.target.value,
-                        ...Object.fromEntries(resetBelow.map((k) => [k, ''])),
+                        childIds: [...(prev.childIds || []).slice(0, level - 1), e.target.value].filter(Boolean),
                       }))}
                       className="adm-field-input"
                       disabled={makeLiveSaving}
@@ -2072,8 +2036,8 @@ export default function ProductManagerEngine({
                       {options.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
                     </select>
                   </label>
-                );
-              })}
+                ));
+              })()}
             </div>
             <div className="adm-modal-footer adm-modal-footer--end">
               <div className="adm-modal-footer__actions">
