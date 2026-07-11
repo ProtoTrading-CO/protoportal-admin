@@ -850,9 +850,16 @@ console.log('✓ Make-live keeps products visible + allocates full subcategory d
   const catSrc = readSrc('api/catalog.js');
   assert.match(catSrc, /toOrderOnly/, 'catalog supports the to-order-only filter');
   assert.match(catSrc, /q\.eq\('to_order', true\)/, 'to-order filter narrows on the column');
+  const adaptSrc = readSrc('api/_catalog-adapt.js');
+  assert.match(adaptSrc, /toOrder: !!row\.to_order/, 'catalog-adapt exposes toOrder on admin rows');
+  assert.match(adaptSrc, /isNew: !!row\.is_new_arrival/, 'catalog-adapt exposes isNew on admin rows');
   const pmSrc2 = readSrc('src/components/ProductManagerEngine.jsx');
   assert.match(pmSrc2, /setToOrder\.mutate/, 'PM has a To order toggle button');
   assert.match(pmSrc2, /To order only/, 'PM has a To order filter chip');
+  // Sparkles toggle now flags Specials (column stays is_new_arrival); rows badge
+  // "Special" + "To order".
+  assert.match(pmSrc2, />To order</, 'desktop row renders a To order badge');
+  assert.match(pmSrc2, />Special</, 'desktop row renders a Special badge (repurposed sparkles)');
   // Search input is isolated so keystrokes don't re-render the product list.
   assert.match(pmSrc2, /const PmSearchField = memo\(/, 'search input isolated into a memoized field');
   assert.doesNotMatch(pmSrc2, /value=\{searchInput\}/, 'parent no longer binds the raw search value');

@@ -261,7 +261,7 @@ function PmMobileProductCard({
             <span className="pm-mobile-card-badge">No image</span>
           )}
           {item.isNew && (
-            <span className="pm-mobile-card-badge" style={{ background: '#0f766e', color: '#fff' }}>New arrival</span>
+            <span className="pm-mobile-card-badge" style={{ background: '#0f766e', color: '#fff' }}>Special</span>
           )}
           {item.toOrder && (
             <span className="pm-mobile-card-badge" style={{ background: '#b45309', color: '#fff' }}>To order</span>
@@ -297,14 +297,14 @@ function PmMobileProductCard({
             <button
               type="button"
               className="adm-btn-ghost adm-btn--sm"
-              title={item.isNew ? 'Remove from New Arrivals' : 'Add to New Arrivals'}
+              title={item.isNew ? 'Remove from Specials' : 'Add to Specials'}
               style={{ color: item.isNew ? '#0f766e' : undefined }}
               onClick={() => mutations.setNewArrival.mutate(
                 { sku: item.sku, isNewArrival: !item.isNew },
                 {
                   onSuccess: () => {
                     onRefreshStats?.();
-                    onShowToast?.(item.isNew ? 'Removed from New Arrivals' : 'Added to New Arrivals');
+                    onShowToast?.(item.isNew ? 'Removed from Specials' : 'Added to Specials');
                   },
                   onError: (err) => onShowToast?.(err.message, 'error'),
                 },
@@ -478,7 +478,7 @@ export default function ProductManagerEngine({
   statuses = CATALOG_STATUSES,
   showCategorySidebar = true,
   title = 'Product Manager',
-  note = 'In-stock products are live on the site. Use ✨ to add products to New Arrivals on the trade homepage.',
+  note = 'In-stock products are live on the site. Use ✨ to add products to Specials on the trade homepage.',
 }) {
   const clampStatus = useCallback(
     (s) => (statuses.includes(s) ? s : statuses[0]),
@@ -1738,7 +1738,10 @@ export default function ProductManagerEngine({
                             <span style={{ fontSize: 10, fontWeight: 700, color: '#92400e', background: '#fef3c7', borderRadius: 4, padding: '1px 5px' }}>No image</span>
                           )}
                           {item.isNew && (
-                            <span style={{ fontSize: 10, fontWeight: 700, color: '#fff', background: '#0f766e', borderRadius: 4, padding: '1px 5px' }}>New arrival</span>
+                            <span style={{ fontSize: 10, fontWeight: 700, color: '#fff', background: '#0f766e', borderRadius: 4, padding: '1px 5px' }}>Special</span>
+                          )}
+                          {item.toOrder && (
+                            <span style={{ fontSize: 10, fontWeight: 700, color: '#fff', background: '#b45309', borderRadius: 4, padding: '1px 5px' }}>To order</span>
                           )}
                           <NutstoreArchiveBadge archivedBy={item.archivedBy} />
                           <NeedsSohPriceBadge item={item} />
@@ -1789,14 +1792,14 @@ export default function ProductManagerEngine({
                             <button
                               type="button"
                               className="adm-btn-ghost adm-btn--sm"
-                              title={item.isNew ? 'Remove from New Arrivals' : 'Add to New Arrivals'}
+                              title={item.isNew ? 'Remove from Specials' : 'Add to Specials'}
                               style={{ color: item.isNew ? '#0f766e' : undefined }}
                               onClick={() => mutations.setNewArrival.mutate(
                                 { sku: item.sku, isNewArrival: !item.isNew },
                                 {
                                   onSuccess: () => {
                                     onRefreshStats?.();
-                                    onShowToast?.(item.isNew ? 'Removed from New Arrivals' : 'Added to New Arrivals');
+                                    onShowToast?.(item.isNew ? 'Removed from Specials' : 'Added to Specials');
                                   },
                                   onError: (err) => onShowToast?.(err.message, 'error'),
                                 },
