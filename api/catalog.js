@@ -44,7 +44,7 @@ async function fetchAllMotarroRows(sb, { search, categoryPath, tree, sort }) {
   return filterByCategoryPath(rows, categoryPath, tree);
 }
 
-async function fetchAllLiveRows(sb, { search, categoryPath, tree, sort }) {
+async function fetchAllLiveRows(sb, { search, categoryPath, tree, sort, toOrderOnly = false }) {
   const rows = [];
   let from = 0;
   while (true) {
@@ -54,6 +54,7 @@ async function fetchAllLiveRows(sb, { search, categoryPath, tree, sort }) {
       q = applyCatalogSearchFilter(q, term);
     }
     q = applyCategoryFiltersToQuery(q, resolveCategoryFilters(tree, categoryPath));
+    if (toOrderOnly) q = q.eq('to_order', true);
     if (sort === 'updated') q = q.order('updated_at', { ascending: false });
     else q = q.order('title', { ascending: true });
     q = q.range(from, from + PAGE_CHUNK - 1);
@@ -134,9 +135,10 @@ function applyCatalogSearchFilter(q, term) {
   ].join(','));
 }
 
-async function queryLivePaginated(sb, { search, categoryPath, tree, page, pageSize, sort }) {
+async function queryLivePaginated(sb, { search, categoryPath, tree, page, pageSize, sort, toOrderOnly = false }) {
   if (isMotarroBrowsePath(categoryPath)) {
     let rows = await fetchAllMotarroRows(sb, { search, categoryPath, tree, sort });
+    if (toOrderOnly) rows = rows.filter((r) => r.to_order);
     rows = applySearchFilter(rows, search);
     const pageSlice = paginateRows(rows, page, pageSize);
     return { ...pageSlice, archived: false };
@@ -149,6 +151,7 @@ async function queryLivePaginated(sb, { search, categoryPath, tree, page, pageSi
     q = applyCatalogSearchFilter(q, term);
   }
   q = applyCategoryFiltersToQuery(q, resolveCategoryFilters(tree, categoryPath));
+  if (toOrderOnly) q = q.eq('to_order', true);
   if (sort === 'updated') q = q.order('updated_at', { ascending: false });
   else q = q.order('title', { ascending: true });
   q = q.range(from, to);
@@ -233,6 +236,7 @@ export default async function handler(req, res) {
   const categoryPath = parseCategoryPath(req.query.categoryPath);
   const sort = String(req.query.sort || 'title').trim();
   const onlyInStock = req.query.onlyInStock === 'true' || req.query.onlyInStock === '1';
+  const toOrderOnly = req.query.toOrderOnly === 'true' || req.query.toOrderOnly === '1';
 
   try {
     const sb = getStockClient();
@@ -251,8 +255,9 @@ export default async function handler(req, res) {
         let rows;
         if (isMotarroBrowsePath(categoryPath)) {
           rows = await fetchAllMotarroRows(sb, { search, categoryPath, tree, sort });
+          if (toOrderOnly) rows = rows.filter((r) => r.to_order);
         } else {
-          rows = await fetchAllLiveRows(sb, { search, categoryPath, tree, sort });
+          rows = await fetchAllLiveRows(sb, { search, categoryPath, tree, sort, toOrderOnly });
         }
         rows = await enrichRowsWithProductStock(sb, rows);
         if (onlyInStock) {
@@ -263,7 +268,7 @@ export default async function handler(req, res) {
         result = { ...pageSlice, archived: false };
         stockAlreadyEnriched = true;
       } else {
-        result = await queryLivePaginated(sb, { search, categoryPath, tree, page, pageSize, sort });
+        result = await queryLivePaginated(sb, { search, categoryPath, tree, page, pageSize, sort, toOrderOnly });
         const rows = await enrichRowsWithProductStock(sb, result.rows);
         result = { ...result, rows };
         stockAlreadyEnriched = true;

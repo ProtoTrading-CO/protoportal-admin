@@ -19,6 +19,7 @@ export function buildCatalogParams({
   stockFilter,
   archivedSource,
   onlyInStock = false,
+  toOrderOnly = false,
 } = {}) {
   return {
     status,
@@ -30,6 +31,7 @@ export function buildCatalogParams({
     stockFilter,
     archivedSource,
     onlyInStock,
+    toOrderOnly,
   };
 }
 
@@ -45,6 +47,7 @@ async function fetchCatalog(params) {
   if (params.stockFilter) qs.set('stockFilter', params.stockFilter);
   if (params.archivedSource && params.archivedSource !== 'all') qs.set('archivedSource', params.archivedSource);
   if (params.onlyInStock) qs.set('onlyInStock', 'true');
+  if (params.toOrderOnly) qs.set('toOrderOnly', 'true');
   try {
     const res = await fetch(`/api/catalog?${qs}`);
     return readApiJson(res, { fallback: 'Catalog fetch failed — try Refresh' });

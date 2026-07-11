@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Archive,
   ArchiveRestore,
@@ -263,6 +263,9 @@ function PmMobileProductCard({
           {item.isNew && (
             <span className="pm-mobile-card-badge" style={{ background: '#0f766e', color: '#fff' }}>New arrival</span>
           )}
+          {item.toOrder && (
+            <span className="pm-mobile-card-badge" style={{ background: '#b45309', color: '#fff' }}>To order</span>
+          )}
           <NutstoreArchiveBadge archivedBy={item.archivedBy} />
           <NeedsSohPriceBadge item={item} />
           <OutOfStockLinkedBadge item={item} />
@@ -308,6 +311,24 @@ function PmMobileProductCard({
               )}
             >
               <Sparkles size={14} />
+            </button>
+            <button
+              type="button"
+              className="adm-btn-ghost adm-btn--sm"
+              title={item.toOrder ? 'Remove “To order” — customers can’t order at 0 stock' : 'Mark “To order” — customers can order even at 0 stock'}
+              style={{ color: item.toOrder ? '#b45309' : undefined }}
+              onClick={() => mutations.setToOrder.mutate(
+                { sku: item.sku, toOrder: !item.toOrder },
+                {
+                  onSuccess: () => {
+                    onRefreshStats?.();
+                    onShowToast?.(item.toOrder ? 'Removed from To order' : 'Marked as To order');
+                  },
+                  onError: (err) => onShowToast?.(err.message, 'error'),
+                },
+              )}
+            >
+              <PackagePlus size={14} />
             </button>
             <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => mutations.archive.mutate(item.sku, { onSuccess: () => onRefreshStats?.(), onError: (err) => onShowToast?.(err.message || 'Archive failed', 'error') })}>Archive</button>
             <button type="button" className="adm-btn-red adm-btn--sm" onClick={() => recycleSku(item.sku, false)}>Recycle</button>
@@ -411,6 +432,35 @@ function CodeEllipsis({ value, prefix = '' }) {
   );
 }
 
+/**
+ * Search field that owns its own raw input value and only lifts the DEBOUNCED
+ * term to the parent. Because it's a separate component, typing re-renders
+ * just this small input — not the parent Product Manager and its ~50 product
+ * rows — which is what made the search feel laggy (each keystroke reconciled
+ * the whole un-virtualised list even though the row data hadn't changed).
+ */
+const PmSearchField = memo(function PmSearchField({ onDebouncedChange, delay = 200 }) {
+  const [value, setValue] = useState('');
+  const onChangeRef = useRef(onDebouncedChange);
+  onChangeRef.current = onDebouncedChange;
+  useEffect(() => {
+    const t = setTimeout(() => onChangeRef.current(value.trim()), delay);
+    return () => clearTimeout(t);
+  }, [value, delay]);
+  return (
+    <label className="adm-search">
+      <Search size={15} />
+      <input
+        type="search"
+        className="adm-search-input"
+        placeholder="Search SKU, barcode, title…"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+      />
+    </label>
+  );
+});
+
 export default function ProductManagerEngine({
   taxonomyTree = [],
   onShowToast,
@@ -444,8 +494,10 @@ export default function ProductManagerEngine({
   }, [initialStatus, clampStatus]);
   const [page, setPage] = useState(1);
   const [pageSize] = useState(50);
-  const [searchInput, setSearchInput] = useState('');
   const [onlyInStock, setOnlyInStock] = useState(() => readOnlyInStockPref());
+  const [toOrderOnly, setToOrderOnly] = useState(false);
+  // Only the debounced term lives here; the raw input value is owned by
+  // PmSearchField so keystrokes don't re-render this component + its rows.
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [categoryPath, setCategoryPath] = useState([]);
   const [selected, setSelected] = useState(new Set());
@@ -492,17 +544,12 @@ export default function ProductManagerEngine({
   }, []);
 
   useEffect(() => {
-    const t = setTimeout(() => setDebouncedSearch(searchInput.trim()), 200);
-    return () => clearTimeout(t);
-  }, [searchInput]);
-
-  useEffect(() => {
     setPage(1);
     setSelected(new Set());
     selectedRowsRef.current = new Map();
     lastSelectIdxRef.current = null;
     setSelectAllView(false);
-  }, [status, debouncedSearch, categoryPath.join('/'), archiveStockView, archiveSourceFilter, onlyInStock]);
+  }, [status, debouncedSearch, categoryPath.join('/'), archiveStockView, archiveSourceFilter, onlyInStock, toOrderOnly]);
 
   // Any catalogue mutation (single-row or bulk archive/restore/delete/make-live)
   // changes category membership — refresh BOTH badge sources so the sidebar
@@ -568,7 +615,8 @@ export default function ProductManagerEngine({
     stockFilter: status === 'archived' ? archiveStockView : undefined,
     archivedSource: status === 'archived' && archiveStockView === 'archived' ? archiveSourceFilter : undefined,
     onlyInStock: status === 'live' && onlyInStock,
-  }), [status, page, pageSize, debouncedSearch, categoryPath, archiveStockView, archiveSourceFilter, onlyInStock]);
+    toOrderOnly: status === 'live' && toOrderOnly,
+  }), [status, page, pageSize, debouncedSearch, categoryPath, archiveStockView, archiveSourceFilter, onlyInStock, toOrderOnly]);
 
   const catalogQueryEnabled = status !== 'approval';
 
@@ -1416,16 +1464,7 @@ export default function ProductManagerEngine({
                   </div>
                 </>
               )}
-              <label className="adm-search">
-                <Search size={15} />
-                <input
-                  type="search"
-                  className="adm-search-input"
-                  placeholder="Search SKU, barcode, title…"
-                  value={searchInput}
-                  onChange={(e) => setSearchInput(e.target.value)}
-                />
-              </label>
+              <PmSearchField onDebouncedChange={setDebouncedSearch} />
               {status === 'live' && (
                 <label className="adm-filter-chip" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer' }}>
                   <input
@@ -1435,6 +1474,17 @@ export default function ProductManagerEngine({
                     style={{ accentColor: '#8B1A1A' }}
                   />
                   Show only in stock
+                </label>
+              )}
+              {status === 'live' && (
+                <label className="adm-filter-chip" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer' }} title="Show only products marked “To order” (orderable at 0 stock)">
+                  <input
+                    type="checkbox"
+                    checked={toOrderOnly}
+                    onChange={(e) => { setToOrderOnly(e.target.checked); setPage(1); }}
+                    style={{ accentColor: '#b45309' }}
+                  />
+                  To order only
                 </label>
               )}
               {!reorderMode && (
@@ -1753,6 +1803,24 @@ export default function ProductManagerEngine({
                               )}
                             >
                               <Sparkles size={14} />
+                            </button>
+                            <button
+                              type="button"
+                              className="adm-btn-ghost adm-btn--sm"
+                              title={item.toOrder ? 'Remove “To order” — customers can’t order at 0 stock' : 'Mark “To order” — customers can order even at 0 stock'}
+                              style={{ color: item.toOrder ? '#b45309' : undefined }}
+                              onClick={() => mutations.setToOrder.mutate(
+                                { sku: item.sku, toOrder: !item.toOrder },
+                                {
+                                  onSuccess: () => {
+                                    onRefreshStats?.();
+                                    onShowToast?.(item.toOrder ? 'Removed from To order' : 'Marked as To order');
+                                  },
+                                  onError: (err) => onShowToast?.(err.message, 'error'),
+                                },
+                              )}
+                            >
+                              <PackagePlus size={14} />
                             </button>
                             <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => mutations.archive.mutate(item.sku, { onSuccess: () => onRefreshStats?.(), onError: (err) => onShowToast?.(err.message || 'Archive failed', 'error') })}>Archive</button>
                             <button type="button" className="adm-btn-red adm-btn--sm" onClick={() => recycleSku(item.sku, false)}>To recycle</button>

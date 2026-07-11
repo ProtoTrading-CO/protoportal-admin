@@ -149,6 +149,7 @@ function adapt(row, { archived = false, tree = null } = {}) {
     tags: [],
     badges: [],
     isNew: !!row.is_new_arrival,
+    toOrder: !!row.to_order,
     isSpecial: false,
     isArchived: archived,
     sortOrder: 0,
@@ -579,6 +580,13 @@ export async function applyDormantLive(sku) {
 /** Toggle curated New Arrivals placement on the trade site homepage. */
 export async function setNewArrival(sku, isNewArrival) {
   await stockAction({ action: 'setNewArrival', sku, isNewArrival: !!isNewArrival });
+  invalidateProductCache();
+  invalidateAdminCache();
+}
+
+/** Toggle "to order": lets a customer order this product even at zero stock. */
+export async function setToOrder(sku, toOrder) {
+  await stockAction({ action: 'setToOrder', sku, toOrder: !!toOrder });
   invalidateProductCache();
   invalidateAdminCache();
 }
