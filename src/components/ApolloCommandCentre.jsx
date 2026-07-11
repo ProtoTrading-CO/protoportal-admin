@@ -1,17 +1,42 @@
 import { useState } from 'react';
-import { Bot, Loader2, RefreshCw, Sparkles } from 'lucide-react';
-import { APOLLO_COMMAND_DEFAULT_NAV, APOLLO_COMMAND_NAV } from '../lib/apolloCommandCentre.js';
+import { ArrowLeft, Bot, Loader2, RefreshCw, Sparkles } from 'lucide-react';
+import {
+  APOLLO_COMMAND_DEFAULT_MODE,
+  APOLLO_COMMAND_MODES,
+  workObjectById,
+} from '../lib/apolloCommandCentre.js';
 import { greetingForHour } from '../lib/apolloTodayPresentation.js';
 import ApolloChatPanel from './ApolloChatPanel.jsx';
 import ApolloKnowledgePlaceholder from './ApolloKnowledgePlaceholder.jsx';
 import ApolloOperationalBrief from './ApolloOperationalBrief.jsx';
+import ApolloWorkGateway from './ApolloWorkGateway.jsx';
+import ApolloWorkObjectPreview from './ApolloWorkObjectPreview.jsx';
 import OrdersWorkspacePanel from './OrdersWorkspacePanel.jsx';
 
-function WorkspaceShell({ children, chatPanel }) {
+function WorkShell({ children, chatPanel }) {
   return (
-    <div className="apollo-cc-workspace-shell">
-      <div className="apollo-cc-workspace-shell-main">{children}</div>
-      <div className="apollo-cc-workspace-shell-rail">{chatPanel}</div>
+    <div className="apollo-cc-work-shell">
+      <div className="apollo-cc-work-shell-main">{children}</div>
+      <div className="apollo-cc-work-shell-rail">{chatPanel}</div>
+    </div>
+  );
+}
+
+function ActiveWorkChrome({ objectId, onBack, children }) {
+  const item = workObjectById(objectId);
+  if (!item) return children;
+
+  return (
+    <div className="apollo-cc-work-active">
+      <button type="button" className="apollo-cc-work-back" onClick={onBack}>
+        <ArrowLeft size={14} />
+        Work
+      </button>
+      <p className="apollo-cc-work-active-crumb">
+        <span>{item.emoji}</span>
+        {item.label}
+      </p>
+      {children}
     </div>
   );
 }
@@ -37,7 +62,8 @@ export default function ApolloCommandCentre({
   onClearChat,
   onShowToast,
 }) {
-  const [activeNav, setActiveNav] = useState(APOLLO_COMMAND_DEFAULT_NAV);
+  const [activeMode, setActiveMode] = useState(APOLLO_COMMAND_DEFAULT_MODE);
+  const [activeWorkObject, setActiveWorkObject] = useState(null);
   const hour = new Date().getHours();
   const greeting = greetingForHour(hour);
   const displayName = userName || 'there';
@@ -68,6 +94,44 @@ export default function ApolloCommandCentre({
     />
   );
 
+  const selectMode = (modeId) => {
+    setActiveMode(modeId);
+    if (modeId !== 'work') setActiveWorkObject(null);
+  };
+
+  const selectWorkObject = (objectId) => {
+    setActiveMode('work');
+    setActiveWorkObject(objectId);
+  };
+
+  const backToWorkGateway = () => setActiveWorkObject(null);
+
+  const renderWork = () => {
+    if (!activeWorkObject) {
+      return (
+        <WorkShell chatPanel={chatPanel}>
+          <ApolloWorkGateway onSelectWorkObject={selectWorkObject} />
+        </WorkShell>
+      );
+    }
+
+    if (activeWorkObject === 'orders') {
+      return (
+        <WorkShell chatPanel={chatPanel}>
+          <ActiveWorkChrome objectId="orders" onBack={backToWorkGateway}>
+            <OrdersWorkspacePanel onShowToast={onShowToast} />
+          </ActiveWorkChrome>
+        </WorkShell>
+      );
+    }
+
+    return (
+      <WorkShell chatPanel={chatPanel}>
+        <ApolloWorkObjectPreview objectId={activeWorkObject} onBack={backToWorkGateway} />
+      </WorkShell>
+    );
+  };
+
   return (
     <div className="apollo-cc apollo-cc--phase2">
       <header className="apollo-cc-head">
@@ -94,34 +158,32 @@ export default function ApolloCommandCentre({
         </div>
       </header>
 
-      <nav className="apollo-cc-nav" aria-label="Apollo sections">
-        {APOLLO_COMMAND_NAV.map((item) => (
+      <nav className="apollo-cc-modes" aria-label="Apollo modes">
+        {APOLLO_COMMAND_MODES.map((mode) => (
           <button
-            key={item.id}
+            key={mode.id}
             type="button"
-            className={`apollo-cc-nav-btn${activeNav === item.id ? ' is-active' : ''}`}
-            onClick={() => setActiveNav(item.id)}
+            className={`apollo-cc-mode-btn${activeMode === mode.id ? ' is-active' : ''}`}
+            onClick={() => selectMode(mode.id)}
+            aria-current={activeMode === mode.id ? 'page' : undefined}
           >
-            <span className="apollo-cc-nav-emoji" aria-hidden="true">{item.emoji}</span>
-            {item.label}
+            <span className="apollo-cc-mode-emoji" aria-hidden="true">{mode.emoji}</span>
+            <span className="apollo-cc-mode-label">{mode.label}</span>
+            <span className="apollo-cc-mode-tagline">{mode.tagline}</span>
           </button>
         ))}
       </nav>
 
-      {activeNav === 'today' && (
+      {activeMode === 'today' && (
         <ApolloOperationalBrief {...briefSharedProps} chatPanel={chatPanel} />
       )}
 
-      {activeNav === 'orders' && (
-        <WorkspaceShell chatPanel={chatPanel}>
-          <OrdersWorkspacePanel onShowToast={onShowToast} />
-        </WorkspaceShell>
-      )}
+      {activeMode === 'work' && renderWork()}
 
-      {activeNav === 'remember' && (
-        <WorkspaceShell chatPanel={chatPanel}>
+      {activeMode === 'knowledge' && (
+        <WorkShell chatPanel={chatPanel}>
           <ApolloKnowledgePlaceholder />
-        </WorkspaceShell>
+        </WorkShell>
       )}
 
       {indexStatus && (
