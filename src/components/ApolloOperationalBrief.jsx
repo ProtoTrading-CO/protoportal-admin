@@ -359,6 +359,13 @@ function RecommendsSection({ items, onOpen, onAsk, onReviewNotification }) {
                         <p>{rec.actionShort}</p>
                       </div>
                     )}
+                    {rec.reasoning?.length > 0 && (
+                      <ul className="apollo-cc-recommend-reasoning">
+                        {rec.reasoning.map((line) => (
+                          <li key={line}>{line}</li>
+                        ))}
+                      </ul>
+                    )}
                     {rec.confidenceLevel && (
                       <p className="apollo-cc-recommend-confidence-level">{rec.confidenceLevel}</p>
                     )}
@@ -380,6 +387,13 @@ function RecommendsSection({ items, onOpen, onAsk, onReviewNotification }) {
                         <span className="apollo-cc-recommend-kicker">Do this next</span>
                         <p>{rec.actionShort}</p>
                       </div>
+                    )}
+                    {rec.reasoning?.length > 0 && (
+                      <ul className="apollo-cc-recommend-reasoning">
+                        {rec.reasoning.map((line) => (
+                          <li key={line}>{line}</li>
+                        ))}
+                      </ul>
                     )}
                     {rec.confidenceLevel && (
                       <p className="apollo-cc-recommend-confidence-level">{rec.confidenceLevel}</p>

@@ -191,12 +191,25 @@ export function buildApolloInfluence(context) {
       || feedback === 'useful';
   }).length;
 
+  const suppressedToday = items.filter((item) => item.payload?.expectedBehaviourSuppressed).length;
+  const resolvedToday = items.filter((item) => item.payload?.negativeStockClass === 'resolved_automatically').length;
+
+  let headline = decisionsToday > 0
+    ? `Apollo influenced ${decisionsToday} business decision${decisionsToday === 1 ? '' : 's'} today`
+    : 'Apollo influenced — tracking starts when you act on a recommendation';
+
+  if (suppressedToday > 0) {
+    headline = `Expected behaviour suppressed: ${suppressedToday} today`;
+  } else if (resolvedToday > 0) {
+    headline = `${resolvedToday} timing issue${resolvedToday === 1 ? '' : 's'} resolved automatically today`;
+  }
+
   return {
     decisionsToday,
-    trackingLive: decisionsToday > 0,
-    headline: decisionsToday > 0
-      ? `Apollo influenced ${decisionsToday} business decision${decisionsToday === 1 ? '' : 's'} today`
-      : 'Apollo influenced — tracking starts when you act on a recommendation',
+    suppressedToday,
+    resolvedToday,
+    trackingLive: decisionsToday > 0 || suppressedToday > 0 || resolvedToday > 0,
+    headline,
   };
 }
 
@@ -241,8 +254,11 @@ export function buildWhyToday(item) {
   if (badge?.key === 'buying_review' || badge?.key === 'stock_cover') return 'Stock cover needs a decision today.';
   if (badge?.key === 'negative_stock') return 'Stock went negative in ERP.';
   if (badge?.key === 'stock_awaiting_grv' || badge?.key === 'grv_in_progress' || badge?.key === 'stock_timing') {
+    const reasoning = item?.payload?.reasoning;
+    if (Array.isArray(reasoning) && reasoning[0]) return reasoning[0].endsWith('.') ? reasoning[0] : `${reasoning[0]}.`;
     return 'GRV is still being processed.';
   }
+  if (badge?.key === 'resolved_automatically') return 'Stock corrected itself after GRV timing.';
   if (badge?.key === 'inventory_investigation' || badge?.key === 'stock_discrepancy') {
     return 'Negative stock persisted without a matching GRV.';
   }
@@ -378,6 +394,7 @@ const EVENT_BADGE_CATALOG = {
   stock_timing: { emoji: '🟡', label: 'STOCK TIMING DIFFERENCE', tone: 'amber' },
   stock_discrepancy: { emoji: '🔴', label: 'STOCK DISCREPANCY', tone: 'red' },
   inventory_investigation: { emoji: '🔴', label: 'INVENTORY INVESTIGATION', tone: 'red' },
+  resolved_automatically: { emoji: '🟢', label: 'RESOLVED AUTOMATICALLY', tone: 'green' },
   zero_stock: { emoji: '🔴', label: 'ZERO STOCK', tone: 'red' },
   low_stock: { emoji: '🟡', label: 'LOW STOCK', tone: 'amber' },
   buying_review: { emoji: '🟡', label: 'BUYING REVIEW', tone: 'amber' },
@@ -445,6 +462,9 @@ function resolveEventBadgeKey(item, headline) {
   const stockBucket = item?.payload?.stockBucket;
   const negativeClass = item?.payload?.negativeStockClass;
 
+  if (negativeClass === 'resolved_automatically' || stockBucket === 'negative_resolved' || category.includes('stock_timing_resolved')) {
+    return 'resolved_automatically';
+  }
   if (negativeClass === 'investigate' || stockBucket === 'negative_investigate' || category.includes('negative_stock_investigation')) {
     return 'inventory_investigation';
   }
@@ -927,6 +947,7 @@ export function buildApolloRecommends(focus = []) {
         ? Math.round(confidenceNum)
         : null;
       const recommendationText = action || view.recommendation || null;
+      const reasoning = Array.isArray(item.payload?.reasoning) ? item.payload.reasoning : [];
       const confidenceChip = buildConfidenceChip(confidence);
       return {
         id: `${item.type}-${item.priority}`,
@@ -936,7 +957,10 @@ export function buildApolloRecommends(focus = []) {
         summaryHeadline: buildRecommendSummary(view, item),
         actionShort: shortenActionText(recommendationText),
         whyToday: buildWhyToday(item),
-        confidenceLevel: confidenceLevelText(confidence),
+        reasoning,
+        confidenceLevel: item.payload?.confidenceLevel
+          ? `${String(item.payload.confidenceLevel).charAt(0).toUpperCase()}${String(item.payload.confidenceLevel).slice(1)} confidence`
+          : confidenceLevelText(confidence),
         metrics,
         recommendationText,
         confidence,

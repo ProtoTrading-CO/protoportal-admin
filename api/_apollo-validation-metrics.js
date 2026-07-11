@@ -4,7 +4,9 @@ const IMPACT_SCORE = { low: 1, medium: 2, high: 3, critical: 4 };
 
 function isExceptionRow(row) {
   return row?.payload?.release === 'apollo-operational-v1.2'
-    || String(row?.dedupe_key || '').startsWith('exception:');
+    || row?.payload?.businessRuleId
+    || String(row?.dedupe_key || row?.dedupeKey || '').startsWith('exception:')
+    || ['stock_timing', 'stock_timing_resolved', 'negative_stock_investigation'].includes(row?.category);
 }
 
 function dayBounds(offsetDays = 0) {
@@ -117,6 +119,8 @@ export function buildDailyBriefScore({ todayRows = [], yesterdayRows = [] } = {}
   return {
     notificationsGeneratedToday: todayRows.length,
     exceptionsGeneratedToday: todayExceptions.length,
+    expectedBehaviourSuppressedToday: todayRows.filter((row) => row.payload?.expectedBehaviourSuppressed).length,
+    resolvedAutomaticallyToday: todayRows.filter((row) => row.payload?.negativeStockClass === 'resolved_automatically').length,
     usefulExceptionsYesterday: yesterdayReviewed.filter((row) => row.feedback_status === 'useful').length,
     falsePositivesYesterday: yesterdayReviewed.filter((row) => row.feedback_status === 'false_positive').length,
     thresholdAdjustmentsYesterday: yesterdayReviewed.filter((row) => row.feedback_status === 'needs_threshold_adjustment').length,
@@ -145,9 +149,19 @@ export function buildValidationReport(rows = [], { days = 7 } = {}) {
   const businessValueScore = calculateBusinessValueScore(feedbackRows.filter((row) => row.business_value));
   const usefulRate = calculateUsefulRate(feedbackRows);
 
+  const suppressedCount = exceptionRows.filter((row) => row.payload?.expectedBehaviourSuppressed).length;
+  const resolvedAutoCount = exceptionRows.filter((row) => row.payload?.negativeStockClass === 'resolved_automatically').length;
+  const timingCount = exceptionRows.filter((row) => ['temporary_timing', 'grv_in_progress'].includes(row.payload?.negativeStockClass)).length;
+  const temporaryTimingResolvedRate = timingCount + resolvedAutoCount > 0
+    ? Math.round((resolvedAutoCount / (timingCount + resolvedAutoCount)) * 1000) / 10
+    : null;
+
   const report = {
     periodDays: days,
     totalExceptions: exceptionRows.length,
+    expectedBehaviourSuppressed: suppressedCount,
+    resolvedAutomatically: resolvedAutoCount,
+    temporaryTimingResolvedRate,
     usefulExceptions: usefulCount,
     falsePositives: falsePositiveCount,
     needsThresholdAdjustment: thresholdCount,

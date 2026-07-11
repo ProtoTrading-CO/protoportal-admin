@@ -137,6 +137,19 @@ describe('apolloCommandCentrePresentation', () => {
     expect(influence.headline).toMatch(/influenced 1 business decision/);
   });
 
+  it('celebrates expected behaviour suppressed in apollo influence', () => {
+    const influence = buildApolloInfluence({
+      notifications: {
+        items: [
+          { payload: { expectedBehaviourSuppressed: true, negativeStockClass: 'temporary_timing' } },
+          { payload: { expectedBehaviourSuppressed: true, negativeStockClass: 'grv_in_progress' } },
+        ],
+      },
+    });
+    expect(influence.suppressedToday).toBe(2);
+    expect(influence.headline).toMatch(/Expected behaviour suppressed: 2 today/);
+  });
+
   it('builds compact daily brief bullets', () => {
     const { bullets, detailSections } = buildDailyBriefBullets({
       focusToday: duplicateStockFocus,

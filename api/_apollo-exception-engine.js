@@ -337,8 +337,9 @@ export function detectNegativeStockInvestigations({ products = [], sales = null,
       confidence: 88,
       evidence: [
         { label: 'On hand', value: row.stockQty },
-        { label: 'Persisted hours', value: row.persistedHours || 24 },
+        { label: 'Persisted hours', value: row.persistedHours || row.rules?.gracePeriodHours || 24 },
         { label: 'GRV pending', value: row.pendingGrv ? 'yes' : 'no' },
+        ...(row.reasoning || []).map((line) => ({ label: 'Reason', value: line })),
       ],
       query: `Show product ${row.code}`,
     }));
