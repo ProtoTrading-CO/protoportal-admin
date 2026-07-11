@@ -1,26 +1,57 @@
 # Apollo Status
 
-## Infrastructure
+## Current Mission
 
-✅ Frozen
+**Earn the Knowledge responsibility.**
 
-## Current Release
+Proto Memory must move from emerging to earned — knowledge reused in daily operations without being asked.
 
-Apollo Operational Release 1.2
+---
 
-## Current Branch
+## Responsibilities
 
-`feature/orders-workspace-v1`
+| | Responsibility | Status |
+| --- | --- | --- |
+| ✓ | Truth | Earned |
+| ✓ | Context | Earned |
+| △ | Knowledge | Emerging |
+| △ | Rulebook | Emerging (v1.0 live) |
+| ○ | Reasoning | Waiting |
+| ○ | Advice | Waiting |
+| ✓ | Execution | Earned |
+| ○ | Coordination | Waiting |
+| ○ | Stewardship | Waiting |
 
-## Current Focus
+**Last responsibility earned:** Execution
 
-Release 1.2 Validation Week — measure Trust Score and Business Value Score (no new detectors, no threshold tuning)
+---
 
-## Next Milestone
+## Current KPI
 
-Tag `apollo-operational-v1.2` after one week of production evidence, then Apollo Operational Release 1.3
+**Knowledge Reuse Rate** — how often existing knowledge helped Proto today.
+
+---
+
+## Constitution
+
+**Apollo Constitution v1.0** (Frozen)
+
+---
 
 ## Guiding Question
 
-> "What changed that I would not have noticed?"
+> What operational responsibility did Apollo earn this month?
 
+---
+
+## Documentation
+
+| Document | Purpose |
+| --- | --- |
+| [README.md](./README.md) | What Apollo is |
+| [docs/APOLLO_CONSTITUTION.md](./docs/APOLLO_CONSTITUTION.md) | Governing principles |
+| [docs/APOLLO_MISSION.md](./docs/APOLLO_MISSION.md) | Why Apollo exists |
+| [docs/APOLLO_ARCHITECTURE.md](./docs/APOLLO_ARCHITECTURE.md) | How it's built |
+| [docs/PROTO_RULEBOOK.md](./docs/PROTO_RULEBOOK.md) | How Proto interprets the business |
+
+Planning is measured by responsibilities earned — not version numbers like "Apollo 3.1".
