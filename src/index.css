@@ -8306,6 +8306,116 @@ html, body { background: #f5f5f5; color: #111827; }
   background: #fafafa;
 }
 
+.apollo-cc-recommend-hit {
+  display: block;
+  width: 100%;
+  border: none;
+  background: none;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+  margin-bottom: 8px;
+}
+
+.apollo-cc-recommend-hit:hover .apollo-cc-obj-sku,
+.apollo-cc-recommend-hit:hover .apollo-cc-obj-entity { color: #c40000; }
+
+.apollo-cc-obj {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.apollo-cc-obj--compact {
+  gap: 1px;
+}
+
+.apollo-cc-obj-sku {
+  font-size: 15px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  color: #0f172a;
+  line-height: 1.2;
+}
+
+.apollo-cc-obj--compact .apollo-cc-obj-sku {
+  font-size: 13px;
+}
+
+.apollo-cc-obj-entity {
+  font-size: 14px;
+  font-weight: 800;
+  color: #0f172a;
+  line-height: 1.25;
+}
+
+.apollo-cc-obj--compact .apollo-cc-obj-entity {
+  font-size: 12px;
+}
+
+.apollo-cc-obj-desc {
+  font-size: 12px;
+  font-weight: 600;
+  color: #475569;
+  line-height: 1.35;
+}
+
+.apollo-cc-obj--compact .apollo-cc-obj-desc {
+  font-size: 11px;
+  font-weight: 700;
+  color: #334155;
+}
+
+.apollo-cc-obj-meta {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #94a3b8;
+}
+
+.apollo-cc-obj-headline {
+  font-size: 11px;
+  font-weight: 700;
+  color: #b45309;
+  margin-top: 2px;
+}
+
+.apollo-cc-recommend-metrics {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.apollo-cc-recommend-metrics li {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #475569;
+}
+
+.apollo-cc-recommend-metrics strong {
+  font-size: 12px;
+  font-weight: 800;
+  color: #0f172a;
+  font-variant-numeric: tabular-nums;
+}
+
+.apollo-cc-recommend-action {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #64748b;
+  line-height: 1.4;
+}
+
 .apollo-cc-recommend-title {
   display: block;
   width: 100%;
@@ -8407,15 +8517,13 @@ html, body { background: #f5f5f5; color: #111827; }
   border: none;
   background: none;
   text-align: left;
-  padding: 5px 0;
-  font-size: 12px;
-  font-weight: 700;
-  color: #334155;
+  padding: 6px 0;
   cursor: pointer;
   font-family: inherit;
 }
 
-.apollo-cc-notif-group li button:hover { color: #c40000; }
+.apollo-cc-notif-group li button:hover .apollo-cc-obj-sku,
+.apollo-cc-notif-group li button:hover .apollo-cc-obj-entity { color: #c40000; }
 
 .apollo-cc-severity--red.apollo-cc-notif-group h4 { color: #dc2626; }
 .apollo-cc-severity--amber.apollo-cc-notif-group h4 { color: #b45309; }

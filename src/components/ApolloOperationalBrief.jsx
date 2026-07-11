@@ -164,6 +164,40 @@ function RememberSection({ items }) {
   );
 }
 
+function OperationalObjectDisplay({ view, compact = false }) {
+  if (!view) return null;
+
+  if (view.kind === 'product' && view.sku) {
+    return (
+      <span className={`apollo-cc-obj${compact ? ' apollo-cc-obj--compact' : ''}`}>
+        <span className="apollo-cc-obj-sku" data-sku={view.sku}>{view.sku}</span>
+        {view.description && <span className="apollo-cc-obj-desc">{view.description}</span>}
+        {view.meta && <span className="apollo-cc-obj-meta">{view.meta}</span>}
+        {!compact && view.headline && <span className="apollo-cc-obj-headline">{view.headline}</span>}
+      </span>
+    );
+  }
+
+  if (view.identifierLabel && view.identifier) {
+    return (
+      <span className={`apollo-cc-obj${compact ? ' apollo-cc-obj--compact' : ''}`}>
+        <span className="apollo-cc-obj-entity">
+          {view.identifierLabel}: {view.identifier}
+        </span>
+        {view.description && <span className="apollo-cc-obj-desc">{view.description}</span>}
+        {!compact && view.headline && <span className="apollo-cc-obj-headline">{view.headline}</span>}
+      </span>
+    );
+  }
+
+  return (
+    <span className={`apollo-cc-obj${compact ? ' apollo-cc-obj--compact' : ''}`}>
+      {view.description && <span className="apollo-cc-obj-desc">{view.description}</span>}
+      {view.headline && <span className="apollo-cc-obj-headline">{view.headline}</span>}
+    </span>
+  );
+}
+
 function RecommendsSection({ items, onSelect }) {
   if (!items.length) return null;
   return (
@@ -176,10 +210,25 @@ function RecommendsSection({ items, onSelect }) {
       <div className="apollo-cc-recommends-stack">
         {items.map((rec) => (
           <article key={rec.id} className={`apollo-cc-recommend apollo-cc-severity--${rec.severity}`}>
-            <button type="button" className="apollo-cc-recommend-title" onClick={() => onSelect?.(rec.item)}>
-              {rec.title}
+            <button
+              type="button"
+              className="apollo-cc-recommend-hit"
+              onClick={() => onSelect?.(rec.item)}
+              data-search={rec.view?.searchText || rec.title}
+            >
+              <OperationalObjectDisplay view={rec.view} />
             </button>
-            {rec.why.length > 0 && (
+            {rec.metrics?.length > 0 && (
+              <ul className="apollo-cc-recommend-metrics">
+                {rec.metrics.map((row) => (
+                  <li key={row.label}>
+                    <span>{row.label}</span>
+                    <strong>{row.value}</strong>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {!rec.metrics?.length && rec.why.length > 0 && (
               <div className="apollo-cc-recommend-why">
                 <span className="apollo-cc-recommend-kicker">Why?</span>
                 <ul>
@@ -187,13 +236,8 @@ function RecommendsSection({ items, onSelect }) {
                 </ul>
               </div>
             )}
-            {rec.evidence?.length > 0 && (
-              <div className="apollo-cc-recommend-evidence">
-                <span className="apollo-cc-recommend-kicker">Evidence</span>
-                <ul>
-                  {rec.evidence.map((line, i) => <li key={i}>{line}</li>)}
-                </ul>
-              </div>
+            {rec.view?.recommendation && (
+              <p className="apollo-cc-recommend-action">{rec.view.recommendation}</p>
             )}
             {rec.confidence != null && (
               <p className="apollo-cc-recommend-confidence">
@@ -251,8 +295,12 @@ function NotificationsGrouped({ groups, onOpen }) {
             <ul>
               {rows.map((row) => (
                 <li key={row.id}>
-                  <button type="button" onClick={() => onOpen?.(row)}>
-                    {row.displayTitle || row.title}
+                  <button
+                    type="button"
+                    onClick={() => onOpen?.(row)}
+                    data-search={row.view?.searchText || row.displayTitle || row.title}
+                  >
+                    <OperationalObjectDisplay view={row.view} compact />
                   </button>
                 </li>
               ))}

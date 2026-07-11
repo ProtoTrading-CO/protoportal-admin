@@ -229,6 +229,187 @@ export function formatWithProductCode(item, title = '') {
   return `${code} · ${text}`;
 }
 
+const PRODUCT_EVENT_PATTERNS = [
+  { pattern: /\s+sales spiked$/i, headline: 'Sales spiked' },
+  { pattern: /\s+sales dropped$/i, headline: 'Sales dropped' },
+  { pattern: /\s+stock differs between ERP and website$/i, headline: 'Stock mismatch' },
+  { pattern: /\s+price differs between ERP and website$/i, headline: 'Price mismatch' },
+  { pattern: /\s+is missing from the website$/i, headline: 'Missing from website' },
+  { pattern: /\s+is missing from ERP$/i, headline: 'Missing from ERP' },
+  { pattern: /\s+stock cover is ([\d.]+ days?)$/i, headline: (m) => `Stock cover ${m[1]}` },
+];
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function stripProductDescription(title, code) {
+  let text = String(title || '').trim();
+  text = text.replace(/^Buying review:\s*/i, '').trim();
+  if (code) {
+    text = text.replace(new RegExp(`^${escapeRegExp(code)}\\s*[·\\-—]\\s*`, 'i'), '');
+  }
+  for (const row of PRODUCT_EVENT_PATTERNS) {
+    text = text.replace(row.pattern, '');
+  }
+  return text.trim();
+}
+
+function extractHeadline(title, item) {
+  const text = String(title || '').trim();
+  for (const row of PRODUCT_EVENT_PATTERNS) {
+    const match = text.match(row.pattern);
+    if (match) return typeof row.headline === 'function' ? row.headline(match) : row.headline;
+  }
+  if (/^Buying review:/i.test(text)) return 'Buying review';
+  if (/supplier follow-up:/i.test(text)) return 'Supplier follow-up';
+  if (/supplier delay risk/i.test(text)) return 'Supplier delay risk';
+  if (/order is overdue/i.test(text)) return 'Order overdue';
+  if (/quiet for/i.test(text)) return 'Customer quiet';
+  if (/awaiting approval/i.test(text)) return 'Awaiting approval';
+  const action = String(item?.action || item?.recommendation || '').trim();
+  if (action && !GENERIC_FOCUS_ACTIONS.has(action.toLowerCase())) return action;
+  return null;
+}
+
+function extractSupplierFromDetail(detail, code) {
+  const parts = String(detail || '').split('·').map((part) => part.trim()).filter(Boolean);
+  if (parts.length >= 2 && code && parts[0].toUpperCase() === code) return parts[1];
+  return '';
+}
+
+function extractDepartmentFromDescription(description) {
+  const match = String(description || '').match(/\(([^)]+)\)\s*$/);
+  return match ? match[1].trim() : '';
+}
+
+function isCustomerItem(item) {
+  const hay = `${item?.type || ''} ${item?.category || ''} ${item?.title || ''}`.toLowerCase();
+  return /customer|inactive_customer|pending_customers|inactive_high_value|large_recent_order|order_yesterday|customer_behaviour/.test(hay)
+    && !extractProductCode(item);
+}
+
+function isSupplierItem(item) {
+  const hay = `${item?.type || ''} ${item?.category || ''} ${item?.title || ''}`.toLowerCase();
+  return /supplier/.test(hay) && !extractProductCode(item);
+}
+
+function extractCustomerName(item, rawTitle) {
+  if (item?.name) return String(item.name).trim();
+  const split = rawTitle.split(/[—–-]/);
+  if (split.length > 1) return split[0].trim();
+  return rawTitle.replace(/\s+—.*/u, '').trim();
+}
+
+function extractSupplierName(item, rawTitle) {
+  if (item?.payload?.supplier) return String(item.payload.supplier).trim();
+  const followUp = rawTitle.match(/^Supplier follow-up:\s*(.+)$/i);
+  if (followUp) return followUp[1].trim();
+  const delay = rawTitle.match(/^(.+?)\s+supplier delay risk$/i);
+  if (delay) return delay[1].trim();
+  return rawTitle.replace(/^Supplier follow-up:\s*/i, '').trim();
+}
+
+/** Structured operational object — SKU first, description second. */
+export function buildOperationalObjectView(item) {
+  if (!item) {
+    return {
+      kind: 'generic',
+      searchText: '',
+      identifierLabel: null,
+      identifier: null,
+      description: '',
+      meta: null,
+      headline: null,
+      recommendation: null,
+    };
+  }
+
+  const rawTitle = String(item.title || item.label || '').trim();
+  const code = extractProductCode(item);
+  const recommendation = String(item.action || item.recommendation || '').trim() || null;
+
+  if (isSupplierItem(item)) {
+    const identifier = extractSupplierName(item, rawTitle);
+    return {
+      kind: 'supplier',
+      identifierLabel: 'Supplier',
+      identifier,
+      description: String(item.detail || '').trim() || null,
+      meta: null,
+      headline: extractHeadline(rawTitle, item),
+      recommendation,
+      searchText: identifier,
+    };
+  }
+
+  if (isCustomerItem(item)) {
+    const identifier = extractCustomerName(item, rawTitle);
+    return {
+      kind: 'customer',
+      identifierLabel: 'Customer',
+      identifier,
+      description: String(item.detail || '').trim() || null,
+      meta: null,
+      headline: extractHeadline(rawTitle, item),
+      recommendation,
+      searchText: identifier,
+    };
+  }
+
+  if (code) {
+    let description = stripProductDescription(rawTitle, code);
+    let department = String(item.payload?.department || item.department || item.dept || '').trim();
+    if (!department) department = extractDepartmentFromDescription(description);
+    if (department) description = description.replace(/\s*\([^)]+\)\s*$/, '').trim();
+
+    const supplier = String(item.payload?.supplier || item.supplier || '').trim()
+      || extractSupplierFromDetail(item.detail, code);
+    const meta = [department, supplier].filter(Boolean).join(' · ') || null;
+
+    return {
+      kind: 'product',
+      sku: code,
+      identifierLabel: 'SKU',
+      identifier: code,
+      description: description || rawTitle,
+      department: department || null,
+      supplier: supplier || null,
+      meta,
+      headline: extractHeadline(rawTitle, item),
+      recommendation: recommendation && !GENERIC_FOCUS_ACTIONS.has(recommendation.toLowerCase())
+        ? recommendation
+        : null,
+      searchText: [code, description, department, supplier].filter(Boolean).join(' '),
+    };
+  }
+
+  return {
+    kind: 'generic',
+    identifierLabel: null,
+    identifier: null,
+    description: rawTitle,
+    meta: null,
+    headline: extractHeadline(rawTitle, item),
+    recommendation,
+    searchText: rawTitle,
+  };
+}
+
+export function buildEvidenceMetrics(item) {
+  const raw = item?.payload?.evidence || item?.evidence;
+  if (!Array.isArray(raw) || !raw.length) return [];
+  return raw
+    .map((row) => {
+      if (typeof row !== 'object' || row == null) return null;
+      const label = String(row.label || '').trim();
+      const value = row.value;
+      if (!label || value == null || value === '') return null;
+      return { label, value };
+    })
+    .filter(Boolean);
+}
+
 /** Drop duplicate focus rows (same title or same generic recommendation). */
 export function dedupeFocusForDisplay(focus = [], limit = 5) {
   const seenTitles = new Set();
@@ -413,21 +594,30 @@ export function buildApolloRecommends(focus = []) {
     .filter((item) => item.action || item.recommendation || item.title)
     .map((item) => {
       const evidence = parseEvidence(item);
+      const view = buildOperationalObjectView(item);
+      const metrics = buildEvidenceMetrics(item);
       const action = String(item.action || item.recommendation || '').trim();
       const rawTitle = String(item.title || item.label || action || 'Recommendation').trim();
-      const title = formatWithProductCode(item, rawTitle);
+      const title = view.kind === 'product' && view.sku
+        ? `${view.sku} · ${view.description}`
+        : formatWithProductCode(item, rawTitle);
       const actionIsGeneric = !action || GENERIC_FOCUS_ACTIONS.has(action.toLowerCase()) || action === title;
-      const why = evidence.length
-        ? evidence
-        : (actionIsGeneric && item.why ? [item.why] : (action && !actionIsGeneric ? [action] : (item.why ? [item.why] : [])));
-      const confidenceRaw = item.confidence != null ? Number(item.confidence) : null;
-      const confidence = evidence.length && confidenceRaw != null && !Number.isNaN(confidenceRaw)
-        ? Math.round(confidenceRaw)
+      const why = metrics.length
+        ? metrics.map((row) => `${row.label}: ${row.value}`)
+        : evidence.length
+          ? evidence
+          : (actionIsGeneric && item.why ? [item.why] : (action && !actionIsGeneric ? [action] : (item.why ? [item.why] : [])));
+      const confidenceRaw = item.confidence != null ? Number(item.confidence) : item.payload?.confidence;
+      const confidenceNum = confidenceRaw != null ? Number(confidenceRaw) : null;
+      const confidence = (metrics.length || evidence.length) && confidenceNum != null && !Number.isNaN(confidenceNum)
+        ? Math.round(confidenceNum)
         : null;
       return {
         id: `${item.type}-${item.priority}`,
         title,
-        code: extractProductCode(item),
+        code: view.sku || extractProductCode(item),
+        view,
+        metrics,
         why,
         evidence,
         confidence,
@@ -454,9 +644,11 @@ export function groupNotificationsByUrgency(items = []) {
       title: item.title,
       displayTitle: formatWithProductCode(item, item.title),
       code: extractProductCode(item),
+      view: buildOperationalObjectView(item),
       detail: item.detail,
       severity: displaySeverity(item.severity),
-      url: item.actionUrl,
+      url: item.actionUrl || item.url,
+      query: item.payload?.query || item.query || null,
     });
   });
   return grouped;
