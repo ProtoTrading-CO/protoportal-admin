@@ -10,6 +10,7 @@ import {
   ShoppingCart,
 } from 'lucide-react';
 import {
+  buildApolloInfluence,
   buildApolloRecommends,
   buildBusinessStatus,
   buildDailyBriefBullets,
@@ -49,11 +50,11 @@ function FocusHero({ items, onSelect }) {
       <ol className="apollo-cc-hero-list">
         {items.map((row) => (
           <li key={`${row.category}-${row.rank}`} className={`apollo-cc-hero-item apollo-cc-severity--${row.severity}`}>
-            <span className="apollo-cc-hero-rank" aria-hidden="true">{row.rank}.</span>
             <div className="apollo-cc-hero-item-body">
+              <span className="apollo-cc-hero-urgency">{row.urgencyLabel}</span>
               <span className="apollo-cc-hero-category">{row.categoryLabel}</span>
               <button type="button" className="apollo-cc-hero-action" onClick={() => onSelect?.(row.item)}>
-                {row.label}
+                {row.summaryLabel}
                 <ArrowRight size={14} />
               </button>
             </div>
@@ -64,40 +65,76 @@ function FocusHero({ items, onSelect }) {
   );
 }
 
+function ApolloInfluenceBar({ influence }) {
+  const breakdown = (influence.rulesAppliedBreakdown || []).filter((row) => row.count > 0);
+  return (
+    <section className="apollo-cc-influence" aria-label="Apollo influence">
+      <p className={`apollo-cc-influence-copy${influence.trackingLive ? ' apollo-cc-influence-copy--live' : ''}`}>
+        {influence.headline}
+      </p>
+      {breakdown.length > 0 && (
+        <details className="apollo-cc-influence-breakdown">
+          <summary>Rulebook breakdown</summary>
+          <ul>
+            {breakdown.map((row) => (
+              <li key={row.key}>
+                {row.label}
+                {' '}
+                <strong>{row.count}</strong>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+    </section>
+  );
+}
+
 function BusinessStatusBar({ status }) {
   return (
     <section className="apollo-cc-status" aria-labelledby="apollo-cc-status-title">
       <h2 id="apollo-cc-status-title" className="apollo-cc-status-title">Business Status</h2>
       <div className={`apollo-cc-status-body apollo-cc-severity--${status.severity}`}>
-        <div className="apollo-cc-status-primary">
-          <span className="apollo-cc-status-emoji" aria-hidden="true">{status.emoji}</span>
-          <span className="apollo-cc-status-label">{status.label}</span>
-          {status.percent != null && (
-            <span className="apollo-cc-status-percent">{status.percent}%</span>
-          )}
-        </div>
-        <ul className="apollo-cc-status-metrics">
-          <li><strong>{status.issues}</strong> issues</li>
-          <li><strong>{status.opportunities}</strong> opportunities</li>
-          <li><strong>{status.urgent}</strong> urgent</li>
+        <p className="apollo-cc-status-headline">{status.headline}</p>
+        <ul className="apollo-cc-status-lines">
+          {status.lines.map((line) => (
+            <li key={line}>{line}</li>
+          ))}
         </ul>
       </div>
-      {(status.biggestRisk || status.biggestOpportunity) && (
-        <div className="apollo-cc-status-insights">
-          {status.biggestRisk && (
-            <p className="apollo-cc-status-insight">
-              <span className="apollo-cc-status-insight-kicker">Today&apos;s biggest risk:</span>
-              {status.biggestRisk}
-            </p>
+      <details className="apollo-cc-status-detail">
+        <summary>View health detail</summary>
+        <div className="apollo-cc-status-detail-body">
+          <p className="apollo-cc-status-detail-score">
+            Business health score: <strong>{status.detail.healthScore}</strong>
+            {status.detail.percent != null && <> ({status.detail.percent}%)</>}
+          </p>
+          {status.detail.bar && (
+            <p className="apollo-cc-status-detail-bar" aria-hidden="true">{status.detail.bar}</p>
           )}
-          {status.biggestOpportunity && (
-            <p className="apollo-cc-status-insight">
-              <span className="apollo-cc-status-insight-kicker">Today&apos;s biggest opportunity:</span>
-              {status.biggestOpportunity}
-            </p>
+          <ul className="apollo-cc-status-detail-metrics">
+            <li>{status.detail.issues} issues flagged</li>
+            <li>{status.detail.opportunities} opportunities</li>
+            <li>{status.detail.urgent} urgent</li>
+          </ul>
+          {(status.biggestRisk || status.biggestOpportunity) && (
+            <div className="apollo-cc-status-insights">
+              {status.biggestRisk && (
+                <p className="apollo-cc-status-insight">
+                  <span className="apollo-cc-status-insight-kicker">Biggest risk:</span>
+                  {status.biggestRisk}
+                </p>
+              )}
+              {status.biggestOpportunity && (
+                <p className="apollo-cc-status-insight">
+                  <span className="apollo-cc-status-insight-kicker">Biggest opportunity:</span>
+                  {status.biggestOpportunity}
+                </p>
+              )}
+            </div>
           )}
         </div>
-      )}
+      </details>
     </section>
   );
 }
@@ -297,6 +334,8 @@ function RecommendCardActions({ rec, onAsk, onReviewNotification }) {
 }
 
 function RecommendsSection({ items, onOpen, onAsk, onReviewNotification }) {
+  const [expandedId, setExpandedId] = useState(null);
+
   if (!items.length) return null;
   return (
     <section
@@ -306,47 +345,115 @@ function RecommendsSection({ items, onOpen, onAsk, onReviewNotification }) {
     >
       <h3 id="apollo-cc-recommends-title" className="apollo-cc-block-title">Apollo Recommends</h3>
       <div className="apollo-cc-recommends-stack">
-        {items.map((rec) => (
-          <article key={rec.id} className={`apollo-cc-recommend apollo-cc-severity--${rec.severity}`}>
-            <button
-              type="button"
-              className="apollo-cc-recommend-card"
-              onClick={() => onOpen?.(rec)}
-              data-search={rec.view?.searchText || rec.title}
-            >
-              {rec.relativeTime && (
-                <span className="apollo-cc-recommend-time">{rec.relativeTime}</span>
+        {items.map((rec) => {
+          const expanded = expandedId === rec.id;
+          return (
+            <article key={rec.id} className={`apollo-cc-recommend apollo-cc-severity--${rec.severity}${expanded ? ' is-expanded' : ''}`}>
+              <button
+                type="button"
+                className="apollo-cc-recommend-card"
+                onClick={() => setExpandedId(expanded ? null : rec.id)}
+                data-search={rec.view?.searchText || rec.title}
+                aria-expanded={expanded}
+              >
+                {rec.relativeTime && (
+                  <span className="apollo-cc-recommend-time">{rec.relativeTime}</span>
+                )}
+                {!expanded ? (
+                  <div className="apollo-cc-recommend-scan">
+                    <p className="apollo-cc-recommend-summary">{rec.summaryHeadline}</p>
+                    {rec.whyToday && (
+                      <p className="apollo-cc-recommend-why">
+                        <span className="apollo-cc-recommend-kicker">Why today?</span>
+                        {rec.whyToday}
+                      </p>
+                    )}
+                    {rec.actionShort && (
+                      <div className="apollo-cc-recommend-action-block">
+                        <span className="apollo-cc-recommend-kicker">Do this next</span>
+                        <p>{rec.actionShort}</p>
+                      </div>
+                    )}
+                    {rec.reasoning?.length > 0 && (
+                      <ul className="apollo-cc-recommend-reasoning">
+                        {rec.reasoning.map((line) => (
+                          <li key={line}>{line}</li>
+                        ))}
+                      </ul>
+                    )}
+                    {rec.confidenceLevel && (
+                      <p className="apollo-cc-recommend-confidence-level">{rec.confidenceLevel}</p>
+                    )}
+                  </div>
+                ) : (
+                  <div className="apollo-cc-recommend-expanded">
+                    <OperationalObjectDisplay
+                      view={rec.view}
+                      impactBadge={rec.impactBadge}
+                    />
+                    {rec.whyToday && (
+                      <p className="apollo-cc-recommend-why">
+                        <span className="apollo-cc-recommend-kicker">Why today?</span>
+                        {rec.whyToday}
+                      </p>
+                    )}
+                    {rec.actionShort && (
+                      <div className="apollo-cc-recommend-action-block">
+                        <span className="apollo-cc-recommend-kicker">Do this next</span>
+                        <p>{rec.actionShort}</p>
+                      </div>
+                    )}
+                    {rec.reasoning?.length > 0 && (
+                      <ul className="apollo-cc-recommend-reasoning">
+                        {rec.reasoning.map((line) => (
+                          <li key={line}>{line}</li>
+                        ))}
+                      </ul>
+                    )}
+                    {rec.confidenceLevel && (
+                      <p className="apollo-cc-recommend-confidence-level">{rec.confidenceLevel}</p>
+                    )}
+                    <details className="apollo-cc-recommend-evidence" onClick={(e) => e.stopPropagation()}>
+                      <summary>View evidence</summary>
+                      <div className="apollo-cc-recommend-evidence-body">
+                        {rec.metrics?.length > 0 && (
+                          <ul className="apollo-cc-recommend-metrics">
+                            {rec.metrics.map((row) => (
+                              <li key={row.label}>
+                                <span>{row.label}</span>
+                                <strong>{row.value}</strong>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                        {rec.confidenceChip && <ConfidenceChip chip={rec.confidenceChip} />}
+                        {rec.priorityBadge && <PriorityBadge badge={rec.priorityBadge} />}
+                      </div>
+                    </details>
+                    <button
+                      type="button"
+                      className="apollo-cc-recommend-open"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onOpen?.(rec);
+                      }}
+                    >
+                      Open workspace
+                      <ArrowRight size={14} />
+                    </button>
+                  </div>
+                )}
+              </button>
+              {expanded && (
+                <RecommendCardActions
+                  rec={rec}
+                  onAsk={onAsk}
+                  onReviewNotification={onReviewNotification}
+                />
               )}
-              <OperationalObjectDisplay
-                view={rec.view}
-                impactBadge={rec.impactBadge}
-                priorityBadge={rec.priorityBadge}
-              />
-              {rec.metrics?.length > 0 && (
-                <ul className="apollo-cc-recommend-metrics">
-                  {rec.metrics.map((row) => (
-                    <li key={row.label}>
-                      <span>{row.label}</span>
-                      <strong>{row.value}</strong>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              {rec.recommendationText && (
-                <div className="apollo-cc-recommend-action-block">
-                  <span className="apollo-cc-recommend-kicker">Next Action</span>
-                  <p>{rec.recommendationText}</p>
-                </div>
-              )}
-              {rec.confidenceChip && <ConfidenceChip chip={rec.confidenceChip} />}
-            </button>
-            <RecommendCardActions
-              rec={rec}
-              onAsk={onAsk}
-              onReviewNotification={onReviewNotification}
-            />
-          </article>
-        ))}
+            </article>
+          );
+        })}
       </div>
     </section>
   );
@@ -487,20 +594,23 @@ function StartMyDay({ active, stepIndex, onStart, onAdvance, onExit }) {
 }
 
 export function HeaderHealthCard({ card }) {
+  const emoji = card.severity === 'green' ? '🟢' : card.severity === 'amber' ? '🟡' : card.severity === 'red' ? '🔴' : '⚪';
+  const headline = card.label === 'Excellent' || card.label === 'Healthy'
+    ? `${emoji} Business Healthy`
+    : `${emoji} Business ${card.label}`;
+
   return (
-    <div className={`apollo-cc-health-header apollo-cc-severity--${card.severity}`} aria-label="Business health">
-      <span className="apollo-cc-health-header-label">Business Health</span>
-      <p className="apollo-cc-health-header-bar" aria-hidden="true">{card.bar}</p>
-      <p className="apollo-cc-health-header-score">
-        <strong>{card.display}</strong>
-        <span> / {card.max}</span>
-      </p>
-      <span className="apollo-cc-health-header-status">{card.label}</span>
-      {card.delta != null && (
-        <span className={`apollo-cc-health-header-delta apollo-cc-health-header-delta--${card.delta >= 0 ? 'up' : 'down'}`}>
-          {card.delta >= 0 ? '▲' : '▼'} {Math.abs(card.delta).toFixed(1)} since yesterday
-        </span>
-      )}
+    <div className={`apollo-cc-health-header apollo-cc-severity--${card.severity}`} aria-label="Business status">
+      <span className="apollo-cc-health-header-label">Business Status</span>
+      <p className="apollo-cc-health-header-status">{headline}</p>
+      <details className="apollo-cc-health-header-detail">
+        <summary>Detail</summary>
+        <p className="apollo-cc-health-header-bar" aria-hidden="true">{card.bar}</p>
+        <p className="apollo-cc-health-header-score">
+          <strong>{card.display}</strong>
+          <span> / {card.max}</span>
+        </p>
+      </details>
     </div>
   );
 }
@@ -592,6 +702,7 @@ export default function ApolloOperationalBrief({
   const focusTypes = focusTypesPresent(context.focusToday || []);
   const heroItems = buildHeroFocusItems(context.focusToday || []);
   const businessStatus = buildBusinessStatus(context);
+  const apolloInfluence = buildApolloInfluence(context);
   const dailyBrief = buildDailyBriefBullets(context);
   const recommends = buildApolloRecommends(context.focusToday || []);
   const notifications = groupNotificationsByUrgency(context.notifications?.items || []);
@@ -614,6 +725,7 @@ export default function ApolloOperationalBrief({
       </div>
 
       <BusinessStatusBar status={businessStatus} />
+      <ApolloInfluenceBar influence={apolloInfluence} />
 
       <FocusHero items={heroItems} onSelect={handleFocusSelect} />
 

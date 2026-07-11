@@ -63,6 +63,20 @@ Supabase email/password login with a **3-email allowlist** (`src/lib/auth.js`, m
 
 `Root.jsx` shows `AdminLoginPage` until `getVerifiedSession()` + `/api/auth-check` succeed. API routes use `requireAdminKey` (JWT or optional `ADMIN_DASH_KEY` header). Fulfillment links use per-order HMAC tokens (`ORDER_NOTIFY_SECRET`). Crons require `CRON_SECRET`.
 
+## Apollo governance
+
+**Mandatory reading** for anyone contributing to Apollo:
+
+1. [`docs/APOLLO_CONSTITUTION.md`](docs/APOLLO_CONSTITUTION.md) — frozen v1.0 project governance
+2. [`STATUS.md`](STATUS.md) — current mission and responsibilities earned
+3. [`docs/PROTO_RULEBOOK.md`](docs/PROTO_RULEBOOK.md) — how Proto interprets the business
+
+**Planning question:** *What operational responsibility did Apollo earn?* — not "what should we build next?"
+
+**Pull requests:** Changes to the Constitution are exceptional events (typo 1.0.1, clarification 1.1, model change 2.0 only). Routine documentation edits do not apply to `APOLLO_CONSTITUTION.md`.
+
+See also: [`docs/APOLLO_MISSION.md`](docs/APOLLO_MISSION.md) · [`docs/APOLLO_ARCHITECTURE.md`](docs/APOLLO_ARCHITECTURE.md) · [`README.md`](README.md)
+
 ## Agent skill
 See `.cursor/skills/protoportal-admin/SKILL.md` for full architecture.
 

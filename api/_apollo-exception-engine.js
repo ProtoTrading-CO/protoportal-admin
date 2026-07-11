@@ -1,6 +1,8 @@
 const IMPACT_RANK = { critical: 4, high: 3, medium: 2, low: 1 };
 const SEVERITY_RANK = { critical: 4, action: 3, review: 2, info: 1 };
 
+import { classifyNegativeStockList } from './_apollo-negative-stock-rules.js';
+
 function num(value, fallback = 0) {
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
@@ -320,6 +322,29 @@ export function detectSupplierDelays({ suppliers = [] } = {}) {
   });
 }
 
+export function detectNegativeStockInvestigations({ products = [], sales = null, existingByKey = null, now = new Date() } = {}) {
+  return classifyNegativeStockList(products, { sales, existingByKey, now })
+    .filter((row) => row.kind === 'investigate')
+    .map((row) => exception({
+      type: 'negative_stock_investigation',
+      category: 'negative_stock_investigation',
+      key: row.code,
+      title: row.title,
+      detail: row.detail,
+      recommendation: row.recommendation,
+      severity: 'action',
+      businessImpact: 'high',
+      confidence: 88,
+      evidence: [
+        { label: 'On hand', value: row.stockQty },
+        { label: 'Persisted hours', value: row.persistedHours || row.rules?.gracePeriodHours || 24 },
+        { label: 'GRV pending', value: row.pendingGrv ? 'yes' : 'no' },
+        ...(row.reasoning || []).map((line) => ({ label: 'Reason', value: line })),
+      ],
+      query: `Show product ${row.code}`,
+    }));
+}
+
 export function buildBusinessExceptions(source = {}) {
   const items = [
     ...detectSalesAnomalies(source.sales || {}),
@@ -327,6 +352,7 @@ export function buildBusinessExceptions(source = {}) {
     ...detectStockCoverRisks(source.stockCover || {}),
     ...detectCustomerBehaviourChanges(source.customers || {}),
     ...detectSupplierDelays(source.suppliers || {}),
+    ...detectNegativeStockInvestigations(source.negativeStock || {}),
   ];
 
   return items.sort((a, b) => {

@@ -72,14 +72,19 @@ async function loadWorkspaceNotificationSource(supabase) {
   }));
 }
 
-async function loadBuyingSupplierNotificationSource(ctx = {}) {
+async function loadBuyingSupplierNotificationSource(ctx = {}, { existingByKey = null, now = new Date() } = {}) {
   try {
     const inventoryEnv = await buildInventoryContext({ type: 'all', limit: 10, threshold: 10 }, ctx);
     if (!inventoryEnv.ok) return [];
     let sales = null;
     const salesRes = await executeQuery('erp.top_line_items', { period: 'last_week', scope: 'top_sellers', limit: 15 }, ctx);
     if (salesRes.ok) sales = salesRes.data;
-    return buildBuyingSupplierNotifications({ inventory: inventoryEnv.data, sales });
+    return buildBuyingSupplierNotifications({
+      inventory: inventoryEnv.data,
+      sales,
+      existingByKey,
+      now,
+    });
   } catch (err) {
     console.warn('apollo-notifications advisory source unavailable:', err?.message || err);
     return [];
@@ -223,6 +228,10 @@ async function loadExceptionNotificationSource(workspaces, ctx = {}) {
       stockCover: stockCoverSource(inventory, sales),
       customers: customerExceptionSource(ordersRes.ok ? ordersRes.data?.orders || [] : []),
       suppliers: supplierExceptionSource(workspaces),
+      negativeStock: {
+        products: inventory.lists?.negative || [],
+        sales,
+      },
     });
   } catch (err) {
     console.warn('apollo exception source unavailable:', err?.message || err);
@@ -234,7 +243,7 @@ async function loadExistingNotifications(supabase, dedupeKeys = []) {
   if (!dedupeKeys.length) return new Map();
   const { data, error } = await supabase
     .from('apollo_notifications')
-    .select('id,dedupe_key,status,feedback_status,feedback_note,feedback_by,feedback_at,business_value,decision_outcome,audit_snapshot,confidence,business_impact,evidence,recommendation,detail,title,category')
+    .select('id,dedupe_key,status,feedback_status,feedback_note,feedback_by,feedback_at,business_value,decision_outcome,audit_snapshot,confidence,business_impact,evidence,recommendation,detail,title,category,detected_at,created_at')
     .in('dedupe_key', dedupeKeys);
   if (error) throw error;
   return new Map((data || []).map((row) => [row.dedupe_key, row]));
@@ -335,20 +344,37 @@ export async function loadDailyBriefValidationScore(supabase = getPortalAdminCli
 
 export async function generateApolloNotifications({ supabase = getPortalAdminClient(), persist = false, now = new Date(), includeAdvisory = persist, includeExceptions = true } = {}) {
   const source = await loadWorkspaceNotificationSource(supabase);
+  const ctx = { bypassCache: true };
+  const workspaceItems = buildOrderWorkspaceNotifications(source, { now });
+  const preliminaryBuying = includeAdvisory ? await loadBuyingSupplierNotificationSource(ctx, { now }) : [];
+  const preliminaryExceptions = includeExceptions ? await loadExceptionNotificationSource(source, { bypassCache: true }) : [];
+  const existingByKey = await loadExistingNotifications(
+    supabase,
+    [...workspaceItems, ...preliminaryBuying, ...preliminaryExceptions].map((item) => item.dedupeKey),
+  );
+  const buyingItems = includeAdvisory
+    ? await loadBuyingSupplierNotificationSource(ctx, { existingByKey, now })
+    : [];
   const generated = [
-    ...buildOrderWorkspaceNotifications(source, { now }),
-    ...(includeAdvisory ? await loadBuyingSupplierNotificationSource({ bypassCache: true }) : []),
+    ...workspaceItems,
+    ...buyingItems,
     ...(includeExceptions ? await loadExceptionNotificationSource(source, { bypassCache: true }) : []),
   ].sort((a, b) => b.priorityScore - a.priorityScore || String(a.title).localeCompare(String(b.title)));
 
-  const existingByKey = await loadExistingNotifications(supabase, generated.map((item) => item.dedupeKey));
-  if (persist) await persistGeneratedNotifications(supabase, generated, existingByKey);
+  const mergedExisting = await loadExistingNotifications(
+    supabase,
+    [...new Set([...existingByKey.keys(), ...generated.map((item) => item.dedupeKey)])],
+  );
+  for (const [key, value] of existingByKey.entries()) {
+    if (!mergedExisting.has(key)) mergedExisting.set(key, value);
+  }
+  if (persist) await persistGeneratedNotifications(supabase, generated, mergedExisting);
   const visible = generated
     .filter((item) => {
-      const existing = existingByKey.get(item.dedupeKey);
+      const existing = mergedExisting.get(item.dedupeKey);
       return !SUPPRESSED_NOTIFICATION_STATUSES.includes(existing?.status) && existing?.feedback_status !== 'ignore_permanently';
     })
-    .map((item) => withExistingState(item, existingByKey.get(item.dedupeKey)));
+    .map((item) => withExistingState(item, mergedExisting.get(item.dedupeKey)));
 
   return {
     items: visible,

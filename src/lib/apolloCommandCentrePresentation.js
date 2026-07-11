@@ -1,6 +1,9 @@
 /** Apollo Command Centre — presentation helpers (no backend / business rules). */
 
 import {
+  summarizeBusinessRulesApplied,
+} from './apolloRulebookPresentation.js';
+import {
   businessHealthScore,
   displaySeverity,
   greetingForHour,
@@ -135,6 +138,158 @@ export function diverseFocusForDisplay(focus = [], limit = 3) {
   return picked.slice(0, limit);
 }
 
+function businessStatusHeadline(label, emoji) {
+  const map = {
+    Excellent: 'Very healthy',
+    Healthy: 'Healthy',
+    'Needs attention': 'Needs attention',
+    'At risk': 'Under pressure',
+    Unknown: 'Status unknown',
+  };
+  return `${emoji} Business ${map[label] || label}`;
+}
+
+function countSupplierAttention(context, focusPool) {
+  const notifications = context?.notifications?.items || [];
+  const fromFocus = focusPool.filter((item) => categorizeFocusItem(item) === 'supplier').length;
+  const fromNotif = notifications.filter((n) => /supplier/i.test(`${n.category || ''} ${n.title || ''}`)).length;
+  return Math.max(fromFocus, fromNotif);
+}
+
+/** Narrative summary lines — prose counts, not dashboard numbers. */
+export function buildBusinessSummaryLines(status, context, focusPool = []) {
+  const lines = [];
+  const pool = focusPool.length ? focusPool : dedupeFocusForDisplay(context?.focusToday || [], 10);
+  const supplierCount = countSupplierAttention(context, pool);
+  const needsAttention = status.urgent > 0 || status.issues > 0;
+
+  if (!needsAttention) lines.push('No critical issues.');
+  else if (status.urgent > 0) {
+    lines.push(`${status.urgent} thing${status.urgent === 1 ? '' : 's'} need${status.urgent === 1 ? 's' : ''} urgent attention.`);
+  } else {
+    lines.push(`${status.issues} item${status.issues === 1 ? '' : 's'} need${status.issues === 1 ? 's' : ''} attention.`);
+  }
+
+  if (status.opportunities > 0) {
+    lines.push(`${status.opportunities} buying opportunit${status.opportunities === 1 ? 'y' : 'ies'}.`);
+  }
+
+  if (supplierCount > 0) {
+    lines.push(`${supplierCount} supplier${supplierCount === 1 ? '' : 's'} require${supplierCount === 1 ? 's' : ''} attention.`);
+  }
+
+  return lines.slice(0, 3);
+}
+
+/** Behavioural KPI — Apollo proving value, not looking impressive. */
+export function buildApolloInfluence(context) {
+  const items = context?.notifications?.items || [];
+  const decisionsToday = items.filter((item) => {
+    const outcome = item.decisionOutcome || item.decision_outcome;
+    const feedback = item.feedbackStatus || item.feedback_status;
+    return (outcome && outcome !== 'no_action_taken')
+      || item.businessValue
+      || item.business_value
+      || feedback === 'acted_on'
+      || feedback === 'useful';
+  }).length;
+
+  const rulesApplied = summarizeBusinessRulesApplied(items);
+  const suppressedToday = items.filter((item) => item.payload?.expectedBehaviourSuppressed).length;
+  const resolvedToday = items.filter((item) => item.payload?.negativeStockClass === 'resolved_automatically').length;
+
+  let headline = decisionsToday > 0
+    ? `Apollo influenced ${decisionsToday} business decision${decisionsToday === 1 ? '' : 's'} today`
+    : 'Apollo influenced — tracking starts when you act on a recommendation';
+
+  if (rulesApplied.total > 0) {
+    headline = `Business rules applied today: ${rulesApplied.total}`;
+  } else if (suppressedToday > 0) {
+    headline = `Expected behaviour suppressed: ${suppressedToday} today`;
+  } else if (resolvedToday > 0) {
+    headline = `${resolvedToday} timing issue${resolvedToday === 1 ? '' : 's'} resolved automatically today`;
+  }
+
+  return {
+    decisionsToday,
+    rulesAppliedToday: rulesApplied.total,
+    rulesAppliedBreakdown: rulesApplied.breakdown,
+    rulebookVersion: rulesApplied.rulebookVersion,
+    suppressedToday,
+    resolvedToday,
+    trackingLive: decisionsToday > 0 || rulesApplied.total > 0 || suppressedToday > 0 || resolvedToday > 0,
+    headline,
+  };
+}
+
+export function focusUrgencyLabel(rank, severity) {
+  if (rank === 1) return '🔴 Do this first';
+  if (rank === 2 || displaySeverity(severity) === 'urgent') return '🟡 Do next';
+  return 'Worth reviewing';
+}
+
+export function confidenceLevelText(confidence) {
+  if (confidence == null || Number.isNaN(Number(confidence))) return null;
+  const pct = Math.round(Number(confidence));
+  if (pct >= 85) return 'High confidence';
+  if (pct >= 60) return 'Medium confidence';
+  return 'Low confidence';
+}
+
+function shortenActionText(text) {
+  const trimmed = String(text || '').trim();
+  if (!trimmed) return null;
+  return trimmed
+    .replace(/^Review stock cover before demand outruns supply\.?$/i, 'Review stock cover')
+    .replace(/^Check whether demand has slowed or stock\/listing issues are suppressing sales\.?$/i, 'Check demand and listing')
+    .replace(/\.$/, '');
+}
+
+/** Why am I seeing this today? — builds trust fast. */
+export function buildWhyToday(item) {
+  const badge = buildEventBadge(item);
+  const detail = String(item.detail || '').trim();
+  const title = String(item.title || '').toLowerCase();
+
+  if (badge?.key === 'sales_spike') return 'Sales increased yesterday.';
+  if (badge?.key === 'sales_drop') return 'Sales dropped against recent trend.';
+  if (badge?.key === 'supplier_followup' || badge?.key === 'supplier_delay') {
+    if (/eta|container|shipment|delay/i.test(detail) || /eta|container|delay/i.test(title)) {
+      return 'Container ETA changed.';
+    }
+    return 'Supplier deadline moved.';
+  }
+  if (badge?.key === 'customer_quiet') return 'Customer is quieter than usual.';
+  if (badge?.key === 'buying_review' || badge?.key === 'stock_cover') return 'Stock cover needs a decision today.';
+  if (badge?.key === 'negative_stock') return 'Stock went negative in ERP.';
+  if (badge?.key === 'stock_awaiting_grv' || badge?.key === 'grv_in_progress' || badge?.key === 'stock_timing') {
+    const reasoning = item?.payload?.reasoning;
+    if (Array.isArray(reasoning) && reasoning[0]) return reasoning[0].endsWith('.') ? reasoning[0] : `${reasoning[0]}.`;
+    return 'GRV is still being processed.';
+  }
+  if (badge?.key === 'resolved_automatically') return 'Stock corrected itself after GRV timing.';
+  if (badge?.key === 'inventory_investigation' || badge?.key === 'stock_discrepancy') {
+    return 'Negative stock persisted without a matching GRV.';
+  }
+  if (badge?.key === 'low_stock' || badge?.key === 'zero_stock') return 'On-hand stock is running low.';
+  if (badge?.key === 'order_overdue') return 'A commitment date passed.';
+  if (badge?.key === 'awaiting_approval') return 'Waiting on your approval.';
+
+  if (detail && detail.length <= 90) {
+    return detail.endsWith('.') ? detail : `${detail}.`;
+  }
+  return 'Flagged in today\'s operational scan.';
+}
+
+function buildRecommendSummary(view, item) {
+  if (view.kind === 'product' && view.description) {
+    if (view.eventBadge?.key === 'sales_spike') return `${view.description} demand increasing`;
+    if (view.eventBadge?.key === 'sales_drop') return `${view.description} sales slowing`;
+    return view.description;
+  }
+  return formatStatusInsight(item) || view.description || String(item.title || '').trim();
+}
+
 function formatStatusInsight(item) {
   const title = String(item.title || item.label || '').trim();
   if (!title) return heroFocusLabel(item);
@@ -243,6 +398,12 @@ const EVENT_BADGE_CATALOG = {
   sales_spike: { emoji: '🟢', label: 'SALES SPIKE', tone: 'green' },
   sales_drop: { emoji: '🔴', label: 'SALES DROP', tone: 'red' },
   negative_stock: { emoji: '🔴', label: 'NEGATIVE STOCK', tone: 'red' },
+  stock_awaiting_grv: { emoji: '🟡', label: 'STOCK AWAITING GRV', tone: 'amber' },
+  grv_in_progress: { emoji: '🟡', label: 'GRV IN PROGRESS', tone: 'amber' },
+  stock_timing: { emoji: '🟡', label: 'STOCK TIMING DIFFERENCE', tone: 'amber' },
+  stock_discrepancy: { emoji: '🔴', label: 'STOCK DISCREPANCY', tone: 'red' },
+  inventory_investigation: { emoji: '🔴', label: 'INVENTORY INVESTIGATION', tone: 'red' },
+  resolved_automatically: { emoji: '🟢', label: 'RESOLVED AUTOMATICALLY', tone: 'green' },
   zero_stock: { emoji: '🔴', label: 'ZERO STOCK', tone: 'red' },
   low_stock: { emoji: '🟡', label: 'LOW STOCK', tone: 'amber' },
   buying_review: { emoji: '🟡', label: 'BUYING REVIEW', tone: 'amber' },
@@ -308,8 +469,21 @@ function resolveEventBadgeKey(item, headline) {
   const category = String(item?.category || item?.type || '').toLowerCase();
   const title = String(item?.title || '').toLowerCase();
   const stockBucket = item?.payload?.stockBucket;
+  const negativeClass = item?.payload?.negativeStockClass;
 
-  if (stockBucket === 'negative' || category.includes('negative_stock') || /negative stock/.test(title)) {
+  if (negativeClass === 'resolved_automatically' || stockBucket === 'negative_resolved' || category.includes('stock_timing_resolved')) {
+    return 'resolved_automatically';
+  }
+  if (negativeClass === 'investigate' || stockBucket === 'negative_investigate' || category.includes('negative_stock_investigation')) {
+    return 'inventory_investigation';
+  }
+  if (negativeClass === 'grv_in_progress' || item?.payload?.pendingGrv) return 'grv_in_progress';
+  if (negativeClass === 'temporary_timing' || stockBucket === 'negative_timing' || category.includes('stock_timing')) {
+    return 'stock_awaiting_grv';
+  }
+  if (stockBucket === 'negative' || category.includes('negative_stock') || /negative stock|stock discrepancy|stock awaiting grv|grv in progress/i.test(title)) {
+    if (/grv|awaiting grv|timing/i.test(title)) return 'stock_awaiting_grv';
+    if (/discrepancy|investigat/i.test(title)) return 'inventory_investigation';
     return 'negative_stock';
   }
   if (stockBucket === 'zero' || category.includes('zero_stock')) return 'zero_stock';
@@ -636,11 +810,14 @@ function focusHeroTitle(count) {
 export function buildHeroFocusItems(focus = [], limit = 3) {
   return diverseFocusForDisplay(focus, limit).map((item, index) => {
     const category = categorizeFocusItem(item);
+    const rank = index + 1;
     return {
-      rank: index + 1,
+      rank,
       category,
       categoryLabel: FOCUS_CATEGORY_LABELS[category] || 'Operations',
       label: heroFocusLabel(item),
+      summaryLabel: formatStatusInsight(item),
+      urgencyLabel: focusUrgencyLabel(rank, item.severity),
       severity: displaySeverity(item.severity || 'attention'),
       item,
     };
@@ -779,12 +956,20 @@ export function buildApolloRecommends(focus = []) {
         ? Math.round(confidenceNum)
         : null;
       const recommendationText = action || view.recommendation || null;
+      const reasoning = Array.isArray(item.payload?.reasoning) ? item.payload.reasoning : [];
       const confidenceChip = buildConfidenceChip(confidence);
       return {
         id: `${item.type}-${item.priority}`,
         title,
         code: view.sku || extractProductCode(item),
         view: { ...view, recommendation: recommendationText },
+        summaryHeadline: buildRecommendSummary(view, item),
+        actionShort: shortenActionText(recommendationText),
+        whyToday: buildWhyToday(item),
+        reasoning,
+        confidenceLevel: item.payload?.confidenceLevel
+          ? `${String(item.payload.confidenceLevel).charAt(0).toUpperCase()}${String(item.payload.confidenceLevel).slice(1)} confidence`
+          : confidenceLevelText(confidence),
         metrics,
         recommendationText,
         confidence,
@@ -800,6 +985,9 @@ export function buildApolloRecommends(focus = []) {
 
 function notificationUrgencyBucket(item) {
   const sev = displaySeverity(item.severity);
+  if (item.category === 'stock_timing' || item.payload?.negativeStockClass === 'temporary_timing' || item.payload?.negativeStockClass === 'grv_in_progress') {
+    return 'info';
+  }
   if (sev === 'urgent' || item.severity === 'critical') return 'immediate';
   if (sev === 'attention' || item.severity === 'action' || item.severity === 'review') return 'today';
   return 'info';
@@ -863,7 +1051,12 @@ export function buildBusinessStatus(context) {
       : card.severity === 'red' ? '🔴'
         : '⚪';
 
-  return {
+  const narrative = {
+    headline: businessStatusHeadline(card.label, emoji),
+    lines: [],
+  };
+
+  const status = {
     label: card.label,
     emoji,
     percent,
@@ -874,7 +1067,20 @@ export function buildBusinessStatus(context) {
     severity: card.severity,
     biggestRisk: pickBiggestRisk(context, focusPool),
     biggestOpportunity: pickBiggestOpportunity(focusPool),
+    headline: narrative.headline,
+    detail: {
+      healthScore: card.display,
+      percent,
+      bar: card.bar,
+      issues,
+      opportunities,
+      urgent,
+      label: card.label,
+    },
   };
+
+  status.lines = buildBusinessSummaryLines(status, context, focusPool);
+  return status;
 }
 
 /** Scannable Daily Brief bullets with optional detail sections. */
@@ -935,11 +1141,11 @@ export function buildDailyBriefBullets(context) {
 export const APOLLO_RESPONSIBILITIES = [
   { id: 'truth', label: 'Truth', status: 'earned' },
   { id: 'context', label: 'Context', status: 'earned' },
-  { id: 'attention', label: 'Attention', status: 'earned' },
-  { id: 'execution', label: 'Execution', status: 'earned' },
-  { id: 'memory', label: 'Memory', status: 'emerging', note: 'Not yet earned' },
-  { id: 'reasoning', label: 'Reasoning', status: 'waiting', note: 'Waiting for Memory' },
+  { id: 'knowledge', label: 'Knowledge', status: 'emerging', note: 'Proto Memory emerging' },
+  { id: 'rulebook', label: 'Rulebook', status: 'emerging', note: 'Rulebook v1.0 live' },
+  { id: 'reasoning', label: 'Reasoning', status: 'waiting', note: 'Combines Knowledge + Rulebook' },
   { id: 'advice', label: 'Advice', status: 'waiting', note: 'Waiting for Reasoning' },
+  { id: 'execution', label: 'Execution', status: 'earned' },
   { id: 'coordination', label: 'Coordination', status: 'waiting', note: null },
   { id: 'stewardship', label: 'Stewardship', status: 'waiting', note: null },
 ];
@@ -964,10 +1170,12 @@ export const APOLLO_KNOWLEDGE_DEFAULT_COUNTS = {
   buying: 0,
   decision: 0,
   operational: 0,
+  business_rules: 1,
+  reference: 0,
 };
 
 export const APOLLO_KNOWLEDGE_HEALTH_PURPOSE =
-  "Proto's operational knowledge grows here over time.";
+  "Proto's operational knowledge grows here. Knowledge is experience; Business Rules are judgment.";
 
 export function buildKnowledgeHealth({
   verifiedKnowledge = 0,
@@ -994,6 +1202,9 @@ export function buildKnowledgeDomainCounts(overrides = {}) {
 }
 
 export function formatKnowledgeDomainCount(domain, count = 0) {
+  if (domain.status === 'reserved') return 'Reserved';
   if (domain.countType === 'active') return `${count} active`;
+  if (domain.countType === 'rulebook') return domain.rulebookLabel || `Rulebook v1.0 · ${count} validated`;
+  if (domain.countType === 'reference') return count > 0 ? `${count} documents` : 'Reserved';
   return `${count} verified`;
 }

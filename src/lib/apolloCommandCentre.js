@@ -143,6 +143,25 @@ export const APOLLO_KNOWLEDGE_DOMAINS = [
     countType: 'active',
     emptyCopy: 'No operational state recorded.',
   },
+  {
+    id: 'business_rules',
+    label: 'Business Rules',
+    description: 'How Proto interprets operations — Apollo\'s judgment framework (Rulebook).',
+    countType: 'rulebook',
+    rulebookLabel: 'Rulebook v1.0 · 1 validated',
+    emptyCopy: 'No business rules encoded yet.',
+    separateFromMemory: true,
+    assetType: 'business_rule',
+  },
+  {
+    id: 'reference',
+    label: 'Reference Knowledge',
+    description: 'External policy and reference — Incoterms, VAT, freight, contracts.',
+    countType: 'reference',
+    emptyCopy: 'Reference library not yet activated.',
+    status: 'reserved',
+    assetType: 'reference',
+  },
 ];
 
 export function knowledgeDomainById(id) {
@@ -155,3 +174,10 @@ export function isWorkObjectReady(id) {
 
 /** @deprecated Use isWorkObjectReady */
 export const isWorkspaceLive = isWorkObjectReady;
+
+/**
+ * Apollo 3.0 UI is feature-complete.
+ * No new UI components unless a real user needed them during daily operation.
+ * Next work is operational capability (3.x), not visual redesign.
+ */
+export const APOLLO_3_FEATURE_COMPLETE = true;

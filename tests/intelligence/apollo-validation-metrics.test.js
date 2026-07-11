@@ -103,4 +103,88 @@ describe('Apollo validation metrics', () => {
     expect(report.averageConfidenceByDetector.length).toBeGreaterThan(0);
     expect(report.averageBusinessImpactByDetector.length).toBeGreaterThan(0);
   });
+
+  it('tracks expected behaviour suppressed and resolved automatically', () => {
+    const report = buildValidationReport([
+      exception({
+        category: 'stock_timing',
+        payload: {
+          release: 'apollo-operational-v1.2',
+          negativeStockClass: 'temporary_timing',
+          expectedBehaviourSuppressed: true,
+          businessRuleApplied: true,
+          businessRuleMetricKey: 'negative_stock_timing',
+        },
+      }),
+      exception({
+        category: 'stock_timing',
+        payload: {
+          release: 'apollo-operational-v1.2',
+          negativeStockClass: 'grv_in_progress',
+          expectedBehaviourSuppressed: true,
+          businessRuleApplied: true,
+          businessRuleMetricKey: 'negative_stock_timing',
+        },
+      }),
+      exception({
+        category: 'stock_timing_resolved',
+        payload: {
+          release: 'apollo-operational-v1.2',
+          negativeStockClass: 'resolved_automatically',
+          businessRuleApplied: true,
+          businessRuleMetricKey: 'negative_stock_timing',
+        },
+      }),
+    ], { days: 7 });
+
+    expect(report.expectedBehaviourSuppressed).toBe(2);
+    expect(report.resolvedAutomatically).toBe(1);
+    expect(report.temporaryTimingResolvedRate).toBe(33.3);
+    expect(report.businessRulesApplied).toBe(3);
+    expect(report.businessRulesAppliedBreakdown.find((row) => row.key === 'negative_stock_timing')?.count).toBe(3);
+  });
+
+  it('includes business rules applied in daily brief score', () => {
+    const score = buildDailyBriefScore({
+      todayRows: [
+        exception({
+          category: 'stock_timing',
+          payload: {
+            release: 'apollo-operational-v1.2',
+            businessRuleApplied: true,
+            businessRuleMetricKey: 'negative_stock_timing',
+          },
+        }),
+      ],
+      yesterdayRows: [],
+    });
+
+    expect(score.businessRulesAppliedToday).toBe(1);
+    expect(score.rulebookVersion).toBe('1.0');
+  });
+
+  it('includes suppressed and resolved counts in daily brief score', () => {
+    const score = buildDailyBriefScore({
+      todayRows: [
+        exception({
+          category: 'stock_timing',
+          payload: {
+            release: 'apollo-operational-v1.2',
+            expectedBehaviourSuppressed: true,
+          },
+        }),
+        exception({
+          category: 'stock_timing_resolved',
+          payload: {
+            release: 'apollo-operational-v1.2',
+            negativeStockClass: 'resolved_automatically',
+          },
+        }),
+      ],
+      yesterdayRows: [],
+    });
+
+    expect(score.expectedBehaviourSuppressedToday).toBe(1);
+    expect(score.resolvedAutomaticallyToday).toBe(1);
+  });
 });

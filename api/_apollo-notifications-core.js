@@ -1,3 +1,8 @@
+import {
+  buildNegativeStockNotifications,
+  summarizeNegativeStock,
+} from './_apollo-negative-stock-rules.js';
+
 const DAY_MS = 86_400_000;
 const INACTIVE_ORDER_DAYS = 2;
 const APPROACHING_DUE_DAYS = 2;
@@ -190,7 +195,7 @@ export function buildOrderWorkspaceNotifications(workspaces = [], { now = new Da
   return items.sort((a, b) => b.priorityScore - a.priorityScore || String(a.title).localeCompare(String(b.title)));
 }
 
-export function buildBuyingSupplierNotifications({ inventory = {}, sales = null } = {}) {
+export function buildBuyingSupplierNotifications({ inventory = {}, sales = null, existingByKey = null, now = new Date() } = {}) {
   const items = [];
   const negative = inventory.lists?.negative || [];
   const zero = inventory.lists?.zero || [];
@@ -201,8 +206,10 @@ export function buildBuyingSupplierNotifications({ inventory = {}, sales = null 
     { ...item, rank: index + 1 },
   ]).filter(([code]) => code));
 
+  const negativeSummary = summarizeNegativeStock(negative, { sales, existingByKey, now });
+  items.push(...buildNegativeStockNotifications(negative, { sales, existingByKey, now }));
+
   const attentionProducts = [
-    ...negative.map((p) => ({ ...p, stockBucket: 'negative', basePriority: 94, severity: 'urgent' })),
     ...zero.map((p) => ({ ...p, stockBucket: 'zero', basePriority: 84, severity: 'attention' })),
     ...low.map((p) => ({ ...p, stockBucket: 'low', basePriority: 72, severity: 'attention' })),
   ];
@@ -236,12 +243,19 @@ export function buildBuyingSupplierNotifications({ inventory = {}, sales = null 
   }
 
   const supplierMap = new Map();
-  for (const product of attentionProducts) {
+  const supplierAttentionProducts = [
+    ...negativeSummary.investigate,
+    ...attentionProducts,
+  ];
+
+  for (const product of supplierAttentionProducts) {
     const supplier = String(product.supplier || '').trim();
     if (!supplier) continue;
     const current = supplierMap.get(supplier) || { supplier, products: [], urgent: 0 };
     current.products.push(product);
-    if (product.stockBucket === 'negative') current.urgent += 1;
+    if (product.stockBucket === 'negative_investigate' || product.kind === 'investigate') {
+      current.urgent += 1;
+    }
     supplierMap.set(supplier, current);
   }
 
@@ -297,6 +311,9 @@ export function notificationCounts(items = []) {
 
 export function businessHealthScore(items = []) {
   const penalty = items.reduce((sum, item) => {
+    if (item.category === 'stock_timing' || item.payload?.negativeStockClass === 'temporary_timing' || item.payload?.negativeStockClass === 'grv_in_progress') {
+      return sum + 0.04;
+    }
     if (item.severity === 'critical') return sum + 0.6;
     if (item.severity === 'urgent' || item.severity === 'action') return sum + 0.45;
     if (item.severity === 'attention' || item.severity === 'review') return sum + 0.22;

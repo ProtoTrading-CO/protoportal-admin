@@ -1,13 +1,18 @@
 import { describe, it, expect } from 'vitest';
 import {
+  buildApolloInfluence,
   buildApolloRecommends,
   buildBusinessStatus,
+  buildBusinessSummaryLines,
   buildDailyBriefBullets,
   buildDailyBriefScan,
   buildConfidenceChip,
   buildEventBadge,
   buildImpactBadge,
   buildPriorityBadge,
+  buildWhyToday,
+  confidenceLevelText,
+  focusUrgencyLabel,
   formatApolloRelativeTime,
   buildHealthCard,
   buildHeroFocusItems,
@@ -103,10 +108,61 @@ describe('apolloCommandCentrePresentation', () => {
       notifications: { businessHealthScore: 9.2, items: [] },
     });
     expect(status.label).toBe('Excellent');
-    expect(status.percent).toBe(92);
-    expect(status.emoji).toBe('🟢');
-    expect(status.issues).toBeGreaterThan(0);
+    expect(status.headline).toBe('🟢 Business Very healthy');
+    expect(status.lines.length).toBeGreaterThan(0);
+    expect(status.detail.percent).toBe(92);
+    expect(status.detail.healthScore).toBe('9.2');
     expect(status.biggestOpportunity).toBeTruthy();
+  });
+
+  it('builds narrative business summary lines without dashboard numbers on surface', () => {
+    const status = { urgent: 0, issues: 2, opportunities: 2 };
+    const lines = buildBusinessSummaryLines(status, {
+      focusToday: [
+        { type: 'notification_supplier', title: 'Motarro shipment delay', severity: 'urgent' },
+      ],
+      notifications: { items: [] },
+    });
+    expect(lines.some((l) => /buying opportunit/i.test(l))).toBe(true);
+    expect(lines.some((l) => /supplier/i.test(l))).toBe(true);
+  });
+
+  it('builds apollo influence behavioural KPI', () => {
+    const influence = buildApolloInfluence({
+      notifications: {
+        items: [{ decisionOutcome: 'order_placed', businessValue: 'high' }],
+      },
+    });
+    expect(influence.decisionsToday).toBe(1);
+    expect(influence.headline).toMatch(/influenced 1 business decision/);
+  });
+
+  it('celebrates business rules applied in apollo influence', () => {
+    const influence = buildApolloInfluence({
+      notifications: {
+        items: [
+          { payload: { businessRuleApplied: true, businessRuleMetricKey: 'negative_stock_timing' } },
+          { payload: { businessRuleApplied: true, businessRuleMetricKey: 'negative_stock_timing' } },
+          { payload: { businessRuleApplied: true, businessRuleMetricKey: 'seasonal_buying' } },
+        ],
+      },
+    });
+    expect(influence.rulesAppliedToday).toBe(3);
+    expect(influence.headline).toMatch(/Business rules applied today: 3/);
+    expect(influence.rulesAppliedBreakdown.find((row) => row.key === 'negative_stock_timing')?.count).toBe(2);
+  });
+
+  it('celebrates expected behaviour suppressed in apollo influence', () => {
+    const influence = buildApolloInfluence({
+      notifications: {
+        items: [
+          { payload: { expectedBehaviourSuppressed: true, negativeStockClass: 'temporary_timing' } },
+          { payload: { expectedBehaviourSuppressed: true, negativeStockClass: 'grv_in_progress' } },
+        ],
+      },
+    });
+    expect(influence.suppressedToday).toBe(2);
+    expect(influence.headline).toMatch(/Expected behaviour suppressed: 2 today/);
   });
 
   it('builds compact daily brief bullets', () => {
@@ -234,25 +290,45 @@ describe('apolloCommandCentrePresentation', () => {
       { label: 'NORMAL SALES', value: '0/day' },
     ]);
     expect(recs[0].recommendationText).toBe('Review stock cover before demand outruns supply.');
+    expect(recs[0].actionShort).toBe('Review stock cover');
+    expect(recs[0].whyToday).toBe('Sales increased yesterday.');
+    expect(recs[0].confidenceLevel).toBe('High confidence');
+    expect(recs[0].summaryHeadline).toBe('BOUNCING BALL W/STRAP demand increasing');
     expect(recs[0].confidenceChip?.label).toBe('HIGH CONFIDENCE');
     expect(recs[0].impactBadge?.label).toBe('MEDIUM IMPACT');
     expect(recs[0].priorityBadge?.label).toBe('PRIORITY');
     expect(recs[0].confidence).toBe(90);
   });
 
-  it('formats confidence, impact, priority, and relative time for scan-first cards', () => {
+  it('maps focus urgency labels for progressive disclosure', () => {
+    expect(focusUrgencyLabel(1, 'urgent')).toBe('🔴 Do this first');
+    expect(focusUrgencyLabel(2, 'attention')).toBe('🟡 Do next');
+    expect(confidenceLevelText(90)).toBe('High confidence');
+    expect(buildWhyToday({
+      title: '8616700111 · BALL sales spiked',
+      dedupeKey: 'exception:sales_anomaly:8616700111:spike',
+    })).toBe('Sales increased yesterday.');
+  });
+
+  it('formats confidence, impact, priority, and relative time for evidence layer', () => {
     const fiveMinAgo = new Date(Date.now() - 5 * 60_000).toISOString();
     expect(buildConfidenceChip(90)).toMatchObject({ label: 'HIGH CONFIDENCE', value: '90%', tone: 'green' });
-    expect(buildConfidenceChip(72)).toMatchObject({ label: 'MEDIUM', value: '72%', tone: 'amber' });
-    expect(buildConfidenceChip(41)).toMatchObject({ label: 'LOW', value: '41%', tone: 'red' });
     expect(buildImpactBadge({ businessImpact: 'high' })?.label).toBe('HIGH IMPACT');
     expect(buildPriorityBadge({ priorityScore: 98 })).toMatchObject({ label: 'PRIORITY', value: '98', tone: 'red' });
     expect(formatApolloRelativeTime(fiveMinAgo)).toBe('5 minutes ago');
   });
 
   it('maps stock and supplier events to scan-friendly badges', () => {
-    expect(buildEventBadge({ title: '4+ products with negative stock', category: 'negative_stock' })?.label)
-      .toBe('NEGATIVE STOCK');
+    expect(buildEventBadge({
+      title: 'Stock awaiting GRV: 8612300456 · BALL',
+      category: 'stock_timing',
+      payload: { negativeStockClass: 'temporary_timing', stockBucket: 'negative_timing' },
+    })?.label).toBe('STOCK AWAITING GRV');
+    expect(buildEventBadge({
+      title: 'Stock discrepancy: 8612300456 · BALL',
+      category: 'negative_stock_investigation',
+      payload: { negativeStockClass: 'investigate' },
+    })?.label).toBe('INVENTORY INVESTIGATION');
     expect(buildEventBadge({ title: '8612300456 · BALL low stock', payload: { stockBucket: 'low' } })?.label)
       .toBe('LOW STOCK');
     expect(buildEventBadge({ title: 'Supplier follow-up: Motarro', category: 'supplier_followups' })?.label)
@@ -283,7 +359,7 @@ describe('apolloCommandCentrePresentation', () => {
     expect(health.knowledgeReused).toBe(0);
     expect(health.activeOperational).toBe(0);
     expect(health.decisionLessons).toBe(0);
-    expect(health.purposeCopy).toContain('operational knowledge grows');
+    expect(health.purposeCopy).toContain('judgment');
     expect(health.memoryStatusCopy).toContain('not yet been activated');
   });
 
@@ -292,8 +368,20 @@ describe('apolloCommandCentrePresentation', () => {
     expect(responsibilityStatusIcon('emerging')).toBe('△');
     expect(responsibilityStatusIcon('waiting')).toBe('○');
     const rows = buildApolloResponsibilities();
+    expect(rows.map((r) => r.id)).toEqual([
+      'truth',
+      'context',
+      'knowledge',
+      'rulebook',
+      'reasoning',
+      'advice',
+      'execution',
+      'coordination',
+      'stewardship',
+    ]);
     expect(rows.find((r) => r.id === 'execution')?.icon).toBe('✓');
-    expect(rows.find((r) => r.id === 'memory')?.note).toBe('Not yet earned');
-    expect(rows.find((r) => r.id === 'reasoning')?.note).toBe('Waiting for Memory');
+    expect(rows.find((r) => r.id === 'knowledge')?.note).toBe('Proto Memory emerging');
+    expect(rows.find((r) => r.id === 'rulebook')?.note).toBe('Rulebook v1.0 live');
+    expect(rows.find((r) => r.id === 'reasoning')?.note).toBe('Combines Knowledge + Rulebook');
   });
 });

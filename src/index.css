@@ -7587,10 +7587,161 @@ html, body { background: #f5f5f5; color: #111827; }
 
 .apollo-cc-status-body {
   display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.apollo-cc-status-headline {
+  margin: 0;
+  font-size: 1.35rem;
+  font-weight: 800;
+  color: #0f172a;
+  letter-spacing: 0.02em;
+}
+
+.apollo-cc-status-lines {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.92rem;
+  color: #475569;
+  line-height: 1.45;
+}
+
+.apollo-cc-status-detail {
+  margin-top: 8px;
+  font-size: 0.82rem;
+  color: #64748b;
+}
+
+.apollo-cc-status-detail summary {
+  cursor: pointer;
+  font-weight: 700;
+  color: #64748b;
+}
+
+.apollo-cc-status-detail-body {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.apollo-cc-status-detail-score {
+  margin: 0 0 6px;
+  font-size: 0.88rem;
+  color: #334155;
+}
+
+.apollo-cc-status-detail-bar {
+  margin: 0 0 8px;
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  color: #94a3b8;
+}
+
+.apollo-cc-status-detail-metrics {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
   flex-wrap: wrap;
+  gap: 10px 16px;
+  font-size: 0.82rem;
+  color: #64748b;
+}
+
+.apollo-cc-influence {
+  padding: 10px 14px;
+  border: 1px dashed #e2e8f0;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.apollo-cc-influence-copy {
+  margin: 0;
+  font-size: 0.86rem;
+  font-weight: 700;
+  color: #64748b;
+}
+
+.apollo-cc-influence-copy--live {
+  color: #0f766e;
+}
+
+.apollo-cc-hero-urgency {
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #b45309;
+}
+
+.apollo-cc-recommend.is-expanded {
+  border-color: #cbd5e1;
+  background: #fff;
+}
+
+.apollo-cc-recommend-summary {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 800;
+  color: #0f172a;
+  line-height: 1.35;
+}
+
+.apollo-cc-recommend-why {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: #64748b;
+  line-height: 1.45;
+}
+
+.apollo-cc-recommend-why .apollo-cc-recommend-kicker {
+  display: block;
+  margin-bottom: 2px;
+}
+
+.apollo-cc-recommend-confidence-level {
+  margin: 8px 0 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: #047857;
+}
+
+.apollo-cc-recommend-evidence {
+  margin-top: 10px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.apollo-cc-recommend-evidence summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.apollo-cc-recommend-evidence-body {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #eef2f7;
+}
+
+.apollo-cc-recommend-open {
+  display: inline-flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px 20px;
+  gap: 6px;
+  margin-top: 10px;
+  border: none;
+  background: none;
+  padding: 0;
+  font-size: 12px;
+  font-weight: 800;
+  color: #c40000;
+  cursor: pointer;
+  font-family: inherit;
 }
 
 .apollo-cc-status-primary {

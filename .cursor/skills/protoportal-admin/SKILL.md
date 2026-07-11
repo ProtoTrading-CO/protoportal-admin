@@ -82,11 +82,13 @@ Taxonomy tree loaded dynamically (`taxonomyTree`), not only static JSON.
 
 ## Apollo (Intelligence — `apollo-core` branch)
 
-**Mission (canonical, frozen):** Apollo preserves, improves, and extends human judgement — never replaces it. See `docs/APOLLO_MISSION.md`.
+**Constitution (governing, frozen v1.0):** `docs/APOLLO_CONSTITUTION.md` — operational brain charter, four assets, responsibility ladder, engineering rules.
 
-**Education:** `docs/APOLLO_EDUCATION_PLAN.md` · **Integration (build):** `docs/APOLLO_INTEGRATION_LAYER.md`
+**Mission (purpose):** `docs/APOLLO_MISSION.md` — Apollo preserves, improves, and extends human judgement — never replaces it.
 
-**Rule:** Architecture frozen v1.0. Next build: Entity Registry + Product Context (Capability 1). Apollo requests Contexts — never SQL directly.
+**Education:** `docs/APOLLO_EDUCATION_PLAN.md` · **Integration (build):** `docs/APOLLO_INTEGRATION_LAYER.md` · **Rulebook:** `docs/PROTO_RULEBOOK.md`
+
+**Rule:** Constitution and architecture frozen v1.0. Every capability must strengthen one rung on the responsibility ladder.
 
 **Pipeline:** NL → Intent Engine → Business Context → Query Engine → SQL/Supabase → evidence → answer. Work on branch `apollo-core`; do not merge Intelligence to `main` without explicit approval.
 

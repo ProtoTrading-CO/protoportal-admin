@@ -192,6 +192,27 @@ describe('Apollo notification engine', () => {
     expect(items.find((item) => item.category === 'supplier_followups')?.payload).toMatchObject({ supplier: 'Motarro' });
   });
 
+  it('classifies negative stock with GRV timing as review, not urgent buying', () => {
+    const items = buildBuyingSupplierNotifications({
+      inventory: {
+        lists: {
+          negative: [{ sku: '8616700999', title: 'Bouncing Ball', stockQty: -5, supplier: 'Motarro', recentGrvAt: '2026-07-10T08:00:00.000Z' }],
+          zero: [],
+          low: [],
+        },
+      },
+      sales: { results: [] },
+      now,
+    });
+
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      category: 'stock_timing',
+      severity: 'review',
+      dedupeKey: 'buying:8616700999:negative-timing',
+    });
+  });
+
   it('does not duplicate stable dedupe keys for repeated generation', () => {
     const first = buildBuyingSupplierNotifications({
       inventory: {

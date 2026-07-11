@@ -1,10 +1,17 @@
+import {
+  RULEBOOK_VERSION,
+  summarizeBusinessRulesApplied,
+} from './_apollo-business-rules.js';
+
 const BUSINESS_VALUE_SCORE = { high: 100, medium: 66, low: 33, none: 0 };
 const DECISION_IMPACT = { action_taken: 3, escalated: 2, investigated: 1, no_action_taken: 0 };
 const IMPACT_SCORE = { low: 1, medium: 2, high: 3, critical: 4 };
 
 function isExceptionRow(row) {
   return row?.payload?.release === 'apollo-operational-v1.2'
-    || String(row?.dedupe_key || '').startsWith('exception:');
+    || row?.payload?.businessRuleId
+    || String(row?.dedupe_key || row?.dedupeKey || '').startsWith('exception:')
+    || ['stock_timing', 'stock_timing_resolved', 'negative_stock_investigation'].includes(row?.category);
 }
 
 function dayBounds(offsetDays = 0) {
@@ -114,9 +121,16 @@ export function buildDailyBriefScore({ todayRows = [], yesterdayRows = [] } = {}
   const yesterdayExceptions = yesterdayRows.filter(isExceptionRow);
   const yesterdayReviewed = yesterdayExceptions.filter((row) => row.feedback_status);
 
+  const rulesApplied = summarizeBusinessRulesApplied(todayRows);
+
   return {
     notificationsGeneratedToday: todayRows.length,
     exceptionsGeneratedToday: todayExceptions.length,
+    businessRulesAppliedToday: rulesApplied.total,
+    businessRulesAppliedBreakdown: rulesApplied.breakdown,
+    rulebookVersion: RULEBOOK_VERSION,
+    expectedBehaviourSuppressedToday: todayRows.filter((row) => row.payload?.expectedBehaviourSuppressed).length,
+    resolvedAutomaticallyToday: todayRows.filter((row) => row.payload?.negativeStockClass === 'resolved_automatically').length,
     usefulExceptionsYesterday: yesterdayReviewed.filter((row) => row.feedback_status === 'useful').length,
     falsePositivesYesterday: yesterdayReviewed.filter((row) => row.feedback_status === 'false_positive').length,
     thresholdAdjustmentsYesterday: yesterdayReviewed.filter((row) => row.feedback_status === 'needs_threshold_adjustment').length,
@@ -145,9 +159,24 @@ export function buildValidationReport(rows = [], { days = 7 } = {}) {
   const businessValueScore = calculateBusinessValueScore(feedbackRows.filter((row) => row.business_value));
   const usefulRate = calculateUsefulRate(feedbackRows);
 
+  const suppressedCount = exceptionRows.filter((row) => row.payload?.expectedBehaviourSuppressed).length;
+  const resolvedAutoCount = exceptionRows.filter((row) => row.payload?.negativeStockClass === 'resolved_automatically').length;
+  const timingCount = exceptionRows.filter((row) => ['temporary_timing', 'grv_in_progress'].includes(row.payload?.negativeStockClass)).length;
+  const temporaryTimingResolvedRate = timingCount + resolvedAutoCount > 0
+    ? Math.round((resolvedAutoCount / (timingCount + resolvedAutoCount)) * 1000) / 10
+    : null;
+
+  const rulesApplied = summarizeBusinessRulesApplied(exceptionRows);
+
   const report = {
     periodDays: days,
     totalExceptions: exceptionRows.length,
+    businessRulesApplied: rulesApplied.total,
+    businessRulesAppliedBreakdown: rulesApplied.breakdown,
+    rulebookVersion: RULEBOOK_VERSION,
+    expectedBehaviourSuppressed: suppressedCount,
+    resolvedAutomatically: resolvedAutoCount,
+    temporaryTimingResolvedRate,
     usefulExceptions: usefulCount,
     falsePositives: falsePositiveCount,
     needsThresholdAdjustment: thresholdCount,
