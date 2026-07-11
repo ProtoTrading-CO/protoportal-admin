@@ -15,8 +15,8 @@ export default function ApolloKnowledgePlaceholder() {
       <header className="apollo-cc-section-head">
         <Brain size={20} />
         <div>
-          <h2>Remember</h2>
-          <p>Business knowledge Apollo keeps for you — not technical docs.</p>
+          <h2>Knowledge</h2>
+          <p>What Proto knows — preferences, reliability, buying lessons, and decision history.</p>
         </div>
       </header>
 
