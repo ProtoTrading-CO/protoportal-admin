@@ -230,14 +230,46 @@ export function formatWithProductCode(item, title = '') {
 }
 
 const PRODUCT_EVENT_PATTERNS = [
-  { pattern: /\s+sales spiked$/i, headline: 'Sales spiked' },
-  { pattern: /\s+sales dropped$/i, headline: 'Sales dropped' },
-  { pattern: /\s+stock differs between ERP and website$/i, headline: 'Stock mismatch' },
-  { pattern: /\s+price differs between ERP and website$/i, headline: 'Price mismatch' },
-  { pattern: /\s+is missing from the website$/i, headline: 'Missing from website' },
-  { pattern: /\s+is missing from ERP$/i, headline: 'Missing from ERP' },
-  { pattern: /\s+stock cover is ([\d.]+ days?)$/i, headline: (m) => `Stock cover ${m[1]}` },
+  { pattern: /\s+sales spiked$/i, headline: 'Sales spiked', badge: 'sales_spike' },
+  { pattern: /\s+sales dropped$/i, headline: 'Sales dropped', badge: 'sales_drop' },
+  { pattern: /\s+stock differs between ERP and website$/i, headline: 'Stock mismatch', badge: 'stock_mismatch' },
+  { pattern: /\s+price differs between ERP and website$/i, headline: 'Price mismatch', badge: 'price_mismatch' },
+  { pattern: /\s+is missing from the website$/i, headline: 'Missing from website', badge: 'missing_website' },
+  { pattern: /\s+is missing from ERP$/i, headline: 'Missing from ERP', badge: 'missing_erp' },
+  { pattern: /\s+stock cover is ([\d.]+ days?)$/i, headline: (m) => `Stock cover ${m[1]}`, badge: 'stock_cover' },
 ];
+
+const EVENT_BADGE_CATALOG = {
+  sales_spike: { emoji: '🟢', label: 'SALES SPIKE', tone: 'green' },
+  sales_drop: { emoji: '🔴', label: 'SALES DROP', tone: 'red' },
+  negative_stock: { emoji: '🔴', label: 'NEGATIVE STOCK', tone: 'red' },
+  zero_stock: { emoji: '🔴', label: 'ZERO STOCK', tone: 'red' },
+  low_stock: { emoji: '🟡', label: 'LOW STOCK', tone: 'amber' },
+  buying_review: { emoji: '🟡', label: 'BUYING REVIEW', tone: 'amber' },
+  stock_cover: { emoji: '🟡', label: 'STOCK COVER', tone: 'amber' },
+  stock_mismatch: { emoji: '🔴', label: 'STOCK MISMATCH', tone: 'red' },
+  price_mismatch: { emoji: '🟡', label: 'PRICE MISMATCH', tone: 'amber' },
+  missing_website: { emoji: '🟡', label: 'MISSING WEBSITE', tone: 'amber' },
+  missing_erp: { emoji: '🔴', label: 'MISSING ERP', tone: 'red' },
+  supplier_followup: { emoji: '🟡', label: 'SUPPLIER FOLLOW-UP', tone: 'amber' },
+  supplier_delay: { emoji: '🔴', label: 'SUPPLIER DELAY', tone: 'red' },
+  customer_quiet: { emoji: '🟡', label: 'CUSTOMER QUIET', tone: 'amber' },
+  order_overdue: { emoji: '🔴', label: 'ORDER OVERDUE', tone: 'red' },
+  awaiting_approval: { emoji: '🟡', label: 'AWAITING APPROVAL', tone: 'amber' },
+};
+
+const METRIC_LABEL_SHORT = {
+  'Current quantity': 'ON HAND',
+  'Recent daily baseline': 'NORMAL SALES',
+  'Daily sales velocity': 'NORMAL SALES',
+  'Average daily sales': 'AVERAGE DAILY SALES',
+  'Current stock': 'ON HAND',
+  'Stock cover': 'STOCK COVER',
+  'Supplier lead time': 'LEAD TIME',
+  'Change': 'CHANGE',
+};
+
+const SALES_RATE_METRICS = new Set(['NORMAL SALES', 'AVERAGE DAILY SALES']);
 
 function escapeRegExp(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -270,6 +302,140 @@ function extractHeadline(title, item) {
   const action = String(item?.action || item?.recommendation || '').trim();
   if (action && !GENERIC_FOCUS_ACTIONS.has(action.toLowerCase())) return action;
   return null;
+}
+
+function resolveEventBadgeKey(item, headline) {
+  const category = String(item?.category || item?.type || '').toLowerCase();
+  const title = String(item?.title || '').toLowerCase();
+  const stockBucket = item?.payload?.stockBucket;
+
+  if (stockBucket === 'negative' || category.includes('negative_stock') || /negative stock/.test(title)) {
+    return 'negative_stock';
+  }
+  if (stockBucket === 'zero' || category.includes('zero_stock')) return 'zero_stock';
+  if (stockBucket === 'low' || category.includes('low_stock')) return 'low_stock';
+
+  for (const row of PRODUCT_EVENT_PATTERNS) {
+    if (row.pattern.test(title) && row.badge) return row.badge;
+  }
+
+  if (/buying review/i.test(title) || category.includes('buying_review')) return 'buying_review';
+  if (category.includes('stock_cover')) return 'stock_cover';
+  if (/supplier follow-up/i.test(title) || category.includes('supplier_followup')) return 'supplier_followup';
+  if (/supplier delay/i.test(title) || category.includes('supplier_delay')) return 'supplier_delay';
+  if (/quiet for/i.test(title) || category.includes('customer_behaviour') || category.includes('inactive_customer')) {
+    return 'customer_quiet';
+  }
+  if (/order is overdue/i.test(title) || category.includes('overdue')) return 'order_overdue';
+  if (/awaiting approval/i.test(title) || category.includes('pending')) return 'awaiting_approval';
+
+  if (headline === 'Sales spiked') return 'sales_spike';
+  if (headline === 'Sales dropped') return 'sales_drop';
+  if (headline === 'Buying review') return 'buying_review';
+  if (headline === 'Supplier follow-up') return 'supplier_followup';
+  if (headline === 'Supplier delay risk') return 'supplier_delay';
+  if (headline === 'Customer quiet') return 'customer_quiet';
+  if (headline === 'Order overdue') return 'order_overdue';
+  if (headline === 'Awaiting approval') return 'awaiting_approval';
+  if (headline && /stock cover/i.test(headline)) return 'stock_cover';
+
+  return null;
+}
+
+export function buildEventBadge(item, headline = null) {
+  const resolvedHeadline = headline ?? extractHeadline(item?.title || item?.label, item);
+  const key = resolveEventBadgeKey(item, resolvedHeadline);
+  if (!key || !EVENT_BADGE_CATALOG[key]) return null;
+  return { ...EVENT_BADGE_CATALOG[key], key };
+}
+
+/** Relative time for operational cards — Apollo should feel alive. */
+export function formatApolloRelativeTime(iso, now = new Date()) {
+  if (!iso) return null;
+  const then = new Date(iso);
+  if (Number.isNaN(then.getTime())) return null;
+  const diffMs = Math.max(0, now.getTime() - then.getTime());
+  const diffMin = Math.floor(diffMs / 60_000);
+  if (diffMin < 1) return 'Just now';
+  if (diffMin < 60) return `${diffMin} minute${diffMin === 1 ? '' : 's'} ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr} hour${diffHr === 1 ? '' : 's'} ago`;
+
+  const startToday = new Date(now);
+  startToday.setHours(0, 0, 0, 0);
+  const startYesterday = new Date(startToday);
+  startYesterday.setDate(startYesterday.getDate() - 1);
+  if (then >= startYesterday && then < startToday) return 'Yesterday';
+
+  const diffDay = Math.floor(diffMs / 86_400_000);
+  if (diffDay < 7) return `${diffDay} days ago`;
+  return then.toLocaleDateString('en-ZA', { day: 'numeric', month: 'short' });
+}
+
+function extractItemTimestamp(item) {
+  return item?.detectedAt || item?.detected_at || item?.lastSeenAt || item?.last_seen_at
+    || item?.createdAt || item?.created_at || item?.payload?.detectedAt || null;
+}
+
+/** Visual confidence chip — colour reads faster than a number alone. */
+export function buildConfidenceChip(confidence) {
+  if (confidence == null || Number.isNaN(Number(confidence))) return null;
+  const pct = Math.round(Number(confidence));
+  if (pct >= 85) return { emoji: '🟢', label: 'HIGH CONFIDENCE', tone: 'green', value: `${pct}%` };
+  if (pct >= 60) return { emoji: '🟡', label: 'MEDIUM', tone: 'amber', value: `${pct}%` };
+  return { emoji: '🔴', label: 'LOW', tone: 'red', value: `${pct}%` };
+}
+
+/** Business impact — how important is this? */
+export function buildImpactBadge(item) {
+  const raw = String(
+    item?.businessImpact || item?.business_impact || item?.payload?.businessImpact || '',
+  ).toLowerCase();
+  if (raw === 'high' || raw === 'critical') {
+    return { emoji: '🔴', label: 'HIGH IMPACT', tone: 'red', level: 'high' };
+  }
+  if (raw === 'low') {
+    return { emoji: '🟢', label: 'LOW IMPACT', tone: 'green', level: 'low' };
+  }
+  if (raw === 'medium') {
+    return { emoji: '🟡', label: 'MEDIUM IMPACT', tone: 'amber', level: 'medium' };
+  }
+
+  const sev = displaySeverity(item?.severity || 'attention');
+  if (sev === 'urgent') return { emoji: '🔴', label: 'HIGH IMPACT', tone: 'red', level: 'high' };
+  if (sev === 'attention') return { emoji: '🟡', label: 'MEDIUM IMPACT', tone: 'amber', level: 'medium' };
+  return { emoji: '🟢', label: 'LOW IMPACT', tone: 'green', level: 'low' };
+}
+
+/** Operational priority — separate from confidence. */
+export function buildPriorityBadge(item) {
+  const scoreRaw = item?.priorityScore ?? item?.priority_score ?? item?.payload?.priorityScore;
+  if (scoreRaw != null && !Number.isNaN(Number(scoreRaw))) {
+    const value = Math.round(Number(scoreRaw));
+    let tone = 'amber';
+    if (value >= 85) tone = 'red';
+    else if (value < 55) tone = 'green';
+    return { label: 'PRIORITY', value: String(value), tone };
+  }
+
+  const rank = Number(item?.priority);
+  if (rank >= 1 && rank <= 8) {
+    const value = Math.max(40, 100 - (rank - 1) * 8);
+    let tone = 'green';
+    if (rank <= 2) tone = 'red';
+    else if (rank <= 4) tone = 'amber';
+    return { label: 'PRIORITY', value: String(value), tone };
+  }
+  return null;
+}
+
+function formatMetricDisplay(label, value) {
+  if (!SALES_RATE_METRICS.has(label)) return value;
+  const text = String(value ?? '').trim();
+  if (!text || text.endsWith('/day')) return text || '0/day';
+  const num = Number(text.replace(/%$/, ''));
+  if (!Number.isNaN(num)) return `${num}/day`;
+  return text;
 }
 
 function extractSupplierFromDetail(detail, code) {
@@ -321,12 +487,15 @@ export function buildOperationalObjectView(item) {
       description: '',
       meta: null,
       headline: null,
+      eventBadge: null,
       recommendation: null,
     };
   }
 
   const rawTitle = String(item.title || item.label || '').trim();
   const code = extractProductCode(item);
+  const headline = extractHeadline(rawTitle, item);
+  const eventBadge = buildEventBadge(item, headline);
   const recommendation = String(item.action || item.recommendation || '').trim() || null;
 
   if (isSupplierItem(item)) {
@@ -337,7 +506,8 @@ export function buildOperationalObjectView(item) {
       identifier,
       description: String(item.detail || '').trim() || null,
       meta: null,
-      headline: extractHeadline(rawTitle, item),
+      headline,
+      eventBadge: eventBadge || buildEventBadge({ title: rawTitle, category: 'supplier_followups' }, headline),
       recommendation,
       searchText: identifier,
     };
@@ -351,7 +521,8 @@ export function buildOperationalObjectView(item) {
       identifier,
       description: String(item.detail || '').trim() || null,
       meta: null,
-      headline: extractHeadline(rawTitle, item),
+      headline,
+      eventBadge: eventBadge || buildEventBadge({ title: rawTitle, category: 'customer_behaviour_change' }, headline),
       recommendation,
       searchText: identifier,
     };
@@ -365,7 +536,7 @@ export function buildOperationalObjectView(item) {
 
     const supplier = String(item.payload?.supplier || item.supplier || '').trim()
       || extractSupplierFromDetail(item.detail, code);
-    const meta = [department, supplier].filter(Boolean).join(' · ') || null;
+    const meta = [department, supplier].filter(Boolean).join(' • ') || null;
 
     return {
       kind: 'product',
@@ -376,11 +547,12 @@ export function buildOperationalObjectView(item) {
       department: department || null,
       supplier: supplier || null,
       meta,
-      headline: extractHeadline(rawTitle, item),
+      headline,
+      eventBadge: eventBadge || buildEventBadge(item, headline),
       recommendation: recommendation && !GENERIC_FOCUS_ACTIONS.has(recommendation.toLowerCase())
         ? recommendation
         : null,
-      searchText: [code, description, department, supplier].filter(Boolean).join(' '),
+      searchText: [code, description, department, supplier, eventBadge?.label].filter(Boolean).join(' '),
     };
   }
 
@@ -390,7 +562,8 @@ export function buildOperationalObjectView(item) {
     identifier: null,
     description: rawTitle,
     meta: null,
-    headline: extractHeadline(rawTitle, item),
+    headline,
+    eventBadge,
     recommendation,
     searchText: rawTitle,
   };
@@ -402,8 +575,8 @@ export function buildEvidenceMetrics(item) {
   return raw
     .map((row) => {
       if (typeof row !== 'object' || row == null) return null;
-      const label = String(row.label || '').trim();
-      const value = row.value;
+      const label = METRIC_LABEL_SHORT[row.label] || String(row.label || '').trim();
+      const value = formatMetricDisplay(label, row.value);
       if (!label || value == null || value === '') return null;
       return { label, value };
     })
@@ -593,7 +766,6 @@ export function buildApolloRecommends(focus = []) {
   return dedupeFocusForDisplay(focus, 4)
     .filter((item) => item.action || item.recommendation || item.title)
     .map((item) => {
-      const evidence = parseEvidence(item);
       const view = buildOperationalObjectView(item);
       const metrics = buildEvidenceMetrics(item);
       const action = String(item.action || item.recommendation || '').trim();
@@ -601,26 +773,25 @@ export function buildApolloRecommends(focus = []) {
       const title = view.kind === 'product' && view.sku
         ? `${view.sku} · ${view.description}`
         : formatWithProductCode(item, rawTitle);
-      const actionIsGeneric = !action || GENERIC_FOCUS_ACTIONS.has(action.toLowerCase()) || action === title;
-      const why = metrics.length
-        ? metrics.map((row) => `${row.label}: ${row.value}`)
-        : evidence.length
-          ? evidence
-          : (actionIsGeneric && item.why ? [item.why] : (action && !actionIsGeneric ? [action] : (item.why ? [item.why] : [])));
       const confidenceRaw = item.confidence != null ? Number(item.confidence) : item.payload?.confidence;
       const confidenceNum = confidenceRaw != null ? Number(confidenceRaw) : null;
-      const confidence = (metrics.length || evidence.length) && confidenceNum != null && !Number.isNaN(confidenceNum)
+      const confidence = (metrics.length) && confidenceNum != null && !Number.isNaN(confidenceNum)
         ? Math.round(confidenceNum)
         : null;
+      const recommendationText = action || view.recommendation || null;
+      const confidenceChip = buildConfidenceChip(confidence);
       return {
         id: `${item.type}-${item.priority}`,
         title,
         code: view.sku || extractProductCode(item),
-        view,
+        view: { ...view, recommendation: recommendationText },
         metrics,
-        why,
-        evidence,
+        recommendationText,
         confidence,
+        confidenceChip,
+        impactBadge: buildImpactBadge(item),
+        priorityBadge: buildPriorityBadge(item),
+        relativeTime: formatApolloRelativeTime(extractItemTimestamp(item)),
         severity: displaySeverity(item.severity || 'attention'),
         item,
       };
@@ -647,6 +818,9 @@ export function groupNotificationsByUrgency(items = []) {
       view: buildOperationalObjectView(item),
       detail: item.detail,
       severity: displaySeverity(item.severity),
+      relativeTime: formatApolloRelativeTime(
+        item.detectedAt || item.detected_at || item.lastSeenAt || item.last_seen_at || item.createdAt || item.created_at,
+      ),
       url: item.actionUrl || item.url,
       query: item.payload?.query || item.query || null,
     });
