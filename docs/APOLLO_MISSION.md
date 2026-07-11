@@ -2,6 +2,8 @@
 
 > **Apollo does not exist to replace human judgement. Apollo exists to preserve, improve, and extend it.**
 
+**Constitution (governing):** [`docs/APOLLO_CONSTITUTION.md`](./APOLLO_CONSTITUTION.md) — frozen v1.0 operational brain charter. This mission document remains the purpose statement; the Constitution governs architecture, assets, and engineering discipline.
+
 If you read only that sentence, you understand how to build Apollo: read-only (AES-001), curated memory, hypotheses before lessons, explainable recommendations, humans as final decision-makers.
 
 **Status:** Canonical · **Architecture:** Frozen v1.0 (2026-07-09)  
@@ -15,7 +17,7 @@ Features evolve. Capabilities evolve. Implementation evolves. **Apollo's purpose
 
 **Freeze:** No new philosophy unless implementation proves something is fundamentally wrong. Educate Apollo — see `docs/APOLLO_EDUCATION_PLAN.md`.
 
-Related (frozen specs): `docs/APOLLO_MEMORY_MODEL.md` · `docs/APOLLO_PROMOTION_ENGINE.md` · `docs/APOLLO_MEMORY_ENGINE.md`  
+Related (frozen specs): `docs/APOLLO_CONSTITUTION.md` · `docs/APOLLO_MEMORY_MODEL.md` · `docs/APOLLO_PROMOTION_ENGINE.md` · `docs/APOLLO_MEMORY_ENGINE.md`  
 Related (development covenant): `APOLLO_DEVELOPMENT_COVENANT.md`
 Related (product governance): `docs/APOLLO_PRODUCT_CHARTER.md` · `docs/BUSINESS_AUTOMATION_SCOREBOARD.md`
 Related (living): `docs/CURRENT_APOLLO_CAPABILITIES.md` · `docs/APOLLO_EDUCATION_PLAN.md`

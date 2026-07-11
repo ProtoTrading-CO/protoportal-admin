@@ -2,7 +2,8 @@
 
 **Version:** Rulebook v1.0  
 **Apollo UI:** 3.x (separate version line)  
-**Architecture:** See [APOLLO_ARCHITECTURE.md](./APOLLO_ARCHITECTURE.md)
+**Constitution:** [`APOLLO_CONSTITUTION.md`](./APOLLO_CONSTITUTION.md) (frozen v1.0)  
+**Architecture:** [`APOLLO_ARCHITECTURE.md`](./APOLLO_ARCHITECTURE.md)
 
 If **Knowledge** is what Proto has learned, the **Rulebook** is how Proto chooses to interpret events.
 

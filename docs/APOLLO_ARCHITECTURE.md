@@ -2,7 +2,9 @@
 
 **Apollo** — Operational Brain
 
-This document formalizes how Apollo separates **experience from judgment**. That distinction is the architectural foundation.
+**Governing document:** [`APOLLO_CONSTITUTION.md`](./APOLLO_CONSTITUTION.md) (frozen v1.0)
+
+This document describes the technical architecture that implements the Constitution — especially how Apollo separates **experience from judgment**.
 
 ---
 
