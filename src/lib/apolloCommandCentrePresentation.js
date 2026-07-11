@@ -73,15 +73,72 @@ function categorizeFocusItem(item) {
   return 'other';
 }
 
-/** Hero numbered focus — one productive hour question. Max 5 per brief. */
-export function buildHeroFocusItems(focus = [], limit = 5) {
-  return focus.slice(0, limit).map((item, index) => ({
+const GENERIC_FOCUS_ACTIONS = new Set([
+  'review stock cover before demand outruns supply.',
+  'review stock cover before demand outruns supply',
+  'check whether demand has slowed or stock/listing issues are suppressing sales.',
+]);
+
+/** Drop duplicate focus rows (same title or same generic recommendation). */
+export function dedupeFocusForDisplay(focus = [], limit = 5) {
+  const seenTitles = new Set();
+  const seenLabels = new Set();
+  const out = [];
+
+  for (const item of focus) {
+    const titleKey = String(item.title || item.label || '').trim().toLowerCase();
+    const label = heroFocusLabel(item);
+    const labelKey = label.trim().toLowerCase();
+    if (titleKey && seenTitles.has(titleKey)) continue;
+    if (seenLabels.has(labelKey)) continue;
+    if (titleKey) seenTitles.add(titleKey);
+    seenLabels.add(labelKey);
+    out.push(item);
+    if (out.length >= limit) break;
+  }
+
+  return out;
+}
+
+function heroFocusLabel(item) {
+  const title = String(item.title || item.label || '').trim();
+  const action = String(item.action || '').trim();
+  const detail = String(item.detail || '').trim();
+  const evidence = parseEvidence(item);
+  const evidenceShort = evidence[0] || '';
+
+  if (!title) return action || 'Review operational item';
+
+  const actionIsGeneric = !action
+    || action === title
+    || GENERIC_FOCUS_ACTIONS.has(action.toLowerCase());
+
+  if (actionIsGeneric) {
+    if (evidenceShort && !title.includes(evidenceShort)) return `${title} — ${evidenceShort}`;
+    if (detail && detail.length <= 72 && !title.includes(detail)) return `${title} — ${detail}`;
+    return title;
+  }
+
+  return `${title} — ${action}`;
+}
+
+function focusHeroTitle(count) {
+  if (count === 1) return '1 thing requires your attention';
+  if (count <= 3) return `${count} things require your attention`;
+  return 'These deserve your attention first';
+}
+
+/** Hero numbered focus — specific titles, deduped. Default max 3 for scan efficiency. */
+export function buildHeroFocusItems(focus = [], limit = 3) {
+  return dedupeFocusForDisplay(focus, limit).map((item, index) => ({
     rank: index + 1,
-    label: item.action || item.title || item.label || 'Review operational item',
+    label: heroFocusLabel(item),
     severity: displaySeverity(item.severity || 'attention'),
     item,
   }));
 }
+
+export { focusHeroTitle };
 
 /** Trusted operations manager greeting — Apollo speaks first. */
 export function buildProactiveGreeting(context, { userName, hour = new Date().getHours() } = {}) {
@@ -97,48 +154,32 @@ export function buildProactiveGreeting(context, { userName, hour = new Date().ge
     return { lead, lines };
   }
 
-  lines.push(
-    focus.length === 1
-      ? 'You have one important operational item today.'
-      : `You have ${focus.length} important operational items today.`,
-  );
-
+  const distinct = dedupeFocusForDisplay(focus, 5);
   const buckets = { customer: 0, supplier: 0, buying: 0, orders: 0 };
-  focus.forEach((item) => {
+  distinct.forEach((item) => {
     const bucket = categorizeFocusItem(item);
     if (buckets[bucket] != null) buckets[bucket] += 1;
   });
 
+  const parts = [];
+  if (buckets.buying) {
+    parts.push(buckets.buying === 1 ? 'stock or buying' : `${buckets.buying} stock/buying items`);
+  }
   if (buckets.customer) {
-    lines.push(
-      buckets.customer === 1
-        ? 'One customer requires attention.'
-        : `${buckets.customer} customers require attention.`,
-    );
+    parts.push(buckets.customer === 1 ? 'a customer' : `${buckets.customer} customers`);
   }
   if (buckets.supplier) {
-    lines.push(
-      buckets.supplier === 1
-        ? 'One supplier follow-up is overdue.'
-        : `${buckets.supplier} supplier follow-ups need attention.`,
-    );
+    parts.push(buckets.supplier === 1 ? 'a supplier follow-up' : `${buckets.supplier} supplier follow-ups`);
   }
-  if (buckets.buying) {
-    lines.push(
-      buckets.buying === 1
-        ? 'One buying opportunity has appeared.'
-        : `${buckets.buying} buying opportunities need review.`,
-    );
-  }
-  if (buckets.orders && lines.length < 4) {
-    lines.push(
-      buckets.orders === 1
-        ? 'One order needs your decision.'
-        : `${buckets.orders} orders need review.`,
-    );
+  if (buckets.orders) {
+    parts.push(buckets.orders === 1 ? 'an order decision' : `${buckets.orders} orders`);
   }
 
-  return { lead, lines: lines.slice(0, 4) };
+  if (parts.length) {
+    lines.push(`Priority areas today: ${parts.join(' · ')}.`);
+  }
+
+  return { lead, lines: lines.slice(0, 2) };
 }
 
 export function buildHealthCard(context) {
@@ -181,13 +222,13 @@ export function buildDailyBriefScan(context) {
     return { risks: [], wins: [], changes: [], recommendations: [] };
   }
 
-  const focus = context.focusToday || [];
+  const focus = dedupeFocusForDisplay(context.focusToday || [], 5);
   const changed = context.whatChangedSinceYesterday || [];
 
   const risks = focus
     .filter((item) => ['urgent', 'attention'].includes(displaySeverity(item.severity)))
     .slice(0, 4)
-    .map((item) => item.title || item.action)
+    .map((item) => heroFocusLabel(item))
     .filter(Boolean);
 
   const wins = changed
@@ -199,28 +240,37 @@ export function buildDailyBriefScan(context) {
   const changes = changed.slice(0, 4).map((line) => line.text).filter(Boolean);
 
   const recommendations = focus
-    .filter((item) => item.action)
+    .filter((item) => item.action && item.action !== item.title)
     .slice(0, 3)
-    .map((item) => item.action);
+    .map((item) => {
+      const action = String(item.action || '').trim();
+      if (GENERIC_FOCUS_ACTIONS.has(action.toLowerCase())) return heroFocusLabel(item);
+      return action;
+    })
+    .filter(Boolean);
 
   return { risks, wins, changes, recommendations };
 }
 
 /** Explainable recommendations — confidence only when evidence exists. */
 export function buildApolloRecommends(focus = []) {
-  return focus
-    .filter((item) => item.action || item.recommendation)
-    .slice(0, 4)
+  return dedupeFocusForDisplay(focus, 4)
+    .filter((item) => item.action || item.recommendation || item.title)
     .map((item) => {
       const evidence = parseEvidence(item);
-      const why = evidence.length ? evidence : (item.why ? [item.why] : []);
+      const action = String(item.action || item.recommendation || '').trim();
+      const title = String(item.title || item.label || action || 'Recommendation').trim();
+      const actionIsGeneric = !action || GENERIC_FOCUS_ACTIONS.has(action.toLowerCase()) || action === title;
+      const why = evidence.length
+        ? evidence
+        : (actionIsGeneric && item.why ? [item.why] : (action && !actionIsGeneric ? [action] : (item.why ? [item.why] : [])));
       const confidenceRaw = item.confidence != null ? Number(item.confidence) : null;
       const confidence = evidence.length && confidenceRaw != null && !Number.isNaN(confidenceRaw)
         ? Math.round(confidenceRaw)
         : null;
       return {
         id: `${item.type}-${item.priority}`,
-        title: item.action || item.recommendation || item.title,
+        title,
         why,
         evidence,
         confidence,
