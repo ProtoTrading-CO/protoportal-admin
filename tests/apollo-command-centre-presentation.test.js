@@ -8,6 +8,8 @@ import {
   buildHeroFocusItems,
   buildKnowledgeHealth,
   buildApolloResponsibilities,
+  extractProductCode,
+  formatWithProductCode,
   responsibilityStatusIcon,
   buildProactiveGreeting,
   categorizeFocusItem,
@@ -174,6 +176,34 @@ describe('apolloCommandCentrePresentation', () => {
     expect(grouped.immediate).toHaveLength(1);
     expect(grouped.today).toHaveLength(1);
     expect(grouped.info).toHaveLength(1);
+  });
+
+  it('prefixes product notifications and recommends with Proto codes', () => {
+    const item = {
+      title: 'BATTERY OPERATED CANDLE 6cm sales spiked',
+      detail: 'BATCAND6 · appeared as an unexpected bestseller with 24 units',
+      dedupeKey: 'exception:sales_anomaly:BATCAND6:spike',
+      payload: { code: 'BATCAND6' },
+    };
+    expect(extractProductCode(item)).toBe('BATCAND6');
+    expect(formatWithProductCode(item)).toBe('BATCAND6 · BATTERY OPERATED CANDLE 6cm sales spiked');
+
+    const grouped = groupNotificationsByUrgency([{ ...item, severity: 'attention' }]);
+    expect(grouped.today[0].displayTitle).toMatch(/^BATCAND6 · /);
+
+    const recs = buildApolloRecommends([{
+      type: 'notification_sales_anomaly',
+      priority: 1,
+      severity: 'attention',
+      title: item.title,
+      detail: item.detail,
+      dedupeKey: item.dedupeKey,
+      payload: item.payload,
+      evidence: [{ label: 'Current quantity', value: 24 }],
+      confidence: 90,
+    }]);
+    expect(recs[0].title).toMatch(/^BATCAND6 · /);
+    expect(recs[0].code).toBe('BATCAND6');
   });
 
   it('builds knowledge health with business language before memory is live', () => {

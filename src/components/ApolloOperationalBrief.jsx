@@ -252,7 +252,7 @@ function NotificationsGrouped({ groups, onOpen }) {
               {rows.map((row) => (
                 <li key={row.id}>
                   <button type="button" onClick={() => onOpen?.(row)}>
-                    {row.title}
+                    {row.displayTitle || row.title}
                   </button>
                 </li>
               ))}
