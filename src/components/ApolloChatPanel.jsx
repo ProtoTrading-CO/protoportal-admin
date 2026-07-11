@@ -209,88 +209,141 @@ export default function ApolloChatPanel({
   error,
   onFixLast,
   onClear,
+  variant = 'compact',
 }) {
   const scrollRef = useRef(null);
   const lastAssistantIdx = messages.reduce((acc, m, i) => (m.role === 'assistant' ? i : acc), -1);
+  const isCompact = variant === 'compact';
 
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
-  }, [messages, busy]);
+    if (!isCompact || messages.length) {
+      scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+    }
+  }, [messages, busy, isCompact]);
 
   return (
-    <aside className="apollo-cc-chat" aria-label="Apollo chat">
-      <header className="apollo-cc-chat-head">
-        <MessageSquare size={16} />
-        <h3>Apollo</h3>
-        {messages.length > 0 && (
-          <button type="button" className="apollo-cc-chat-clear" onClick={onClear} disabled={busy}>
+    <aside className={`apollo-cc-chat${isCompact ? ' apollo-cc-chat--compact' : ''}`} aria-label="Apollo chat">
+      {!isCompact && (
+        <header className="apollo-cc-chat-head">
+          <MessageSquare size={16} />
+          <h3>Apollo</h3>
+          {messages.length > 0 && (
+            <button type="button" className="apollo-cc-chat-clear" onClick={onClear} disabled={busy}>
+              Clear
+            </button>
+          )}
+        </header>
+      )}
+
+      {isCompact && messages.length > 0 && (
+        <details className="apollo-cc-chat-thread">
+          <summary>Conversation ({messages.length})</summary>
+          <div className="apollo-cc-chat-body apollo-cc-chat-body--thread" ref={scrollRef}>
+            {messages.map((msg, i) => (
+              <ChatMessage
+                key={i}
+                msg={msg}
+                isLastAssistant={i === lastAssistantIdx && !busy}
+                onExportPdf={exportApolloMessagePdf}
+                onFix={onFixLast}
+                fixBusy={busy}
+              />
+            ))}
+            {busy && (
+              <div className="apollo-msg-row apollo-msg-row--assistant">
+                <div className="apollo-avatar apollo-avatar--assistant" aria-hidden="true">
+                  <Bot size={15} />
+                </div>
+                <div className="apollo-msg-stack">
+                  <div className="apollo-msg-body apollo-msg-body--assistant apollo-thinking">
+                    <Loader2 size={15} className="spin" />
+                    <span>Analysing…</span>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+          <button type="button" className="apollo-cc-chat-clear apollo-cc-chat-clear--inline" onClick={onClear} disabled={busy}>
             Clear
           </button>
-        )}
-      </header>
+        </details>
+      )}
 
-      <div className="apollo-cc-chat-body" ref={scrollRef}>
-        {messages.length === 0 && (
-          <div className="apollo-cc-chat-idle">
-            <p className="apollo-cc-chat-idle-lead">Supporting tool — ask when you need depth.</p>
-            <div className="apollo-ask-starters">
-              {STARTERS.map((s) => (
-                <button key={s} type="button" className="apollo-starter apollo-starter--compact" onClick={() => void onSend(s)} disabled={busy}>
-                  {s}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-        {messages.map((msg, i) => (
-          <ChatMessage
-            key={i}
-            msg={msg}
-            isLastAssistant={i === lastAssistantIdx && !busy}
-            onExportPdf={exportApolloMessagePdf}
-            onFix={onFixLast}
-            fixBusy={busy}
-          />
-        ))}
-        {busy && (
-          <div className="apollo-msg-row apollo-msg-row--assistant">
-            <div className="apollo-avatar apollo-avatar--assistant" aria-hidden="true">
-              <Bot size={15} />
-            </div>
-            <div className="apollo-msg-stack">
-              <div className="apollo-msg-meta"><span className="apollo-msg-name">Apollo</span></div>
-              <div className="apollo-msg-body apollo-msg-body--assistant apollo-thinking">
-                <Loader2 size={15} className="spin" />
-                <span>Analysing your data…</span>
+      {!isCompact && (
+        <div className="apollo-cc-chat-body" ref={scrollRef}>
+          {messages.length === 0 && (
+            <div className="apollo-cc-chat-idle">
+              <p className="apollo-cc-chat-idle-lead">Supporting tool — ask when you need depth.</p>
+              <div className="apollo-ask-starters">
+                {STARTERS.map((s) => (
+                  <button key={s} type="button" className="apollo-starter apollo-starter--compact" onClick={() => void onSend(s)} disabled={busy}>
+                    {s}
+                  </button>
+                ))}
               </div>
             </div>
-          </div>
-        )}
-      </div>
+          )}
+          {messages.map((msg, i) => (
+            <ChatMessage
+              key={i}
+              msg={msg}
+              isLastAssistant={i === lastAssistantIdx && !busy}
+              onExportPdf={exportApolloMessagePdf}
+              onFix={onFixLast}
+              fixBusy={busy}
+            />
+          ))}
+          {busy && (
+            <div className="apollo-msg-row apollo-msg-row--assistant">
+              <div className="apollo-avatar apollo-avatar--assistant" aria-hidden="true">
+                <Bot size={15} />
+              </div>
+              <div className="apollo-msg-stack">
+                <div className="apollo-msg-meta"><span className="apollo-msg-name">Apollo</span></div>
+                <div className="apollo-msg-body apollo-msg-body--assistant apollo-thinking">
+                  <Loader2 size={15} className="spin" />
+                  <span>Analysing your data…</span>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="apollo-cc-chat-composer">
         {error && <p className="apollo-error">{error}</p>}
         <form
-          className="apollo-input-row"
+          className={`apollo-input-row${isCompact ? ' apollo-input-row--compact' : ''}`}
           onSubmit={(e) => {
             e.preventDefault();
             void onSend(input);
           }}
         >
-          <textarea
-            className="apollo-input apollo-input--textarea"
-            rows={2}
-            value={input}
-            onChange={(e) => onInputChange(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                void onSend(input);
-              }
-            }}
-            placeholder="Ask Apollo…"
-            disabled={busy}
-          />
+          {isCompact ? (
+            <input
+              type="text"
+              className="apollo-input apollo-input--compact"
+              value={input}
+              onChange={(e) => onInputChange(e.target.value)}
+              placeholder="Talk to Apollo…"
+              disabled={busy}
+            />
+          ) : (
+            <textarea
+              className="apollo-input apollo-input--textarea"
+              rows={2}
+              value={input}
+              onChange={(e) => onInputChange(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  void onSend(input);
+                }
+              }}
+              placeholder="Ask Apollo…"
+              disabled={busy}
+            />
+          )}
           <button type="submit" className="apollo-send-btn" disabled={busy || !input.trim()} aria-label="Send">
             {busy ? <Loader2 size={18} className="spin" /> : <Send size={18} />}
           </button>

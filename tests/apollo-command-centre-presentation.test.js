@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   buildApolloRecommends,
+  buildBusinessStatus,
+  buildDailyBriefBullets,
   buildDailyBriefScan,
   buildHealthCard,
   buildHeroFocusItems,
@@ -9,6 +11,8 @@ import {
   focusHeroTitle,
   groupNotificationsByUrgency,
   OPERATIONAL_MATURITY,
+  rememberEmptyCopy,
+  REMEMBER_TEACHING_TOPICS,
 } from '../src/lib/apolloCommandCentrePresentation.js';
 
 const duplicateStockFocus = [
@@ -56,6 +60,37 @@ describe('apolloCommandCentrePresentation', () => {
   it('uses contextual hero titles', () => {
     expect(focusHeroTitle(1)).toBe('1 thing requires your attention');
     expect(focusHeroTitle(3)).toBe('3 things require your attention');
+  });
+
+  it('builds business status for morning scan', () => {
+    const status = buildBusinessStatus({
+      focusToday: duplicateStockFocus,
+      notifications: { businessHealthScore: 9.2, items: [] },
+    });
+    expect(status.label).toBe('Excellent');
+    expect(status.percent).toBe(92);
+    expect(status.emoji).toBe('🟢');
+    expect(status.issues).toBeGreaterThan(0);
+  });
+
+  it('builds compact daily brief bullets', () => {
+    const { bullets, detailSections } = buildDailyBriefBullets({
+      focusToday: duplicateStockFocus,
+      businessHealth: [
+        { key: 'website', label: 'Website', severity: 'healthy', status: 'No changes' },
+        { key: 'orders', label: 'Orders', severity: 'healthy', status: '2 orders yesterday' },
+      ],
+      whatChangedSinceYesterday: [{ type: 'orders', text: '2 orders yesterday', severity: 'healthy' }],
+      notifications: { items: [] },
+    });
+    expect(bullets.length).toBe(4);
+    expect(bullets[0].text).toMatch(/buying opportunit/);
+    expect(detailSections.length).toBeGreaterThan(0);
+  });
+
+  it('teaches remember feature when empty', () => {
+    expect(rememberEmptyCopy()).toBe('Nothing remembered yet.');
+    expect(REMEMBER_TEACHING_TOPICS).toHaveLength(3);
   });
 
   it('builds proactive greeting without repeating focus count', () => {

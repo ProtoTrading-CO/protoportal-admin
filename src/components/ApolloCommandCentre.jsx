@@ -10,8 +10,6 @@ import {
 
 } from '../lib/apolloCommandCentre.js';
 
-import { buildHealthCard } from '../lib/apolloCommandCentrePresentation.js';
-
 import {
 
   buildBuyingOps,
@@ -32,7 +30,7 @@ import ApolloChatPanel from './ApolloChatPanel.jsx';
 
 import ApolloKnowledgePlaceholder from './ApolloKnowledgePlaceholder.jsx';
 
-import ApolloOperationalBrief, { HeaderHealthCard } from './ApolloOperationalBrief.jsx';
+import ApolloOperationalBrief from './ApolloOperationalBrief.jsx';
 
 import OrdersWorkspacePanel from './OrdersWorkspacePanel.jsx';
 
@@ -226,10 +224,6 @@ export default function ApolloCommandCentre({
 
   const displayName = userName || 'there';
 
-  const healthCard = buildHealthCard(briefContext);
-
-
-
   const briefSharedProps = {
 
     context: briefContext,
@@ -273,7 +267,7 @@ export default function ApolloCommandCentre({
       onFixLast={onFixLast}
 
       onClear={onClearChat}
-
+      variant="compact"
     />
 
   );
@@ -303,9 +297,6 @@ export default function ApolloCommandCentre({
         </div>
 
         <div className="apollo-cc-head-meta">
-
-          <HeaderHealthCard card={healthCard} />
-
           <button
 
             type="button"
