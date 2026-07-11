@@ -155,3 +155,10 @@ export function isWorkObjectReady(id) {
 
 /** @deprecated Use isWorkObjectReady */
 export const isWorkspaceLive = isWorkObjectReady;
+
+/**
+ * Apollo 3.0 UI is feature-complete.
+ * No new UI components unless a real user needed them during daily operation.
+ * Next work is operational capability (3.x), not visual redesign.
+ */
+export const APOLLO_3_FEATURE_COMPLETE = true;
