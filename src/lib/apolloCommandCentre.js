@@ -143,6 +143,15 @@ export const APOLLO_KNOWLEDGE_DOMAINS = [
     countType: 'active',
     emptyCopy: 'No operational state recorded.',
   },
+  {
+    id: 'business_rules',
+    label: 'Business Rules',
+    description: 'How Proto interprets operations — Apollo\'s judgment framework (Rulebook).',
+    countType: 'rulebook',
+    rulebookLabel: 'Rulebook v1.0 · 1 active',
+    emptyCopy: 'No business rules encoded yet.',
+    separateFromMemory: true,
+  },
 ];
 
 export function knowledgeDomainById(id) {

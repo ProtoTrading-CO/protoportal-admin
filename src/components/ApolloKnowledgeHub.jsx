@@ -98,6 +98,9 @@ export default function ApolloKnowledgeHub() {
                     </span>
                   </div>
                   <p className="apollo-cc-knowledge-hub-desc">{domain.description}</p>
+                  {domain.separateFromMemory && (
+                    <p className="apollo-cc-knowledge-hub-note">Separate from Proto Memory — Apollo&apos;s operating manual.</p>
+                  )}
                 </div>
                 <p className="apollo-cc-knowledge-hub-empty">{domain.emptyCopy}</p>
               </section>

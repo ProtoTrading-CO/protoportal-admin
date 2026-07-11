@@ -33,15 +33,18 @@ describe('apolloCommandCentre modes', () => {
     expect(workObjectById('orders')?.statusBadge).toBe('🟢');
   });
 
-  it('defines knowledge hub domains', () => {
+  it('defines knowledge hub domains including Business Rules separate from Memory', () => {
     expect(APOLLO_KNOWLEDGE_DOMAINS.map((d) => d.label)).toEqual([
       'Customer Knowledge',
       'Supplier Knowledge',
       'Buying Knowledge',
       'Decision Knowledge',
       'Operational State',
+      'Business Rules',
     ]);
     expect(APOLLO_KNOWLEDGE_DOMAINS[0].emptyCopy).toBe('No customer knowledge recorded.');
     expect(APOLLO_KNOWLEDGE_DOMAINS[4].countType).toBe('active');
+    expect(APOLLO_KNOWLEDGE_DOMAINS[5].countType).toBe('rulebook');
+    expect(APOLLO_KNOWLEDGE_DOMAINS[5].separateFromMemory).toBe(true);
   });
 });

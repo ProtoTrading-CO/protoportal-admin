@@ -1,6 +1,9 @@
 /** Apollo Command Centre — presentation helpers (no backend / business rules). */
 
 import {
+  summarizeBusinessRulesApplied,
+} from './apolloRulebookPresentation.js';
+import {
   businessHealthScore,
   displaySeverity,
   greetingForHour,
@@ -191,6 +194,7 @@ export function buildApolloInfluence(context) {
       || feedback === 'useful';
   }).length;
 
+  const rulesApplied = summarizeBusinessRulesApplied(items);
   const suppressedToday = items.filter((item) => item.payload?.expectedBehaviourSuppressed).length;
   const resolvedToday = items.filter((item) => item.payload?.negativeStockClass === 'resolved_automatically').length;
 
@@ -198,7 +202,9 @@ export function buildApolloInfluence(context) {
     ? `Apollo influenced ${decisionsToday} business decision${decisionsToday === 1 ? '' : 's'} today`
     : 'Apollo influenced — tracking starts when you act on a recommendation';
 
-  if (suppressedToday > 0) {
+  if (rulesApplied.total > 0) {
+    headline = `Business rules applied today: ${rulesApplied.total}`;
+  } else if (suppressedToday > 0) {
     headline = `Expected behaviour suppressed: ${suppressedToday} today`;
   } else if (resolvedToday > 0) {
     headline = `${resolvedToday} timing issue${resolvedToday === 1 ? '' : 's'} resolved automatically today`;
@@ -206,9 +212,12 @@ export function buildApolloInfluence(context) {
 
   return {
     decisionsToday,
+    rulesAppliedToday: rulesApplied.total,
+    rulesAppliedBreakdown: rulesApplied.breakdown,
+    rulebookVersion: rulesApplied.rulebookVersion,
     suppressedToday,
     resolvedToday,
-    trackingLive: decisionsToday > 0 || suppressedToday > 0 || resolvedToday > 0,
+    trackingLive: decisionsToday > 0 || rulesApplied.total > 0 || suppressedToday > 0 || resolvedToday > 0,
     headline,
   };
 }
@@ -1161,6 +1170,7 @@ export const APOLLO_KNOWLEDGE_DEFAULT_COUNTS = {
   buying: 0,
   decision: 0,
   operational: 0,
+  business_rules: 1,
 };
 
 export const APOLLO_KNOWLEDGE_HEALTH_PURPOSE =
@@ -1192,5 +1202,6 @@ export function buildKnowledgeDomainCounts(overrides = {}) {
 
 export function formatKnowledgeDomainCount(domain, count = 0) {
   if (domain.countType === 'active') return `${count} active`;
+  if (domain.countType === 'rulebook') return domain.rulebookLabel || `Rulebook v1.0 · ${count} active`;
   return `${count} verified`;
 }

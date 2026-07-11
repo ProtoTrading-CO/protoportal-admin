@@ -137,6 +137,21 @@ describe('apolloCommandCentrePresentation', () => {
     expect(influence.headline).toMatch(/influenced 1 business decision/);
   });
 
+  it('celebrates business rules applied in apollo influence', () => {
+    const influence = buildApolloInfluence({
+      notifications: {
+        items: [
+          { payload: { businessRuleApplied: true, businessRuleMetricKey: 'negative_stock_timing' } },
+          { payload: { businessRuleApplied: true, businessRuleMetricKey: 'negative_stock_timing' } },
+          { payload: { businessRuleApplied: true, businessRuleMetricKey: 'seasonal_buying' } },
+        ],
+      },
+    });
+    expect(influence.rulesAppliedToday).toBe(3);
+    expect(influence.headline).toMatch(/Business rules applied today: 3/);
+    expect(influence.rulesAppliedBreakdown.find((row) => row.key === 'negative_stock_timing')?.count).toBe(2);
+  });
+
   it('celebrates expected behaviour suppressed in apollo influence', () => {
     const influence = buildApolloInfluence({
       notifications: {

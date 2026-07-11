@@ -52,11 +52,12 @@ describe('Proto negative stock business rules', () => {
     expect(row.title).toMatch(/GRV in progress/);
   });
 
-  it('uses configurable grace period per profile without code changes', () => {
-    const warehouseRules = resolveNegativeStockRules({ stockProfile: 'warehouse' });
+  it('uses configurable grace period per appliesTo scope without code changes', () => {
+    const warehouseRules = resolveNegativeStockRules({ warehouse: 'main' });
     expect(warehouseRules.gracePeriodHours).toBe(12);
+    expect(warehouseRules.appliesTo).toEqual({ dimension: 'warehouse', match: 'main' });
 
-    const importsRules = resolveNegativeStockRules({ stockProfile: 'imports' });
+    const importsRules = resolveNegativeStockRules({ warehouse: 'imports' });
     expect(importsRules.gracePeriodHours).toBe(48);
 
     const existingByKey = new Map([
@@ -67,12 +68,14 @@ describe('Proto negative stock business rules', () => {
       sku: '8616700333',
       title: 'Travel Wallet',
       stockQty: -14,
-      supplier: 'Motarro',
-      stockProfile: 'warehouse',
+      supplier: 'Other Co',
+      warehouse: 'main',
     }, { now, salesRank: 2, existingByKey });
 
     expect(warehouseRow.kind).toBe('investigate');
-    expect(warehouseRow.rules.profile).toBe('warehouse');
+    expect(warehouseRow.payload.businessRuleAppliesTo).toEqual({ dimension: 'warehouse', match: 'main' });
+    expect(warehouseRow.payload.businessRuleApplied).toBe(true);
+    expect(warehouseRow.payload.businessRuleMetricKey).toBe('negative_stock_timing');
   });
 
   it('escalates only when negative stock persists past grace period, sells, and magnitude is significant', () => {

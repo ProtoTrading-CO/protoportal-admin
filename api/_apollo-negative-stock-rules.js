@@ -247,7 +247,10 @@ function buildClassificationResult({
       confidence,
       confidenceLevel,
       businessRuleId: rules.ruleId,
-      businessRuleProfile: rules.profile,
+      businessRuleMetricKey: rules.metricKey,
+      businessRuleAppliesTo: rules.appliesTo,
+      businessRuleApplied: true,
+      rulebookVersion: rules.rulebookVersion,
       expectedBehaviourSuppressed: kind === 'temporary_timing' || kind === 'grv_in_progress',
       legacyAlertAvoided: kind === 'temporary_timing' || kind === 'grv_in_progress' ? 'negative_stock_urgent' : null,
       protoBusinessRule: APOLLO_BUSINESS_PRINCIPLES.join(' '),
@@ -356,7 +359,15 @@ export function detectResolvedNegativeStock(existingByKey, currentNegativeProduc
     const supplier = row?.payload?.supplier || 'Unknown supplier';
 
     seen.add(code);
-    const rules = resolveNegativeStockRules({ stockProfile: row?.payload?.businessRuleProfile }, options.ruleOverrides);
+    const rules = resolveNegativeStockRules({
+      supplier: row?.payload?.supplier,
+      department: row?.payload?.department,
+      warehouse: row?.payload?.warehouse,
+      sku: code,
+      ...(row?.payload?.businessRuleAppliesTo?.dimension && row?.payload?.businessRuleAppliesTo?.match
+        ? { [row.payload.businessRuleAppliesTo.dimension]: row.payload.businessRuleAppliesTo.match }
+        : {}),
+    }, options.ruleOverrides);
     const { confidence, level: confidenceLevel } = buildConfidence({ kind: 'resolved_automatically', rules });
     const reasoning = buildReasoning({
       kind: 'resolved_automatically',

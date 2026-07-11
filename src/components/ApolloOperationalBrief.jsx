@@ -66,11 +66,26 @@ function FocusHero({ items, onSelect }) {
 }
 
 function ApolloInfluenceBar({ influence }) {
+  const breakdown = (influence.rulesAppliedBreakdown || []).filter((row) => row.count > 0);
   return (
     <section className="apollo-cc-influence" aria-label="Apollo influence">
       <p className={`apollo-cc-influence-copy${influence.trackingLive ? ' apollo-cc-influence-copy--live' : ''}`}>
         {influence.headline}
       </p>
+      {breakdown.length > 0 && (
+        <details className="apollo-cc-influence-breakdown">
+          <summary>Rulebook breakdown</summary>
+          <ul>
+            {breakdown.map((row) => (
+              <li key={row.key}>
+                {row.label}
+                {' '}
+                <strong>{row.count}</strong>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
     </section>
   );
 }
