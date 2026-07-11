@@ -530,3 +530,70 @@ export function buildDailyBriefBullets(context) {
 
   return { bullets, detailSections };
 }
+
+/** Knowledge hub — presentation until Proto Memory is live. */
+export const APOLLO_RESPONSIBILITIES = [
+  { id: 'truth', label: 'Truth', status: 'earned' },
+  { id: 'context', label: 'Context', status: 'earned' },
+  { id: 'attention', label: 'Attention', status: 'earned' },
+  { id: 'execution', label: 'Execution', status: 'earned' },
+  { id: 'memory', label: 'Memory', status: 'emerging', note: 'Not yet earned' },
+  { id: 'reasoning', label: 'Reasoning', status: 'waiting', note: 'Waiting for Memory' },
+  { id: 'advice', label: 'Advice', status: 'waiting', note: 'Waiting for Reasoning' },
+  { id: 'coordination', label: 'Coordination', status: 'waiting', note: null },
+  { id: 'stewardship', label: 'Stewardship', status: 'waiting', note: null },
+];
+
+export function responsibilityStatusIcon(status) {
+  if (status === 'earned') return '✓';
+  if (status === 'emerging') return '△';
+  return '○';
+}
+
+export function buildApolloResponsibilities(overrides = {}) {
+  return APOLLO_RESPONSIBILITIES.map((row) => ({
+    ...row,
+    ...(overrides[row.id] || {}),
+    icon: responsibilityStatusIcon(overrides[row.id]?.status || row.status),
+  }));
+}
+
+export const APOLLO_KNOWLEDGE_DEFAULT_COUNTS = {
+  customer: 0,
+  supplier: 0,
+  buying: 0,
+  decision: 0,
+  operational: 0,
+};
+
+export const APOLLO_KNOWLEDGE_HEALTH_PURPOSE =
+  "Proto's operational knowledge grows here over time.";
+
+export function buildKnowledgeHealth({
+  verifiedKnowledge = 0,
+  knowledgeReused = 0,
+  activeOperational = 0,
+  decisionLessons = 0,
+  memoryActivated = false,
+} = {}) {
+  return {
+    verifiedKnowledge,
+    knowledgeReused,
+    activeOperational,
+    decisionLessons,
+    memoryActivated,
+    purposeCopy: APOLLO_KNOWLEDGE_HEALTH_PURPOSE,
+    memoryStatusCopy: memoryActivated
+      ? 'Proto Memory is active — knowledge grows as you work.'
+      : 'Proto Memory has not yet been activated.',
+  };
+}
+
+export function buildKnowledgeDomainCounts(overrides = {}) {
+  return { ...APOLLO_KNOWLEDGE_DEFAULT_COUNTS, ...overrides };
+}
+
+export function formatKnowledgeDomainCount(domain, count = 0) {
+  if (domain.countType === 'active') return `${count} active`;
+  return `${count} verified`;
+}
