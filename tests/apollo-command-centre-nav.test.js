@@ -41,6 +41,7 @@ describe('apolloCommandCentre modes', () => {
       'Decision Knowledge',
       'Operational State',
     ]);
-    expect(APOLLO_KNOWLEDGE_DOMAINS[0].emptyCopy).toBe('No knowledge recorded yet.');
+    expect(APOLLO_KNOWLEDGE_DOMAINS[0].emptyCopy).toBe('No customer knowledge recorded.');
+    expect(APOLLO_KNOWLEDGE_DOMAINS[4].countType).toBe('active');
   });
 });

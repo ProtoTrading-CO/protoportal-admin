@@ -7225,6 +7225,134 @@ html, body { background: #f5f5f5; color: #111827; }
   color: #64748b;
 }
 
+.apollo-cc-responsibilities {
+  margin-bottom: 14px;
+  padding: 14px 16px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.apollo-cc-responsibilities-title {
+  margin: 0 0 12px;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #475569;
+}
+
+.apollo-cc-responsibilities-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.apollo-cc-responsibilities-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.apollo-cc-responsibilities-icon {
+  flex-shrink: 0;
+  width: 16px;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.35;
+  text-align: center;
+}
+
+.apollo-cc-responsibilities-row--earned .apollo-cc-responsibilities-icon { color: #15803d; }
+.apollo-cc-responsibilities-row--emerging .apollo-cc-responsibilities-icon { color: #b45309; }
+.apollo-cc-responsibilities-row--waiting .apollo-cc-responsibilities-icon { color: #94a3b8; }
+
+.apollo-cc-responsibilities-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.apollo-cc-responsibilities-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.apollo-cc-responsibilities-note {
+  font-size: 11px;
+  font-weight: 600;
+  color: #94a3b8;
+}
+
+.apollo-cc-knowledge-health {
+  margin-bottom: 18px;
+  padding: 14px 16px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #f8fafc 0%, #fff 100%);
+}
+
+.apollo-cc-knowledge-health-title {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #475569;
+}
+
+.apollo-cc-knowledge-health-purpose {
+  margin: 0 0 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #64748b;
+  line-height: 1.45;
+}
+
+.apollo-cc-knowledge-health-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.apollo-cc-knowledge-health-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+}
+
+.apollo-cc-knowledge-health-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #64748b;
+}
+
+.apollo-cc-knowledge-health-value {
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1;
+  color: #0f172a;
+}
+
+.apollo-cc-knowledge-health-foot {
+  margin: 12px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: #94a3b8;
+}
+
 .apollo-cc-knowledge-hub-list {
   display: flex;
   flex-direction: column;
@@ -7240,11 +7368,31 @@ html, body { background: #f5f5f5; color: #111827; }
   padding: 14px 0;
 }
 
+.apollo-cc-knowledge-hub-row-head {
+  margin-bottom: 4px;
+}
+
+.apollo-cc-knowledge-hub-row-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
 .apollo-cc-knowledge-hub-title {
-  margin: 0 0 4px;
+  margin: 0;
   font-size: 15px;
   font-weight: 800;
   color: #0f172a;
+}
+
+.apollo-cc-knowledge-hub-count {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 700;
+  color: #64748b;
+  text-transform: lowercase;
 }
 
 .apollo-cc-knowledge-hub-desc {
@@ -7263,6 +7411,22 @@ html, body { background: #f5f5f5; color: #111827; }
   font-size: 12px;
   font-weight: 600;
   color: #94a3b8;
+}
+
+@media (max-width: 960px) {
+  .apollo-cc-knowledge-health-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .apollo-cc-responsibilities-list {
+    grid-template-columns: 1fr;
+  }
+
+  .apollo-cc-knowledge-health-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .apollo-cc-knowledge-foot {

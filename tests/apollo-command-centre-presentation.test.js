@@ -6,6 +6,9 @@ import {
   buildDailyBriefScan,
   buildHealthCard,
   buildHeroFocusItems,
+  buildKnowledgeHealth,
+  buildApolloResponsibilities,
+  responsibilityStatusIcon,
   buildProactiveGreeting,
   categorizeFocusItem,
   diverseFocusForDisplay,
@@ -171,5 +174,25 @@ describe('apolloCommandCentrePresentation', () => {
     expect(grouped.immediate).toHaveLength(1);
     expect(grouped.today).toHaveLength(1);
     expect(grouped.info).toHaveLength(1);
+  });
+
+  it('builds knowledge health with business language before memory is live', () => {
+    const health = buildKnowledgeHealth();
+    expect(health.verifiedKnowledge).toBe(0);
+    expect(health.knowledgeReused).toBe(0);
+    expect(health.activeOperational).toBe(0);
+    expect(health.decisionLessons).toBe(0);
+    expect(health.purposeCopy).toContain('operational knowledge grows');
+    expect(health.memoryStatusCopy).toContain('not yet been activated');
+  });
+
+  it('tracks Apollo responsibilities as earned or waiting', () => {
+    expect(responsibilityStatusIcon('earned')).toBe('✓');
+    expect(responsibilityStatusIcon('emerging')).toBe('△');
+    expect(responsibilityStatusIcon('waiting')).toBe('○');
+    const rows = buildApolloResponsibilities();
+    expect(rows.find((r) => r.id === 'execution')?.icon).toBe('✓');
+    expect(rows.find((r) => r.id === 'memory')?.note).toBe('Not yet earned');
+    expect(rows.find((r) => r.id === 'reasoning')?.note).toBe('Waiting for Memory');
   });
 });
