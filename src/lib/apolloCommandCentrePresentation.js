@@ -41,7 +41,7 @@ function healthLabel(score) {
   return 'At risk';
 }
 
-function categorizeFocusItem(item) {
+export function categorizeFocusItem(item) {
   const type = String(item.type || '').toLowerCase();
   const title = String(item.title || item.label || '').toLowerCase();
   const category = String(item.category || '').toLowerCase();
@@ -71,6 +71,126 @@ function categorizeFocusItem(item) {
   ) return 'buying';
   if (type.includes('order') || title.includes('container') || title.includes('order')) return 'orders';
   return 'other';
+}
+
+export const FOCUS_CATEGORY_LABELS = {
+  buying: 'Buying',
+  supplier: 'Supplier',
+  customer: 'Customer',
+  orders: 'Orders',
+  other: 'Operations',
+};
+
+const FOCUS_CATEGORY_ORDER = ['buying', 'supplier', 'customer', 'orders', 'other'];
+
+function severityRank(severity) {
+  const s = displaySeverity(severity);
+  if (s === 'urgent') return 0;
+  if (s === 'attention') return 1;
+  return 2;
+}
+
+function focusItemKey(item) {
+  return String(item.title || item.label || '').trim().toLowerCase();
+}
+
+/** One focus item per responsibility area — buying, supplier, customer, etc. */
+export function diverseFocusForDisplay(focus = [], limit = 3) {
+  const pool = [];
+  const seenTitles = new Set();
+  const seenLabels = new Set();
+
+  for (const item of focus) {
+    const titleKey = focusItemKey(item);
+    const labelKey = heroFocusLabel(item).trim().toLowerCase();
+    if (titleKey && seenTitles.has(titleKey)) continue;
+    if (seenLabels.has(labelKey)) continue;
+    if (titleKey) seenTitles.add(titleKey);
+    seenLabels.add(labelKey);
+    pool.push(item);
+  }
+
+  const byCategory = {};
+  pool.forEach((item) => {
+    const cat = categorizeFocusItem(item);
+    if (!byCategory[cat]) byCategory[cat] = [];
+    byCategory[cat].push(item);
+  });
+
+  Object.values(byCategory).forEach((items) => {
+    items.sort((a, b) => severityRank(a.severity) - severityRank(b.severity));
+  });
+
+  const picked = [];
+  const usedCategories = new Set();
+
+  for (const cat of FOCUS_CATEGORY_ORDER) {
+    if (picked.length >= limit) break;
+    const item = byCategory[cat]?.[0];
+    if (!item || usedCategories.has(cat)) continue;
+    picked.push(item);
+    usedCategories.add(cat);
+  }
+
+  return picked.slice(0, limit);
+}
+
+function formatStatusInsight(item) {
+  const title = String(item.title || item.label || '').trim();
+  if (!title) return heroFocusLabel(item);
+
+  const cleaned = title
+    .replace(/^Supplier follow-up:\s*/i, '')
+    .replace(/^Notification:\s*/i, '')
+    .trim();
+
+  if (/wallet/i.test(cleaned) && /spike|sales|demand|cover|stock/i.test(cleaned)) {
+    return 'Wallet demand accelerating';
+  }
+
+  return cleaned.length > 72 ? `${cleaned.slice(0, 69)}…` : cleaned;
+}
+
+function pickBiggestRisk(context, focusPool) {
+  const notifications = context?.notifications?.items || [];
+  const candidates = [
+    ...focusPool,
+    ...notifications.map((n) => ({
+      title: n.title,
+      label: n.title,
+      severity: n.severity,
+      category: n.category,
+      type: `notification_${n.category || 'alert'}`,
+    })),
+  ];
+
+  const risks = candidates
+    .filter((item) => {
+      const cat = categorizeFocusItem(item);
+      const sev = displaySeverity(item.severity);
+      return sev === 'urgent' || sev === 'attention' || cat === 'supplier' || cat === 'customer';
+    })
+    .sort((a, b) => {
+      const catScore = (item) => {
+        const cat = categorizeFocusItem(item);
+        if (cat === 'supplier') return 0;
+        if (cat === 'customer') return 1;
+        return 2;
+      };
+      const diff = catScore(a) - catScore(b);
+      if (diff !== 0) return diff;
+      return severityRank(a.severity) - severityRank(b.severity);
+    });
+
+  return risks[0] ? formatStatusInsight(risks[0]) : null;
+}
+
+function pickBiggestOpportunity(focusPool) {
+  const buying = focusPool
+    .filter((item) => categorizeFocusItem(item) === 'buying')
+    .sort((a, b) => severityRank(a.severity) - severityRank(b.severity));
+
+  return buying[0] ? formatStatusInsight(buying[0]) : null;
 }
 
 const GENERIC_FOCUS_ACTIONS = new Set([
@@ -128,14 +248,19 @@ function focusHeroTitle(count) {
   return 'These deserve your attention first';
 }
 
-/** Hero numbered focus — specific titles, deduped. Default max 3 for scan efficiency. */
+/** Hero numbered focus — one item per responsibility area. Default max 3. */
 export function buildHeroFocusItems(focus = [], limit = 3) {
-  return dedupeFocusForDisplay(focus, limit).map((item, index) => ({
-    rank: index + 1,
-    label: heroFocusLabel(item),
-    severity: displaySeverity(item.severity || 'attention'),
-    item,
-  }));
+  return diverseFocusForDisplay(focus, limit).map((item, index) => {
+    const category = categorizeFocusItem(item);
+    return {
+      rank: index + 1,
+      category,
+      categoryLabel: FOCUS_CATEGORY_LABELS[category] || 'Operations',
+      label: heroFocusLabel(item),
+      severity: displaySeverity(item.severity || 'attention'),
+      item,
+    };
+  });
 }
 
 export { focusHeroTitle };
@@ -321,15 +446,15 @@ export const REMEMBER_TEACHING_TOPICS = [
 /** Morning status strip — is the business OK? */
 export function buildBusinessStatus(context) {
   const card = buildHealthCard(context);
-  const focus = dedupeFocusForDisplay(context?.focusToday || [], 10);
+  const focusPool = dedupeFocusForDisplay(context?.focusToday || [], 10);
   const notifications = context?.notifications?.items || [];
   const grouped = groupNotificationsByUrgency(notifications);
 
   const urgent = grouped.immediate.length
-    + focus.filter((item) => displaySeverity(item.severity) === 'urgent').length;
-  const issues = focus.filter((item) => ['urgent', 'attention'].includes(displaySeverity(item.severity))).length
+    + focusPool.filter((item) => displaySeverity(item.severity) === 'urgent').length;
+  const issues = focusPool.filter((item) => ['urgent', 'attention'].includes(displaySeverity(item.severity))).length
     || grouped.immediate.length + grouped.today.length;
-  const opportunities = focus.filter((item) => categorizeFocusItem(item) === 'buying').length
+  const opportunities = focusPool.filter((item) => categorizeFocusItem(item) === 'buying').length
     || notifications.filter((n) => /buying|stock|inventory/i.test(`${n.category || ''} ${n.title || ''}`)).length;
 
   const percent = card.score == null ? null : Math.round(card.score * 10);
@@ -347,6 +472,8 @@ export function buildBusinessStatus(context) {
     opportunities,
     urgent,
     severity: card.severity,
+    biggestRisk: pickBiggestRisk(context, focusPool),
+    biggestOpportunity: pickBiggestOpportunity(focusPool),
   };
 }
 

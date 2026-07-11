@@ -288,6 +288,8 @@ export default function ApolloCommandCentre({
 
             <h1 className="apollo-cc-title">Apollo Command Centre</h1>
 
+            <p className="apollo-cc-subtitle">Operational brain for Proto Trading</p>
+
             <p className="apollo-cc-greeting">{greeting} {displayName}</p>
 
             {indexError && <p className="apollo-index-error">{indexError}</p>}
