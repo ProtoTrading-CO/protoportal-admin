@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   AlertTriangle,
   ArrowRight,
@@ -29,6 +29,13 @@ import {
   isApolloOwner,
 } from '../lib/apolloTodayPresentation.js';
 import ApolloToday from './ApolloToday.jsx';
+import ApolloOperationalWorkspace from './ApolloOperationalWorkspace.jsx';
+import ApolloInboxPanel from './ApolloInboxPanel.jsx';
+import {
+  buildApolloInboxItems,
+  buildRecentActionSnippets,
+  buildRecentConversationSnippets,
+} from '../lib/apolloInboxPresentation.js';
 
 function FocusHero({ items, onSelect }) {
   if (!items.length) {
@@ -625,10 +632,43 @@ export default function ApolloOperationalBrief({
   refreshing,
   userName,
   userEmail,
-  chatPanel,
+  messages = [],
+  chatInput = '',
+  onChatInputChange,
+  onSend,
+  chatBusy,
+  chatError,
+  onFixLast,
+  onClearChat,
 }) {
   const [startDayActive, setStartDayActive] = useState(false);
   const [startDayStep, setStartDayStep] = useState(0);
+  const [selectedInboxItem, setSelectedInboxItem] = useState(null);
+  const [inboxExpanded, setInboxExpanded] = useState(false);
+
+  const inboxItems = useMemo(
+    () => buildApolloInboxItems(context || {}, { limit: inboxExpanded ? 12 : 4 }),
+    [context, inboxExpanded],
+  );
+  const recentConversations = useMemo(
+    () => buildRecentConversationSnippets(messages),
+    [messages],
+  );
+  const recentActions = useMemo(
+    () => buildRecentActionSnippets(context || {}),
+    [context],
+  );
+
+  const handleInboxSelect = useCallback((item) => {
+    setSelectedInboxItem(item);
+    if (item?.query) onAsk?.(item.query);
+    else if (item?.url) window.location.href = item.url;
+  }, [onAsk]);
+
+  const handleOpenInbox = useCallback(() => {
+    setInboxExpanded(true);
+    onAsk?.('Open my inbox');
+  }, [onAsk]);
 
   const scrollToStep = useCallback((targetId) => {
     if (!targetId) return;
@@ -764,8 +804,34 @@ export default function ApolloOperationalBrief({
         </div>
 
         <div className="apollo-cc-body-col apollo-cc-body-col--right">
-          {chatPanel}
-          <ActivitySection lines={activity} />
+          {selectedInboxItem ? (
+            <ApolloOperationalWorkspace
+              item={selectedInboxItem}
+              onBack={() => setSelectedInboxItem(null)}
+              messages={messages}
+              input={chatInput}
+              onInputChange={onChatInputChange}
+              onSend={onSend}
+              busy={chatBusy}
+              error={chatError}
+              onFixLast={onFixLast}
+              onClear={onClearChat}
+            />
+          ) : (
+            <ApolloInboxPanel
+              items={inboxItems}
+              recentConversations={recentConversations}
+              recentActions={recentActions}
+              input={chatInput}
+              onInputChange={onChatInputChange}
+              onSend={onSend}
+              busy={chatBusy}
+              error={chatError}
+              onSelectItem={handleInboxSelect}
+              onOpenInbox={handleOpenInbox}
+            />
+          )}
+          {!selectedInboxItem && <ActivitySection lines={activity} />}
         </div>
       </div>
     </div>

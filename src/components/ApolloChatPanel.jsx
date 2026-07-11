@@ -200,6 +200,7 @@ export async function exportApolloMessagePdf(content, title = 'Apollo Report') {
   doc.save(`apollo-${new Date().toISOString().slice(0, 10)}.pdf`);
 }
 
+/** Full conversation thread — used inside Conversation Workspace and Work rail only. */
 export default function ApolloChatPanel({
   messages,
   input,
@@ -209,21 +210,19 @@ export default function ApolloChatPanel({
   error,
   onFixLast,
   onClear,
-  variant = 'compact',
+  variant = 'workspace',
 }) {
   const scrollRef = useRef(null);
   const lastAssistantIdx = messages.reduce((acc, m, i) => (m.role === 'assistant' ? i : acc), -1);
-  const isCompact = variant === 'compact';
+  const isWorkspace = variant === 'workspace';
 
   useEffect(() => {
-    if (!isCompact || messages.length) {
-      scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
-    }
-  }, [messages, busy, isCompact]);
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+  }, [messages, busy]);
 
   return (
-    <aside className={`apollo-cc-chat${isCompact ? ' apollo-cc-chat--compact' : ''}`} aria-label="Apollo chat">
-      {!isCompact && (
+    <div className={`apollo-cc-chat${isWorkspace ? ' apollo-cc-chat--workspace' : ''}`} aria-label="Apollo conversation">
+      {isWorkspace && (
         <header className="apollo-cc-chat-head">
           <MessageSquare size={16} />
           <h3>Apollo</h3>
@@ -235,120 +234,73 @@ export default function ApolloChatPanel({
         </header>
       )}
 
-      {isCompact && messages.length > 0 && (
-        <details className="apollo-cc-chat-thread">
-          <summary>Conversation ({messages.length})</summary>
-          <div className="apollo-cc-chat-body apollo-cc-chat-body--thread" ref={scrollRef}>
-            {messages.map((msg, i) => (
-              <ChatMessage
-                key={i}
-                msg={msg}
-                isLastAssistant={i === lastAssistantIdx && !busy}
-                onExportPdf={exportApolloMessagePdf}
-                onFix={onFixLast}
-                fixBusy={busy}
-              />
-            ))}
-            {busy && (
-              <div className="apollo-msg-row apollo-msg-row--assistant">
-                <div className="apollo-avatar apollo-avatar--assistant" aria-hidden="true">
-                  <Bot size={15} />
-                </div>
-                <div className="apollo-msg-stack">
-                  <div className="apollo-msg-body apollo-msg-body--assistant apollo-thinking">
-                    <Loader2 size={15} className="spin" />
-                    <span>Analysing…</span>
-                  </div>
-                </div>
-              </div>
-            )}
+      <div className="apollo-cc-chat-body" ref={scrollRef}>
+        {messages.length === 0 && (
+          <div className="apollo-cc-chat-idle">
+            <p className="apollo-cc-chat-idle-lead">Ask Apollo when you need depth on this thread.</p>
+            <div className="apollo-ask-starters">
+              {STARTERS.map((s) => (
+                <button key={s} type="button" className="apollo-starter apollo-starter--compact" onClick={() => void onSend(s)} disabled={busy}>
+                  {s}
+                </button>
+              ))}
+            </div>
           </div>
-          <button type="button" className="apollo-cc-chat-clear apollo-cc-chat-clear--inline" onClick={onClear} disabled={busy}>
-            Clear
-          </button>
-        </details>
-      )}
-
-      {!isCompact && (
-        <div className="apollo-cc-chat-body" ref={scrollRef}>
-          {messages.length === 0 && (
-            <div className="apollo-cc-chat-idle">
-              <p className="apollo-cc-chat-idle-lead">Supporting tool — ask when you need depth.</p>
-              <div className="apollo-ask-starters">
-                {STARTERS.map((s) => (
-                  <button key={s} type="button" className="apollo-starter apollo-starter--compact" onClick={() => void onSend(s)} disabled={busy}>
-                    {s}
-                  </button>
-                ))}
+        )}
+        {messages.map((msg, i) => (
+          <ChatMessage
+            key={i}
+            msg={msg}
+            isLastAssistant={i === lastAssistantIdx && !busy}
+            onExportPdf={exportApolloMessagePdf}
+            onFix={onFixLast}
+            fixBusy={busy}
+          />
+        ))}
+        {busy && (
+          <div className="apollo-msg-row apollo-msg-row--assistant">
+            <div className="apollo-avatar apollo-avatar--assistant" aria-hidden="true">
+              <Bot size={15} />
+            </div>
+            <div className="apollo-msg-stack">
+              <div className="apollo-msg-meta"><span className="apollo-msg-name">Apollo</span></div>
+              <div className="apollo-msg-body apollo-msg-body--assistant apollo-thinking">
+                <Loader2 size={15} className="spin" />
+                <span>Analysing…</span>
               </div>
             </div>
-          )}
-          {messages.map((msg, i) => (
-            <ChatMessage
-              key={i}
-              msg={msg}
-              isLastAssistant={i === lastAssistantIdx && !busy}
-              onExportPdf={exportApolloMessagePdf}
-              onFix={onFixLast}
-              fixBusy={busy}
-            />
-          ))}
-          {busy && (
-            <div className="apollo-msg-row apollo-msg-row--assistant">
-              <div className="apollo-avatar apollo-avatar--assistant" aria-hidden="true">
-                <Bot size={15} />
-              </div>
-              <div className="apollo-msg-stack">
-                <div className="apollo-msg-meta"><span className="apollo-msg-name">Apollo</span></div>
-                <div className="apollo-msg-body apollo-msg-body--assistant apollo-thinking">
-                  <Loader2 size={15} className="spin" />
-                  <span>Analysing your data…</span>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
+          </div>
+        )}
+      </div>
 
       <div className="apollo-cc-chat-composer">
         {error && <p className="apollo-error">{error}</p>}
         <form
-          className={`apollo-input-row${isCompact ? ' apollo-input-row--compact' : ''}`}
+          className="apollo-input-row apollo-input-row--workspace"
           onSubmit={(e) => {
             e.preventDefault();
             void onSend(input);
           }}
         >
-          {isCompact ? (
-            <input
-              type="text"
-              className="apollo-input apollo-input--compact"
-              value={input}
-              onChange={(e) => onInputChange(e.target.value)}
-              placeholder="Talk to Apollo…"
-              disabled={busy}
-            />
-          ) : (
-            <textarea
-              className="apollo-input apollo-input--textarea"
-              rows={2}
-              value={input}
-              onChange={(e) => onInputChange(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  void onSend(input);
-                }
-              }}
-              placeholder="Ask Apollo…"
-              disabled={busy}
-            />
-          )}
-          <button type="submit" className="apollo-send-btn" disabled={busy || !input.trim()} aria-label="Send">
+          <textarea
+            className="apollo-input apollo-input--textarea"
+            rows={2}
+            value={input}
+            onChange={(e) => onInputChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                void onSend(input);
+              }
+            }}
+            placeholder="Ask Apollo…"
+            disabled={busy}
+          />
+          <button type="submit" className="apollo-send-btn apollo-send-btn--icon" disabled={busy || !input.trim()} aria-label="Send">
             {busy ? <Loader2 size={18} className="spin" /> : <Send size={18} />}
           </button>
         </form>
       </div>
-    </aside>
+    </div>
   );
 }

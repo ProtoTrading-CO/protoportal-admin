@@ -68,18 +68,6 @@ export default function ApolloCommandCentre({
   const greeting = greetingForHour(hour);
   const displayName = userName || 'there';
 
-  const briefSharedProps = {
-    context: briefContext,
-    meta: briefMeta,
-    loading: briefLoading,
-    onAsk: onSend,
-    onRefresh: onRefreshBrief,
-    onReviewNotification,
-    refreshing: rebuildingIndex,
-    userName,
-    userEmail,
-  };
-
   const chatPanel = (
     <ApolloChatPanel
       messages={messages}
@@ -90,9 +78,29 @@ export default function ApolloCommandCentre({
       error={chatError}
       onFixLast={onFixLast}
       onClear={onClearChat}
-      variant="compact"
+      variant="workspace"
     />
   );
+
+  const briefSharedProps = {
+    context: briefContext,
+    meta: briefMeta,
+    loading: briefLoading,
+    onAsk: onSend,
+    onRefresh: onRefreshBrief,
+    onReviewNotification,
+    refreshing: rebuildingIndex,
+    userName,
+    userEmail,
+    messages,
+    chatInput,
+    onChatInputChange,
+    onSend,
+    chatBusy,
+    chatError,
+    onFixLast,
+    onClearChat,
+  };
 
   const selectMode = (modeId) => {
     setActiveMode(modeId);
@@ -175,7 +183,7 @@ export default function ApolloCommandCentre({
       </nav>
 
       {activeMode === 'today' && (
-        <ApolloOperationalBrief {...briefSharedProps} chatPanel={chatPanel} />
+        <ApolloOperationalBrief {...briefSharedProps} />
       )}
 
       {activeMode === 'work' && renderWork()}

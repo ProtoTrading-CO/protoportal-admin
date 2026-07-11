@@ -219,6 +219,8 @@ ERP systems expose information.
 
 Apollo exposes decisions.
 
+Apollo surfaces work before conversation.
+
 ---
 
 ## Closing
