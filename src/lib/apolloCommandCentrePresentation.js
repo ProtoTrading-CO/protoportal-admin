@@ -199,6 +199,36 @@ const GENERIC_FOCUS_ACTIONS = new Set([
   'check whether demand has slowed or stock/listing issues are suppressing sales.',
 ]);
 
+/** Pull Proto product code from notification/focus payload or detail line. */
+export function extractProductCode(item) {
+  if (!item) return '';
+  const direct = item.sku || item.code || item.payload?.code;
+  if (direct) return String(direct).trim().toUpperCase();
+
+  const dedupe = String(item.dedupeKey || item.dedupe_key || '');
+  let match = dedupe.match(/^buying:([^:]+):/i);
+  if (match) return match[1].toUpperCase();
+  match = dedupe.match(/^exception:[^:]+:([A-Z0-9][A-Z0-9._-]*)/i);
+  if (match) return match[1].toUpperCase();
+
+  const detail = String(item.detail || '');
+  match = detail.match(/^([A-Z0-9][A-Z0-9._-]{2,})\s*·/);
+  if (match) return match[1].toUpperCase();
+
+  return '';
+}
+
+/** Prefix titles with product code when Proto has one — codes are how the team thinks. */
+export function formatWithProductCode(item, title = '') {
+  const code = extractProductCode(item);
+  const text = String(title || item?.title || item?.label || '').trim();
+  if (!code) return text;
+  const upper = text.toUpperCase();
+  if (upper.startsWith(`${code} ·`) || upper.startsWith(`${code} -`) || upper.startsWith(`${code} —`)) return text;
+  if (upper.includes(` ${code} `) || upper.includes(`(${code})`)) return text;
+  return `${code} · ${text}`;
+}
+
 /** Drop duplicate focus rows (same title or same generic recommendation). */
 export function dedupeFocusForDisplay(focus = [], limit = 5) {
   const seenTitles = new Set();
@@ -221,7 +251,7 @@ export function dedupeFocusForDisplay(focus = [], limit = 5) {
 }
 
 function heroFocusLabel(item) {
-  const title = String(item.title || item.label || '').trim();
+  const title = formatWithProductCode(item, String(item.title || item.label || '').trim());
   const action = String(item.action || '').trim();
   const detail = String(item.detail || '').trim();
   const evidence = parseEvidence(item);
@@ -384,7 +414,8 @@ export function buildApolloRecommends(focus = []) {
     .map((item) => {
       const evidence = parseEvidence(item);
       const action = String(item.action || item.recommendation || '').trim();
-      const title = String(item.title || item.label || action || 'Recommendation').trim();
+      const rawTitle = String(item.title || item.label || action || 'Recommendation').trim();
+      const title = formatWithProductCode(item, rawTitle);
       const actionIsGeneric = !action || GENERIC_FOCUS_ACTIONS.has(action.toLowerCase()) || action === title;
       const why = evidence.length
         ? evidence
@@ -396,6 +427,7 @@ export function buildApolloRecommends(focus = []) {
       return {
         id: `${item.type}-${item.priority}`,
         title,
+        code: extractProductCode(item),
         why,
         evidence,
         confidence,
@@ -420,6 +452,8 @@ export function groupNotificationsByUrgency(items = []) {
     grouped[bucket].push({
       id: item.id || item.dedupeKey || item.title,
       title: item.title,
+      displayTitle: formatWithProductCode(item, item.title),
+      code: extractProductCode(item),
       detail: item.detail,
       severity: displaySeverity(item.severity),
       url: item.actionUrl,

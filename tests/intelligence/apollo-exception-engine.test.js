@@ -23,6 +23,7 @@ describe('Apollo exception engine', () => {
     expect(item.payload.confidence).toBeGreaterThanOrEqual(80);
     expect(item.payload.businessImpact).toBe('high');
     expect(item.payload.evidence.map((row) => row.label)).toEqual(expect.arrayContaining(['Change']));
+    expect(item.title).toMatch(/^8616700111 · Leather Wallet sales spiked$/);
   });
 
   it('detects ERP and website stock and price exceptions', () => {

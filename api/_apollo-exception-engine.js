@@ -104,7 +104,7 @@ export function detectSalesAnomalies({ today = [], baseline = [] } = {}) {
       type: 'sales_anomaly',
       category: 'sales_anomaly',
       key: `${code}:${spike ? 'spike' : 'drop'}`,
-      title: `${titleOf(item)} sales ${spike ? 'spiked' : 'dropped'}`,
+      title: `${code} · ${titleOf(item)} sales ${spike ? 'spiked' : 'dropped'}`,
       detail: unexpected
         ? `${code} appeared as an unexpected bestseller with ${currentQty} units`
         : `${code} is ${Math.abs(change)}% ${spike ? 'above' : 'below'} recent trend`,
