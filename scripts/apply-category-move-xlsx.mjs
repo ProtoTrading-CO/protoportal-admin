@@ -26,6 +26,7 @@ import {
   pathStringToLabels,
   resolvePathFields,
 } from './lib/taxonomy-paths.mjs';
+import { parseExtraLabels } from '../lib/taxonomy-match.mjs';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dir, '..');
@@ -219,6 +220,7 @@ function productPath(row) {
     row.subcategory_two,
     row.subcategory_three,
     row.subcategory_four,
+    ...parseExtraLabels(row.subcategory_extra),
   ].map(norm).filter(Boolean).join(' > ');
 }
 
@@ -229,6 +231,7 @@ function fieldsMatch(row, fields) {
     && (row.subcategory_two || null) === (fields.subcategory_two || null)
     && (row.subcategory_three || null) === (fields.subcategory_three || null)
     && (row.subcategory_four || null) === (fields.subcategory_four || null)
+    && (row.subcategory_extra || null) === (fields.subcategory_extra || null)
   );
 }
 
@@ -395,7 +398,7 @@ async function loadTableBySku(table) {
   while (true) {
     const { data, error } = await supabase
       .from(table)
-      .select('id, sku, category, subcategory_one, subcategory_two, subcategory_three, subcategory_four')
+      .select('id, sku, category, subcategory_one, subcategory_two, subcategory_three, subcategory_four, subcategory_extra')
       .range(from, from + PAGE - 1);
     if (error) throw error;
     for (const row of data || []) {

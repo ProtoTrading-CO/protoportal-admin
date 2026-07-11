@@ -1,6 +1,7 @@
 import { requireAdminKey } from './_admin-auth.js';
 import { createClient } from '@supabase/supabase-js';
 import { labelsToDbFields, loadTaxonomy, resolveLabelsForSubcategory, resolveLabelsFromPathIds } from './_taxonomy-utils.js';
+import { parseExtraLabels } from '../lib/taxonomy-match.mjs';
 import { deriveMotarroPathFromLabels, isMotarroProduct, motarroPathSnapshot } from './_mottaro-category.js';
 import { restoreArchivedToLive } from './_ensure-product.js';
 import { buildMoveTagPatch, tableHasMoveTagColumns } from './_move-tag.js';
@@ -128,7 +129,7 @@ async function bulkMoveProducts(supabase, normalizedSkus, dbFields, { mottaroSna
   return results;
 }
 
-const REMOVE_SELECT = 'sku,title,category,subcategory_one,subcategory_two,subcategory_three,subcategory_four,mottaro_path';
+const REMOVE_SELECT = 'sku,title,category,subcategory_one,subcategory_two,subcategory_three,subcategory_four,subcategory_extra,mottaro_path';
 
 async function fetchRowsForSkus(supabase, table, skus) {
   const map = new Map();
@@ -174,7 +175,7 @@ async function bulkRemoveFromCategory(supabase, normalizedSkus, tree) {
         results.push({ sku, ok: false, error: 'Not a Motarro product' });
         continue;
       }
-      const labels = [row.category, row.subcategory_one, row.subcategory_two, row.subcategory_three, row.subcategory_four];
+      const labels = [row.category, row.subcategory_one, row.subcategory_two, row.subcategory_three, row.subcategory_four, ...parseExtraLabels(row.subcategory_extra)];
       const snapshot = motarroPathSnapshot(deriveMotarroPathFromLabels(labels, tree));
       const key = snapshot && snapshot !== row.mottaro_path ? snapshot : '__none__';
       if (!groups.has(key)) groups.set(key, []);

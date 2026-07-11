@@ -9,6 +9,7 @@ import {
   paginateRows,
   resolveCategoryFilters,
   applyCategoryFiltersToQuery,
+  categoryPathExceedsFixedColumns,
   isExactlyZeroStock,
   isNegativeStock,
   isPublishableOnWebsite,
@@ -62,6 +63,12 @@ async function fetchAllLiveRows(sb, { search, categoryPath, tree, sort }) {
     if ((data || []).length < PAGE_CHUNK) break;
     from += PAGE_CHUNK;
   }
+  // The SQL filter is exact only within the fixed subcategory columns; a path
+  // deeper than subcategory_four is coarsely narrowed by ilike, so refine it to
+  // an exact ordered-prefix match in JS (extras-aware via rowCategoryPath).
+  if (categoryPathExceedsFixedColumns(categoryPath)) {
+    return filterByCategoryPath(rows, categoryPath, tree);
+  }
   return rows;
 }
 
@@ -88,6 +95,12 @@ async function fetchAllArchivedRows(sb, { archivedBy, excludeBy, sort, search, c
     rows.push(...(data || []));
     if ((data || []).length < PAGE_CHUNK) break;
     from += PAGE_CHUNK;
+  }
+  // Exact ordered-prefix refine for paths deeper than the fixed columns (the
+  // SQL filter only coarsely narrows subcategory_extra via ilike). Motarro
+  // browse paths are refined by their own caller.
+  if (categoryPathExceedsFixedColumns(categoryPath) && !isMotarroBrowsePath(categoryPath)) {
+    return filterByCategoryPath(rows, categoryPath, tree);
   }
   return rows;
 }
@@ -117,6 +130,7 @@ function applyCatalogSearchFilter(q, term) {
     `subcategory_two.ilike.%${term}%`,
     `subcategory_three.ilike.%${term}%`,
     `subcategory_four.ilike.%${term}%`,
+    `subcategory_extra.ilike.%${term}%`,
   ].join(','));
 }
 
@@ -228,7 +242,11 @@ export default async function handler(req, res) {
     let stockAlreadyEnriched = false;
     if (status === 'live') {
       const term = safeSearchTerm(search);
-      const useFullScan = onlyInStock || isMotarroBrowsePath(categoryPath) || term;
+      // Paths deeper than the fixed subcategory columns can't get an exact SQL
+      // count (subcategory_extra is only coarsely narrowed), so full-scan them
+      // and refine + paginate in JS.
+      const useFullScan = onlyInStock || isMotarroBrowsePath(categoryPath) || term
+        || categoryPathExceedsFixedColumns(categoryPath);
       if (useFullScan) {
         let rows;
         if (isMotarroBrowsePath(categoryPath)) {
@@ -251,9 +269,21 @@ export default async function handler(req, res) {
         stockAlreadyEnriched = true;
       }
     } else if (status === 'recycle') {
-      result = await queryArchivedPaginated(sb, {
-        search, categoryPath, tree, page, pageSize, sort, archivedBy: 'recycle-bin',
-      });
+      if (categoryPathExceedsFixedColumns(categoryPath)) {
+        // Deep path — full-scan + JS refine so the count is exact.
+        let rows = await fetchAllArchivedRows(sb, {
+          archivedBy: 'recycle-bin', sort, search, categoryPath, tree,
+        });
+        rows = await enrichRowsWithProductStock(sb, rows);
+        rows = applySearchFilter(rows, search);
+        const pageSlice = paginateRows(rows, page, pageSize);
+        result = { ...pageSlice, archived: true };
+        stockAlreadyEnriched = true;
+      } else {
+        result = await queryArchivedPaginated(sb, {
+          search, categoryPath, tree, page, pageSize, sort, archivedBy: 'recycle-bin',
+        });
+      }
     } else if (status === 'archived') {
       const stockFilter = String(req.query.stockFilter || 'archived').trim();
       const archivedSource = String(req.query.archivedSource || 'all').trim();

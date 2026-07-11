@@ -18,8 +18,9 @@ import {
   motarroPathSnapshot,
   parseStoredMotarroPath,
 } from '../lib/mottaro-category.mjs';
-import { matchesTaxonomyLabel, normalizeLabel, rowMatchesLabelScope, escapeIlikePattern } from '../lib/taxonomy-match.mjs';
+import { matchesTaxonomyLabel, normalizeLabel, rowMatchesLabelScope, escapeIlikePattern, parseExtraLabels } from '../lib/taxonomy-match.mjs';
 import { buildClearLabelsPatch, buildNodeProductFilter, labelsToDbFields, nodeScopeColumn, resolveCategoryIds } from '../api/_taxonomy-utils.js';
+import { resolveCategoryFilters, applyCategoryFiltersToQuery, filterByCategoryPath, categoryPathExceedsFixedColumns, adaptCatalogRow } from '../api/_catalog-adapt.js';
 import { BULK_CHUNK_SIZE, MOVE_UPDATE_CHUNK_SIZE, runInChunks } from '../lib/bulk-chunk.mjs';
 import { codeLookupCandidates, firstCodeToken } from '../lib/code-normalize.mjs';
 import { catalogueDisplayTitle, catalogueDescription, loaderCodeLabel } from '../lib/product-loader-display.mjs';
@@ -730,6 +731,60 @@ console.log('✓ A2 buildClearLabelsPatch depth-aware clearing');
   assert.equal(nodeScopeColumn(ctxC4), 'subcategory_four', 'depth-4 node scope column unchanged');
 }
 console.log('✓ Unlimited category depth via subcategory_extra overflow');
+
+// Product Manager deep-browse (api/catalog.js) must resolve depth>4 exactly.
+{
+  const c6 = { id: 'c6', label: 'C6', children: [] };
+  const c5 = { id: 'c5', label: 'C5', children: [c6] };
+  const c4 = { id: 'c4', label: 'C4', children: [c5] };
+  const c3 = { id: 'c3', label: 'C3', children: [c4] };
+  const c2 = { id: 'c2', label: 'C2', children: [c3] };
+  const c1 = { id: 'c1', label: 'C1', children: [c2] };
+  const deepTree = [{ id: 'main', label: 'Main', children: [c1] }];
+  const deepPath = ['main', 'c1', 'c2', 'c3', 'c4', 'c5', 'c6'];
+
+  // A depth-6 browse path must be routed through the full-scan JS refine
+  // (SQL .eq() can't match subcategory_extra exactly).
+  assert.ok(categoryPathExceedsFixedColumns(deepPath), 'depth-6 path flagged as beyond fixed columns');
+  assert.ok(!categoryPathExceedsFixedColumns(['main', 'c1', 'c2', 'c3', 'c4']), 'depth-4 path stays on the fast SQL path');
+
+  // resolveCategoryFilters emits the fixed columns + a coarse ilike on the
+  // deepest extra label; the SQL narrow must never key an undefined column.
+  const filters = resolveCategoryFilters(deepTree, deepPath);
+  assert.equal(filters.subcategory_four, 'C4', 'fixed columns still resolved for deep path');
+  assert.equal(filters.subcategoryExtraDeepest, 'C6', 'deepest extra label exposed for coarse SQL narrow');
+  assert.ok(!('undefined' in filters), 'deep path never writes filters[undefined]');
+  // Prove the ilike clause is applied (fake query recorder).
+  const applied = [];
+  const fakeQ = {
+    eq(col, val) { applied.push(['eq', col, val]); return this; },
+    or(expr) { applied.push(['or', expr]); return this; },
+    ilike(col, pat) { applied.push(['ilike', col, pat]); return this; },
+  };
+  applyCategoryFiltersToQuery(fakeQ, filters);
+  assert.ok(applied.some(([op, col]) => op === 'ilike' && col === 'subcategory_extra'), 'deep path adds an ilike narrow on subcategory_extra');
+
+  // filterByCategoryPath (the exact JS refine) keeps a matching row and drops a
+  // sibling that only shares the fixed-column prefix.
+  const deepFields = labelsToDbFields(['Main', 'C1', 'C2', 'C3', 'C4', 'C5', 'C6']);
+  const matchRow = { sku: 'A', ...deepFields };
+  const siblingRow = { sku: 'B', ...labelsToDbFields(['Main', 'C1', 'C2', 'C3', 'C4', 'C5', 'OTHER']) };
+  const shallowRow = { sku: 'C', ...labelsToDbFields(['Main', 'C1', 'C2', 'C3', 'C4']) };
+  const kept = filterByCategoryPath([matchRow, siblingRow, shallowRow], deepPath, deepTree).map((r) => r.sku);
+  assert.deepEqual(kept, ['A'], 'deep JS refine keeps only the exact-path row, drops sibling + shallow ancestor');
+
+  // adaptCatalogRow surfaces the full-depth subcategoryLabels for the UI.
+  const adapted = adaptCatalogRow(matchRow, deepTree);
+  assert.deepEqual(adapted.subcategoryLabels, ['C1', 'C2', 'C3', 'C4', 'C5', 'C6'], 'adaptCatalogRow includes subcategory_extra labels');
+  assert.deepEqual(adapted.categoryPath, deepPath, 'adaptCatalogRow builds the full-depth categoryPath');
+}
+console.log('✓ Product Manager deep-browse (catalog) resolves depth>4 exactly');
+
+// parseExtraLabels tolerates junk without throwing.
+assert.deepEqual(parseExtraLabels(null), []);
+assert.deepEqual(parseExtraLabels('not json'), []);
+assert.deepEqual(parseExtraLabels('["X","Y"]'), ['X', 'Y']);
+console.log('✓ parseExtraLabels is null/garbage tolerant');
 
 // A1 — count/content parity
 assert.match(taxonomyUtilsSrc2, /onlyInStock && !isPublishableOnWebsite/, 'counts stock gate only when onlyInStock');

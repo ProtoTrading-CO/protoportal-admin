@@ -45,13 +45,17 @@ export function fuzzyFixPath(tree, labels) {
   return resolved.length >= 2 ? resolved : null;
 }
 
+// Keep in lockstep with labelsToDbFields in api/_taxonomy-utils.js — depth
+// beyond subcategory_four is stored as a JSON array in subcategory_extra.
 export function labelsToDbFields(labels) {
+  const extra = labels.slice(5).filter((v) => v != null && String(v).trim());
   return {
     category: labels[0],
     subcategory_one: labels[1] || labels[0],
     subcategory_two: labels[2] || null,
     subcategory_three: labels[3] || null,
     subcategory_four: labels[4] || null,
+    subcategory_extra: extra.length ? JSON.stringify(extra) : null,
   };
 }
 

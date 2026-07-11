@@ -285,10 +285,8 @@ function applyCategoryFilter(rows, categoryFilter, categoryPathFilter = []) {
   }
   return rows.filter((p) =>
     matchesMainCategory(p, categoryFilter)
-    || p.categoryPath?.[1] === categoryFilter
-    || p.categoryPath?.[2] === categoryFilter
-    || p.categoryPath?.[3] === categoryFilter
-    || p.categoryPath?.[4] === categoryFilter
+    // Match the filter id at any subcategory depth (no fixed-level cap).
+    || (p.categoryPath || []).slice(1).includes(categoryFilter)
   );
 }
 
@@ -624,12 +622,8 @@ export async function fetchReorderProducts({
     products = products.filter((p) => matchesMainCategory(p, mainCategory));
   }
   if (subcategoryId && subcategoryId !== 'all') {
-    products = products.filter((p) =>
-      p.categoryPath?.[1] === subcategoryId
-      || p.categoryPath?.[2] === subcategoryId
-      || p.categoryPath?.[3] === subcategoryId
-      || p.categoryPath?.[4] === subcategoryId
-    );
+    // Match the subcategory id at any depth (no fixed-level cap).
+    products = products.filter((p) => (p.categoryPath || []).slice(1).includes(subcategoryId));
   }
 
   return products.sort((a, b) => a.name.localeCompare(b.name));

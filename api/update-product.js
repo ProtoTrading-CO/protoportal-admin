@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { resolveProductLoaderMatch } from './_product-loader-lookup.js';
 import { ensureProductFromCatalogueRow } from './_ensure-product.js';
 import { labelsToDbFields, loadTaxonomy, resolveLabelsFromPathIds } from './_taxonomy-utils.js';
+import { parseExtraLabels } from '../lib/taxonomy-match.mjs';
 import { deriveMotarroPathFromLabels, isMotarroProduct, motarroPathSnapshot } from './_mottaro-category.js';
 import { buildMoveTagPatch, tableHasMoveTagColumns } from './_move-tag.js';
 
@@ -15,7 +16,9 @@ const CATEGORY_COLS = ['category', 'subcategory_one', 'subcategory_two', 'subcat
 async function snapshotMottaroPath(supabase, table, verified) {
   if (!isMotarroProduct(verified)) return;
   const tree = await loadTaxonomy();
-  const labels = CATEGORY_COLS.map((col) => verified[col]);
+  // Include depth beyond subcategory_four so a deep Motarro product snapshots to
+  // its true position rather than a truncated one.
+  const labels = [...CATEGORY_COLS.map((col) => verified[col]), ...parseExtraLabels(verified.subcategory_extra)];
   const snapshot = motarroPathSnapshot(deriveMotarroPathFromLabels(labels, tree));
   if (!snapshot || snapshot === verified.mottaro_path) return;
   const { error } = await supabase
@@ -80,6 +83,16 @@ export default async function handler(req, res) {
   if (subcategory_two !== undefined) patch.subcategory_two = subcategory_two ? String(subcategory_two).trim() : null;
   if (subcategory_three !== undefined) patch.subcategory_three = subcategory_three ? String(subcategory_three).trim() : null;
   if (subcategory_four !== undefined) patch.subcategory_four = subcategory_four ? String(subcategory_four).trim() : null;
+  // subcategory_extra holds depth beyond subcategory_four (JSON array of labels).
+  // A raw-fields write that names columns up to subcategory_four defines a path
+  // within the fixed columns, so any stale deeper tail must be cleared — else a
+  // move to a shallower category would leave the row pointing past its new leaf.
+  const rawExtra = req.body?.subcategory_extra;
+  if (rawExtra !== undefined) {
+    patch.subcategory_extra = rawExtra && String(rawExtra).trim() ? String(rawExtra).trim() : null;
+  } else if (CATEGORY_COLS.some((col) => patch[col] !== undefined)) {
+    patch.subcategory_extra = null;
+  }
   // Preferred category input: taxonomy node ids, resolved server-side against
   // the live tree (mirrors bulk move) so a stale client can't write outdated
   // labels. Raw label fields above remain supported for legacy callers.
