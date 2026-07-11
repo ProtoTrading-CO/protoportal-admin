@@ -4,6 +4,11 @@ import {
   buildBusinessStatus,
   buildDailyBriefBullets,
   buildDailyBriefScan,
+  buildConfidenceChip,
+  buildEventBadge,
+  buildImpactBadge,
+  buildPriorityBadge,
+  formatApolloRelativeTime,
   buildHealthCard,
   buildHeroFocusItems,
   buildKnowledgeHealth,
@@ -146,12 +151,14 @@ describe('apolloCommandCentrePresentation', () => {
   it('formats Apollo Recommends with confidence only when evidence exists', () => {
     const withEvidence = buildApolloRecommends([{
       type: 'x', priority: 1, title: 'Wallet stock falling', action: 'Increase wallet order',
-      evidence: 'Sales +31% · Stock cover 11 days',
-      confidence: 96,
+      payload: {
+        evidence: [{ label: 'Stock cover', value: '11 days' }],
+        confidence: 96,
+      },
     }]);
     expect(withEvidence[0].title).toBe('Wallet stock falling');
     expect(withEvidence[0].confidence).toBe(96);
-    expect(withEvidence[0].evidence.length).toBeGreaterThan(0);
+    expect(withEvidence[0].recommendationText).toBe('Increase wallet order');
 
     const noEvidence = buildApolloRecommends([{
       type: 'y', priority: 2, action: 'Call supplier',
@@ -200,22 +207,56 @@ describe('apolloCommandCentrePresentation', () => {
     expect(view.kind).toBe('product');
     expect(view.sku).toBe('8616700111');
     expect(view.description).toBe('BOUNCING BALL W/STRAP');
-    expect(view.meta).toBe('TOYS · Motarro');
+    expect(view.meta).toBe('TOYS • Motarro');
     expect(view.headline).toBe('Sales spiked');
+    expect(view.eventBadge).toEqual({
+      key: 'sales_spike',
+      emoji: '🟢',
+      label: 'SALES SPIKE',
+      tone: 'green',
+    });
 
     const grouped = groupNotificationsByUrgency([{ ...item, severity: 'attention' }]);
     expect(grouped.today[0].view.sku).toBe('8616700111');
+    expect(grouped.today[0].view.eventBadge?.label).toBe('SALES SPIKE');
 
     const recs = buildApolloRecommends([{
       type: 'notification_sales_anomaly',
       priority: 1,
       severity: 'attention',
       ...item,
+      action: 'Review stock cover before demand outruns supply.',
       confidence: 90,
     }]);
     expect(recs[0].view.sku).toBe('8616700111');
-    expect(recs[0].metrics).toHaveLength(2);
+    expect(recs[0].metrics).toEqual([
+      { label: 'ON HAND', value: 24 },
+      { label: 'NORMAL SALES', value: '0/day' },
+    ]);
+    expect(recs[0].recommendationText).toBe('Review stock cover before demand outruns supply.');
+    expect(recs[0].confidenceChip?.label).toBe('HIGH CONFIDENCE');
+    expect(recs[0].impactBadge?.label).toBe('MEDIUM IMPACT');
+    expect(recs[0].priorityBadge?.label).toBe('PRIORITY');
     expect(recs[0].confidence).toBe(90);
+  });
+
+  it('formats confidence, impact, priority, and relative time for scan-first cards', () => {
+    const fiveMinAgo = new Date(Date.now() - 5 * 60_000).toISOString();
+    expect(buildConfidenceChip(90)).toMatchObject({ label: 'HIGH CONFIDENCE', value: '90%', tone: 'green' });
+    expect(buildConfidenceChip(72)).toMatchObject({ label: 'MEDIUM', value: '72%', tone: 'amber' });
+    expect(buildConfidenceChip(41)).toMatchObject({ label: 'LOW', value: '41%', tone: 'red' });
+    expect(buildImpactBadge({ businessImpact: 'high' })?.label).toBe('HIGH IMPACT');
+    expect(buildPriorityBadge({ priorityScore: 98 })).toMatchObject({ label: 'PRIORITY', value: '98', tone: 'red' });
+    expect(formatApolloRelativeTime(fiveMinAgo)).toBe('5 minutes ago');
+  });
+
+  it('maps stock and supplier events to scan-friendly badges', () => {
+    expect(buildEventBadge({ title: '4+ products with negative stock', category: 'negative_stock' })?.label)
+      .toBe('NEGATIVE STOCK');
+    expect(buildEventBadge({ title: '8612300456 · BALL low stock', payload: { stockBucket: 'low' } })?.label)
+      .toBe('LOW STOCK');
+    expect(buildEventBadge({ title: 'Supplier follow-up: Motarro', category: 'supplier_followups' })?.label)
+      .toBe('SUPPLIER FOLLOW-UP');
   });
 
   it('formats customer and supplier operational objects by business identifier', () => {

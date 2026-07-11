@@ -164,7 +164,44 @@ function RememberSection({ items }) {
   );
 }
 
-function OperationalObjectDisplay({ view, compact = false }) {
+function EventBadge({ badge }) {
+  if (!badge) return null;
+  return (
+    <span className={`apollo-cc-obj-badge apollo-cc-obj-badge--${badge.tone}`}>
+      <span className="apollo-cc-obj-badge-emoji" aria-hidden="true">{badge.emoji}</span>
+      {badge.label}
+    </span>
+  );
+}
+
+function PriorityBadge({ badge }) {
+  if (!badge) return null;
+  return (
+    <span className={`apollo-cc-obj-badge apollo-cc-obj-badge--${badge.tone}`}>
+      {badge.label} {badge.value}
+    </span>
+  );
+}
+
+function ConfidenceChip({ chip }) {
+  if (!chip) return null;
+  return (
+    <div className={`apollo-cc-confidence apollo-cc-confidence--${chip.tone}`}>
+      <span className={`apollo-cc-obj-badge apollo-cc-obj-badge--${chip.tone}`}>
+        <span className="apollo-cc-obj-badge-emoji" aria-hidden="true">{chip.emoji}</span>
+        {chip.label}
+      </span>
+      <strong>{chip.value}</strong>
+    </div>
+  );
+}
+
+function OperationalObjectDisplay({
+  view,
+  compact = false,
+  impactBadge = null,
+  priorityBadge = null,
+}) {
   if (!view) return null;
 
   if (view.kind === 'product' && view.sku) {
@@ -173,7 +210,13 @@ function OperationalObjectDisplay({ view, compact = false }) {
         <span className="apollo-cc-obj-sku" data-sku={view.sku}>{view.sku}</span>
         {view.description && <span className="apollo-cc-obj-desc">{view.description}</span>}
         {view.meta && <span className="apollo-cc-obj-meta">{view.meta}</span>}
-        {!compact && view.headline && <span className="apollo-cc-obj-headline">{view.headline}</span>}
+        <EventBadge badge={view.eventBadge} />
+        {(impactBadge || priorityBadge) && (
+          <span className="apollo-cc-obj-badges-row">
+            <EventBadge badge={impactBadge} />
+            <PriorityBadge badge={priorityBadge} />
+          </span>
+        )}
       </span>
     );
   }
@@ -185,7 +228,13 @@ function OperationalObjectDisplay({ view, compact = false }) {
           {view.identifierLabel}: {view.identifier}
         </span>
         {view.description && <span className="apollo-cc-obj-desc">{view.description}</span>}
-        {!compact && view.headline && <span className="apollo-cc-obj-headline">{view.headline}</span>}
+        <EventBadge badge={view.eventBadge} />
+        {(impactBadge || priorityBadge) && (
+          <span className="apollo-cc-obj-badges-row">
+            <EventBadge badge={impactBadge} />
+            <PriorityBadge badge={priorityBadge} />
+          </span>
+        )}
       </span>
     );
   }
@@ -193,12 +242,61 @@ function OperationalObjectDisplay({ view, compact = false }) {
   return (
     <span className={`apollo-cc-obj${compact ? ' apollo-cc-obj--compact' : ''}`}>
       {view.description && <span className="apollo-cc-obj-desc">{view.description}</span>}
-      {view.headline && <span className="apollo-cc-obj-headline">{view.headline}</span>}
+      <EventBadge badge={view.eventBadge} />
+      {(impactBadge || priorityBadge) && (
+        <span className="apollo-cc-obj-badges-row">
+          <EventBadge badge={impactBadge} />
+          <PriorityBadge badge={priorityBadge} />
+        </span>
+      )}
     </span>
   );
 }
 
-function RecommendsSection({ items, onSelect }) {
+function RecommendCardActions({ rec, onAsk, onReviewNotification }) {
+  const sku = rec.code || rec.view?.sku;
+  const stop = (event) => event.stopPropagation();
+
+  return (
+    <div className="apollo-cc-recommend-actions" role="group" aria-label="Recommendation actions">
+      {sku && (
+        <button type="button" onClick={(e) => { stop(e); onAsk?.(`Open product ${sku}`); }}>
+          Open Product
+        </button>
+      )}
+      {sku && (
+        <button type="button" onClick={(e) => { stop(e); onAsk?.(`Order ${sku}`); }}>
+          Order
+        </button>
+      )}
+      {sku && (
+        <button type="button" onClick={(e) => { stop(e); onAsk?.(`Show sales history for ${sku}`); }}>
+          History
+        </button>
+      )}
+      {rec.item?.notificationDbId ? (
+        <button
+          type="button"
+          onClick={(e) => {
+            stop(e);
+            onReviewNotification?.(rec.item, {
+              feedback: 'ignore_permanently',
+              note: 'Dismissed from Apollo Recommends',
+            });
+          }}
+        >
+          Ignore
+        </button>
+      ) : (
+        <button type="button" onClick={(e) => { stop(e); onAsk?.(`Ignore ${rec.title}`); }}>
+          Ignore
+        </button>
+      )}
+    </div>
+  );
+}
+
+function RecommendsSection({ items, onOpen, onAsk, onReviewNotification }) {
   if (!items.length) return null;
   return (
     <section
@@ -212,39 +310,41 @@ function RecommendsSection({ items, onSelect }) {
           <article key={rec.id} className={`apollo-cc-recommend apollo-cc-severity--${rec.severity}`}>
             <button
               type="button"
-              className="apollo-cc-recommend-hit"
-              onClick={() => onSelect?.(rec.item)}
+              className="apollo-cc-recommend-card"
+              onClick={() => onOpen?.(rec)}
               data-search={rec.view?.searchText || rec.title}
             >
-              <OperationalObjectDisplay view={rec.view} />
-            </button>
-            {rec.metrics?.length > 0 && (
-              <ul className="apollo-cc-recommend-metrics">
-                {rec.metrics.map((row) => (
-                  <li key={row.label}>
-                    <span>{row.label}</span>
-                    <strong>{row.value}</strong>
-                  </li>
-                ))}
-              </ul>
-            )}
-            {!rec.metrics?.length && rec.why.length > 0 && (
-              <div className="apollo-cc-recommend-why">
-                <span className="apollo-cc-recommend-kicker">Why?</span>
-                <ul>
-                  {rec.why.map((line, i) => <li key={i}>{line}</li>)}
+              {rec.relativeTime && (
+                <span className="apollo-cc-recommend-time">{rec.relativeTime}</span>
+              )}
+              <OperationalObjectDisplay
+                view={rec.view}
+                impactBadge={rec.impactBadge}
+                priorityBadge={rec.priorityBadge}
+              />
+              {rec.metrics?.length > 0 && (
+                <ul className="apollo-cc-recommend-metrics">
+                  {rec.metrics.map((row) => (
+                    <li key={row.label}>
+                      <span>{row.label}</span>
+                      <strong>{row.value}</strong>
+                    </li>
+                  ))}
                 </ul>
-              </div>
-            )}
-            {rec.view?.recommendation && (
-              <p className="apollo-cc-recommend-action">{rec.view.recommendation}</p>
-            )}
-            {rec.confidence != null && (
-              <p className="apollo-cc-recommend-confidence">
-                <span className="apollo-cc-recommend-kicker">Confidence</span>
-                <strong>{rec.confidence}%</strong>
-              </p>
-            )}
+              )}
+              {rec.recommendationText && (
+                <div className="apollo-cc-recommend-action-block">
+                  <span className="apollo-cc-recommend-kicker">Next Action</span>
+                  <p>{rec.recommendationText}</p>
+                </div>
+              )}
+              {rec.confidenceChip && <ConfidenceChip chip={rec.confidenceChip} />}
+            </button>
+            <RecommendCardActions
+              rec={rec}
+              onAsk={onAsk}
+              onReviewNotification={onReviewNotification}
+            />
           </article>
         ))}
       </div>
@@ -300,6 +400,9 @@ function NotificationsGrouped({ groups, onOpen }) {
                     onClick={() => onOpen?.(row)}
                     data-search={row.view?.searchText || row.displayTitle || row.title}
                   >
+                    {row.relativeTime && (
+                      <span className="apollo-cc-notif-time">{row.relativeTime}</span>
+                    )}
                     <OperationalObjectDisplay view={row.view} compact />
                   </button>
                 </li>
@@ -449,6 +552,15 @@ export default function ApolloOperationalBrief({
     if (query) onAsk?.(query);
   }, [onAsk]);
 
+  const handleRecommendOpen = useCallback((rec) => {
+    const sku = rec?.code || rec?.view?.sku;
+    if (sku) {
+      onAsk?.(`Open product ${sku}`);
+      return;
+    }
+    handleFocusSelect(rec?.item);
+  }, [onAsk, handleFocusSelect]);
+
   const handleRowSelect = useCallback((row) => {
     if (row?.url) {
       window.location.href = row.url;
@@ -514,7 +626,12 @@ export default function ApolloOperationalBrief({
 
         <div className="apollo-cc-body-col apollo-cc-body-col--centre">
           <DailyBriefCompact bullets={dailyBrief.bullets} detailSections={dailyBrief.detailSections} />
-          <RecommendsSection items={recommends} onSelect={handleFocusSelect} />
+          <RecommendsSection
+            items={recommends}
+            onOpen={handleRecommendOpen}
+            onAsk={onAsk}
+            onReviewNotification={onReviewNotification}
+          />
           <OpsList title="Buying" icon={Package} rows={buyingRows} onSelect={handleRowSelect} />
           {showValidation && (
             <div id="apollo-cc-section-brief" className="apollo-cc-validation-slot">
