@@ -1,5 +1,18 @@
 # Apollo Status
 
+## Apollo 3.0
+
+| | |
+| --- | --- |
+| **Status** | Frozen |
+| **Mission** | Operate Proto through Apollo. |
+| **Current responsibility** | Earn the Knowledge responsibility. |
+| **UI policy** | Frozen. |
+
+Future releases earn operational responsibilities rather than redesigning the interface.
+
+---
+
 ## Current Mission
 
 **Earn the Knowledge responsibility.**

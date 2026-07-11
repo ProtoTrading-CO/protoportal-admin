@@ -13,7 +13,7 @@ export default function ApolloInboxPanel({
   onOpenInbox,
 }) {
   return (
-    <aside className="apollo-inbox" aria-label="Inbox">
+    <aside className="apollo-inbox" aria-label="Operational Inbox">
       <ApolloTalkComposer
         input={input}
         onInputChange={onInputChange}
@@ -23,10 +23,10 @@ export default function ApolloInboxPanel({
       />
 
       <section className="apollo-inbox-queue" aria-labelledby="apollo-inbox-title">
-        <h3 id="apollo-inbox-title" className="apollo-inbox-title">Inbox</h3>
+        <h3 id="apollo-inbox-title" className="apollo-inbox-title">Operational Inbox</h3>
 
         {items.length === 0 ? (
-          <p className="apollo-inbox-empty">Nothing waiting. Inbox stays clear until someone needs you.</p>
+          <p className="apollo-inbox-empty">Nothing waiting. Operational Inbox stays clear until someone needs you.</p>
         ) : (
           <ul className="apollo-inbox-list">
             {items.map((item) => (
@@ -41,11 +41,12 @@ export default function ApolloInboxPanel({
                     {' '}
                     {item.workType?.label}
                   </span>
-                  <span className="apollo-inbox-item-head">
-                    <span className="apollo-inbox-item-who">{item.who}</span>
-                    <span className="apollo-inbox-item-when">{item.when}</span>
-                  </span>
                   <span className="apollo-inbox-item-why">{item.why}</span>
+                  <span className="apollo-inbox-item-meta">
+                    {item.who}
+                    {' · '}
+                    {item.when}
+                  </span>
                 </button>
               </li>
             ))}

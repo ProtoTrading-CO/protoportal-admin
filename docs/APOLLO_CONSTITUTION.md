@@ -211,15 +211,18 @@ Future capabilities grow inside these three modes.
 
 ---
 
-## Permanent principle
+## Apollo Principles
 
-Apollo should reduce cognitive load before it adds capability.
+Permanent UX principles. Apollo should reduce cognitive load before it adds capability.
 
-ERP systems expose information.
+- **Surface work before conversation.**
+- **Surface decisions before data.**
+- **Surface attention before navigation.**
+- **Surface evidence before confidence.**
 
-Apollo exposes decisions.
+ERP systems expose information. Apollo exposes decisions.
 
-Apollo surfaces work before conversation.
+*Future (when Memory becomes operational): Surface knowledge before questions.*
 
 ---
 

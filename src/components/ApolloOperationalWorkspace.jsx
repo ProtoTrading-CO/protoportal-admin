@@ -40,7 +40,7 @@ export default function ApolloOperationalWorkspace({
       <header className="apollo-op-workspace-head">
         <button type="button" className="apollo-op-workspace-back" onClick={onBack}>
           <ArrowLeft size={14} />
-          Inbox
+          Operational Inbox
         </button>
         {item?.workType && (
           <span className="apollo-op-workspace-badge">
