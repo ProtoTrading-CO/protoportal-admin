@@ -1141,11 +1141,11 @@ export function buildDailyBriefBullets(context) {
 export const APOLLO_RESPONSIBILITIES = [
   { id: 'truth', label: 'Truth', status: 'earned' },
   { id: 'context', label: 'Context', status: 'earned' },
-  { id: 'attention', label: 'Attention', status: 'earned' },
-  { id: 'execution', label: 'Execution', status: 'earned' },
-  { id: 'memory', label: 'Memory', status: 'emerging', note: 'Not yet earned' },
-  { id: 'reasoning', label: 'Reasoning', status: 'waiting', note: 'Waiting for Memory' },
+  { id: 'knowledge', label: 'Knowledge', status: 'emerging', note: 'Proto Memory emerging' },
+  { id: 'rulebook', label: 'Rulebook', status: 'emerging', note: 'Rulebook v1.0 live' },
+  { id: 'reasoning', label: 'Reasoning', status: 'waiting', note: 'Combines Knowledge + Rulebook' },
   { id: 'advice', label: 'Advice', status: 'waiting', note: 'Waiting for Reasoning' },
+  { id: 'execution', label: 'Execution', status: 'earned' },
   { id: 'coordination', label: 'Coordination', status: 'waiting', note: null },
   { id: 'stewardship', label: 'Stewardship', status: 'waiting', note: null },
 ];
@@ -1171,10 +1171,11 @@ export const APOLLO_KNOWLEDGE_DEFAULT_COUNTS = {
   decision: 0,
   operational: 0,
   business_rules: 1,
+  reference: 0,
 };
 
 export const APOLLO_KNOWLEDGE_HEALTH_PURPOSE =
-  "Proto's operational knowledge grows here over time.";
+  "Proto's operational knowledge grows here. Knowledge is experience; Business Rules are judgment.";
 
 export function buildKnowledgeHealth({
   verifiedKnowledge = 0,
@@ -1201,7 +1202,9 @@ export function buildKnowledgeDomainCounts(overrides = {}) {
 }
 
 export function formatKnowledgeDomainCount(domain, count = 0) {
+  if (domain.status === 'reserved') return 'Reserved';
   if (domain.countType === 'active') return `${count} active`;
-  if (domain.countType === 'rulebook') return domain.rulebookLabel || `Rulebook v1.0 · ${count} active`;
+  if (domain.countType === 'rulebook') return domain.rulebookLabel || `Rulebook v1.0 · ${count} validated`;
+  if (domain.countType === 'reference') return count > 0 ? `${count} documents` : 'Reserved';
   return `${count} verified`;
 }

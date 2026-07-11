@@ -1,7 +1,7 @@
 /**
  * Apollo Rulebook — Proto's judgment framework.
- * Not Proto Memory (experience). Not code thresholds alone — operating philosophy.
- * @see docs/PROTO_RULEBOOK.md
+ * SOURCE OF TRUTH: docs/PROTO_RULEBOOK.md — code implements, does not define.
+ * @see docs/APOLLO_ARCHITECTURE.md
  */
 
 /** Rulebook evolves with the business; Apollo UI stays on its own version line. */
@@ -12,14 +12,50 @@ export const APOLLO_BUSINESS_PRINCIPLES = [
   'Apollo must distinguish between operational timing and operational problems.',
 ];
 
-/** Four knowledge assets — Business Rules interpret; the others describe. */
-export const APOLLO_KNOWLEDGE_ASSETS = [
+/** Four pillars of Apollo's operational brain. */
+export const APOLLO_OPERATIONAL_PILLARS = [
+  {
+    id: 'data',
+    label: 'Data',
+    tagline: 'What is',
+    question: 'What happened?',
+    changesBecause: 'ERP transactions',
+  },
+  {
+    id: 'knowledge',
+    label: 'Knowledge',
+    tagline: 'What we know',
+    question: 'What have we learned?',
+    changesBecause: 'Experience',
+    storage: 'proto_memory',
+  },
+  {
+    id: 'rulebook',
+    label: 'Rulebook',
+    tagline: 'How we think',
+    question: 'How should we interpret this?',
+    changesBecause: 'Business policy',
+    storage: 'rulebook',
+  },
+  {
+    id: 'decision_history',
+    label: 'Decision History',
+    tagline: 'What happened when',
+    question: 'What happened after we decided?',
+    changesBecause: 'Outcomes',
+    storage: 'validation_outcomes',
+  },
+];
+
+/** Knowledge library types — each answers a different business question. */
+export const APOLLO_KNOWLEDGE_TYPES = [
   {
     id: 'business',
     label: 'Business Knowledge',
-    purpose: 'Stable facts',
+    purpose: 'Learned facts',
     example: 'Addie prefers black packaging',
     storage: 'proto_memory',
+    status: 'active',
   },
   {
     id: 'decision',
@@ -27,6 +63,7 @@ export const APOLLO_KNOWLEDGE_ASSETS = [
     purpose: 'Outcomes',
     example: 'Ordering extra wallets prevented stock-outs',
     storage: 'proto_memory',
+    status: 'active',
   },
   {
     id: 'operational',
@@ -34,15 +71,34 @@ export const APOLLO_KNOWLEDGE_ASSETS = [
     purpose: 'Temporary context',
     example: 'Container 58 awaiting customs',
     storage: 'proto_memory',
+    status: 'active',
   },
   {
     id: 'business_rule',
     label: 'Business Rules',
-    purpose: 'How to interpret the business',
+    purpose: 'Operational judgment',
     example: 'Negative stock during GRV is expected',
     storage: 'rulebook',
+    status: 'active',
+  },
+  {
+    id: 'reference',
+    label: 'Reference Knowledge',
+    purpose: 'External policy and reference',
+    example: 'Incoterms, VAT rules, supplier contracts',
+    storage: 'reference_store',
+    status: 'reserved',
   },
 ];
+
+/** @deprecated Use APOLLO_KNOWLEDGE_TYPES */
+export const APOLLO_KNOWLEDGE_ASSETS = APOLLO_KNOWLEDGE_TYPES.filter((row) => row.status !== 'reserved');
+
+/** Rule governance lifecycle — documentation → implementation → evidence. */
+export const RULE_GOVERNANCE_STATUSES = ['draft', 'validated', 'institutional'];
+
+/** Code wiring status — separate from governance trust level. */
+export const RULE_IMPLEMENTATION_STATUSES = ['planned', 'active'];
 
 /** Metric keys for "business rules applied today" breakdown. */
 export const BUSINESS_RULE_METRIC_KEYS = {
@@ -109,17 +165,56 @@ function resolveBestScope(rule, product) {
   return matched;
 }
 
+export function calculateRuleAccuracy(validation = {}) {
+  const observed = Number(validation.observed) || 0;
+  const falseAlarms = Number(validation.falseAlarms) || 0;
+  if (!observed) return null;
+  return Math.round(((observed - falseAlarms) / observed) * 1000) / 10;
+}
+
+export function buildRuleGovernanceView(rule) {
+  const validation = rule.validation || {};
+  const accuracy = validation.accuracy ?? calculateRuleAccuracy(validation);
+  return {
+    id: rule.id,
+    title: rule.title,
+    metricLabel: rule.metricLabel,
+    owner: rule.owner || null,
+    approvedBy: rule.approvedBy || null,
+    lastReviewed: rule.lastReviewed || null,
+    governanceStatus: rule.governanceStatus || 'draft',
+    implementationStatus: rule.implementationStatus || 'planned',
+    validation: {
+      observed: validation.observed ?? 0,
+      resolvedAutomatically: validation.resolvedAutomatically ?? 0,
+      investigations: validation.investigations ?? 0,
+      falseAlarms: validation.falseAlarms ?? 0,
+      accuracy,
+    },
+    documentationPath: 'docs/PROTO_RULEBOOK.md',
+  };
+}
+
 export const APOLLO_BUSINESS_RULES = {
   negativeStock: {
     id: 'negative_stock_grv_timing',
     knowledgeType: 'business_rule',
     metricKey: 'negative_stock_timing',
     metricLabel: BUSINESS_RULE_METRIC_KEYS.negative_stock_timing,
-    status: 'active',
+    implementationStatus: 'active',
+    governanceStatus: 'validated',
+    owner: 'Operations',
+    approvedBy: 'Gee',
+    lastReviewed: '2026-07-12',
     title: 'Negative stock during GRV is expected',
     statement: 'Negative stock during GRV processing is operational timing, not a stock problem.',
-    source: 'operations',
-    confidence: 'verified',
+    validation: {
+      observed: 0,
+      resolvedAutomatically: 0,
+      investigations: 0,
+      falseAlarms: 0,
+      accuracy: null,
+    },
     defaultConfig: {
       gracePeriodHours: 24,
       investigateBelow: -10,
@@ -137,11 +232,14 @@ export const APOLLO_BUSINESS_RULES = {
     knowledgeType: 'business_rule',
     metricKey: 'supplier_grace_period',
     metricLabel: BUSINESS_RULE_METRIC_KEYS.supplier_grace_period,
-    status: 'planned',
+    implementationStatus: 'planned',
+    governanceStatus: 'draft',
+    owner: 'Operations',
+    approvedBy: null,
+    lastReviewed: null,
     title: 'Supplier ships two days early',
     statement: 'Early shipment within the grace window is expected supplier behaviour.',
-    source: 'operations',
-    confidence: 'draft',
+    validation: { observed: 0, resolvedAutomatically: 0, investigations: 0, falseAlarms: 0, accuracy: null },
     defaultConfig: { graceDays: 2 },
     scopes: [],
   },
@@ -150,11 +248,14 @@ export const APOLLO_BUSINESS_RULES = {
     knowledgeType: 'business_rule',
     metricKey: 'container_delay',
     metricLabel: BUSINESS_RULE_METRIC_KEYS.container_delay,
-    status: 'planned',
+    implementationStatus: 'planned',
+    governanceStatus: 'draft',
+    owner: 'Operations',
+    approvedBy: null,
+    lastReviewed: null,
     title: 'Container ETA changes under 12 hours',
     statement: 'Short ETA fluctuations during transit are operational timing, not delays.',
-    source: 'operations',
-    confidence: 'draft',
+    validation: { observed: 0, resolvedAutomatically: 0, investigations: 0, falseAlarms: 0, accuracy: null },
     defaultConfig: { ignoreHours: 12 },
     scopes: [],
   },
@@ -163,11 +264,14 @@ export const APOLLO_BUSINESS_RULES = {
     knowledgeType: 'business_rule',
     metricKey: 'seasonal_buying',
     metricLabel: BUSINESS_RULE_METRIC_KEYS.seasonal_buying,
-    status: 'planned',
+    implementationStatus: 'planned',
+    governanceStatus: 'draft',
+    owner: 'Buying',
+    approvedBy: null,
+    lastReviewed: null,
     title: 'Christmas buying begins in October',
     statement: 'Seasonal uplift before peak trading is expected buying behaviour.',
-    source: 'operations',
-    confidence: 'draft',
+    validation: { observed: 0, resolvedAutomatically: 0, investigations: 0, falseAlarms: 0, accuracy: null },
     defaultConfig: { leadMonths: 2 },
     scopes: [],
   },
@@ -192,6 +296,7 @@ export function resolveBusinessRuleConfig(ruleKey, product = {}, overrides = {})
     ruleTitle: rule.title,
     metricKey: rule.metricKey,
     metricLabel: rule.metricLabel,
+    governanceStatus: rule.governanceStatus,
     rulebookVersion: RULEBOOK_VERSION,
     appliesTo: matchedScope
       ? { dimension: matchedScope.appliesTo, match: matchedScope.match }
@@ -209,19 +314,29 @@ export function resolveNegativeStockRules(product = {}, overrides = {}) {
   return resolveBusinessRuleConfig('negativeStock', product, overrides);
 }
 
-export function listApolloBusinessRules({ status } = {}) {
+export function listApolloBusinessRules({
+  implementationStatus,
+  governanceStatus,
+  /** @deprecated */ status,
+} = {}) {
+  const implFilter = implementationStatus || status;
   return Object.entries(APOLLO_BUSINESS_RULES)
-    .filter(([, rule]) => !status || rule.status === status)
+    .filter(([, rule]) => {
+      if (implFilter && rule.implementationStatus !== implFilter) return false;
+      if (governanceStatus && rule.governanceStatus !== governanceStatus) return false;
+      return true;
+    })
     .map(([key, rule]) => ({
       key,
       ...rule,
+      ...buildRuleGovernanceView(rule),
       principles: APOLLO_BUSINESS_PRINCIPLES,
       rulebookVersion: RULEBOOK_VERSION,
     }));
 }
 
 export function countActiveBusinessRules() {
-  return listApolloBusinessRules({ status: 'active' }).length;
+  return listApolloBusinessRules({ implementationStatus: 'active' }).length;
 }
 
 /** Rows where Apollo applied judgment from the Rulebook today. */

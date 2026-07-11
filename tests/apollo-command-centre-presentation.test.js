@@ -359,7 +359,7 @@ describe('apolloCommandCentrePresentation', () => {
     expect(health.knowledgeReused).toBe(0);
     expect(health.activeOperational).toBe(0);
     expect(health.decisionLessons).toBe(0);
-    expect(health.purposeCopy).toContain('operational knowledge grows');
+    expect(health.purposeCopy).toContain('judgment');
     expect(health.memoryStatusCopy).toContain('not yet been activated');
   });
 
@@ -368,8 +368,20 @@ describe('apolloCommandCentrePresentation', () => {
     expect(responsibilityStatusIcon('emerging')).toBe('△');
     expect(responsibilityStatusIcon('waiting')).toBe('○');
     const rows = buildApolloResponsibilities();
+    expect(rows.map((r) => r.id)).toEqual([
+      'truth',
+      'context',
+      'knowledge',
+      'rulebook',
+      'reasoning',
+      'advice',
+      'execution',
+      'coordination',
+      'stewardship',
+    ]);
     expect(rows.find((r) => r.id === 'execution')?.icon).toBe('✓');
-    expect(rows.find((r) => r.id === 'memory')?.note).toBe('Not yet earned');
-    expect(rows.find((r) => r.id === 'reasoning')?.note).toBe('Waiting for Memory');
+    expect(rows.find((r) => r.id === 'knowledge')?.note).toBe('Proto Memory emerging');
+    expect(rows.find((r) => r.id === 'rulebook')?.note).toBe('Rulebook v1.0 live');
+    expect(rows.find((r) => r.id === 'reasoning')?.note).toBe('Combines Knowledge + Rulebook');
   });
 });

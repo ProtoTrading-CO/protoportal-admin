@@ -1,23 +1,30 @@
 # Proto Rulebook
 
 **Version:** Rulebook v1.0  
-**Apollo UI:** 3.x (separate version line)
+**Apollo UI:** 3.x (separate version line)  
+**Architecture:** See [APOLLO_ARCHITECTURE.md](./APOLLO_ARCHITECTURE.md)
 
-If **Proto Memory** is Apollo's experience, the **Rulebook** is Apollo's judgment framework.  
-Memory stores what Proto knows. Rules teach Apollo how Proto thinks.
+If **Knowledge** is what Proto has learned, the **Rulebook** is how Proto chooses to interpret events.
+
+**This document is the source of truth.** Code in `api/_apollo-business-rules.js` implements it — it does not define it.
 
 ---
 
-## Knowledge assets
+## Governance workflow
 
-| Asset | Purpose | Example | Where it lives |
-| --- | --- | --- | --- |
-| Business Knowledge | Stable facts | Addie prefers black packaging | Proto Memory |
-| Decision Knowledge | Outcomes | Ordering extra wallets prevented stock-outs | Proto Memory |
-| Operational State | Temporary context | Container 58 awaiting customs | Proto Memory |
-| **Business Rules** | **How to interpret the business** | **Negative stock during GRV is expected** | **Rulebook** |
+```
+docs/PROTO_RULEBOOK.md  →  Reviewed  →  Implemented  →  Validated  →  Institutional
+```
 
-Business Rules are different from the other three. They do not describe the business — they describe **how to interpret** the business.
+### Statuses
+
+| Status | Meaning |
+| --- | --- |
+| Draft | Documented philosophy; detector not live or not yet validated |
+| Validated | Live in production; accuracy tracked from outcomes |
+| Institutional | Earned judgment — high confidence, documented owner, reviewed |
+
+Apollo earns judgment through validation. It does not only inherit it.
 
 ---
 
@@ -28,9 +35,18 @@ Business Rules are different from the other three. They do not describe the busi
 
 ---
 
-## Rulebook v1.0 — active rules
+## Active rules
 
 ### Negative stock during GRV — Expected
+
+| Field | Value |
+| --- | --- |
+| **Rule** | Negative Stock Timing |
+| **Owner** | Operations |
+| **Approved by** | Gee |
+| **Last reviewed** | 12 July 2026 |
+| **Governance status** | Validated |
+| **Implementation** | Active |
 
 **Statement:** Negative stock during GRV processing is operational timing, not a stock problem.
 
@@ -51,31 +67,34 @@ Business Rules are different from the other three. They do not describe the busi
 - 🔴 Inventory Investigation — persists past grace, no GRV, selling, significant magnitude
 - 🟢 Resolved Automatically — was timing yesterday, positive today without operator action
 
-**Validation target:** *"Temporary stock timing observed 417 times. 412 resolved automatically. 5 became investigations."*
+**Validation target (Institutional):**
 
-**Implementation:** `api/_apollo-business-rules.js`, `api/_apollo-negative-stock-rules.js`
+> Temporary stock timing observed 417 times. 412 resolved automatically. 5 became investigations. Accuracy 98.8%.
+
+**Why does Apollo ignore negative stock?** Because GRV timing is expected at Proto. This rule documents that judgment.
+
+**Implementation:** `api/_apollo-negative-stock-rules.js`
 
 ---
 
-## Rulebook v1.0 — planned rules
+## Draft rules
 
-These belong in the Rulebook, not in code comments. Implement when the detector exists.
+Documented here first. Implement when the detector exists.
 
-| Rule | Expected behaviour |
-| --- | --- |
-| Supplier ships two days early | Expected within grace window |
-| Container ETA changes &lt;12 hours | Ignore — operational timing |
-| Christmas buying begins October | Expected seasonal uplift |
-| Customer skips one weekly order | Ignore — normal variance |
-| Customer spend drops 70% over eight weeks | Investigate |
-| Supplier reliability below 85% | Warn buyers |
+| Rule | Owner | Expected behaviour | Governance |
+| --- | --- | --- | --- |
+| Supplier ships two days early | Operations | Expected within grace window | Draft |
+| Container ETA changes &lt;12 hours | Operations | Ignore — operational timing | Draft |
+| Christmas buying begins October | Buying | Expected seasonal uplift | Draft |
+| Customer skips one weekly order | Sales | Ignore — normal variance | Draft |
+| Customer spend drops 70% over eight weeks | Sales | Investigate | Draft |
+| Supplier reliability below 85% | Buying | Warn buyers | Draft |
 
 ---
 
 ## Scoping model
 
-Rules do not use coarse profiles like `warehouse` vs `imports` as the only axis.  
-Each rule declares **appliesTo** scopes:
+Each rule declares **appliesTo** scopes — not coarse code profiles:
 
 ```yaml
 businessRule:
@@ -84,8 +103,21 @@ businessRule:
   gracePeriodHours: 48
 ```
 
-Supported dimensions: `supplier`, `department`, `warehouse`, `product`.  
-Most specific match wins.
+Supported dimensions: `product`, `supplier`, `department`, `warehouse`. Most specific match wins.
+
+---
+
+## Rule interactions (future)
+
+When multiple rules apply, Reasoning explains precedence:
+
+```
+Rule A:  Christmas buying begins October.
+Rule B:  Cash preservation mode.
+Rule C:  Supplier lead time increased.
+
+Reasoning: "Three rules apply. Cash preservation outweighs seasonal buying this month."
+```
 
 ---
 
@@ -93,9 +125,7 @@ Most specific match wins.
 
 ### Business rules applied today
 
-How much operational judgment Apollo applied **before** bothering anyone.
-
-Example:
+Operational judgment applied **before** interrupting anyone.
 
 ```
 Business rules applied today: 37
@@ -107,36 +137,37 @@ Business rules applied today: 37
 
 ### Expected behaviour suppressed
 
-Alerts Apollo chose not to generate because the Rulebook said timing, not problem.
+Alerts avoided because the Rulebook classified timing, not problem.
 
 ### Resolved automatically
 
-Feedback loop — Apollo learns it was right not to alert.
+Feedback loop validating the rule.
 
 ---
 
-## Knowledge hub placement
+## Knowledge library placement
 
 ```
 Knowledge
-├── Customer Knowledge      (Proto Memory)
-├── Supplier Knowledge      (Proto Memory)
-├── Buying Knowledge        (Proto Memory)
-├── Decision Knowledge      (Proto Memory)
-├── Operational State       (Proto Memory)
-└── Business Rules          (Rulebook — separate asset)
+├── Customer Knowledge       (Proto Memory)
+├── Supplier Knowledge       (Proto Memory)
+├── Buying Knowledge         (Proto Memory)
+├── Decision Knowledge       (Proto Memory)
+├── Operational State        (Proto Memory)
+├── Business Rules           (Rulebook — separate asset)
+└── Reference Knowledge      (Reserved — Incoterms, VAT, contracts)
 ```
-
-Business Rules are Apollo's operating manual. They are **not** stored inside Proto Memory.
 
 ---
 
 ## Adding a rule
 
-1. Document it here first — operating philosophy, not exception logic.
-2. Add to `APOLLO_BUSINESS_RULES` in `api/_apollo-business-rules.js` with `metricKey` and scopes.
-3. Wire the detector to set `payload.businessRuleApplied` and `payload.businessRuleMetricKey`.
-4. Bump **Rulebook** version when rules change materially (not Apollo UI version).
+1. **Write it here** — operating philosophy, owner, expected behaviour.
+2. **Review** with the rule owner.
+3. **Implement** in `api/_apollo-business-rules.js` (implements doc, does not replace it).
+4. **Validate** — track observed, resolved, investigations, false alarms.
+5. **Promote** to Institutional when accuracy is earned.
+6. **Bump Rulebook version** when rules change materially (not Apollo UI).
 
 ---
 
@@ -144,4 +175,4 @@ Business Rules are Apollo's operating manual. They are **not** stored inside Pro
 
 | Version | Date | Notes |
 | --- | --- | --- |
-| v1.0 | Jul 2026 | Negative stock GRV timing; scoped appliesTo; resolved-automatically feedback |
+| v1.0 | Jul 2026 | Architecture formalized; negative stock GRV timing; governance model |

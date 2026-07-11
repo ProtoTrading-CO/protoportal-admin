@@ -148,9 +148,19 @@ export const APOLLO_KNOWLEDGE_DOMAINS = [
     label: 'Business Rules',
     description: 'How Proto interprets operations — Apollo\'s judgment framework (Rulebook).',
     countType: 'rulebook',
-    rulebookLabel: 'Rulebook v1.0 · 1 active',
+    rulebookLabel: 'Rulebook v1.0 · 1 validated',
     emptyCopy: 'No business rules encoded yet.',
     separateFromMemory: true,
+    assetType: 'business_rule',
+  },
+  {
+    id: 'reference',
+    label: 'Reference Knowledge',
+    description: 'External policy and reference — Incoterms, VAT, freight, contracts.',
+    countType: 'reference',
+    emptyCopy: 'Reference library not yet activated.',
+    status: 'reserved',
+    assetType: 'reference',
   },
 ];
 
