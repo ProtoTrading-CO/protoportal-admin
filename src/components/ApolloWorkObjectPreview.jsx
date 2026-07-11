@@ -26,14 +26,15 @@ export default function ApolloWorkObjectPreview({ objectId, onBack }) {
         ))}
       </ul>
 
-      <div className="apollo-cc-work-card-status apollo-cc-work-preview-status">
-        <span className="apollo-cc-work-card-status-label apollo-cc-work-card-status-label--planning">
+      <div className="apollo-cc-work-preview-status">
+        <span className={`apollo-cc-workshop-badge apollo-cc-workshop-badge--${item.status}`}>
+          <span className="apollo-cc-workshop-badge-dot" aria-hidden="true">{item.statusBadge}</span>
           {item.statusLabel}
         </span>
       </div>
 
       <p className="apollo-cc-knowledge-foot">
-        Apollo is growing into this — ships when {item.label.toLowerCase()} is ready to own execution.
+        Apollo is growing into this — earns execution when {item.label.toLowerCase()} is ready.
       </p>
     </div>
   );

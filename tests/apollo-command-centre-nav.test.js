@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   APOLLO_COMMAND_DEFAULT_MODE,
   APOLLO_COMMAND_MODES,
+  APOLLO_KNOWLEDGE_DOMAINS,
   APOLLO_WORK_OBJECTS,
   isWorkObjectReady,
   workObjectById,
@@ -27,6 +28,19 @@ describe('apolloCommandCentre modes', () => {
     expect(isWorkObjectReady('customers')).toBe(false);
     expect(workObjectById('orders')?.statusLabel).toBe('Ready');
     expect(workObjectById('customers')?.statusLabel).toBe('Planning');
-    expect(workObjectById('suppliers')?.modules).toContain('Purchase Orders');
+    expect(workObjectById('containers')?.statusLabel).toBe('Future');
+    expect(workObjectById('containers')?.statusBadge).toBe('⚪');
+    expect(workObjectById('orders')?.statusBadge).toBe('🟢');
+  });
+
+  it('defines knowledge hub domains', () => {
+    expect(APOLLO_KNOWLEDGE_DOMAINS.map((d) => d.label)).toEqual([
+      'Customer Knowledge',
+      'Supplier Knowledge',
+      'Buying Knowledge',
+      'Decision Knowledge',
+      'Operational State',
+    ]);
+    expect(APOLLO_KNOWLEDGE_DOMAINS[0].emptyCopy).toBe('No knowledge recorded yet.');
   });
 });

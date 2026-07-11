@@ -15,6 +15,13 @@ export const APOLLO_COMMAND_NAV = APOLLO_COMMAND_MODES;
 /** @deprecated Use APOLLO_COMMAND_DEFAULT_MODE */
 export const APOLLO_COMMAND_DEFAULT_NAV = APOLLO_COMMAND_DEFAULT_MODE;
 
+/** Status badges — what Apollo can be trusted with today. */
+export const APOLLO_WORK_STATUS_BADGES = {
+  ready: '🟢',
+  planning: '🟡',
+  future: '⚪',
+};
+
 /** Operational objects behind Work — not tabs, not dashboards. */
 export const APOLLO_WORK_OBJECTS = [
   {
@@ -25,8 +32,11 @@ export const APOLLO_WORK_OBJECTS = [
     featured: true,
     status: 'ready',
     statusLabel: 'Ready',
+    statusBadge: APOLLO_WORK_STATUS_BADGES.ready,
     roleLabel: 'Operational',
+    summary: 'Manage customer orders, timelines, tasks and commitments.',
     modules: ['Timeline', 'Tasks', 'Files', 'Commitments', 'Conversation', 'Apollo'],
+    openLabel: 'Open Orders',
   },
   {
     id: 'customers',
@@ -36,8 +46,11 @@ export const APOLLO_WORK_OBJECTS = [
     featured: false,
     status: 'planning',
     statusLabel: 'Planning',
+    statusBadge: APOLLO_WORK_STATUS_BADGES.planning,
     roleLabel: null,
+    summary: null,
     modules: ['History', 'Knowledge', 'Orders', 'Quotes', 'Payments', 'Conversation'],
+    openLabel: null,
   },
   {
     id: 'suppliers',
@@ -47,8 +60,11 @@ export const APOLLO_WORK_OBJECTS = [
     featured: false,
     status: 'planning',
     statusLabel: 'Planning',
+    statusBadge: APOLLO_WORK_STATUS_BADGES.planning,
     roleLabel: null,
+    summary: null,
     modules: ['Reliability', 'Lead Times', 'Purchase Orders', 'Containers', 'Knowledge', 'Conversation'],
+    openLabel: null,
   },
   {
     id: 'containers',
@@ -56,10 +72,13 @@ export const APOLLO_WORK_OBJECTS = [
     objectTitle: 'Container Workspace',
     emoji: '🚢',
     featured: false,
-    status: 'planning',
-    statusLabel: 'Planning',
+    status: 'future',
+    statusLabel: 'Future',
+    statusBadge: APOLLO_WORK_STATUS_BADGES.future,
     roleLabel: null,
+    summary: null,
     modules: ['Tracking', 'Arrivals', 'Allocations', 'Documents'],
+    openLabel: null,
   },
   {
     id: 'buying',
@@ -69,8 +88,11 @@ export const APOLLO_WORK_OBJECTS = [
     featured: false,
     status: 'planning',
     statusLabel: 'Planning',
+    statusBadge: APOLLO_WORK_STATUS_BADGES.planning,
     roleLabel: null,
+    summary: null,
     modules: ['Stock cover', 'Quotes', 'Replenishment', 'Lessons'],
+    openLabel: null,
   },
 ];
 
@@ -83,6 +105,44 @@ export function workObjectById(id) {
 
 /** @deprecated Use workObjectById */
 export const workspaceById = workObjectById;
+
+/** Knowledge domains — stewardship areas inside Knowledge mode. */
+export const APOLLO_KNOWLEDGE_DOMAINS = [
+  {
+    id: 'customer',
+    label: 'Customer Knowledge',
+    description: 'Preferences, promises, payment behaviour',
+    emptyCopy: 'No knowledge recorded yet.',
+  },
+  {
+    id: 'supplier',
+    label: 'Supplier Knowledge',
+    description: 'Reliability, lead times, quality',
+    emptyCopy: 'No knowledge recorded yet.',
+  },
+  {
+    id: 'buying',
+    label: 'Buying Knowledge',
+    description: 'Seasonal lessons, reorder lessons',
+    emptyCopy: 'No knowledge recorded yet.',
+  },
+  {
+    id: 'decision',
+    label: 'Decision Knowledge',
+    description: 'Recommendations and outcomes',
+    emptyCopy: 'No knowledge recorded yet.',
+  },
+  {
+    id: 'operational',
+    label: 'Operational State',
+    description: 'Current commitments and active situations',
+    emptyCopy: 'No knowledge recorded yet.',
+  },
+];
+
+export function knowledgeDomainById(id) {
+  return APOLLO_KNOWLEDGE_DOMAINS.find((row) => row.id === id) || null;
+}
 
 export function isWorkObjectReady(id) {
   return workObjectById(id)?.status === 'ready';
