@@ -7,6 +7,8 @@ import {
   buildHealthCard,
   buildHeroFocusItems,
   buildProactiveGreeting,
+  categorizeFocusItem,
+  diverseFocusForDisplay,
   dedupeFocusForDisplay,
   focusHeroTitle,
   groupNotificationsByUrgency,
@@ -43,18 +45,39 @@ const sampleFocus = [
 ];
 
 describe('apolloCommandCentrePresentation', () => {
-  it('builds up to three deduped hero focus items with specific titles', () => {
+  it('builds up to three diverse hero focus items with category labels', () => {
     const rows = buildHeroFocusItems(duplicateStockFocus);
     expect(rows.length).toBeLessThanOrEqual(3);
-    expect(rows.length).toBe(3);
-    expect(rows[0].label).toMatch(/Wallet A/);
-    expect(rows[1].label).toMatch(/Wallet B/);
-    expect(new Set(rows.map((r) => r.label)).size).toBe(rows.length);
+    expect(rows[0].categoryLabel).toBe('Buying');
+    expect(new Set(rows.map((r) => r.category)).size).toBe(rows.length);
+  });
+
+  it('forces focus diversity across responsibility areas', () => {
+    const mixed = [
+      ...duplicateStockFocus,
+      { type: 'inactive_customer', priority: 5, severity: 'attention', title: 'Approve Addie quotation', action: 'Approve quotation' },
+      { type: 'notification_supplier', priority: 6, severity: 'urgent', title: 'Motarro shipment delay', action: 'Follow up' },
+    ];
+    const rows = buildHeroFocusItems(mixed, 3);
+    const categories = rows.map((r) => r.category);
+    expect(categories).toContain('buying');
+    expect(categories).toContain('supplier');
+    expect(categories).toContain('customer');
   });
 
   it('dedupes focus items by title and generic recommendation', () => {
     const distinct = dedupeFocusForDisplay(duplicateStockFocus, 5);
     expect(distinct).toHaveLength(4);
+  });
+
+  it('picks diverse focus for display', () => {
+    const diverse = diverseFocusForDisplay([
+      { title: 'Wallet A', type: 'notification_buying', severity: 'attention' },
+      { title: 'Wallet B', type: 'notification_buying', severity: 'attention' },
+      { title: 'Motarro delay', type: 'notification_supplier', severity: 'urgent' },
+    ], 2);
+    expect(diverse).toHaveLength(2);
+    expect(diverse.map((i) => categorizeFocusItem(i))).toEqual(expect.arrayContaining(['buying', 'supplier']));
   });
 
   it('uses contextual hero titles', () => {
@@ -71,6 +94,7 @@ describe('apolloCommandCentrePresentation', () => {
     expect(status.percent).toBe(92);
     expect(status.emoji).toBe('🟢');
     expect(status.issues).toBeGreaterThan(0);
+    expect(status.biggestOpportunity).toBeTruthy();
   });
 
   it('builds compact daily brief bullets', () => {

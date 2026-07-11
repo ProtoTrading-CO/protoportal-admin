@@ -48,12 +48,15 @@ function FocusHero({ items, onSelect }) {
       </h2>
       <ol className="apollo-cc-hero-list">
         {items.map((row) => (
-          <li key={row.rank} className={`apollo-cc-hero-item apollo-cc-severity--${row.severity}`}>
+          <li key={`${row.category}-${row.rank}`} className={`apollo-cc-hero-item apollo-cc-severity--${row.severity}`}>
             <span className="apollo-cc-hero-rank" aria-hidden="true">{row.rank}.</span>
-            <button type="button" className="apollo-cc-hero-action" onClick={() => onSelect?.(row.item)}>
-              {row.label}
-              <ArrowRight size={14} />
-            </button>
+            <div className="apollo-cc-hero-item-body">
+              <span className="apollo-cc-hero-category">{row.categoryLabel}</span>
+              <button type="button" className="apollo-cc-hero-action" onClick={() => onSelect?.(row.item)}>
+                {row.label}
+                <ArrowRight size={14} />
+              </button>
+            </div>
           </li>
         ))}
       </ol>
@@ -79,6 +82,22 @@ function BusinessStatusBar({ status }) {
           <li><strong>{status.urgent}</strong> urgent</li>
         </ul>
       </div>
+      {(status.biggestRisk || status.biggestOpportunity) && (
+        <div className="apollo-cc-status-insights">
+          {status.biggestRisk && (
+            <p className="apollo-cc-status-insight">
+              <span className="apollo-cc-status-insight-kicker">Today&apos;s biggest risk:</span>
+              {status.biggestRisk}
+            </p>
+          )}
+          {status.biggestOpportunity && (
+            <p className="apollo-cc-status-insight">
+              <span className="apollo-cc-status-insight-kicker">Today&apos;s biggest opportunity:</span>
+              {status.biggestOpportunity}
+            </p>
+          )}
+        </div>
+      )}
     </section>
   );
 }
@@ -88,7 +107,7 @@ function DailyBriefCompact({ bullets, detailSections }) {
 
   return (
     <section className="apollo-cc-daily-compact" aria-labelledby="apollo-cc-daily-compact-title">
-      <h3 id="apollo-cc-daily-compact-title" className="apollo-cc-block-title">Today</h3>
+      <h3 id="apollo-cc-daily-compact-title" className="apollo-cc-block-title">Today&apos;s Snapshot</h3>
       <ul className="apollo-cc-daily-bullets">
         {bullets.map((bullet, i) => (
           <li key={i} className={`apollo-cc-daily-bullet apollo-cc-daily-bullet--${bullet.tone}`}>
