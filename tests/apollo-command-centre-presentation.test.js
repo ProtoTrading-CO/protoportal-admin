@@ -8,6 +8,8 @@ import {
   buildHeroFocusItems,
   buildKnowledgeHealth,
   buildApolloResponsibilities,
+  buildOperationalObjectView,
+  buildEvidenceMetrics,
   extractProductCode,
   formatWithProductCode,
   responsibilityStatusIcon,
@@ -180,30 +182,58 @@ describe('apolloCommandCentrePresentation', () => {
 
   it('prefixes product notifications and recommends with Proto codes', () => {
     const item = {
-      title: 'BATTERY OPERATED CANDLE 6cm sales spiked',
-      detail: 'BATCAND6 · appeared as an unexpected bestseller with 24 units',
-      dedupeKey: 'exception:sales_anomaly:BATCAND6:spike',
-      payload: { code: 'BATCAND6' },
+      title: '8616700111 · BOUNCING BALL W/STRAP sales spiked',
+      detail: '8616700111 · Motarro · appeared as an unexpected bestseller with 24 units',
+      dedupeKey: 'exception:sales_anomaly:8616700111:spike',
+      payload: {
+        code: '8616700111',
+        supplier: 'Motarro',
+        department: 'TOYS',
+        evidence: [
+          { label: 'Current quantity', value: 24 },
+          { label: 'Recent daily baseline', value: 0 },
+        ],
+        confidence: 90,
+      },
     };
-    expect(extractProductCode(item)).toBe('BATCAND6');
-    expect(formatWithProductCode(item)).toBe('BATCAND6 · BATTERY OPERATED CANDLE 6cm sales spiked');
+    const view = buildOperationalObjectView(item);
+    expect(view.kind).toBe('product');
+    expect(view.sku).toBe('8616700111');
+    expect(view.description).toBe('BOUNCING BALL W/STRAP');
+    expect(view.meta).toBe('TOYS · Motarro');
+    expect(view.headline).toBe('Sales spiked');
 
     const grouped = groupNotificationsByUrgency([{ ...item, severity: 'attention' }]);
-    expect(grouped.today[0].displayTitle).toMatch(/^BATCAND6 · /);
+    expect(grouped.today[0].view.sku).toBe('8616700111');
 
     const recs = buildApolloRecommends([{
       type: 'notification_sales_anomaly',
       priority: 1,
       severity: 'attention',
-      title: item.title,
-      detail: item.detail,
-      dedupeKey: item.dedupeKey,
-      payload: item.payload,
-      evidence: [{ label: 'Current quantity', value: 24 }],
+      ...item,
       confidence: 90,
     }]);
-    expect(recs[0].title).toMatch(/^BATCAND6 · /);
-    expect(recs[0].code).toBe('BATCAND6');
+    expect(recs[0].view.sku).toBe('8616700111');
+    expect(recs[0].metrics).toHaveLength(2);
+    expect(recs[0].confidence).toBe(90);
+  });
+
+  it('formats customer and supplier operational objects by business identifier', () => {
+    const customer = buildOperationalObjectView({
+      type: 'inactive_customer',
+      title: 'Addie — quiet for 32 days',
+      detail: 'Usually orders every 14 days',
+    });
+    expect(customer.kind).toBe('customer');
+    expect(customer.identifier).toBe('Addie');
+
+    const supplier = buildOperationalObjectView({
+      category: 'supplier_followups',
+      title: 'Supplier follow-up: Motarro',
+      payload: { supplier: 'Motarro' },
+    });
+    expect(supplier.kind).toBe('supplier');
+    expect(supplier.identifier).toBe('Motarro');
   });
 
   it('builds knowledge health with business language before memory is live', () => {
