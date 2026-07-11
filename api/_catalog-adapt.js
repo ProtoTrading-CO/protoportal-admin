@@ -136,6 +136,8 @@ export function adaptCatalogRow(row, tree, { archived = false } = {}) {
     categoryLabel: row.category,
     categoryPath,
     subcategoryLabels: subLabels,
+    toOrder: !!row.to_order,
+    isNew: !!row.is_new_arrival,
     isArchived: archived,
     archivedBy: row.archived_by || null,
     stillLive: !!row.still_live,
