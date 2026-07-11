@@ -139,6 +139,19 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, toOrder: !!toOrder });
     }
 
+    if (action === 'setNewArrival') {
+      // Toggle the New Arrivals flag (drives the storefront "New Stock"
+      // collection via is_new_arrival). New Arrivals is a live-catalogue concept
+      // and the button only appears on live rows, so this targets website_stock.
+      const { sku, isNewArrival } = req.body;
+      if (!sku) return res.status(400).json({ error: 'sku required' });
+      const patch = { is_new_arrival: !!isNewArrival, updated_at: new Date().toISOString() };
+      const { data, error } = await supabase.from('website_stock').update(patch).eq('sku', sku).select('sku');
+      if (error) throw error;
+      if (!data?.length) return res.status(404).json({ error: 'Product not found in the live catalogue' });
+      return res.status(200).json({ ok: true, isNewArrival: !!isNewArrival });
+    }
+
     if (action === 'recycleFromArchive') {
       const { sku, archivedBy } = req.body;
       if (!sku) return res.status(400).json({ error: 'sku required' });

@@ -839,6 +839,10 @@ console.log('✓ Make-live keeps products visible + allocates full subcategory d
   const stockActionsSrc = readSrc('api/stock-actions.js');
   assert.match(stockActionsSrc, /action === 'setToOrder'/, 'stock-actions has a setToOrder handler');
   assert.match(stockActionsSrc, /to_order: !!toOrder/, 'setToOrder writes the to_order column');
+  // The New Arrivals toggle POSTs action:'setNewArrival' — the handler must
+  // exist or the button errors with "Unknown action: setNewArrival".
+  assert.match(stockActionsSrc, /action === 'setNewArrival'/, 'stock-actions has a setNewArrival handler');
+  assert.match(stockActionsSrc, /is_new_arrival: !!isNewArrival/, 'setNewArrival writes the is_new_arrival column');
   assert.match(stockActionsSrc, /'is_new_arrival', 'to_order'/, 'live list selects to_order');
   const prodSrc = readSrc('src/lib/products.js');
   assert.match(prodSrc, /export async function setToOrder/, 'products lib exposes setToOrder');
