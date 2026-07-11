@@ -24,6 +24,7 @@ import {
   buildOrderOps,
   buildSupplierOps,
   buildWebsiteOps,
+  buildFocusScanItems,
   displaySeverity,
   isApolloOwner,
 } from '../lib/apolloTodayPresentation.js';
@@ -66,12 +67,10 @@ function formatScore(value) {
   return value == null ? '—' : `${value}`;
 }
 
-function DailyBriefScore({ score }) {
+function DailyBriefScore({ score, collapsed = true }) {
   if (!score) return null;
-  return (
-    <section className="apollo-today-validation" aria-label="Release 1.2 validation score">
-      <SectionLabel n="·">Validation week</SectionLabel>
-      <div className="apollo-today-validation-grid">
+  const body = (
+    <div className="apollo-today-validation-grid">
         <div className="apollo-today-validation-stat">
           <span className="apollo-today-validation-label">Notifications today</span>
           <strong>{score.notificationsGeneratedToday}</strong>
@@ -109,6 +108,21 @@ function DailyBriefScore({ score }) {
           <strong>{formatScore(score.businessValueScore)}</strong>
         </div>
       </div>
+  );
+
+  if (collapsed) {
+    return (
+      <details className="apollo-today-validation apollo-today-validation--collapsed">
+        <summary className="apollo-today-validation-summary">Validation week (engineering)</summary>
+        {body}
+      </details>
+    );
+  }
+
+  return (
+    <section className="apollo-today-validation" aria-label="Release 1.2 validation score">
+      <SectionLabel n="·">Validation week</SectionLabel>
+      {body}
     </section>
   );
 }
@@ -193,6 +207,27 @@ function ExceptionReview({ item, onReview }) {
         {saving ? 'Saving…' : 'Record review'}
       </button>
     </div>
+  );
+}
+
+function FocusScanList({ items }) {
+  if (!items.length) {
+    return (
+      <div className="apollo-cc-focus-clear">
+        <CheckCircle2 size={18} />
+        <p>Nothing urgent flagged. The business looks calm.</p>
+      </div>
+    );
+  }
+  return (
+    <ul className="apollo-cc-focus-scan">
+      {items.map((item) => (
+        <li key={item.id} className={`apollo-cc-focus-scan-item apollo-cc-severity--${item.severity}`}>
+          <SeverityDot severity={item.severity} />
+          <span>{item.title}</span>
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -318,7 +353,18 @@ function OpsRow({ title, meta, severity, onClick, url }) {
   );
 }
 
-export default function ApolloToday({ context, meta, loading, onAsk, onRefresh, onReviewNotification, refreshing, userName, userEmail }) {
+export default function ApolloToday({
+  context,
+  meta,
+  loading,
+  onAsk,
+  onRefresh,
+  onReviewNotification,
+  refreshing,
+  userName,
+  userEmail,
+  column,
+}) {
   const generatedAt = meta?.generatedAt
     ? new Date(meta.generatedAt).toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
     : null;
@@ -344,8 +390,9 @@ export default function ApolloToday({ context, meta, loading, onAsk, onRefresh, 
     );
   }
 
-  const executiveLines = buildExecutiveSummary(context, { userName });
+  const executiveLines = buildExecutiveSummary(context, { userName, omitGreeting: column === 'brief' });
   const focus = context.focusToday || [];
+  const focusScan = buildFocusScanItems(focus);
   const changed = context.whatChangedSinceYesterday || [];
   const health = businessHealthWithCrm(context);
   const focusTypes = focusTypesPresent(focus);
@@ -358,6 +405,199 @@ export default function ApolloToday({ context, meta, loading, onAsk, onRefresh, 
   const supplierRows = buildSupplierOps(context);
   const websiteRows = buildWebsiteOps(context, focusTypes);
   const showValidation = isApolloOwner(userEmail);
+
+  if (column === 'focus') {
+    return (
+      <div className="apollo-today apollo-today--focus-column">
+        <h2 className="apollo-cc-focus-hero">Today&apos;s Focus</h2>
+        <p className="apollo-cc-focus-sub">What deserves attention right now</p>
+        <FocusScanList items={focusScan} />
+        {focus.length > 0 && (
+          <div className="apollo-today-focus-grid apollo-today-focus-grid--stack">
+            {focus.slice(0, 2).map((item) => (
+              <FocusCard key={`${item.type}-${item.priority}`} item={item} onAsk={onAsk} onReview={onReviewNotification} />
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (column === 'validation-only') {
+    if (!showValidation || !context.validationScore) return null;
+    return (
+      <div className="apollo-today apollo-today--validation-only">
+        <DailyBriefScore score={context.validationScore} collapsed />
+      </div>
+    );
+  }
+
+  if (column === 'brief-compact') {
+    return (
+      <div className="apollo-today apollo-today--brief-compact">
+        <header className="apollo-today-meta-bar apollo-today-meta-bar--compact">
+          <div>
+            <p className="apollo-today-tagline">Daily Brief</p>
+          </div>
+          <div className="apollo-today-meta-actions">
+            <span className={`apollo-today-fresh apollo-today-fresh--${meta?.partial ? 'partial' : 'ok'}`}>
+              <Clock size={12} />
+              {freshnessLabel(meta)}
+            </span>
+            <button type="button" className="apollo-today-refresh" onClick={onRefresh} disabled={refreshing} title="Refresh briefing">
+              <RefreshCw size={14} className={refreshing ? 'spin' : ''} />
+            </button>
+          </div>
+        </header>
+
+        {warnings.length > 0 && (
+          <p className="apollo-today-warn" role="status">
+            <AlertTriangle size={13} />
+            {warnings.join(' · ')}
+          </p>
+        )}
+
+        {showValidation && context.validationScore && (
+          <DailyBriefScore score={context.validationScore} collapsed />
+        )}
+
+        <section className="apollo-today-changed" aria-label="Since yesterday">
+          <SectionLabel n="·">Since yesterday</SectionLabel>
+          <ul className="apollo-today-changed-list apollo-today-changed-list--compact">
+            {changed.length
+              ? changed.map((line) => <ChangedLine key={line.type} line={line} />)
+              : <li className="apollo-today-changed-line apollo-today-changed-line--healthy">No notable changes</li>}
+          </ul>
+        </section>
+
+        <section className="apollo-today-ops-wrap" aria-label="Operational areas">
+          <SectionLabel n="·">Operational</SectionLabel>
+          <div className="apollo-today-ops-grid apollo-today-ops-grid--brief">
+            <OpsCard title="Orders" icon={ShoppingCart} empty={!orderRows.length ? 'No orders need review.' : null}>
+              {orderRows.map((o) => (
+                <OpsRow key={o.id} title={o.title} meta={o.meta} severity={o.severity} url={o.url} onClick={() => onAsk?.(o.query)} />
+              ))}
+            </OpsCard>
+            <OpsCard title="Buying" icon={Package} empty={!buyingRows.length ? 'No buying reviews due.' : null}>
+              {buyingRows.map((b) => (
+                <OpsRow key={b.id} title={b.title} meta={b.meta} severity={b.severity} url={b.url} onClick={() => onAsk?.(b.query)} />
+              ))}
+            </OpsCard>
+            <OpsCard title="Customers" icon={Users} empty={!customerItems.length ? 'No customers need attention.' : null}>
+              {customerItems.map((item, i) => (
+                <OpsRow
+                  key={`${item.type}-${item.id || item.orderId || i}`}
+                  title={item.name || item.email || 'Customer'}
+                  meta={item.reason}
+                  severity={item.severity}
+                  onClick={() => onAsk?.(item.email ? `Find customer ${item.email}` : `Find customer ${item.name}`)}
+                />
+              ))}
+            </OpsCard>
+            <OpsCard title="Suppliers" icon={Users} empty={!supplierRows.length ? 'No supplier follow-ups due.' : null}>
+              {supplierRows.map((s) => (
+                <OpsRow key={s.id} title={s.title} meta={s.meta} severity={s.severity} url={s.url} onClick={() => onAsk?.(s.query)} />
+              ))}
+            </OpsCard>
+          </div>
+        </section>
+      </div>
+    );
+  }
+
+  if (column === 'brief') {
+    return (
+      <div className="apollo-today apollo-today--brief-column">
+        <header className="apollo-today-meta-bar">
+          <div>
+            <p className="apollo-today-date">{dateStr}</p>
+            <p className="apollo-today-tagline">Daily Brief</p>
+          </div>
+          <div className="apollo-today-meta-actions">
+            <span className={`apollo-today-fresh apollo-today-fresh--${meta?.partial ? 'partial' : 'ok'}`}>
+              <Clock size={12} />
+              {freshnessLabel(meta)}
+              {generatedAt && ` · ${generatedAt}`}
+            </span>
+            <button type="button" className="apollo-today-refresh" onClick={onRefresh} disabled={refreshing} title="Refresh briefing">
+              <RefreshCw size={14} className={refreshing ? 'spin' : ''} />
+            </button>
+          </div>
+        </header>
+
+        {warnings.length > 0 && (
+          <p className="apollo-today-warn" role="status">
+            <AlertTriangle size={13} />
+            {warnings.join(' · ')}
+          </p>
+        )}
+
+        {executiveLines.length > 0 && (
+          <section className="apollo-today-exec apollo-today-exec--brief" aria-label="Daily brief summary">
+            <div className="apollo-today-exec-body">
+              {executiveLines.map((line, i) => (
+                <p key={i} className={i === 0 ? 'apollo-today-exec-lead' : 'apollo-today-exec-line'}>{line}</p>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {showValidation && context.validationScore && (
+          <DailyBriefScore score={context.validationScore} collapsed />
+        )}
+
+        <section className="apollo-today-health-row" aria-label="Business health">
+          <SectionLabel n="·">Business health</SectionLabel>
+          <div className="apollo-today-health-grid apollo-today-health-grid--5">
+            {health.map((item) => (
+              <HealthPulse key={item.key} item={item} />
+            ))}
+          </div>
+        </section>
+
+        <section className="apollo-today-changed" aria-label="Since yesterday">
+          <SectionLabel n="·">Since yesterday</SectionLabel>
+          <ul className="apollo-today-changed-list apollo-today-changed-list--compact">
+            {changed.length
+              ? changed.map((line) => <ChangedLine key={line.type} line={line} />)
+              : <li className="apollo-today-changed-line apollo-today-changed-line--healthy">No notable changes</li>}
+          </ul>
+        </section>
+
+        <section className="apollo-today-ops-wrap" aria-label="Operational areas">
+          <SectionLabel n="·">Operational</SectionLabel>
+          <div className="apollo-today-ops-grid apollo-today-ops-grid--brief">
+            <OpsCard title="Orders" icon={ShoppingCart} empty={!orderRows.length ? 'No orders need review.' : null}>
+              {orderRows.map((o) => (
+                <OpsRow key={o.id} title={o.title} meta={o.meta} severity={o.severity} url={o.url} onClick={() => onAsk?.(o.query)} />
+              ))}
+            </OpsCard>
+            <OpsCard title="Buying" icon={Package} empty={!buyingRows.length ? 'No buying reviews due.' : null}>
+              {buyingRows.map((b) => (
+                <OpsRow key={b.id} title={b.title} meta={b.meta} severity={b.severity} url={b.url} onClick={() => onAsk?.(b.query)} />
+              ))}
+            </OpsCard>
+            <OpsCard title="Customers" icon={Users} empty={!customerItems.length ? 'No customers need attention.' : null}>
+              {customerItems.map((item, i) => (
+                <OpsRow
+                  key={`${item.type}-${item.id || item.orderId || i}`}
+                  title={item.name || item.email || 'Customer'}
+                  meta={item.reason}
+                  severity={item.severity}
+                  onClick={() => onAsk?.(item.email ? `Find customer ${item.email}` : `Find customer ${item.name}`)}
+                />
+              ))}
+            </OpsCard>
+            <OpsCard title="Suppliers" icon={Users} empty={!supplierRows.length ? 'No supplier follow-ups due.' : null}>
+              {supplierRows.map((s) => (
+                <OpsRow key={s.id} title={s.title} meta={s.meta} severity={s.severity} url={s.url} onClick={() => onAsk?.(s.query)} />
+              ))}
+            </OpsCard>
+          </div>
+        </section>
+      </div>
+    );
+  }
 
   return (
     <div className="apollo-today apollo-today--executive">
@@ -387,7 +627,9 @@ export default function ApolloToday({ context, meta, loading, onAsk, onRefresh, 
 
       <ExecutiveSummary lines={executiveLines} />
 
-      {showValidation && context.validationScore && <DailyBriefScore score={context.validationScore} />}
+      {showValidation && context.validationScore && (
+        <DailyBriefScore score={context.validationScore} collapsed />
+      )}
 
       <section className="apollo-today-focus" aria-label="Focus today">
         <SectionLabel n="2">Focus today</SectionLabel>

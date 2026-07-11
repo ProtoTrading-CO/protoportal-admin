@@ -63,7 +63,7 @@ function healthIsCalm(health = []) {
  * Executive summary — max three sentences from existing brief context.
  * @returns {string[]}
  */
-export function buildExecutiveSummary(context, { userName, hour = new Date().getHours() } = {}) {
+export function buildExecutiveSummary(context, { userName, hour = new Date().getHours(), omitGreeting = false } = {}) {
   if (!context) return [];
 
   const greeting = greetingForHour(hour);
@@ -74,7 +74,7 @@ export function buildExecutiveSummary(context, { userName, hour = new Date().get
   const notifications = context.notifications?.counts?.total || 0;
   const exceptions = context.exceptionAlerts?.items?.length || 0;
 
-  const sentences = [`${greeting} ${name}.`];
+  const sentences = omitGreeting ? [] : [`${greeting} ${name}.`];
 
   if (exceptions > 0) {
     sentences.push(
@@ -84,7 +84,7 @@ export function buildExecutiveSummary(context, { userName, hour = new Date().get
     );
     const highlights = focus.slice(0, 2).map(summarizeFocusItem);
     if (highlights.length) sentences.push(`${highlights.join(', ')}.`);
-    return sentences.slice(0, 3);
+    return sentences.slice(0, omitGreeting ? 3 : 3);
   }
 
   if (notifications > 0) {
@@ -286,4 +286,29 @@ export function buildWebsiteOps(context, focusTypes) {
     severity: 'info',
     query: `Show product ${p.sku}`,
   }));
+}
+
+/** Business health score from Daily Brief — presentation only. */
+export function businessHealthScore(context) {
+  const score = context?.notifications?.businessHealthScore;
+  return score == null ? null : Number(score);
+}
+
+/** Compact scan lines for Today's Focus column — no new business rules. */
+export function buildFocusScanItems(focus = []) {
+  return focus.map((item) => ({
+    id: `${item.type}-${item.priority}`,
+    title: item.title || item.label || 'Item needs attention',
+    severity: displaySeverity(item.severity || 'attention'),
+    action: item.action || null,
+  }));
+}
+
+/** Map internal severity classes to Command Centre colour tokens. */
+export function severityColourToken(severity) {
+  const mapped = displaySeverity(severity);
+  if (mapped === 'urgent') return 'red';
+  if (mapped === 'attention') return 'amber';
+  if (mapped === 'healthy') return 'green';
+  return 'grey';
 }

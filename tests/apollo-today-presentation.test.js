@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest';
 import {
   buildExecutiveSummary,
   businessHealthWithCrm,
+  businessHealthScore,
+  buildFocusScanItems,
   displayNameFromEmail,
   focusShowsViewAll,
   filterInventoryOps,
@@ -9,6 +11,7 @@ import {
   buildOrderOps,
   buildSupplierOps,
   displaySeverity,
+  severityColourToken,
 } from '../src/lib/apolloTodayPresentation.js';
 
 const sampleContext = {
@@ -162,5 +165,22 @@ describe('apolloTodayPresentation', () => {
     expect(buildOrderOps(context, new Set()).map((row) => row.id)).toEqual(['order-risk']);
     expect(buildBuyingOps(context)[0]).toMatchObject({ id: 'buying-risk', query: 'Show product 8616700111' });
     expect(buildSupplierOps(context)[0]).toMatchObject({ id: 'supplier-risk', query: 'Motarro' });
+  });
+
+  it('omits greeting line for Command Centre brief column', () => {
+    const lines = buildExecutiveSummary(sampleContext, { userName: 'Gee', hour: 9, omitGreeting: true });
+    expect(lines[0]).not.toMatch(/^Good morning/);
+    expect(lines.length).toBeGreaterThan(0);
+  });
+
+  it('exposes business health score and focus scan items for Command Centre', () => {
+    expect(businessHealthScore({ notifications: { businessHealthScore: 9.4 } })).toBe(9.4);
+    expect(businessHealthScore({})).toBeNull();
+    const scan = buildFocusScanItems(sampleContext.focusToday);
+    expect(scan).toHaveLength(2);
+    expect(scan[0].title).toMatch(/negative stock/i);
+    expect(severityColourToken('critical')).toBe('red');
+    expect(severityColourToken('healthy')).toBe('green');
+    expect(severityColourToken('info')).toBe('grey');
   });
 });
