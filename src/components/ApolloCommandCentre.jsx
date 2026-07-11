@@ -7,7 +7,7 @@ import {
 } from '../lib/apolloCommandCentre.js';
 import { greetingForHour } from '../lib/apolloTodayPresentation.js';
 import ApolloChatPanel from './ApolloChatPanel.jsx';
-import ApolloKnowledgePlaceholder from './ApolloKnowledgePlaceholder.jsx';
+import ApolloKnowledgeHub from './ApolloKnowledgeHub.jsx';
 import ApolloOperationalBrief from './ApolloOperationalBrief.jsx';
 import ApolloWorkGateway from './ApolloWorkGateway.jsx';
 import ApolloWorkObjectPreview from './ApolloWorkObjectPreview.jsx';
@@ -182,7 +182,7 @@ export default function ApolloCommandCentre({
 
       {activeMode === 'knowledge' && (
         <WorkShell chatPanel={chatPanel}>
-          <ApolloKnowledgePlaceholder />
+          <ApolloKnowledgeHub />
         </WorkShell>
       )}
 

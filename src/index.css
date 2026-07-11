@@ -6710,161 +6710,190 @@ html, body { background: #f5f5f5; color: #111827; }
 
 .apollo-cc-mode-btn.is-active .apollo-cc-mode-tagline { color: #b45309; }
 
-.apollo-cc-work-gateway {
-  padding: 16px;
+.apollo-cc-workshop {
+  padding: 16px 18px 20px;
 }
 
-.apollo-cc-work-gateway-head {
+.apollo-cc-workshop-head {
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  margin-bottom: 16px;
+  margin-bottom: 18px;
 }
 
-.apollo-cc-work-gateway-head h2 {
+.apollo-cc-workshop-head h2 {
   margin: 0;
-  font-size: 20px;
+  font-size: 22px;
   font-weight: 800;
   color: #0f172a;
+  letter-spacing: -0.02em;
 }
 
-.apollo-cc-work-gateway-head p {
+.apollo-cc-workshop-head p {
   margin: 4px 0 0;
-  font-size: 13px;
+  font-size: 14px;
   color: #64748b;
 }
 
-.apollo-cc-work-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 10px;
-}
-
-.apollo-cc-work-card {
+.apollo-cc-workshop-list {
   display: flex;
   flex-direction: column;
-  align-items: stretch;
-  gap: 8px;
-  padding: 14px;
-  border: 1px solid #e5e7eb;
-  border-radius: 12px;
-  background: #fff;
+}
+
+.apollo-cc-workshop-divider {
+  margin: 0;
+  border: none;
+  border-top: 1px solid #e5e7eb;
+}
+
+.apollo-cc-workshop-row {
+  padding: 14px 0;
+}
+
+.apollo-cc-workshop-row--ready {
+  padding: 16px 0 18px;
+}
+
+.apollo-cc-workshop-row-hit {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
   text-align: left;
   font-family: inherit;
-  cursor: default;
-}
-
-.apollo-cc-work-card--ready {
   cursor: pointer;
-  border-color: #fecaca;
-  background: linear-gradient(180deg, #fff5f5 0%, #fff 56px);
-  box-shadow: 0 2px 10px rgba(196, 0, 0, 0.06);
 }
 
-.apollo-cc-work-card--ready:hover {
+.apollo-cc-workshop-row--ready .apollo-cc-workshop-row-hit {
+  padding: 14px 16px;
+  border: 1px solid #fecaca;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #fff8f8 0%, #fff 72px);
+  box-shadow: 0 2px 12px rgba(196, 0, 0, 0.06);
+}
+
+.apollo-cc-workshop-row--ready .apollo-cc-workshop-row-hit:hover {
   border-color: #c40000;
-  box-shadow: 0 6px 18px rgba(196, 0, 0, 0.12);
+  box-shadow: 0 6px 20px rgba(196, 0, 0, 0.1);
 }
 
-.apollo-cc-work-card--planning {
-  background: #f8fafc;
-  cursor: pointer;
-}
-
-.apollo-cc-work-card--planning:hover {
-  border-color: #cbd5e1;
-  background: #fff;
-}
-
-.apollo-cc-work-card-top {
+.apollo-cc-workshop-row-head {
   display: flex;
   align-items: flex-start;
-  gap: 10px;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
 }
 
-.apollo-cc-work-card-emoji { font-size: 22px; line-height: 1; flex-shrink: 0; }
+.apollo-cc-workshop-row-titleblock {
+  min-width: 0;
+}
 
-.apollo-cc-work-card-headings { min-width: 0; }
-
-.apollo-cc-work-card-title {
+.apollo-cc-workshop-row-title {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 16px;
+  margin: 0;
+  font-size: 17px;
   font-weight: 800;
   color: #0f172a;
 }
 
-.apollo-cc-work-card-stars {
+.apollo-cc-workshop-stars {
   display: inline-flex;
   align-items: center;
   gap: 1px;
   color: #f59e0b;
 }
 
-.apollo-cc-work-card-object {
+.apollo-cc-workshop-role {
   display: block;
   margin-top: 2px;
-  font-size: 12px;
-  font-weight: 600;
-  color: #64748b;
-}
-
-.apollo-cc-work-card-module-list {
-  margin: 0;
-  padding: 0 0 0 14px;
-  list-style: disc;
-}
-
-.apollo-cc-work-card-module-list li {
   font-size: 11px;
-  font-weight: 600;
-  color: #475569;
-  line-height: 1.5;
-}
-
-.apollo-cc-work-card-status {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 4px;
-}
-
-.apollo-cc-work-card-role {
-  font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: #b45309;
 }
 
-.apollo-cc-work-card-status-label {
-  padding: 2px 8px;
+.apollo-cc-workshop-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  padding: 4px 10px;
   border-radius: 999px;
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
+  white-space: nowrap;
 }
 
-.apollo-cc-work-card-status-label--ready {
+.apollo-cc-workshop-badge-dot {
+  font-size: 11px;
+  line-height: 1;
+}
+
+.apollo-cc-workshop-badge--ready {
   background: #dcfce7;
   color: #15803d;
 }
 
-.apollo-cc-work-card-status-label--planning {
-  background: #e2e8f0;
+.apollo-cc-workshop-badge--planning {
+  background: #fef9c3;
+  color: #a16207;
+}
+
+.apollo-cc-workshop-badge--future {
+  background: #f1f5f9;
   color: #64748b;
 }
 
-.apollo-cc-work-card-cta {
+.apollo-cc-workshop-summary {
+  margin: 0 0 12px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #475569;
+  max-width: 52ch;
+}
+
+.apollo-cc-workshop-modules {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.apollo-cc-workshop-modules li {
+  font-size: 12px;
+  font-weight: 600;
+  color: #64748b;
+}
+
+.apollo-cc-workshop-modules li::before {
+  content: '• ';
+  color: #94a3b8;
+}
+
+.apollo-cc-workshop-open {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  margin-top: auto;
+  gap: 6px;
+  margin-top: 4px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: #c40000;
+  color: #fff;
   font-size: 12px;
   font-weight: 700;
-  color: #c40000;
+}
+
+.apollo-cc-workshop-row--ready .apollo-cc-workshop-row-hit:hover .apollo-cc-workshop-open {
+  background: #a30000;
 }
 
 .apollo-cc-work-back {
@@ -7171,42 +7200,69 @@ html, body { background: #f5f5f5; color: #111827; }
   font-weight: 500;
 }
 
-.apollo-cc-knowledge-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
+.apollo-cc-knowledge-hub {
+  padding: 16px 18px 20px;
 }
 
-.apollo-cc-knowledge-card {
-  padding: 14px;
-  border-radius: 10px;
-  border: 1px solid #e5e7eb;
-  background: #f8fafc;
+.apollo-cc-knowledge-hub-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.apollo-cc-knowledge-hub-head h2 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 800;
+  color: #0f172a;
+  letter-spacing: -0.02em;
+}
+
+.apollo-cc-knowledge-hub-head p {
+  margin: 4px 0 0;
+  font-size: 14px;
+  color: #64748b;
+}
+
+.apollo-cc-knowledge-hub-list {
   display: flex;
   flex-direction: column;
-  gap: 4px;
 }
 
-.apollo-cc-knowledge-card--placeholder { opacity: 0.85; }
-
-.apollo-cc-knowledge-label {
-  font-size: 11px;
-  font-weight: 700;
-  color: #64748b;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+.apollo-cc-knowledge-hub-divider {
+  margin: 0;
+  border: none;
+  border-top: 1px solid #e5e7eb;
 }
 
-.apollo-cc-knowledge-value {
-  font-size: 24px;
+.apollo-cc-knowledge-hub-row {
+  padding: 14px 0;
+}
+
+.apollo-cc-knowledge-hub-title {
+  margin: 0 0 4px;
+  font-size: 15px;
   font-weight: 800;
-  color: #94a3b8;
+  color: #0f172a;
 }
 
-.apollo-cc-knowledge-note {
-  font-size: 11px;
-  color: #94a3b8;
+.apollo-cc-knowledge-hub-desc {
+  margin: 0;
+  font-size: 12px;
   font-weight: 600;
+  color: #64748b;
+}
+
+.apollo-cc-knowledge-hub-empty {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px dashed #e2e8f0;
+  background: #f8fafc;
+  font-size: 12px;
+  font-weight: 600;
+  color: #94a3b8;
 }
 
 .apollo-cc-knowledge-foot {
@@ -7238,7 +7294,6 @@ html, body { background: #f5f5f5; color: #111827; }
     grid-column: 1 / -1;
     max-height: 360px;
   }
-  .apollo-cc-knowledge-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 768px) {
@@ -7249,7 +7304,6 @@ html, body { background: #f5f5f5; color: #111827; }
   .apollo-cc-chat { max-height: 420px; }
   .apollo-cc-focus-hero { font-size: 22px; }
   .apollo-today-ops-grid--brief { grid-template-columns: 1fr; }
-  .apollo-cc-knowledge-grid { grid-template-columns: 1fr; }
 }
 
 /* ── Apollo Command Centre Phase 2 — Today page ─────────────────────────── */
