@@ -482,9 +482,13 @@ assert.match(orderDocsSrc, /drawAddressBlock\('Delivery Address'/, 'order confir
   assert.ok(deliveryAddressLines({ customers: {} }).length > 0, 'delivery block always has a fallback line');
 }
 
-const apolloSrc = readSrc('src/components/ApolloPanel.jsx');
-assert.doesNotMatch(apolloSrc, /^import \{ jsPDF \} from 'jspdf'/m, 'ApolloPanel does not statically import jspdf');
-assert.match(apolloSrc, /loadJsPDF/, 'ApolloPanel uses lazy jspdf loader');
+// PDF export moved from ApolloPanel to ApolloChatPanel in the Apollo Command
+// Centre refactor; the lazy-jspdf perf guard follows the code there. ApolloPanel
+// itself no longer references jspdf at all (better than lazy-loading it).
+const apolloPdfSrc = readSrc('src/components/ApolloChatPanel.jsx');
+assert.doesNotMatch(apolloPdfSrc, /^import \{ jsPDF \} from 'jspdf'/m, 'ApolloChatPanel does not statically import jspdf');
+assert.match(apolloPdfSrc, /loadJsPDF/, 'ApolloChatPanel uses lazy jspdf loader');
+assert.doesNotMatch(readSrc('src/components/ApolloPanel.jsx'), /jspdf/i, 'ApolloPanel no longer references jspdf');
 
 const lazyJsPdfSrc = readSrc('src/lib/lazyJspdf.js');
 assert.match(lazyJsPdfSrc, /_jspdfPromise/, 'lazyJspdf caches the dynamic import');
@@ -785,6 +789,20 @@ assert.deepEqual(parseExtraLabels(null), []);
 assert.deepEqual(parseExtraLabels('not json'), []);
 assert.deepEqual(parseExtraLabels('["X","Y"]'), ['X', 'Y']);
 console.log('✓ parseExtraLabels is null/garbage tolerant');
+
+// Product lists default to most-recently-edited first (updated_at desc) so an
+// edited / archived / restored product surfaces at the top. api/catalog.js maps
+// sort='updated' → updated_at desc, and the archive RPCs stamp updated_at.
+{
+  const useCatalogSrc = readSrc('src/hooks/useCatalog.js');
+  assert.match(useCatalogSrc, /sort = 'updated'/, 'buildCatalogParams defaults to updated (recently-edited first)');
+  assert.match(useCatalogSrc, /params\.sort \|\| 'updated'/, 'fetchCatalog falls back to updated, not title');
+  const catalogApiSrc = readSrc('api/catalog.js');
+  assert.match(catalogApiSrc, /sort === 'updated'[\s\S]*?updated_at[\s\S]*?ascending: false/, "catalog maps 'updated' → updated_at desc");
+  const sidebarSrc = readSrc('src/components/GroupedSidebar.jsx');
+  assert.match(sidebarSrc, /sort: 'updated'/, 'sidebar prefetch matches the updated-first default so it primes the same cache entry');
+}
+console.log('✓ Catalog lists default to recently-edited-first');
 
 // A1 — count/content parity
 assert.match(taxonomyUtilsSrc2, /onlyInStock && !isPublishableOnWebsite/, 'counts stock gate only when onlyInStock');
