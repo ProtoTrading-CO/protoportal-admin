@@ -7069,6 +7069,218 @@ html, body { background: #f5f5f5; color: #111827; }
 .apollo-cc-health-header-delta--up { color: #047857; }
 .apollo-cc-health-header-delta--down { color: #dc2626; }
 
+.apollo-cc-status {
+  padding: 14px 18px;
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #fff 0%, #f8fafc 100%);
+}
+
+.apollo-cc-status-title {
+  margin: 0 0 10px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+
+.apollo-cc-status-body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 20px;
+}
+
+.apollo-cc-status-primary {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.apollo-cc-status-emoji { font-size: 1.25rem; line-height: 1; }
+
+.apollo-cc-status-label {
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.apollo-cc-status-percent {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #334155;
+}
+
+.apollo-cc-status-metrics {
+  display: flex;
+  gap: 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.82rem;
+  color: #64748b;
+}
+
+.apollo-cc-status-metrics strong {
+  color: #0f172a;
+  font-size: 1rem;
+}
+
+.apollo-cc-daily-compact {
+  padding: 14px 16px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.apollo-cc-daily-bullets {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.apollo-cc-daily-bullet {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 0.88rem;
+  color: #334155;
+}
+
+.apollo-cc-daily-bullet-icon {
+  flex-shrink: 0;
+  width: 1rem;
+  font-weight: 700;
+}
+
+.apollo-cc-daily-bullet--ok .apollo-cc-daily-bullet-icon { color: #15803d; }
+.apollo-cc-daily-bullet--warn .apollo-cc-daily-bullet-icon { color: #b45309; }
+.apollo-cc-daily-bullet--neutral .apollo-cc-daily-bullet-icon { color: #94a3b8; }
+
+.apollo-cc-daily-details {
+  margin-top: 10px;
+  font-size: 0.82rem;
+}
+
+.apollo-cc-daily-details summary {
+  cursor: pointer;
+  color: #c40000;
+  font-weight: 600;
+}
+
+.apollo-cc-daily-details-body {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #f1f5f9;
+}
+
+.apollo-cc-daily-detail-block h4 {
+  margin: 0 0 4px;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #64748b;
+}
+
+.apollo-cc-daily-detail-block ul {
+  margin: 0 0 10px;
+  padding-left: 1.1rem;
+  color: #475569;
+}
+
+.apollo-cc-remember-teach {
+  font-size: 0.84rem;
+  color: #64748b;
+}
+
+.apollo-cc-remember-empty-lead {
+  margin: 0 0 8px;
+  font-weight: 600;
+  color: #334155;
+}
+
+.apollo-cc-remember-teach-intro {
+  margin: 0 0 4px;
+}
+
+.apollo-cc-remember-teach-list {
+  margin: 0 0 8px;
+  padding-left: 1.1rem;
+}
+
+.apollo-cc-remember-teach-hint {
+  margin: 0;
+  font-size: 0.8rem;
+  font-style: italic;
+}
+
+.apollo-cc-chat--compact {
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #fff;
+  max-height: none;
+  padding: 10px 12px;
+}
+
+.apollo-cc-chat--compact .apollo-cc-chat-composer {
+  padding: 0;
+  border: none;
+}
+
+.apollo-cc-chat-thread {
+  margin-bottom: 8px;
+  font-size: 0.82rem;
+}
+
+.apollo-cc-chat-thread summary {
+  cursor: pointer;
+  color: #64748b;
+  font-weight: 600;
+}
+
+.apollo-cc-chat-body--thread {
+  max-height: 180px;
+  overflow-y: auto;
+  margin-top: 8px;
+}
+
+.apollo-cc-chat-clear--inline {
+  margin-top: 6px;
+  font-size: 0.75rem;
+}
+
+.apollo-input-row--compact {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.apollo-input--compact {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  font-size: 0.9rem;
+  background: #f8fafc;
+}
+
+.apollo-input--compact:focus {
+  outline: none;
+  border-color: #c40000;
+  background: #fff;
+}
+
+.apollo-cc-body-col--right .apollo-cc-chat--compact {
+  max-height: none;
+}
+
 .apollo-cc-daily-scan {
   padding: 14px 16px;
   border: 1px solid #e5e7eb;

@@ -11,13 +11,14 @@ import {
 } from 'lucide-react';
 import {
   buildApolloRecommends,
-  buildDailyBriefScan,
+  buildBusinessStatus,
+  buildDailyBriefBullets,
   buildHeroFocusItems,
-  buildProactiveGreeting,
   buildRememberItems,
   focusHeroTitle,
   groupNotificationsByUrgency,
-  QUICK_ACTIONS,
+  REMEMBER_TEACHING_TOPICS,
+  rememberEmptyCopy,
   START_MY_DAY_STEPS,
 } from '../lib/apolloCommandCentrePresentation.js';
 import {
@@ -60,44 +61,62 @@ function FocusHero({ items, onSelect }) {
   );
 }
 
-function DailyBriefScan({ scan, greeting }) {
-  const buckets = [
-    { key: 'risks', label: 'Risks', empty: 'No risks flagged.' },
-    { key: 'wins', label: 'Wins', empty: 'No wins recorded yet today.' },
-    { key: 'changes', label: 'Changes', empty: 'No notable changes.' },
-    { key: 'recommendations', label: 'Recommendations', empty: 'No recommendations yet.' },
-  ];
-
+function BusinessStatusBar({ status }) {
   return (
-    <section className="apollo-cc-daily-scan" aria-labelledby="apollo-cc-daily-scan-title">
-      <h3 id="apollo-cc-daily-scan-title" className="apollo-cc-block-title">Daily Brief</h3>
-      <div className="apollo-cc-greeting-inline">
-        <p className="apollo-cc-greeting-lead">{greeting.lead}</p>
-        {greeting.lines.map((line, i) => (
-          <p key={i} className="apollo-cc-greeting-line">{line}</p>
-        ))}
-      </div>
-      <div className="apollo-cc-scan-grid">
-        {buckets.map(({ key, label, empty }) => {
-          const items = scan[key] || [];
-          return (
-            <div key={key} className="apollo-cc-scan-bucket">
-              <h4>{label}</h4>
-              {items.length ? (
-                <ul>{items.map((text, i) => <li key={i}>{text}</li>)}</ul>
-              ) : (
-                <p className="apollo-cc-scan-empty">{empty}</p>
-              )}
-            </div>
-          );
-        })}
+    <section className="apollo-cc-status" aria-labelledby="apollo-cc-status-title">
+      <h2 id="apollo-cc-status-title" className="apollo-cc-status-title">Business Status</h2>
+      <div className={`apollo-cc-status-body apollo-cc-severity--${status.severity}`}>
+        <div className="apollo-cc-status-primary">
+          <span className="apollo-cc-status-emoji" aria-hidden="true">{status.emoji}</span>
+          <span className="apollo-cc-status-label">{status.label}</span>
+          {status.percent != null && (
+            <span className="apollo-cc-status-percent">{status.percent}%</span>
+          )}
+        </div>
+        <ul className="apollo-cc-status-metrics">
+          <li><strong>{status.issues}</strong> issues</li>
+          <li><strong>{status.opportunities}</strong> opportunities</li>
+          <li><strong>{status.urgent}</strong> urgent</li>
+        </ul>
       </div>
     </section>
   );
 }
 
+function DailyBriefCompact({ bullets, detailSections }) {
+  const toneIcon = { ok: '✓', warn: '⚠', neutral: '·' };
+
+  return (
+    <section className="apollo-cc-daily-compact" aria-labelledby="apollo-cc-daily-compact-title">
+      <h3 id="apollo-cc-daily-compact-title" className="apollo-cc-block-title">Today</h3>
+      <ul className="apollo-cc-daily-bullets">
+        {bullets.map((bullet, i) => (
+          <li key={i} className={`apollo-cc-daily-bullet apollo-cc-daily-bullet--${bullet.tone}`}>
+            <span className="apollo-cc-daily-bullet-icon" aria-hidden="true">{toneIcon[bullet.tone] || '·'}</span>
+            {bullet.text}
+          </li>
+        ))}
+      </ul>
+      {detailSections.length > 0 && (
+        <details className="apollo-cc-daily-details">
+          <summary>View details</summary>
+          <div className="apollo-cc-daily-details-body">
+            {detailSections.map((section) => (
+              <div key={section.label} className="apollo-cc-daily-detail-block">
+                <h4>{section.label}</h4>
+                <ul>
+                  {section.items.map((text, i) => <li key={i}>{text}</li>)}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
+    </section>
+  );
+}
+
 function RememberSection({ items }) {
-  if (!items.length) return null;
   return (
     <section className="apollo-cc-remember" aria-labelledby="apollo-cc-remember-title">
       <h3 id="apollo-cc-remember-title" className="apollo-cc-block-title">
@@ -110,7 +129,18 @@ function RememberSection({ items }) {
             <li key={item.id}>{item.text}</li>
           ))}
         </ul>
-      ) : null}
+      ) : (
+        <div className="apollo-cc-remember-teach">
+          <p className="apollo-cc-remember-empty-lead">{rememberEmptyCopy()}</p>
+          <p className="apollo-cc-remember-teach-intro">Apollo will remember:</p>
+          <ul className="apollo-cc-remember-teach-list">
+            {REMEMBER_TEACHING_TOPICS.map((topic) => (
+              <li key={topic}>{topic}</li>
+            ))}
+          </ul>
+          <p className="apollo-cc-remember-teach-hint">Use &quot;Remember…&quot; when something is worth keeping.</p>
+        </div>
+      )}
     </section>
   );
 }
@@ -251,23 +281,6 @@ function ActivitySection({ lines }) {
   );
 }
 
-function QuickActions({ onAction }) {
-  return (
-    <div className="apollo-cc-quick-actions apollo-cc-quick-actions--rail" role="toolbar" aria-label="Quick actions">
-      {QUICK_ACTIONS.map((action) => (
-        <button
-          key={action.id}
-          type="button"
-          className="apollo-cc-quick-pill"
-          onClick={() => onAction?.(action.query)}
-        >
-          {action.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
 function StartMyDay({ active, stepIndex, onStart, onAdvance, onExit }) {
   const step = START_MY_DAY_STEPS[stepIndex];
   const running = active && step;
@@ -399,8 +412,8 @@ export default function ApolloOperationalBrief({
 
   const focusTypes = focusTypesPresent(context.focusToday || []);
   const heroItems = buildHeroFocusItems(context.focusToday || []);
-  const greeting = buildProactiveGreeting(context, { userName });
-  const scan = buildDailyBriefScan(context);
+  const businessStatus = buildBusinessStatus(context);
+  const dailyBrief = buildDailyBriefBullets(context);
   const recommends = buildApolloRecommends(context.focusToday || []);
   const notifications = groupNotificationsByUrgency(context.notifications?.items || []);
   const rememberItems = buildRememberItems();
@@ -421,6 +434,8 @@ export default function ApolloOperationalBrief({
         />
       </div>
 
+      <BusinessStatusBar status={businessStatus} />
+
       <FocusHero items={heroItems} onSelect={handleFocusSelect} />
 
       <div className="apollo-cc-body-grid">
@@ -431,7 +446,7 @@ export default function ApolloOperationalBrief({
         </div>
 
         <div className="apollo-cc-body-col apollo-cc-body-col--centre">
-          <DailyBriefScan scan={scan} greeting={greeting} />
+          <DailyBriefCompact bullets={dailyBrief.bullets} detailSections={dailyBrief.detailSections} />
           <RecommendsSection items={recommends} onSelect={handleFocusSelect} />
           <OpsList title="Buying" icon={Package} rows={buyingRows} onSelect={handleRowSelect} />
           {showValidation && (
@@ -454,7 +469,6 @@ export default function ApolloOperationalBrief({
 
         <div className="apollo-cc-body-col apollo-cc-body-col--right">
           {chatPanel}
-          <QuickActions onAction={onAsk} />
           <ActivitySection lines={activity} />
         </div>
       </div>

@@ -309,5 +309,97 @@ export function buildRememberItems() {
 }
 
 export function rememberEmptyCopy() {
-  return 'Nothing committed to memory yet — use ＋ Remember when facts are worth keeping.';
+  return 'Nothing remembered yet.';
+}
+
+export const REMEMBER_TEACHING_TOPICS = [
+  'Customer preferences',
+  'Supplier lessons',
+  'Buying lessons',
+];
+
+/** Morning status strip — is the business OK? */
+export function buildBusinessStatus(context) {
+  const card = buildHealthCard(context);
+  const focus = dedupeFocusForDisplay(context?.focusToday || [], 10);
+  const notifications = context?.notifications?.items || [];
+  const grouped = groupNotificationsByUrgency(notifications);
+
+  const urgent = grouped.immediate.length
+    + focus.filter((item) => displaySeverity(item.severity) === 'urgent').length;
+  const issues = focus.filter((item) => ['urgent', 'attention'].includes(displaySeverity(item.severity))).length
+    || grouped.immediate.length + grouped.today.length;
+  const opportunities = focus.filter((item) => categorizeFocusItem(item) === 'buying').length
+    || notifications.filter((n) => /buying|stock|inventory/i.test(`${n.category || ''} ${n.title || ''}`)).length;
+
+  const percent = card.score == null ? null : Math.round(card.score * 10);
+  const emoji = card.severity === 'green' ? '🟢'
+    : card.severity === 'amber' ? '🟡'
+      : card.severity === 'red' ? '🔴'
+        : '⚪';
+
+  return {
+    label: card.label,
+    emoji,
+    percent,
+    displayScore: card.display,
+    issues,
+    opportunities,
+    urgent,
+    severity: card.severity,
+  };
+}
+
+/** Scannable Daily Brief bullets with optional detail sections. */
+export function buildDailyBriefBullets(context) {
+  if (!context) return { bullets: [], detailSections: [] };
+
+  const focus = dedupeFocusForDisplay(context.focusToday || [], 10);
+  const health = context.businessHealth || [];
+  const notifications = context.notifications?.items || [];
+
+  const buying = focus.filter((item) => categorizeFocusItem(item) === 'buying').length;
+  const supplier = focus.filter((item) => categorizeFocusItem(item) === 'supplier').length
+    + notifications.filter((n) => /supplier/i.test(`${n.category || ''} ${n.title || ''}`)).length;
+
+  const website = health.find((h) => /website/i.test(h.label || h.key || ''));
+  const orders = health.find((h) => /order|sales/i.test(h.label || h.key || ''));
+
+  const bullets = [];
+
+  bullets.push({
+    tone: buying ? 'ok' : 'neutral',
+    text: buying
+      ? `${buying} buying opportunit${buying === 1 ? 'y' : 'ies'}`
+      : 'No buying flags',
+  });
+
+  bullets.push({
+    tone: supplier ? 'warn' : 'ok',
+    text: supplier
+      ? `${supplier} supplier risk${supplier === 1 ? '' : 's'}`
+      : 'Suppliers clear',
+  });
+
+  const websiteCalm = !website || ['healthy', 'info'].includes(website.severity);
+  bullets.push({
+    tone: websiteCalm ? 'ok' : 'warn',
+    text: websiteCalm ? 'Website healthy' : (website.status || 'Website needs review'),
+  });
+
+  const ordersCalm = !orders || ['healthy', 'info'].includes(orders.severity);
+  bullets.push({
+    tone: ordersCalm ? 'ok' : 'warn',
+    text: orders?.status || 'Orders updated',
+  });
+
+  const scan = buildDailyBriefScan(context);
+  const detailSections = [
+    { label: 'Risks', items: scan.risks },
+    { label: 'Changes', items: scan.changes },
+    { label: 'Wins', items: scan.wins },
+    { label: 'Recommendations', items: scan.recommendations },
+  ].filter((section) => section.items.length);
+
+  return { bullets, detailSections };
 }
