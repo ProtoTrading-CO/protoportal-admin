@@ -15,9 +15,9 @@ import {
   buildHeroFocusItems,
   buildProactiveGreeting,
   buildRememberItems,
+  focusHeroTitle,
   groupNotificationsByUrgency,
   QUICK_ACTIONS,
-  rememberEmptyCopy,
   START_MY_DAY_STEPS,
 } from '../lib/apolloCommandCentrePresentation.js';
 import {
@@ -43,7 +43,7 @@ function FocusHero({ items, onSelect }) {
     <section className="apollo-cc-hero" aria-labelledby="apollo-cc-hero-title">
       <p className="apollo-cc-hero-eyebrow">Today&apos;s Focus</p>
       <h2 id="apollo-cc-hero-title" className="apollo-cc-hero-title">
-        If you only have one productive hour today…
+        {focusHeroTitle(items.length)}
       </h2>
       <ol className="apollo-cc-hero-list">
         {items.map((row) => (
@@ -97,6 +97,7 @@ function DailyBriefScan({ scan, greeting }) {
 }
 
 function RememberSection({ items }) {
+  if (!items.length) return null;
   return (
     <section className="apollo-cc-remember" aria-labelledby="apollo-cc-remember-title">
       <h3 id="apollo-cc-remember-title" className="apollo-cc-block-title">
@@ -109,9 +110,7 @@ function RememberSection({ items }) {
             <li key={item.id}>{item.text}</li>
           ))}
         </ul>
-      ) : (
-        <p className="apollo-cc-remember-empty">{rememberEmptyCopy()}</p>
-      )}
+      ) : null}
     </section>
   );
 }
