@@ -126,9 +126,19 @@ export default async function handler(req, res) {
       // Mark a product orderable at zero stock (with a storefront lead-time
       // disclaimer). Updates whichever table the SKU lives in so it works from
       // the live catalogue and the archive.
+      //
+      // Enabling "to order" ALSO sets keep_live_when_oos = true: a to-order
+      // product must stay both VISIBLE and ORDERABLE at zero stock, and without
+      // the keep-live flag the auto-OOS rule (migration 018) would archive it
+      // out from under the customer — making it un-orderable. Un-marking clears
+      // only the order flag; visibility (keep_live_when_oos) is left as
+      // configured, since a product can still be pinned-live without being
+      // orderable.
       const { sku, toOrder } = req.body;
       if (!sku) return res.status(400).json({ error: 'sku required' });
-      const patch = { to_order: !!toOrder, updated_at: new Date().toISOString() };
+      const patch = toOrder
+        ? { to_order: true, keep_live_when_oos: true, updated_at: new Date().toISOString() }
+        : { to_order: false, updated_at: new Date().toISOString() };
       const live = await supabase.from('website_stock').update(patch).eq('sku', sku).select('sku');
       if (live.error) throw live.error;
       if (!live.data?.length) {
