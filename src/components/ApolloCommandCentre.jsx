@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ArrowLeft, Bot, Loader2, RefreshCw, Sparkles } from 'lucide-react';
+import { ArrowLeft, Loader2, RefreshCw, Sparkles } from 'lucide-react';
 import {
   APOLLO_COMMAND_DEFAULT_MODE,
   APOLLO_COMMAND_MODES,
@@ -66,7 +66,6 @@ export default function ApolloCommandCentre({
   const [activeWorkObject, setActiveWorkObject] = useState(null);
   const hour = new Date().getHours();
   const greeting = greetingForHour(hour);
-  const displayName = userName || 'there';
 
   const chatPanel = (
     <ApolloChatPanel
@@ -144,11 +143,10 @@ export default function ApolloCommandCentre({
     <div className="apollo-cc apollo-cc--phase2">
       <header className="apollo-cc-head">
         <div className="apollo-cc-head-brand">
-          <div className="apollo-head-icon"><Bot size={20} /></div>
           <div>
-            <h1 className="apollo-cc-title">Apollo Command Centre</h1>
-            <p className="apollo-cc-subtitle">Operational brain for Proto Trading</p>
-            <p className="apollo-cc-greeting">{greeting} {displayName}</p>
+            <h1 className="apollo-cc-title">Apollo</h1>
+            <p className="apollo-cc-subtitle">Your operational decisions for today.</p>
+            <p className="apollo-cc-greeting">{greeting} {userName || 'there'}</p>
             {indexError && <p className="apollo-index-error">{indexError}</p>}
           </div>
         </div>
