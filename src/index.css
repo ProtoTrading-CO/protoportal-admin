@@ -127,18 +127,182 @@
 .apollo-cc-mode-tagline { display: none; }
 
 .apollo-desk {
-  display: grid;
-  grid-template-columns: minmax(0, 2.55fr) minmax(300px, 1fr);
-  gap: 18px;
-  align-items: start;
+  display: block;
   min-width: 0;
 }
 
 .apollo-desk-main {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 18px;
   min-width: 0;
+}
+
+.apollo-desk-command {
+  display: grid;
+  grid-template-columns: minmax(250px, 0.7fr) minmax(0, 2fr);
+  gap: 26px;
+  align-items: center;
+  padding: 24px 26px;
+  border: 1px solid #f1c8ce;
+  border-radius: 16px;
+  background: var(--apollo-warm);
+}
+
+.apollo-desk-command-intro {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.apollo-desk-command-mark {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  background: var(--apollo-red);
+  color: #fff;
+}
+
+.apollo-desk-command-intro p {
+  margin: 0 0 3px;
+  color: var(--apollo-red);
+  font-size: 11px;
+  font-weight: 850;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.apollo-desk-command-intro h2 {
+  margin: 0;
+  color: var(--apollo-ink);
+  font-size: clamp(19px, 1.7vw, 25px);
+  line-height: 1.15;
+  letter-spacing: -0.025em;
+}
+
+.apollo-desk-command--active .apollo-desk-command-intro { grid-column: 1 / -1; }
+
+.apollo-desk-command-body { min-width: 0; }
+
+.apollo-desk-command-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 46px;
+  gap: 9px;
+  padding: 7px;
+  border: 1px solid #d7dbe1;
+  border-radius: 13px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgb(18 24 40 / 0.06);
+}
+
+.apollo-desk-command-form:focus-within {
+  border-color: var(--apollo-red);
+  box-shadow: 0 0 0 3px rgba(217, 0, 25, 0.1);
+}
+
+.apollo-desk-command-form textarea {
+  width: 100%;
+  min-height: 46px;
+  max-height: 120px;
+  resize: none;
+  padding: 12px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--apollo-ink);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.apollo-desk-command-form textarea:focus { outline: 0; }
+
+.apollo-desk-command-form button {
+  display: grid;
+  place-items: center;
+  align-self: stretch;
+  min-height: 46px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--apollo-red);
+  color: #fff;
+  cursor: pointer;
+}
+
+.apollo-desk-command-form button:hover { background: var(--apollo-red-dark); }
+.apollo-desk-command-form button:disabled { opacity: 0.35; cursor: not-allowed; }
+
+.apollo-desk-command-prompts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.apollo-desk-command-prompts button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 10px;
+  border: 1px solid #eadde0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.76);
+  color: #505763;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.apollo-desk-command-prompts button:hover {
+  border-color: #e7a5ae;
+  color: var(--apollo-red-dark);
+}
+
+.apollo-desk-conversation {
+  grid-column: 1 / -1;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid #eadde0;
+  border-radius: 13px;
+  background: #fff;
+}
+
+.apollo-desk-conversation .apollo-cc-chat--workspace {
+  min-height: 320px;
+  max-height: 560px;
+  border: 0;
+  border-radius: 0;
+}
+
+.apollo-desk-support {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(280px, 0.7fr);
+  overflow: hidden;
+  border: 1px solid var(--apollo-line);
+  border-radius: 13px;
+  background: #fff;
+}
+
+.apollo-desk-support .apollo-desk-inbox,
+.apollo-desk-support .apollo-desk-history {
+  padding: 22px 24px;
+  border-top: 0;
+}
+
+.apollo-desk-support .apollo-desk-history {
+  border-left: 1px solid var(--apollo-line);
+  background: #fcfcfd;
+}
+
+.apollo-desk-history-empty {
+  margin: 14px 0 0;
+  color: var(--apollo-muted);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .apollo-desk-status {
@@ -510,15 +674,18 @@
 .apollo-desk-history li strong { color: var(--apollo-ink); }
 
 @media (max-width: 1180px) {
-  .apollo-desk { grid-template-columns: minmax(0, 1fr) minmax(280px, 0.72fr); }
   .apollo-desk-decision { grid-template-columns: 1fr; }
   .apollo-desk-evidence { border-top: 1px solid var(--apollo-line); border-left: 0; }
   .apollo-desk-why { margin-top: 36px; }
 }
 
 @media (max-width: 920px) {
-  .apollo-desk { grid-template-columns: 1fr; }
-  .apollo-desk-rail { position: static; }
+  .apollo-desk-command { grid-template-columns: 1fr; gap: 18px; }
+  .apollo-desk-support { grid-template-columns: 1fr; }
+  .apollo-desk-support .apollo-desk-history {
+    border-top: 1px solid var(--apollo-line);
+    border-left: 0;
+  }
 }
 
 @media (max-width: 640px) {
@@ -528,6 +695,10 @@
   .apollo-cc-mode-btn { flex: 1; min-width: 0; padding-inline: 8px; }
   .apollo-desk-status { grid-template-columns: auto 1fr; padding: 12px 14px; }
   .apollo-desk-status > span { grid-column: 2; }
+  .apollo-desk-command { padding: 20px 16px; }
+  .apollo-desk-command-form { grid-template-columns: minmax(0, 1fr) 44px; }
+  .apollo-desk-command-prompts { flex-direction: column; }
+  .apollo-desk-command-prompts button { justify-content: space-between; width: 100%; border-radius: 9px; }
   .apollo-desk-decision-main,
   .apollo-desk-evidence { padding: 22px 18px; }
   .apollo-desk-recommendation { margin-top: 30px; }
