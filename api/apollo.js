@@ -113,8 +113,9 @@ async function answerFromWorkspaceDocuments(query) {
     .map((document) => {
       if (requestedWorkspace && document.workspace_type !== requestedWorkspace) return null;
       const searchable = [
-        document.title, document.filename, document.category, document.notes,
-        ...(document.tags || []), document.extracted_text,
+        document.title, document.filename, document.category, document.notes, document.summary,
+        document.suggested_workspace, ...(document.tags || []), document.extracted_text,
+        ...Object.values(document.detected_entities || {}).flat(),
       ].filter(Boolean).join(' ').toLowerCase();
       const score = terms.reduce((total, term) => total + (searchable.includes(term) ? 1 : 0), 0);
       return { document, score, searchable };
@@ -137,7 +138,8 @@ async function answerFromWorkspaceDocuments(query) {
     const version = document.version > 1 ? ` · v${document.version}` : '';
     const record = document.record_id ? ' · linked record' : '';
     const searchable = document.extraction_status === 'ready' ? ' · text searchable' : '';
-    return `- **${name}** — ${document.workspace_type} / ${document.category}${version}${record}${searchable}`;
+    const summary = String(document.summary || '').trim();
+    return `- **${name}** — ${document.workspace_type} / ${document.category}${version}${record}${searchable}${summary ? `\n  ${summary.slice(0, 180)}` : ''}`;
   });
   return {
     reply: `## Workspace documents\n\n${lines.join('\n')}\n\nSource: private Apollo document vault. Open the relevant Work workspace to preview or download a file.`,

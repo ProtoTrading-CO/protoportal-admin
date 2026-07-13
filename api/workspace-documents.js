@@ -11,7 +11,6 @@ import {
   DOCUMENT_CATEGORIES,
   MAX_EXTRACTED_TEXT,
   WORKSPACE_TYPES,
-  canExtractDocumentText,
   documentVersionGroup,
   normalizeDocumentTags,
   safeDocumentFilename,
@@ -24,7 +23,7 @@ function cleanScope(value) {
 
 function publicDocument(document) {
   if (!document) return null;
-  const { extracted_text: _text, storage_bucket: _bucket, storage_path: _path, ...safe } = document;
+  const { extracted_text: _text, content_hash: _hash, storage_bucket: _bucket, storage_path: _path, ...safe } = document;
   return safe;
 }
 
@@ -46,6 +45,7 @@ async function prepareUpload(req, res, supabase, actor) {
   const {
     workspaceType = '', recordId = '', filename = '', contentType = 'application/octet-stream',
     byteSize = 0, category = 'general', tags = [], notes = '', title = '',
+    contentHash = '',
   } = req.body || {};
   validateScope(workspaceType, category);
   const validation = validateDocumentFile({ name: filename, size: byteSize });
@@ -55,10 +55,21 @@ async function prepareUpload(req, res, supabase, actor) {
   const safeName = safeDocumentFilename(filename);
   const versionGroup = documentVersionGroup(filename);
   const scopeId = cleanScope(recordId) || null;
+  const normalizedHash = /^[a-f0-9]{64}$/i.test(String(contentHash || '')) ? String(contentHash).toLowerCase() : '';
   const id = randomUUID();
   const storagePath = `${workspaceType}/${scopeId || '_library'}/${id}/${safeName}`;
 
   const document = await mutateWorkspaceDocumentIndex(supabase, (documents) => {
+    const duplicate = normalizedHash && documents.find((row) => row.content_hash === normalizedHash
+      && row.workspace_type === workspaceType
+      && (row.record_id || null) === scopeId
+      && row.upload_status !== 'failed'
+      && !row.deleted_at);
+    if (duplicate) {
+      const error = new Error(`Duplicate document: ${duplicate.filename} is already in this workspace.`);
+      error.statusCode = 409;
+      throw error;
+    }
     const previous = documents
       .filter((row) => row.workspace_type === workspaceType
         && (row.record_id || null) === scopeId
@@ -81,9 +92,15 @@ async function prepareUpload(req, res, supabase, actor) {
       version_group: versionGroup,
       version: (previous?.version || 0) + 1,
       supersedes_id: previous?.id || null,
+      content_hash: normalizedHash,
       upload_status: 'uploading',
-      extraction_status: 'not_started',
+      extraction_status: 'processing',
       extracted_text: '',
+      summary: '',
+      suggested_workspace: null,
+      classification_confidence: null,
+      detected_entities: { emails: [], references: [], skus: [] },
+      ingested_at: null,
       uploaded_by: actor,
       created_at: new Date().toISOString(),
       uploaded_at: null,
@@ -125,15 +142,34 @@ async function completeUpload(req, res, supabase) {
     return res.status(409).json({ error: 'The file did not reach private storage. Please retry the upload.' });
   }
 
-  const textCapable = canExtractDocumentText(pending.filename);
-  const extractedText = textCapable ? String(req.body?.extractedText || '').slice(0, MAX_EXTRACTED_TEXT) : '';
+  const extractedText = String(req.body?.extractedText || '').slice(0, MAX_EXTRACTED_TEXT);
+  const requestedExtractionStatus = ['ready', 'unsupported', 'failed'].includes(req.body?.extractionStatus)
+    ? req.body.extractionStatus
+    : (extractedText ? 'ready' : 'unsupported');
+  const requestedCategory = DOCUMENT_CATEGORIES.includes(req.body?.category) ? req.body.category : pending.category;
+  const suggestedWorkspace = WORKSPACE_TYPES.includes(req.body?.suggestedWorkspace) ? req.body.suggestedWorkspace : null;
+  const confidence = Number(req.body?.classificationConfidence);
+  const rawEntities = req.body?.detectedEntities || {};
+  const detectedEntities = {
+    emails: Array.isArray(rawEntities.emails) ? rawEntities.emails.map(String).slice(0, 12) : [],
+    references: Array.isArray(rawEntities.references) ? rawEntities.references.map(String).slice(0, 20) : [],
+    skus: Array.isArray(rawEntities.skus) ? rawEntities.skus.map(String).slice(0, 30) : [],
+  };
   const document = await mutateWorkspaceDocumentIndex(supabase, (index) => {
     const row = index.find((item) => item.id === id);
     if (!row) throw new Error('Document upload not found');
     row.upload_status = 'available';
     row.uploaded_at = new Date().toISOString();
     row.extracted_text = extractedText;
-    row.extraction_status = textCapable ? (extractedText ? 'ready' : 'failed') : 'not_started';
+    row.extraction_status = requestedExtractionStatus;
+    row.category = requestedCategory;
+    row.tags = normalizeDocumentTags([...(row.tags || []), ...(Array.isArray(req.body?.tags) ? req.body.tags : [])]);
+    row.summary = String(req.body?.summary || '').trim().slice(0, 500);
+    row.suggested_workspace = suggestedWorkspace;
+    row.classification_confidence = Number.isFinite(confidence) ? Math.max(0, Math.min(1, confidence)) : null;
+    row.detected_entities = detectedEntities;
+    row.content_hash = /^[a-f0-9]{64}$/i.test(String(req.body?.contentHash || '')) ? String(req.body.contentHash).toLowerCase() : row.content_hash;
+    row.ingested_at = new Date().toISOString();
     return row;
   });
   return res.status(200).json({ document: publicDocument(document) });
@@ -208,7 +244,7 @@ export default async function handler(req, res) {
     }
     return res.status(405).json({ error: 'Method not allowed' });
   } catch (error) {
-    const status = /Unknown|Unsupported|must be|empty|required|not found/i.test(error?.message || '') ? 400 : 500;
+    const status = error?.statusCode || (/Unknown|Unsupported|must be|empty|required|not found|Duplicate/i.test(error?.message || '') ? 400 : 500);
     return res.status(status).json({ error: error?.message || 'Document request failed' });
   }
 }
