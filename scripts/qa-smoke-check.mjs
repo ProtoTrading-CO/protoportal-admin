@@ -1092,8 +1092,8 @@ console.log('✓ Export all customers');
 assert.match(readSrc('src/hooks/useDashboardStats.js'), /refresh: false/, 'dashboard stats no longer force a full recompute every load');
 assert.doesNotMatch(readSrc('src/lib/taxonomyAdmin.js'), /counts=1\$\{stockParam\}&_=\$\{Date\.now/, 'category counts no longer bust the edge cache');
 assert.match(readSrc('api/product-loader-publish.js'), /hasValidPrice \? numericPrice/, 'publish never overwrites a real price with 0');
-assert.match(readSrc('api/admin-customers.js'), /const justApproved =/, 'WhatsApp welcome + approval email fire on the approve transition');
-assert.match(readSrc('api/admin-customers.js'), /if \(justApproved && data\?\.email\)/, 'approval email (Email 3) fires on approval, not on code-assignment');
+assert.match(readSrc('api/admin-customers.js'), /\.eq\('is_approved', false\)[\s\S]*justApproved = Boolean\(claimed\)/, 'approval transition is claimed atomically so concurrent approves cannot double-send');
+assert.match(readSrc('api/admin-customers.js'), /if \(justApproved && data\?\.email\)/, 'approval email (Email 3) fires on the approve transition, not on code-assignment');
 assert.match(readSrc('api/admin-orders.js'), /Field writes commit only after every gate/, 'order field writes run after the workflow gates');
 assert.match(readSrc('api/archive-floaters.js'), /deptLabels\.size === 0/, 'floater sweep refuses to run on an empty taxonomy');
 assert.doesNotMatch(readSrc('src/lib/products.js'), /uploadDormantImageWithBase64/, 'dead image-gen helper removed');
@@ -1165,11 +1165,12 @@ const plApiDeepSrc = readSrc('src/lib/productLoaderApi.js');
 assert.match(plApiDeepSrc, /subcategoryThree: sub3Label/, 'publish API helper posts subcategoryThree');
 assert.match(plApiDeepSrc, /subcategoryFour: sub4Label/, 'publish API helper posts subcategoryFour');
 const plPublishDeepSrc = readSrc('api/product-loader-publish.js');
-assert.match(plPublishDeepSrc, /subcategory_three: subcategoryThree \? String\(subcategoryThree\)\.trim\(\) : null/, 'publish endpoint writes subcategory_three');
-assert.match(plPublishDeepSrc, /subcategory_four: subcategoryFour \? String\(subcategoryFour\)\.trim\(\) : null/, 'publish endpoint writes subcategory_four');
+assert.match(plPublishDeepSrc, /subcategory_three: resolveSub\(subcategoryThree, existing\?\.subcategory_three\)/, 'publish endpoint writes subcategory_three (preserving on omit)');
+assert.match(plPublishDeepSrc, /subcategory_four: resolveSub\(subcategoryFour, existing\?\.subcategory_four\)/, 'publish endpoint writes subcategory_four (preserving on omit)');
+assert.match(plPublishDeepSrc, /incoming === undefined \? \(existingVal \?\? null\)/, 'an omitted deep subcategory preserves the stored value instead of nulling it');
 assert.match(plPublishDeepSrc, /subcategory_three: patch\.subcategory_three \|\| null/, 'publish create inserts subcategory_three');
 const nutstoreDeepSrc = readSrc('api/nutstore-process.js');
-assert.match(nutstoreDeepSrc, /subcategory_three: item\.subcategoryThree \|\| item\.subcategory_three \|\| null,\n    subcategory_four/, 'nutstore publish patch carries subcategory_three/four');
+assert.match(nutstoreDeepSrc, /subcategory_three: resolveSub\(item\.subcategoryThree \?\? item\.subcategory_three, existing\?\.subcategory_three\)/, 'nutstore publish patch carries + preserves subcategory_three');
 assert.equal(
   spawnSync('node', ['--check', join(REPO_ROOT, 'api/product-loader-publish.js')], { encoding: 'utf8' }).status,
   0,
@@ -1215,6 +1216,18 @@ assert.match(ffSrc, /picked: Boolean\(picked\)/, 'picked state is serialized so 
 assert.match(ffSrc, /picked: saved\.picked \?\? it\.picked/, 'saved picked state is restored on load');
 assert.match(ffSrc, /\d+\/\$\{pickableItems\.length\} picked|pickedCount\}\/\$\{pickableItems\.length\} picked/, 'section header shows a per-item picked count');
 assert.match(readSrc('src/index.css'), /\.ff-item-pick--on\s*\{[^}]*#16a34a/, 'picked checkbox turns green');
+assert.match(ffSrc, /removed: !item\.removed, picked: false/, 'removing an item clears its picked tick');
+assert.match(ffSrc, /\{ removed, picked, finalQty/, 'picked is stripped from the customer-facing final items');
 console.log('✓ Fulfillment: per-item pick checkboxes');
+
+// Hardening from the review — bulk approve decouples approval from email so a
+// large/slow email run cannot lose approvals to a timeout, and surfaces email
+// outcomes; single approve claims the transition atomically.
+const bulkHardenSrc = readSrc('api/approve-customers-bulk.js');
+assert.match(bulkHardenSrc, /\.update\(\{ is_approved: true \}\)\.in\('id', chunk\)/, 'bulk approve commits approvals in fast chunked updates first');
+assert.match(bulkHardenSrc, /last_email_type !== 'welcome'/, 'bulk approve never re-sends the welcome email');
+assert.match(bulkHardenSrc, /emailFailed/, 'bulk approve surfaces email failures in its response');
+assert.match(bulkHardenSrc, /EMAIL_CONCURRENCY = 5/, 'bulk approve throttles Brevo sends');
+console.log('✓ Review hardening: bulk-approve decoupled + throttled, atomic approve claim, subcat preserve');
 
 console.log('\nAll smoke checks passed.');

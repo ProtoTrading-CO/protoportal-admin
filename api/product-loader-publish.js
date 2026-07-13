@@ -88,14 +88,21 @@ export default async function handler(req, res) {
   // that case keep the existing DB price instead of dropping the product to R0.
   const numericPrice = Number(price);
   const hasValidPrice = Number.isFinite(numericPrice) && numericPrice > 0;
+  // Preserve an existing deeper subcategory when the caller OMITS the field
+  // (undefined) — only an explicit value (or explicit empty/null) changes it.
+  // Guards against a caller that forgets to send subcategory_three/four from
+  // silently nulling a live product's deep category on re-publish.
+  const resolveSub = (incoming, existingVal) => (
+    incoming === undefined ? (existingVal ?? null) : (String(incoming ?? '').trim() || null)
+  );
   const patch = {
     title: resolvedTitle,
     price: hasValidPrice ? numericPrice : (Number(existing?.price) || 0),
     category: String(category || '').trim(),
     subcategory_one: String(subcategoryOne || category || '').trim(),
-    subcategory_two: subcategoryTwo ? String(subcategoryTwo).trim() : null,
-    subcategory_three: subcategoryThree ? String(subcategoryThree).trim() : null,
-    subcategory_four: subcategoryFour ? String(subcategoryFour).trim() : null,
+    subcategory_two: resolveSub(subcategoryTwo, existing?.subcategory_two),
+    subcategory_three: resolveSub(subcategoryThree, existing?.subcategory_three),
+    subcategory_four: resolveSub(subcategoryFour, existing?.subcategory_four),
     [imageField]: String(imageUrl).trim(),
     updated_at: now,
   };

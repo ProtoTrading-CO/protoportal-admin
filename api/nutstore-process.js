@@ -76,14 +76,19 @@ async function publishOne(sb, item, { overwriteImage }) {
   const { title, description } = resolveCatalogTextFields(item);
   const price = Number(item.price ?? item.sqlRow?.price ?? 0);
 
+  // Preserve an existing deeper subcategory when the caller omits it, so a
+  // re-publish never silently nulls a live product's deep category.
+  const resolveSub = (incoming, existingVal) => (
+    incoming === undefined ? (existingVal ?? null) : (String(incoming ?? '').trim() || null)
+  );
   const patch = {
     title,
     price,
     category,
     subcategory_one: subcategoryOne,
-    subcategory_two: item.subcategoryTwo || item.subcategory_two || null,
-    subcategory_three: item.subcategoryThree || item.subcategory_three || null,
-    subcategory_four: item.subcategoryFour || item.subcategory_four || null,
+    subcategory_two: resolveSub(item.subcategoryTwo ?? item.subcategory_two, existing?.subcategory_two),
+    subcategory_three: resolveSub(item.subcategoryThree ?? item.subcategory_three, existing?.subcategory_three),
+    subcategory_four: resolveSub(item.subcategoryFour ?? item.subcategory_four, existing?.subcategory_four),
     original_description: description,
     [imageField]: imageUrl,
     updated_at: now,

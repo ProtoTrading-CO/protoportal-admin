@@ -306,6 +306,7 @@ export default function FulfillmentPage() {
       mainCategoryId: product.category || it.mainCategoryId,
       mainCategoryLabel: product.categoryLabel || it.mainCategoryLabel,
       swapped: true,
+      picked: false,
       originalCode: it.swapped ? it.originalCode : it.code,
       originalName: it.swapped ? it.originalName : it.name,
     }));
@@ -316,7 +317,7 @@ export default function FulfillmentPage() {
 
   const total = items.filter((it) => !it.removed).reduce((s, it) => s + it.finalQty * (it.unitPrice || it.price || 0), 0);
   const hasPrices = items.some((it) => it.unitPrice || it.price);
-  const buildFinalItems = () => items.filter((it) => !it.removed).map(({ removed, finalQty, swapped, originalCode, originalName, idx, mainCategoryId, mainCategoryLabel, ...rest }) => ({ ...rest, qty: finalQty }));
+  const buildFinalItems = () => items.filter((it) => !it.removed).map(({ removed, picked, finalQty, swapped, originalCode, originalName, idx, mainCategoryId, mainCategoryLabel, ...rest }) => ({ ...rest, qty: finalQty }));
 
   const doSave = async () => {
     if (!victorCanSave) {
@@ -423,7 +424,7 @@ export default function FulfillmentPage() {
           {editable && (
             <div className="ff-item-actions">
               <button type="button" className="ff-icon-btn" onClick={() => setEditingItemIdx(editingItemIdx === idx ? null : idx)} title="Replace"><Pencil size={14} /></button>
-              <button type="button" className={`ff-icon-btn${item.removed ? ' ff-icon-btn--restore' : ' ff-icon-btn--remove'}`} onClick={() => updateItem(idx, { removed: !item.removed })} title={item.removed ? 'Restore' : 'Out of stock'}>
+              <button type="button" className={`ff-icon-btn${item.removed ? ' ff-icon-btn--restore' : ' ff-icon-btn--remove'}`} onClick={() => updateItem(idx, { removed: !item.removed, picked: false })} title={item.removed ? 'Restore' : 'Out of stock'}>
                 {item.removed ? <Check size={14} /> : <X size={14} />}
               </button>
             </div>

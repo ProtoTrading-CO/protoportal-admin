@@ -116,14 +116,21 @@ export default async function handler(req, res) {
     // code was supplied in this same patch it was already validated above.
 
     // WhatsApp welcome AND the approval email both fire on the TRANSITION into
-    // approved, so we read the pre-update row first — re-saving an already
-    // approved customer never re-sends either.
-    const settingCode = typeof patch.customer_code === 'string' && !!patch.customer_code;
-    let priorApproved = null;
-    if (patch.is_approved === true || settingCode) {
-      const { data: before } = await supabase
-        .from('customers').select('is_approved').eq('id', id).maybeSingle();
-      priorApproved = before?.is_approved === true;
+    // approved. We claim that transition ATOMICALLY (update … WHERE is_approved
+    // = false) so two concurrent approve requests (double-click / retry) can't
+    // both read "not approved" and both fire the email — only the request that
+    // actually flips false→true gets a row back and sends.
+    let justApproved = false;
+    if (patch.is_approved === true) {
+      const { data: claimed, error: claimErr } = await supabase
+        .from('customers')
+        .update({ is_approved: true })
+        .eq('id', id)
+        .eq('is_approved', false)
+        .select('id')
+        .maybeSingle();
+      if (claimErr) return res.status(400).json({ error: claimErr.message });
+      justApproved = Boolean(claimed);
     }
 
     const { data, error } = await supabase
@@ -133,8 +140,6 @@ export default async function handler(req, res) {
       .select('*')
       .single();
     if (error) return res.status(400).json({ error: error.message });
-
-    const justApproved = patch.is_approved === true && priorApproved === false;
 
     // Send WhatsApp welcome via WATI on approval — skip only if customer explicitly opted out
     let watiWelcome = 'skipped';
