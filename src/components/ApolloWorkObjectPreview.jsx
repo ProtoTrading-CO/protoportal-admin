@@ -1,7 +1,8 @@
 import { ArrowLeft } from 'lucide-react';
 import { workObjectById } from '../lib/apolloCommandCentre.js';
+import WorkspaceDocuments from './WorkspaceDocuments.jsx';
 
-export default function ApolloWorkObjectPreview({ objectId, onBack }) {
+export default function ApolloWorkObjectPreview({ objectId, onBack, onShowToast }) {
   const item = workObjectById(objectId);
   if (!item) return null;
 
@@ -34,8 +35,14 @@ export default function ApolloWorkObjectPreview({ objectId, onBack }) {
       </div>
 
       <p className="apollo-cc-knowledge-foot">
-        Apollo is growing into this — earns execution when {item.label.toLowerCase()} is ready.
+        The full operational workflow is still growing, but its document knowledge is live now.
       </p>
+
+      <WorkspaceDocuments
+        workspaceType={objectId}
+        scopeLabel={`${item.label} workspace`}
+        onShowToast={onShowToast}
+      />
     </div>
   );
 }
