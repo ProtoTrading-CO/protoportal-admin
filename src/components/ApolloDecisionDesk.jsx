@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import {
-  AlertTriangle,
   ArrowRight,
   Box,
   CheckCircle2,
@@ -29,10 +28,20 @@ function compactText(value, fallback = '') {
 function DecisionEvidence({ decision }) {
   const metrics = decision?.metrics || [];
   const reasoning = decision?.reasoning || [];
+  const read = decision?.summaryHeadline || decision?.whyToday || reasoning[0];
 
   return (
     <section className="apollo-desk-evidence" aria-labelledby="apollo-desk-evidence-title">
       <h3 id="apollo-desk-evidence-title">Evidence</h3>
+      {read && (
+        <div className="apollo-desk-evidence-read">
+          <Sparkles size={16} />
+          <div>
+            <strong>Apollo&apos;s read</strong>
+            <p>{compactText(read)}</p>
+          </div>
+        </div>
+      )}
       {metrics.length ? (
         <dl className="apollo-desk-evidence-list">
           {metrics.slice(0, 7).map((metric) => (
@@ -68,9 +77,14 @@ function DecisionEvidence({ decision }) {
         </div>
       )}
       {reasoning.length > 0 && (
+        <ul className="apollo-desk-evidence-points" aria-label="Key reasoning">
+          {reasoning.slice(0, 3).map((line) => <li key={line}>{line}</li>)}
+        </ul>
+      )}
+      {reasoning.length > 3 && (
         <details className="apollo-desk-reasoning-detail">
           <summary>View Apollo&apos;s reasoning</summary>
-          <ul>{reasoning.map((line) => <li key={line}>{line}</li>)}</ul>
+          <ul>{reasoning.slice(3).map((line) => <li key={line}>{line}</li>)}</ul>
         </details>
       )}
     </section>
@@ -177,20 +191,51 @@ function ApolloCommandLayer({
   messages,
   onFixLast,
   onClearChat,
+  status,
+  selectedDecision,
+  issueCount,
+  inboxCount,
 }) {
-  const suggestions = [
+  const selectedName = selectedDecision?.view?.description || selectedDecision?.title || 'today’s priority';
+  const selectedCode = selectedDecision?.code || selectedDecision?.view?.sku;
+  const suggestions = selectedDecision ? [
+    `Explain why ${selectedCode || selectedName} needs attention`,
+    'What happens if I wait until tomorrow?',
+    'Show me the evidence behind this recommendation',
+  ] : [
     'What is my biggest operational risk today?',
     'Show me items at risk of overstock.',
     'Which suppliers need my attention?',
   ];
+  const statusHeadline = compactText(status?.headline, 'Proto looks calm');
+  const briefingTitle = issueCount
+    ? `${issueCount} decision${issueCount === 1 ? '' : 's'} need you. Start here.`
+    : 'You are clear. Apollo is watching the operation.';
+  const briefingCopy = selectedDecision
+    ? `${selectedName}. ${compactText(selectedDecision.whyToday || selectedDecision.summaryHeadline)}`
+    : 'Nothing needs an immediate decision. Ask Apollo to investigate a product, supplier or operational risk.';
 
   return (
     <section className={`apollo-desk-command${messages.length ? ' apollo-desk-command--active' : ''}`} aria-label="Apollo assistant">
-      <div className="apollo-desk-command-intro">
-        <span className="apollo-desk-command-mark"><Sparkles size={19} /></span>
-        <div>
-          <p>Apollo</p>
-          <h2>What do you want to know or change?</h2>
+      <header className="apollo-desk-command-head">
+        <div className="apollo-desk-command-intro">
+          <span className="apollo-desk-command-mark"><Sparkles size={19} /></span>
+          <div>
+            <p>Apollo</p>
+            <h2>Your operational intelligence</h2>
+          </div>
+        </div>
+        <span className="apollo-desk-command-live"><i aria-hidden="true" />Live operational brief</span>
+      </header>
+
+      <div className="apollo-desk-command-brief">
+        <p>{statusHeadline}</p>
+        <h3>{briefingTitle}</h3>
+        <span>{briefingCopy}</span>
+        <div className="apollo-desk-command-facts" aria-label="Apollo briefing facts">
+          <span><strong>{issueCount}</strong> decisions</span>
+          <span><strong>{inboxCount}</strong> inbox items</span>
+          <span><strong>{selectedDecision?.confidenceChip?.value || 'Live'}</strong> confidence</span>
         </div>
       </div>
 
@@ -210,6 +255,7 @@ function ApolloCommandLayer({
         </div>
       ) : (
         <div className="apollo-desk-command-body">
+          <p className="apollo-desk-command-question">What do you want to know or change?</p>
           {error && <p className="apollo-error">{error}</p>}
           <form
             className="apollo-desk-command-form"
@@ -351,9 +397,6 @@ export default function ApolloDecisionDesk({
   };
 
   const issueCount = visibleDecisions.length;
-  const statusLine = issueCount
-    ? `${status.headline.replace(/^[^A-Za-z]*/, '')} — ${issueCount} decision${issueCount === 1 ? '' : 's'} need you.`
-    : 'Proto looks calm — no decisions need you right now.';
 
   return (
     <div className="apollo-desk">
@@ -367,13 +410,11 @@ export default function ApolloDecisionDesk({
           messages={messages}
           onFixLast={onFixLast}
           onClearChat={onClearChat}
+          status={status}
+          selectedDecision={selected}
+          issueCount={issueCount}
+          inboxCount={inboxItems.length}
         />
-
-        <section className={`apollo-desk-status apollo-desk-status--${status.severity}`} aria-label="Business status">
-          {issueCount ? <AlertTriangle size={18} /> : <CheckCircle2 size={18} />}
-          <p>{statusLine}</p>
-          <span>{issueCount ? `${safeIndex + 1} of ${issueCount}` : 'Clear'}</span>
-        </section>
 
         <DecisionCanvas
           decision={selected}
