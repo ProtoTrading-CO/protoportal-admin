@@ -4950,6 +4950,37 @@ html, body { background: #f5f5f5; color: #111827; }
 .ff-item-row:last-child { border-bottom: none; }
 .ff-item-row--removed { background: #fff5f5; }
 .ff-item-row--readonly { background: #fafafa; }
+.ff-item-row--picked { background: #f0fdf4; }
+/* Per-item pick checkbox — tick each product as it's picked */
+.ff-item-pick {
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  margin-top: 2px;
+  border-radius: 8px;
+  border: 2px solid #cbd5e1;
+  background: #ffffff;
+  color: #ffffff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.12s;
+}
+.ff-item-pick:hover { border-color: #16a34a; }
+.ff-item-pick--on {
+  background: #16a34a;
+  border-color: #16a34a;
+}
+.ff-section-picked {
+  font-size: 12px;
+  font-weight: 700;
+  color: #64748b;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.ff-section-picked--all { color: #16a34a; }
 .ff-item-img {
   width: 62px;
   height: 62px;

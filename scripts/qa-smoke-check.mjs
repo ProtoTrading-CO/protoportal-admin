@@ -1207,4 +1207,14 @@ assert.match(orderDocsEmailSrc, /toLocaleTimeString\('en-ZA'/, 'order PDF prints
 assert.match(orderDocsEmailSrc, /doc\.text\(timeStr, pageWidth - margin/, 'order PDF renders the time in the header');
 console.log('✓ Email revamp (admin): approval-on-approval, bulk approve email, PDF images+time');
 
+// Fulfillment page — tick each item individually (not just whole categories)
+const ffSrc = readSrc('src/pages/FulfillmentPage.jsx');
+assert.match(ffSrc, /ff-item-pick/, 'fulfillment rows have a per-item pick checkbox');
+assert.match(ffSrc, /updateItem\(idx, \{ picked: !item\.picked \}\)/, 'each item can be toggled picked individually');
+assert.match(ffSrc, /picked: Boolean\(picked\)/, 'picked state is serialized so it persists across reloads');
+assert.match(ffSrc, /picked: saved\.picked \?\? it\.picked/, 'saved picked state is restored on load');
+assert.match(ffSrc, /\d+\/\$\{pickableItems\.length\} picked|pickedCount\}\/\$\{pickableItems\.length\} picked/, 'section header shows a per-item picked count');
+assert.match(readSrc('src/index.css'), /\.ff-item-pick--on\s*\{[^}]*#16a34a/, 'picked checkbox turns green');
+console.log('✓ Fulfillment: per-item pick checkboxes');
+
 console.log('\nAll smoke checks passed.');

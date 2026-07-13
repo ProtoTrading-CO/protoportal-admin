@@ -77,6 +77,7 @@ function applyProgress(items, sections = {}) {
       ...it,
       finalQty: saved.finalQty ?? it.finalQty,
       removed: saved.removed ?? it.removed,
+      picked: saved.picked ?? it.picked,
       swapped: saved.swapped ?? it.swapped,
       code: saved.code ?? it.code,
       name: saved.name ?? it.name,
@@ -90,10 +91,11 @@ function applyProgress(items, sections = {}) {
 
 function serializeSectionItems(sectionItems) {
   return sectionItems.map(({
-    productId, code, name, qty, finalQty, removed, swapped,
+    productId, code, name, qty, finalQty, removed, picked, swapped,
     originalCode, originalName, image, unitPrice, price,
   }) => ({
     productId, code, name, qty, finalQty, removed: Boolean(removed),
+    picked: Boolean(picked),
     swapped: Boolean(swapped), originalCode, originalName, image,
     unitPrice: unitPrice || price || 0,
   }));
@@ -176,6 +178,7 @@ export default function FulfillmentPage() {
         const catMap = await lookupProductCategories(ids);
         const enriched = rawItems.map((it) => ({
           ...it,
+          picked: false,
           mainCategoryId: catMap[it.productId]?.category || 'uncategorized',
           mainCategoryLabel: catMap[it.productId]?.categoryLabel || labels[catMap[it.productId]?.category] || labels.uncategorized,
         }));
@@ -376,7 +379,19 @@ export default function FulfillmentPage() {
     const idx = item.idx;
     return (
       <div key={`${item.productId || item.code}-${idx}`}>
-        <div className={`ff-item-row${item.removed ? ' ff-item-row--removed' : ''}${!editable ? ' ff-item-row--readonly' : ''}`}>
+        <div className={`ff-item-row${item.removed ? ' ff-item-row--removed' : ''}${item.picked && !item.removed ? ' ff-item-row--picked' : ''}${!editable ? ' ff-item-row--readonly' : ''}`}>
+          {editable && !item.removed && (
+            <button
+              type="button"
+              className={`ff-item-pick${item.picked ? ' ff-item-pick--on' : ''}`}
+              onClick={() => updateItem(idx, { picked: !item.picked })}
+              aria-pressed={item.picked}
+              aria-label={item.picked ? 'Mark as not picked' : 'Mark as picked'}
+              title={item.picked ? 'Picked' : 'Mark picked'}
+            >
+              {item.picked && <Check size={16} strokeWidth={3} />}
+            </button>
+          )}
           <div className="ff-item-img">
             {item.image ? (
               <button type="button" className="ff-item-img-btn" onClick={() => setLightboxImage(item.image)} aria-label="View product image">
@@ -523,12 +538,20 @@ export default function FulfillmentPage() {
           const savedByOther = section && section.userId !== activeUserId;
           const editable = canEditCategory(group.id) && !savedByOther;
           const canSave = canEditCategory(group.id) && activeUser && victorCanSave;
+          const pickableItems = group.items.filter((it) => !it.removed);
+          const pickedCount = pickableItems.filter((it) => it.picked).length;
+          const allPicked = pickableItems.length > 0 && pickedCount === pickableItems.length;
 
           return (
             <section key={group.id} className={`ff-section${isComplete ? ' ff-section--complete' : ''}${!editable ? ' ff-section--locked' : ''}`}>
               <div className="ff-section-head">
                 <div className="ff-section-titles">
                   <h3>{group.label}</h3>
+                  {editable && !isComplete && pickableItems.length > 0 && (
+                    <span className={`ff-section-picked${allPicked ? ' ff-section-picked--all' : ''}`}>
+                      {allPicked ? <><Check size={11} strokeWidth={3} /> All picked</> : `${pickedCount}/${pickableItems.length} picked`}
+                    </span>
+                  )}
                   {section && (
                     <span className="ff-section-meta">
                       {isComplete
