@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import {
   AlertTriangle,
   ArrowRight,
@@ -13,6 +13,7 @@ import {
   SlidersHorizontal,
   Sparkles,
 } from 'lucide-react';
+import ApolloChatPanel from './ApolloChatPanel.jsx';
 
 function severityLabel(severity) {
   if (severity === 'urgent' || severity === 'red') return 'High priority';
@@ -167,7 +168,16 @@ function DecisionQueue({ decisions, selectedIndex, onSelect }) {
   );
 }
 
-function ApolloAssistant({ input, onInputChange, onSend, busy, error, inboxItems, recentActions, onSelectInbox }) {
+function ApolloCommandLayer({
+  input,
+  onInputChange,
+  onSend,
+  busy,
+  error,
+  messages,
+  onFixLast,
+  onClearChat,
+}) {
   const suggestions = [
     'What is my biggest operational risk today?',
     'Show me items at risk of overstock.',
@@ -175,41 +185,75 @@ function ApolloAssistant({ input, onInputChange, onSend, busy, error, inboxItems
   ];
 
   return (
-    <aside className="apollo-desk-rail" aria-label="Apollo assistant">
-      <section className="apollo-desk-assistant">
-        <header><Sparkles size={20} /><h2>Apollo</h2></header>
-        {error && <p className="apollo-error">{error}</p>}
-        <form
-          className="apollo-desk-composer"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void onSend(input);
-          }}
-        >
-          <textarea
-            value={input}
-            onChange={(event) => onInputChange(event.target.value)}
-            placeholder="Ask Apollo anything…"
-            disabled={busy}
-            rows={3}
-            aria-label="Ask Apollo anything"
-          />
-          <button type="submit" disabled={busy || !input.trim()} aria-label="Send to Apollo">
-            {busy ? <Loader2 size={18} className="spin" /> : <Send size={18} />}
-          </button>
-        </form>
-        <div className="apollo-desk-prompts" aria-label="Suggested questions">
-          {suggestions.map((suggestion) => (
-            <button key={suggestion} type="button" onClick={() => void onSend(suggestion)} disabled={busy}>
-              <MessageSquare size={15} />
-              <span>{suggestion}</span>
-              <ArrowRight size={14} />
-            </button>
-          ))}
+    <section className={`apollo-desk-command${messages.length ? ' apollo-desk-command--active' : ''}`} aria-label="Apollo assistant">
+      <div className="apollo-desk-command-intro">
+        <span className="apollo-desk-command-mark"><Sparkles size={19} /></span>
+        <div>
+          <p>Apollo</p>
+          <h2>What do you want to know or change?</h2>
         </div>
-      </section>
+      </div>
 
-      <section className="apollo-desk-inbox" aria-labelledby="apollo-desk-inbox-title">
+      {messages.length > 0 ? (
+        <div className="apollo-desk-conversation">
+          <ApolloChatPanel
+            messages={messages}
+            input={input}
+            onInputChange={onInputChange}
+            onSend={onSend}
+            busy={busy}
+            error={error}
+            onFixLast={onFixLast}
+            onClear={onClearChat}
+            variant="workspace"
+          />
+        </div>
+      ) : (
+        <div className="apollo-desk-command-body">
+          {error && <p className="apollo-error">{error}</p>}
+          <form
+            className="apollo-desk-command-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void onSend(input);
+            }}
+          >
+            <textarea
+              value={input}
+              onChange={(event) => onInputChange(event.target.value)}
+              placeholder="Ask Apollo about risk, stock, suppliers, customers or today’s priorities…"
+              disabled={busy}
+              rows={1}
+              aria-label="Ask Apollo anything"
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && !event.shiftKey) {
+                  event.preventDefault();
+                  if (input.trim()) void onSend(input);
+                }
+              }}
+            />
+            <button type="submit" disabled={busy || !input.trim()} aria-label="Send to Apollo">
+              {busy ? <Loader2 size={19} className="spin" /> : <Send size={19} />}
+            </button>
+          </form>
+          <div className="apollo-desk-command-prompts" aria-label="Suggested questions">
+            {suggestions.map((suggestion) => (
+              <button key={suggestion} type="button" onClick={() => void onSend(suggestion)} disabled={busy}>
+                <span>{suggestion}</span>
+                <ArrowRight size={14} />
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function OperationalSupport({ inboxItems, recentActions, onSelectInbox }) {
+  return (
+    <section className="apollo-desk-support" aria-label="Operational activity">
+      <div className="apollo-desk-inbox" aria-labelledby="apollo-desk-inbox-title">
         <div className="apollo-desk-section-head">
           <h3 id="apollo-desk-inbox-title">Operational Inbox</h3>
           <span>{inboxItems.length}</span>
@@ -232,11 +276,11 @@ function ApolloAssistant({ input, onInputChange, onSend, busy, error, inboxItems
         ) : (
           <p className="apollo-desk-empty"><CheckCircle2 size={16} />Nothing is waiting for you.</p>
         )}
-      </section>
+      </div>
 
-      {recentActions.length > 0 && (
-        <section className="apollo-desk-history" aria-labelledby="apollo-desk-history-title">
-          <h3 id="apollo-desk-history-title">Recent decisions</h3>
+      <div className="apollo-desk-history" aria-labelledby="apollo-desk-history-title">
+        <h3 id="apollo-desk-history-title">Recent decisions</h3>
+        {recentActions.length > 0 ? (
           <ul>
             {recentActions.slice(0, 4).map((action) => (
               <li key={action.id}>
@@ -245,9 +289,11 @@ function ApolloAssistant({ input, onInputChange, onSend, busy, error, inboxItems
               </li>
             ))}
           </ul>
-        </section>
-      )}
-    </aside>
+        ) : (
+          <p className="apollo-desk-history-empty">Approved decisions will appear here.</p>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -263,10 +309,12 @@ export default function ApolloDecisionDesk({
   error,
   onSelectInbox,
   onReviewNotification,
+  messages = [],
+  onFixLast,
+  onClearChat,
 }) {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [approvedIds, setApprovedIds] = useState(() => new Set());
-  const assistantRailRef = useRef(null);
   const visibleDecisions = decisions.filter((decision) => !approvedIds.has(decision.id));
   const safeIndex = Math.min(selectedIndex, Math.max(visibleDecisions.length - 1, 0));
   const selected = visibleDecisions[safeIndex] || null;
@@ -275,7 +323,6 @@ export default function ApolloDecisionDesk({
     if (!selected) return;
     const sku = selected.code || selected.view?.sku;
     void onSend(sku ? `Explain your recommendation for ${sku}` : `Explain ${selected.title}`);
-    assistantRailRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
   const adjustSelected = () => {
@@ -311,6 +358,17 @@ export default function ApolloDecisionDesk({
   return (
     <div className="apollo-desk">
       <main className="apollo-desk-main">
+        <ApolloCommandLayer
+          input={input}
+          onInputChange={onInputChange}
+          onSend={onSend}
+          busy={busy}
+          error={error}
+          messages={messages}
+          onFixLast={onFixLast}
+          onClearChat={onClearChat}
+        />
+
         <section className={`apollo-desk-status apollo-desk-status--${status.severity}`} aria-label="Business status">
           {issueCount ? <AlertTriangle size={18} /> : <CheckCircle2 size={18} />}
           <p>{statusLine}</p>
@@ -326,20 +384,12 @@ export default function ApolloDecisionDesk({
           onAsk={askAboutSelected}
         />
         <DecisionQueue decisions={visibleDecisions} selectedIndex={safeIndex} onSelect={setSelectedIndex} />
-      </main>
-
-      <div ref={assistantRailRef}>
-        <ApolloAssistant
-          input={input}
-          onInputChange={onInputChange}
-          onSend={onSend}
-          busy={busy}
-          error={error}
+        <OperationalSupport
           inboxItems={inboxItems}
           recentActions={recentActions}
           onSelectInbox={onSelectInbox}
         />
-      </div>
+      </main>
     </div>
   );
 }
