@@ -115,19 +115,15 @@ export default async function handler(req, res) {
     // manually whenever the admin is ready, and are NEVER auto-generated. If a
     // code was supplied in this same patch it was already validated above.
 
-    // WhatsApp welcome fires on the TRANSITION into approved; the confirmation
-    // email fires on the TRANSITION into having a customer code (empty → a real
-    // 6-char code). Both need the pre-update row so re-saving an unchanged
-    // customer never re-spams them. A code being CHANGED (already had one) also
-    // never re-sends.
+    // WhatsApp welcome AND the approval email both fire on the TRANSITION into
+    // approved, so we read the pre-update row first — re-saving an already
+    // approved customer never re-sends either.
     const settingCode = typeof patch.customer_code === 'string' && !!patch.customer_code;
     let priorApproved = null;
-    let priorCode = '';
     if (patch.is_approved === true || settingCode) {
       const { data: before } = await supabase
-        .from('customers').select('is_approved, customer_code').eq('id', id).maybeSingle();
+        .from('customers').select('is_approved').eq('id', id).maybeSingle();
       priorApproved = before?.is_approved === true;
-      priorCode = String(before?.customer_code || '').trim();
     }
 
     const { data, error } = await supabase
@@ -139,9 +135,6 @@ export default async function handler(req, res) {
     if (error) return res.status(400).json({ error: error.message });
 
     const justApproved = patch.is_approved === true && priorApproved === false;
-    // Confirmation email: only when a code is newly assigned to an approved
-    // customer. No code → no email (allocate the code later, then it sends).
-    const justGotCode = settingCode && !priorCode && data?.is_approved === true;
 
     // Send WhatsApp welcome via WATI on approval — skip only if customer explicitly opted out
     let watiWelcome = 'skipped';
@@ -191,16 +184,17 @@ export default async function handler(req, res) {
       }
     }
 
-    // Confirmation email fires only when a code is newly assigned to an approved
-    // customer (best-effort) + stamps last-email status. Approving without a
-    // code sends nothing — the email waits until the code is typed and saved.
+    // Approval email (Email 3) fires on the TRANSITION into approved — the
+    // customer gets the "your trade account is approved" email with a button to
+    // the site. Re-saving an already-approved customer never re-sends it, and a
+    // customer code is not required (codes are allocated manually later).
     let welcomeEmail = 'skipped';
-    if (justGotCode && data?.email) {
+    if (justApproved && data?.email) {
       try {
         const result = await sendWelcomeApprovalEmail(data, { supabase });
         welcomeEmail = result?.sent ? 'sent' : 'skipped';
       } catch (mailErr) {
-        console.error('confirmation email error:', mailErr.message);
+        console.error('approval email error:', mailErr.message);
         welcomeEmail = 'failed';
       }
     }

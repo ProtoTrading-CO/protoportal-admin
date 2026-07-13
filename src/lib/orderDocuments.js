@@ -150,11 +150,14 @@ function detectImageFormat(dataUrl) {
 }
 
 // Packing-slip column layout: #  Image  Barcode  Product  Qty  Avail
+// Image column is wider than the old 44pt so product photos read clearly on
+// the printed slip; barcode/product shift right to keep an 8pt gutter.
+const PRODUCT_IMG = 60;
 const COL = {
   num: { x: 40, w: 20 },
-  img: { x: 62, w: 44 },
-  code: { x: 112, w: 80 },
-  name: { x: 196, w: 212 },
+  img: { x: 60, w: PRODUCT_IMG },
+  code: { x: 128, w: 74 },
+  name: { x: 206, w: 202 },
   qty: { x: 410, w: 52 },
   avail: { x: 464, w: 91 },
 };
@@ -192,8 +195,12 @@ export async function generateOrderPdfBase64({
   };
 
   const orderNumber = displayOrderNumber(order);
-  const dateStr = new Date(order?.created_at || Date.now()).toLocaleDateString('en-ZA', {
+  const orderDate = new Date(order?.created_at || Date.now());
+  const dateStr = orderDate.toLocaleDateString('en-ZA', {
     day: 'numeric', month: 'long', year: 'numeric',
+  });
+  const timeStr = orderDate.toLocaleTimeString('en-ZA', {
+    hour: '2-digit', minute: '2-digit', hour12: false,
   });
   const linkUrl = includeInternalLink ? (fulfillmentUrl || buildFulfillmentUrl(order?.id)) : '';
   const shippingMethod = pdfShippingMethod(order);
@@ -238,6 +245,8 @@ export async function generateOrderPdfBase64({
   doc.setFontSize(9);
   doc.setTextColor(150, 150, 150);
   doc.text(dateStr, pageWidth - margin, 64, { align: 'right' });
+  doc.setFontSize(8.5);
+  doc.text(timeStr, pageWidth - margin, 78, { align: 'right' });
   y = 138;
 
   // ── Shipping method banner ──────────────────────────────────────────────
@@ -324,7 +333,7 @@ export async function generateOrderPdfBase64({
     doc.setFontSize(9);
     const nameLines = doc.splitTextToSize(nameText, COL.name.w).slice(0, 3);
     const textLines = Math.max(1, codeLines.length, nameLines.length);
-    const rowH = Math.max(54, ROW_PAD + textLines * ROW_LINE);
+    const rowH = Math.max(PRODUCT_IMG + 12, ROW_PAD + textLines * ROW_LINE);
 
     // Page break — carry the column header onto the new page.
     if (y + rowH + 8 > pageHeight - margin) {
@@ -347,18 +356,18 @@ export async function generateOrderPdfBase64({
     doc.text(String(rowIndex), COL.num.x + 3, y + rowH / 2 + 3);
 
     // image
-    const imgData = await loadImageDataUrl(item.image);
-    const imgY = y + (rowH - 44) / 2;
+    const imgData = await loadImageDataUrl(item.image, 240);
+    const imgY = y + (rowH - PRODUCT_IMG) / 2;
     if (imgData) {
       try {
-        doc.addImage(imgData, detectImageFormat(imgData), COL.img.x, imgY, 44, 44);
+        doc.addImage(imgData, detectImageFormat(imgData), COL.img.x, imgY, PRODUCT_IMG, PRODUCT_IMG);
       } catch {
         doc.setFillColor(243, 244, 246);
-        doc.rect(COL.img.x, imgY, 44, 44, 'F');
+        doc.rect(COL.img.x, imgY, PRODUCT_IMG, PRODUCT_IMG, 'F');
       }
     } else {
       doc.setFillColor(243, 244, 246);
-      doc.rect(COL.img.x, imgY, 44, 44, 'F');
+      doc.rect(COL.img.x, imgY, PRODUCT_IMG, PRODUCT_IMG, 'F');
     }
 
     const textY = y + 16;

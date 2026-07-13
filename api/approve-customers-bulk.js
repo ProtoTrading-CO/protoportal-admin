@@ -1,6 +1,7 @@
 import { requireAdminKey } from './_admin-auth.js';
 import { createClient } from '@supabase/supabase-js';
 import { BULK_CHUNK_SIZE, runInChunks } from '../lib/bulk-chunk.mjs';
+import { sendWelcomeApprovalEmail } from './_welcome-email.js';
 
 function getAdminClient() {
   return createClient(
@@ -21,7 +22,7 @@ async function fetchCustomersByEmails(supabase, emails) {
     const slice = emails.slice(i, i + CHUNK);
     const { data, error } = await supabase
       .from('customers')
-      .select('id, email, is_approved, customer_code')
+      .select('id, email, is_approved, customer_code, name, business_name')
       .in('email', slice);
     if (error) throw error;
     for (const row of data || []) {
@@ -42,11 +43,19 @@ function classifyEmail(email, customer) {
 }
 
 async function approveCustomer(supabase, email, customer) {
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from('customers')
     .update({ is_approved: true })
-    .eq('id', customer.id);
+    .eq('id', customer.id)
+    .select('*')
+    .single();
   if (error) return { kind: 'failed', entry: { email, error: error.message } };
+  // Approval email (Email 3) — best-effort, never blocks the bulk run.
+  try {
+    await sendWelcomeApprovalEmail(data || { ...customer, email }, { supabase });
+  } catch (mailErr) {
+    console.error('bulk approve email error:', email, mailErr.message);
+  }
   return { kind: 'approved', entry: { email, id: customer.id } };
 }
 

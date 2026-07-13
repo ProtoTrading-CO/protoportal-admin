@@ -1092,9 +1092,8 @@ console.log('✓ Export all customers');
 assert.match(readSrc('src/hooks/useDashboardStats.js'), /refresh: false/, 'dashboard stats no longer force a full recompute every load');
 assert.doesNotMatch(readSrc('src/lib/taxonomyAdmin.js'), /counts=1\$\{stockParam\}&_=\$\{Date\.now/, 'category counts no longer bust the edge cache');
 assert.match(readSrc('api/product-loader-publish.js'), /hasValidPrice \? numericPrice/, 'publish never overwrites a real price with 0');
-assert.match(readSrc('api/admin-customers.js'), /const justApproved =/, 'WhatsApp welcome only fires on the approve transition');
-assert.match(readSrc('api/admin-customers.js'), /const justGotCode = settingCode && !priorCode && data\?\.is_approved === true/, 'confirmation email fires only when a code is newly assigned to an approved customer');
-assert.match(readSrc('api/admin-customers.js'), /if \(justGotCode && data\?\.email\)/, 'confirmation email gated on code-assignment, not on plain approval');
+assert.match(readSrc('api/admin-customers.js'), /const justApproved =/, 'WhatsApp welcome + approval email fire on the approve transition');
+assert.match(readSrc('api/admin-customers.js'), /if \(justApproved && data\?\.email\)/, 'approval email (Email 3) fires on approval, not on code-assignment');
 assert.match(readSrc('api/admin-orders.js'), /Field writes commit only after every gate/, 'order field writes run after the workflow gates');
 assert.match(readSrc('api/archive-floaters.js'), /deptLabels\.size === 0/, 'floater sweep refuses to run on an empty taxonomy');
 assert.doesNotMatch(readSrc('src/lib/products.js'), /uploadDormantImageWithBase64/, 'dead image-gen helper removed');
@@ -1192,5 +1191,20 @@ assert.doesNotMatch(singleImgSrc, /ME039\.2\.jpg/, 'single image note drops the 
 // Make-live ("setting items to live") already offers unlimited-depth subcategories
 assert.match(pmEngineArchiveSrc, /Child category \{level\}/, 'make-live still offers every subcategory level');
 console.log('✓ Image Replace deep category filter + Single Image note + make-live depth');
+
+// Email revamp — approval email (Email 3) fires on the transition into approved,
+// not on customer-code assignment; bulk approve sends it too.
+const adminCustEmailSrc = readSrc('api/admin-customers.js');
+assert.match(adminCustEmailSrc, /if \(justApproved && data\?\.email\)/, 'approval email fires on approval transition');
+assert.doesNotMatch(adminCustEmailSrc, /justGotCode/, 'code-assignment email trigger removed');
+const bulkApproveSrc = readSrc('api/approve-customers-bulk.js');
+assert.match(bulkApproveSrc, /sendWelcomeApprovalEmail/, 'bulk approve sends the approval email');
+// Order confirmation PDF (Email 4) — bigger product images + order time
+const orderDocsEmailSrc = readSrc('src/lib/orderDocuments.js');
+assert.match(orderDocsEmailSrc, /const PRODUCT_IMG = 60/, 'order PDF product images enlarged to 60pt');
+assert.doesNotMatch(orderDocsEmailSrc, /imgY, 44, 44/, 'order PDF no longer draws 44pt images');
+assert.match(orderDocsEmailSrc, /toLocaleTimeString\('en-ZA'/, 'order PDF prints the order time');
+assert.match(orderDocsEmailSrc, /doc\.text\(timeStr, pageWidth - margin/, 'order PDF renders the time in the header');
+console.log('✓ Email revamp (admin): approval-on-approval, bulk approve email, PDF images+time');
 
 console.log('\nAll smoke checks passed.');
