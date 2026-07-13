@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Archive,
+  BrainCircuit,
   Download,
   Eye,
   File,
@@ -71,6 +72,7 @@ export default function WorkspaceDocuments({
   const [category, setCategory] = useState('general');
   const [tags, setTags] = useState('');
   const [uploading, setUploading] = useState(null);
+  const [ingestion, setIngestion] = useState(null);
   const [error, setError] = useState('');
   const [preview, setPreview] = useState(null);
 
@@ -116,6 +118,7 @@ export default function WorkspaceDocuments({
         category: category === 'general' && files.length === 1 ? defaultDocumentCategory(files[0].name) : category,
         tags: normalizeDocumentTags(tags),
         onProgress: ({ index, total, file }) => setUploading(file ? { index: index + 1, total, name: file.name } : null),
+        onIngestionProgress: (progress) => setIngestion(progress),
       });
       setTags('');
       await loadDocuments();
@@ -125,6 +128,7 @@ export default function WorkspaceDocuments({
       toast(uploadError.message || 'Upload failed', 'error');
     } finally {
       setUploading(null);
+      setIngestion(null);
       if (inputRef.current) inputRef.current.value = '';
     }
   };
@@ -178,8 +182,9 @@ export default function WorkspaceDocuments({
           <input ref={inputRef} type="file" accept={DOCUMENT_ACCEPT} multiple hidden onChange={(event) => void uploadFiles(event.target.files)} />
           <span className="workspace-document-drop-icon"><UploadCloud size={22} /></span>
           <div>
-            <strong>{uploading ? `Uploading ${uploading.index} of ${uploading.total}` : 'Drop business documents or images here'}</strong>
-            <small>{uploading?.name || 'PDF, Word, Excel, PowerPoint, email, text and images · 25 MB each'}</small>
+            <strong>{uploading ? `Processing ${uploading.index} of ${uploading.total}` : 'Drop business documents or images here'}</strong>
+            <small>{ingestion?.detail || uploading?.name || 'Apollo extracts, classifies and indexes each file privately · 25 MB each'}</small>
+            {uploading && <span className="workspace-document-progress"><i style={{ width: `${Math.round(Number(ingestion?.progress || 0.08) * 100)}%` }} /></span>}
           </div>
           <button type="button" onClick={() => inputRef.current?.click()} disabled={Boolean(uploading)}>
             {uploading ? <Loader2 size={15} className="spin" /> : <UploadCloud size={15} />}
@@ -224,9 +229,16 @@ export default function WorkspaceDocuments({
                     {document.version > 1 && <span className="workspace-document-version">v{document.version}</span>}
                   </div>
                   <p>{CATEGORY_LABELS[document.category] || document.category} · {formatDocumentBytes(document.byte_size)} · {formatDate(document.uploaded_at || document.created_at)}</p>
+                  {document.summary && <small className="workspace-document-summary">{document.summary}</small>}
                   <div className="workspace-document-chips">
                     {(document.tags || []).map((tag) => <span key={tag}>{tag}</span>)}
-                    {document.extraction_status === 'ready' && <span className="is-searchable">Apollo searchable</span>}
+                    {document.extraction_status === 'ready' && <span className="is-searchable"><BrainCircuit size={9} />Apollo searchable</span>}
+                    {document.suggested_workspace && document.suggested_workspace !== document.workspace_type && (
+                      <span className="is-suggestion">Suggested: {document.suggested_workspace}</span>
+                    )}
+                    {Object.values(document.detected_entities || {}).flat().length > 0 && (
+                      <span>{Object.values(document.detected_entities).flat().length} references detected</span>
+                    )}
                   </div>
                 </div>
                 <div className="workspace-document-actions">

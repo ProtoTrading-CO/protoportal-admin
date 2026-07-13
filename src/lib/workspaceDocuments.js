@@ -1,11 +1,10 @@
 import { supabase } from './supabase';
 import { readApiJson } from './apiError';
 import {
-  MAX_EXTRACTED_TEXT,
-  canExtractDocumentText,
   normalizeDocumentTags,
   validateDocumentFile,
 } from '../../lib/workspace-documents.mjs';
+import { hashDocumentFile, ingestDocumentFile } from './documentIngestion';
 
 async function request(path, options = {}) {
   const res = await fetch(path, {
@@ -56,15 +55,6 @@ export async function restoreWorkspaceDocument(id) {
   return json.document;
 }
 
-async function safeExtractText(file) {
-  if (!canExtractDocumentText(file.name)) return '';
-  try {
-    return String(await file.text()).slice(0, MAX_EXTRACTED_TEXT);
-  } catch {
-    return '';
-  }
-}
-
 export async function uploadWorkspaceDocument({
   workspaceType,
   recordId = '',
@@ -73,10 +63,18 @@ export async function uploadWorkspaceDocument({
   tags = [],
   notes = '',
   title = '',
+  onIngestionProgress,
 }) {
   const validation = validateDocumentFile(file);
   if (!validation.ok) throw new Error(`${file.name}: ${validation.error}`);
 
+  onIngestionProgress?.({ phase: 'hashing', progress: 0.02, detail: 'Checking for duplicates' });
+  const contentHash = await hashDocumentFile(file);
+  const ingestionPromise = ingestDocumentFile(file, {
+    selectedCategory: category,
+    contentHash,
+    onProgress: onIngestionProgress,
+  });
   const prepared = await request('/api/workspace-documents', {
     method: 'POST',
     body: JSON.stringify({
@@ -90,22 +88,37 @@ export async function uploadWorkspaceDocument({
       tags: normalizeDocumentTags(tags),
       notes,
       title,
+      contentHash,
     }),
   });
 
-  const { error } = await supabase.storage
+  onIngestionProgress?.({ phase: 'uploading', progress: 0.1, detail: 'Securing original file' });
+  const uploadPromise = supabase.storage
     .from(prepared.bucket)
     .uploadToSignedUrl(prepared.upload.path, prepared.upload.token, file, {
       contentType: file.type || 'application/octet-stream',
       cacheControl: '3600',
     });
+  const [{ error }, ingestion] = await Promise.all([uploadPromise, ingestionPromise]);
   if (error) throw error;
 
-  const extractedText = await safeExtractText(file);
   const completed = await request('/api/workspace-documents', {
     method: 'POST',
-    body: JSON.stringify({ action: 'complete', id: prepared.document.id, extractedText }),
+    body: JSON.stringify({
+      action: 'complete',
+      id: prepared.document.id,
+      extractedText: ingestion.extractedText,
+      extractionStatus: ingestion.extractionStatus,
+      category: ingestion.category,
+      tags: ingestion.tags,
+      summary: ingestion.summary,
+      suggestedWorkspace: ingestion.suggestedWorkspace,
+      classificationConfidence: ingestion.classificationConfidence,
+      detectedEntities: ingestion.detectedEntities,
+      contentHash: ingestion.contentHash,
+    }),
   });
+  onIngestionProgress?.({ phase: 'complete', progress: 1, detail: 'Apollo indexing complete' });
   return completed.document;
 }
 
@@ -114,7 +127,11 @@ export async function uploadWorkspaceDocuments(options) {
   const uploaded = [];
   for (let index = 0; index < files.length; index += 1) {
     options.onProgress?.({ index, total: files.length, file: files[index] });
-    uploaded.push(await uploadWorkspaceDocument({ ...options, file: files[index] }));
+    uploaded.push(await uploadWorkspaceDocument({
+      ...options,
+      file: files[index],
+      onIngestionProgress: (progress) => options.onIngestionProgress?.({ ...progress, index, total: files.length, file: files[index] }),
+    }));
   }
   options.onProgress?.({ index: files.length, total: files.length, file: null });
   return uploaded;
