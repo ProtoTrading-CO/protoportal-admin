@@ -1178,4 +1178,19 @@ assert.equal(
 );
 console.log('✓ Product Loader image uploads carry deep subcategories (.2/.3/.4)');
 
+// Image Replace ("product replace") — full-depth cascading category filter so
+// every subcategory level is selectable, not just the top-level category.
+const birPanelSrc = readSrc('src/components/BulkImageReplacePanel.jsx');
+assert.match(birPanelSrc, /\[categoryId, sub1Id, sub2Id, sub3Id, sub4Id\]\.filter\(Boolean\)/, 'image replace builds a deep categoryPath from every level');
+assert.match(birPanelSrc, /All subcategories 4/, 'image replace renders the level-4 subcategory filter');
+assert.match(birPanelSrc, /const selectMainCategory =[\s\S]*?setSub4Id\(''\)/, 'image replace clears deeper filters when the main category changes');
+assert.doesNotMatch(birPanelSrc, /\(categoryId \? \[categoryId\] : \[\]\)/, 'image replace no longer filters by a single top-level category');
+// Single Image note no longer lists filename examples — just the original code
+const singleImgSrc = readSrc('src/components/productLoader/ProductLoaderSingleImage.jsx');
+assert.match(singleImgSrc, /original code/, 'single image note references the original code');
+assert.doesNotMatch(singleImgSrc, /ME039\.2\.jpg/, 'single image note drops the filename examples');
+// Make-live ("setting items to live") already offers unlimited-depth subcategories
+assert.match(pmEngineArchiveSrc, /Child category \{level\}/, 'make-live still offers every subcategory level');
+console.log('✓ Image Replace deep category filter + Single Image note + make-live depth');
+
 console.log('\nAll smoke checks passed.');

@@ -28,6 +28,21 @@ import {
 
 const STEPS = ['select', 'slot', 'preflight', 'run'];
 
+function findNode(tree, id) {
+  for (const n of tree || []) {
+    if (n.id === id) return n;
+    if (n.children?.length) {
+      const f = findNode(n.children, id);
+      if (f) return f;
+    }
+  }
+  return null;
+}
+
+function childrenOf(tree, id) {
+  return findNode(tree, id)?.children || [];
+}
+
 function StepTabs({ step }) {
   const idx = STEPS.indexOf(step);
   const labels = ['1. Select products', '2. Image slot', '3. Match folder', '4. Replace'];
@@ -55,6 +70,10 @@ function BulkImageReplacePanelInner({ taxonomyTree = [], onShowToast }) {
   const [searchInput, setSearchInput] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [categoryId, setCategoryId] = useState('');
+  const [sub1Id, setSub1Id] = useState('');
+  const [sub2Id, setSub2Id] = useState('');
+  const [sub3Id, setSub3Id] = useState('');
+  const [sub4Id, setSub4Id] = useState('');
   const [page, setPage] = useState(1);
   const [selectedMap, setSelectedMap] = useState(() => new Map());
   const [imageSlot, setImageSlot] = useState(1);
@@ -68,14 +87,32 @@ function BulkImageReplacePanelInner({ taxonomyTree = [], onShowToast }) {
     return () => clearTimeout(t);
   }, [searchInput]);
 
+  const categoryPath = useMemo(
+    () => [categoryId, sub1Id, sub2Id, sub3Id, sub4Id].filter(Boolean),
+    [categoryId, sub1Id, sub2Id, sub3Id, sub4Id],
+  );
+
   useEffect(() => {
     setPage(1);
-  }, [debouncedSearch, categoryId]);
+  }, [debouncedSearch, categoryPath]);
 
-  const categoryPath = useMemo(
-    () => (categoryId ? [categoryId] : []),
-    [categoryId],
-  );
+  const sub1Options = categoryId ? childrenOf(taxonomyTree, categoryId) : [];
+  const sub2Options = sub1Id ? childrenOf(taxonomyTree, sub1Id) : [];
+  const sub3Options = sub2Id ? childrenOf(taxonomyTree, sub2Id) : [];
+  const sub4Options = sub3Id ? childrenOf(taxonomyTree, sub3Id) : [];
+
+  const selectMainCategory = (v) => {
+    setCategoryId(v);
+    setSub1Id('');
+    setSub2Id('');
+    setSub3Id('');
+    setSub4Id('');
+    setPage(1);
+  };
+  const selectSub1 = (v) => { setSub1Id(v); setSub2Id(''); setSub3Id(''); setSub4Id(''); setPage(1); };
+  const selectSub2 = (v) => { setSub2Id(v); setSub3Id(''); setSub4Id(''); setPage(1); };
+  const selectSub3 = (v) => { setSub3Id(v); setSub4Id(''); setPage(1); };
+  const selectSub4 = (v) => { setSub4Id(v); setPage(1); };
 
   const catalogParams = useMemo(() => buildCatalogParams({
     status: scope === 'archived' ? 'archived' : 'live',
@@ -277,7 +314,7 @@ function BulkImageReplacePanelInner({ taxonomyTree = [], onShowToast }) {
             <select
               className="adm-select adm-select--enhanced"
               value={categoryId}
-              onChange={(e) => { setCategoryId(e.target.value); setPage(1); }}
+              onChange={(e) => selectMainCategory(e.target.value)}
               style={{ minWidth: 180 }}
             >
               <option value="">All categories</option>
@@ -285,6 +322,54 @@ function BulkImageReplacePanelInner({ taxonomyTree = [], onShowToast }) {
                 <option key={c.id} value={c.id}>{c.label}</option>
               ))}
             </select>
+            {sub1Options.length > 0 && (
+              <select
+                className="adm-select adm-select--enhanced"
+                value={sub1Id}
+                onChange={(e) => selectSub1(e.target.value)}
+                style={{ minWidth: 160 }}
+                aria-label="Subcategory"
+              >
+                <option value="">All subcategories</option>
+                {sub1Options.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+              </select>
+            )}
+            {sub2Options.length > 0 && (
+              <select
+                className="adm-select adm-select--enhanced"
+                value={sub2Id}
+                onChange={(e) => selectSub2(e.target.value)}
+                style={{ minWidth: 160 }}
+                aria-label="Subcategory 2"
+              >
+                <option value="">All subcategories 2</option>
+                {sub2Options.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+              </select>
+            )}
+            {sub3Options.length > 0 && (
+              <select
+                className="adm-select adm-select--enhanced"
+                value={sub3Id}
+                onChange={(e) => selectSub3(e.target.value)}
+                style={{ minWidth: 160 }}
+                aria-label="Subcategory 3"
+              >
+                <option value="">All subcategories 3</option>
+                {sub3Options.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+              </select>
+            )}
+            {sub4Options.length > 0 && (
+              <select
+                className="adm-select adm-select--enhanced"
+                value={sub4Id}
+                onChange={(e) => selectSub4(e.target.value)}
+                style={{ minWidth: 160 }}
+                aria-label="Subcategory 4"
+              >
+                <option value="">All subcategories 4</option>
+                {sub4Options.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+              </select>
+            )}
             <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={clearSelection} disabled={!selectedProducts.length}>
               Clear
             </button>
