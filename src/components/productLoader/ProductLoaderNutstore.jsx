@@ -15,6 +15,7 @@ import {
 import { readApiJson } from '../../lib/apiError.js';
 import { catalogueDisplayTitle, catalogueDescription, loaderCodeLabel } from '../../lib/productLoaderDisplay.js';
 import LoaderCodeEllipsis from './LoaderCodeEllipsis.jsx';
+import BatchCategoryPicker from './BatchCategoryPicker.jsx';
 
 function findNode(tree, id) {
   for (const n of tree) {
@@ -27,16 +28,18 @@ function findNode(tree, id) {
   return null;
 }
 
-function childrenOf(tree, id) {
-  return findNode(tree, id)?.children || [];
-}
-
-function categoryLabelsFromIds(tree, categoryId, sub1Id) {
+function categoryLabelsFromIds(tree, categoryId, sub1Id, sub2Id, sub3Id, sub4Id) {
   const catNode = findNode(tree, categoryId);
   const sub1Node = findNode(tree, sub1Id);
+  const sub2Node = findNode(tree, sub2Id);
+  const sub3Node = findNode(tree, sub3Id);
+  const sub4Node = findNode(tree, sub4Id);
   return {
     category: catNode?.label || '',
     subcategoryOne: sub1Node?.label || catNode?.label || '',
+    subcategoryTwo: sub2Node?.label || null,
+    subcategoryThree: sub3Node?.label || null,
+    subcategoryFour: sub4Node?.label || null,
   };
 }
 
@@ -174,6 +177,12 @@ export default function ProductLoaderNutstore({
   setBatchDefaultCategoryId,
   batchDefaultSub1Id,
   setBatchDefaultSub1Id,
+  batchDefaultSub2Id,
+  setBatchDefaultSub2Id,
+  batchDefaultSub3Id,
+  setBatchDefaultSub3Id,
+  batchDefaultSub4Id,
+  setBatchDefaultSub4Id,
   batchOverwrite,
   setBatchOverwrite,
   onShowToast,
@@ -198,8 +207,6 @@ export default function ProductLoaderNutstore({
   const [error, setError] = useState('');
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const resultsRef = useRef(null);
-
-  const batchSub1Options = batchDefaultCategoryId ? childrenOf(taxonomyTree, batchDefaultCategoryId) : [];
 
   const breadcrumbs = useMemo(
     () => relativeCrumbs(currentPath, libraryRoot, libraryLabel),
@@ -361,28 +368,42 @@ export default function ProductLoaderNutstore({
   };
 
   const buildProcessItems = (targetItems, action) => {
-    const labels = categoryLabelsFromIds(taxonomyTree, batchDefaultCategoryId, batchDefaultSub1Id);
+    const labels = categoryLabelsFromIds(
+      taxonomyTree,
+      batchDefaultCategoryId,
+      batchDefaultSub1Id,
+      batchDefaultSub2Id,
+      batchDefaultSub3Id,
+      batchDefaultSub4Id,
+    );
     return targetItems
       // Archive accepts unmatched codes too — they land in the archive as
       // placeholders and get their data allocated once the code is fixed.
       .filter((i) => i.code && (i.group === 'ready' || i.group === 'needs_review'
         || (action === 'archive' && i.group === 'not_found')))
-      .map((item) => ({
-        path: item.path,
-        filename: item.filename,
-        code: item.code,
-        displayCode: item.displayCode,
-        title: catalogueDisplayTitle(item),
-        price: item.price ?? item.sqlRow?.price ?? 0,
-        description: catalogueDescription(item),
-        category: item.websiteRow?.category || (action === 'publish' ? labels.category : labels.category || ''),
-        subcategoryOne: item.websiteRow?.subcategory_one || (action === 'publish' ? labels.subcategoryOne : labels.subcategoryOne || ''),
-        subcategoryTwo: item.websiteRow?.subcategory_two || null,
-        sqlRow: item.sqlRow,
-        websiteRow: item.websiteRow,
-        warnings: item.warnings,
-        overwriteImage: batchOverwrite,
-      }));
+      .map((item) => {
+        // Existing website products keep their own category path; new products
+        // take the admin-picked default chain (parent → sub 1..4).
+        const onWebsite = Boolean(item.websiteRow?.category);
+        return {
+          path: item.path,
+          filename: item.filename,
+          code: item.code,
+          displayCode: item.displayCode,
+          title: catalogueDisplayTitle(item),
+          price: item.price ?? item.sqlRow?.price ?? 0,
+          description: catalogueDescription(item),
+          category: onWebsite ? item.websiteRow.category : labels.category,
+          subcategoryOne: onWebsite ? (item.websiteRow.subcategory_one || item.websiteRow.category) : labels.subcategoryOne,
+          subcategoryTwo: onWebsite ? (item.websiteRow.subcategory_two || null) : labels.subcategoryTwo,
+          subcategoryThree: onWebsite ? (item.websiteRow.subcategory_three || null) : labels.subcategoryThree,
+          subcategoryFour: onWebsite ? (item.websiteRow.subcategory_four || null) : labels.subcategoryFour,
+          sqlRow: item.sqlRow,
+          websiteRow: item.websiteRow,
+          warnings: item.warnings,
+          overwriteImage: batchOverwrite,
+        };
+      });
   };
 
   const runProcess = async (action, targetItems) => {
@@ -729,22 +750,21 @@ export default function ProductLoaderNutstore({
                 Publish only: pick a default category for new products. Archive uses Positill data and tags items as Nutstore in Product Manager → Archive.
               </p>
               <div className="pl-inline-fields">
-                <label>
-                  Default category (new products)
-                  <select className="adm-select adm-select--enhanced" value={batchDefaultCategoryId} onChange={(e) => { setBatchDefaultCategoryId(e.target.value); setBatchDefaultSub1Id(''); }}>
-                    <option value="">— Select if needed —</option>
-                    {taxonomyTree.map((cat) => <option key={cat.id} value={cat.id}>{cat.label}</option>)}
-                  </select>
-                </label>
-                {batchSub1Options.length > 0 && (
-                  <label>
-                    Default subcategory
-                    <select className="adm-select adm-select--enhanced" value={batchDefaultSub1Id} onChange={(e) => setBatchDefaultSub1Id(e.target.value)}>
-                      <option value="">— Optional —</option>
-                      {batchSub1Options.map((opt) => <option key={opt.id} value={opt.id}>{opt.label}</option>)}
-                    </select>
-                  </label>
-                )}
+                <BatchCategoryPicker
+                  taxonomyTree={taxonomyTree}
+                  categoryLabel="Default category (new products)"
+                  categoryPlaceholder="— Select if needed —"
+                  categoryId={batchDefaultCategoryId}
+                  setCategoryId={setBatchDefaultCategoryId}
+                  sub1Id={batchDefaultSub1Id}
+                  setSub1Id={setBatchDefaultSub1Id}
+                  sub2Id={batchDefaultSub2Id}
+                  setSub2Id={setBatchDefaultSub2Id}
+                  sub3Id={batchDefaultSub3Id}
+                  setSub3Id={setBatchDefaultSub3Id}
+                  sub4Id={batchDefaultSub4Id}
+                  setSub4Id={setBatchDefaultSub4Id}
+                />
                 <label className="pl-check">
                   <input type="checkbox" checked={batchOverwrite} onChange={(e) => setBatchOverwrite(e.target.checked)} />
                   Replace image if slot already filled

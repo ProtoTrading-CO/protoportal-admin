@@ -110,6 +110,9 @@ export async function publishLoaderImageItem(item, {
   findNode,
   defaultCategoryId,
   defaultSub1Id,
+  defaultSub2Id,
+  defaultSub3Id,
+  defaultSub4Id,
   overwrite,
   filename,
 }) {
@@ -122,17 +125,25 @@ export async function publishLoaderImageItem(item, {
 
   const uploadJson = await uploadLoaderImage(item);
 
-  const catId = item.websiteRow?.category
-    ? (taxonomyTree.find((c) => c.label === item.websiteRow.category)?.id || defaultCategoryId)
-    : defaultCategoryId;
-  const sub1IdForItem = item.websiteRow?.subcategory_one
-    ? ((findNode(taxonomyTree, catId)?.children || []).find((c) => c.label === item.websiteRow.subcategory_one)?.id || defaultSub1Id)
-    : defaultSub1Id;
-
-  const catNode = findNode(taxonomyTree, catId);
-  const sub1Node = findNode(taxonomyTree, sub1IdForItem);
-  const categoryLabel = catNode?.label || item.websiteRow?.category || '';
-  const sub1Label = sub1Node?.label || item.websiteRow?.subcategory_one || categoryLabel;
+  // A product already on the website keeps its own full category path so a
+  // re-publish (e.g. adding an image slot) never flattens its deep subcategory.
+  // A new product takes the admin-picked default chain (parent → sub 1..4).
+  const onWebsite = Boolean(item.websiteRow?.category);
+  const categoryLabel = onWebsite
+    ? item.websiteRow.category
+    : (findNode(taxonomyTree, defaultCategoryId)?.label || '');
+  const sub1Label = onWebsite
+    ? (item.websiteRow.subcategory_one || categoryLabel)
+    : (findNode(taxonomyTree, defaultSub1Id)?.label || categoryLabel);
+  const sub2Label = onWebsite
+    ? (item.websiteRow.subcategory_two || null)
+    : (findNode(taxonomyTree, defaultSub2Id)?.label || null);
+  const sub3Label = onWebsite
+    ? (item.websiteRow.subcategory_three || null)
+    : (findNode(taxonomyTree, defaultSub3Id)?.label || null);
+  const sub4Label = onWebsite
+    ? (item.websiteRow.subcategory_four || null)
+    : (findNode(taxonomyTree, defaultSub4Id)?.label || null);
 
   if (!categoryLabel) throw new Error('No category available');
 
@@ -153,7 +164,9 @@ export async function publishLoaderImageItem(item, {
       overwriteImage: overwrite || item.warnings?.includes('image_exists'),
       category: categoryLabel,
       subcategoryOne: sub1Label,
-      subcategoryTwo: item.websiteRow?.subcategory_two || null,
+      subcategoryTwo: sub2Label,
+      subcategoryThree: sub3Label,
+      subcategoryFour: sub4Label,
       description: item.descriptionOverride || catalogueDescription(item),
       sqlRow: item.sqlRow || null,
       websiteRow: item.websiteRow || null,

@@ -82,6 +82,8 @@ async function publishOne(sb, item, { overwriteImage }) {
     category,
     subcategory_one: subcategoryOne,
     subcategory_two: item.subcategoryTwo || item.subcategory_two || null,
+    subcategory_three: item.subcategoryThree || item.subcategory_three || null,
+    subcategory_four: item.subcategoryFour || item.subcategory_four || null,
     original_description: description,
     [imageField]: imageUrl,
     updated_at: now,
@@ -197,6 +199,8 @@ async function archiveOne(sb, item) {
       category: payload.category,
       subcategory_one: payload.subcategory_one,
       subcategory_two: payload.subcategory_two,
+      subcategory_three: payload.subcategory_three,
+      subcategory_four: payload.subcategory_four,
       original_description: payload.original_description,
       updated_at: now,
     };

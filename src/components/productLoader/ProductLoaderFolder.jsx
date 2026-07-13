@@ -12,6 +12,7 @@ import { exportBatchReportCsv, isImageFile } from '../../lib/parseIntakeFilename
 import { archiveLoaderImageItem, lookupFilenames, logPublishFailure, publishLoaderImageItem } from '../../lib/productLoaderApi';
 import { catalogueDisplayTitle, loaderCodeLabel } from '../../lib/productLoaderDisplay.js';
 import LoaderCodeEllipsis from './LoaderCodeEllipsis.jsx';
+import BatchCategoryPicker from './BatchCategoryPicker.jsx';
 
 function findNode(tree, id) {
   for (const n of tree) {
@@ -22,10 +23,6 @@ function findNode(tree, id) {
     }
   }
   return null;
-}
-
-function childrenOf(tree, id) {
-  return findNode(tree, id)?.children || [];
 }
 
 const GROUP_LABELS = {
@@ -59,6 +56,12 @@ export default function ProductLoaderFolder({
   setBatchDefaultCategoryId,
   batchDefaultSub1Id,
   setBatchDefaultSub1Id,
+  batchDefaultSub2Id,
+  setBatchDefaultSub2Id,
+  batchDefaultSub3Id,
+  setBatchDefaultSub3Id,
+  batchDefaultSub4Id,
+  setBatchDefaultSub4Id,
   batchOverwrite,
   setBatchOverwrite,
   onShowToast,
@@ -72,8 +75,6 @@ export default function ProductLoaderFolder({
   const [startedAt, setStartedAt] = useState(null);
   const [elapsedMs, setElapsedMs] = useState(0);
   const [stats, setStats] = useState({ published: 0, dormant: 0, failed: 0 });
-
-  const batchSub1Options = batchDefaultCategoryId ? childrenOf(taxonomyTree, batchDefaultCategoryId) : [];
 
   const grouped = useMemo(() => ({
     ready: items.filter((i) => i.group === 'ready'),
@@ -141,6 +142,9 @@ export default function ProductLoaderFolder({
           findNode,
           defaultCategoryId: batchDefaultCategoryId,
           defaultSub1Id: batchDefaultSub1Id,
+          defaultSub2Id: batchDefaultSub2Id,
+          defaultSub3Id: batchDefaultSub3Id,
+          defaultSub4Id: batchDefaultSub4Id,
           overwrite: batchOverwrite,
         });
         published += 1;
@@ -296,22 +300,21 @@ export default function ProductLoaderFolder({
           {renderGroup('not_found')}
 
           <div className="pl-inline-fields">
-            <label>
-              Default category (new products)
-              <select className="adm-select adm-select--enhanced" value={batchDefaultCategoryId} onChange={(e) => { setBatchDefaultCategoryId(e.target.value); setBatchDefaultSub1Id(''); }}>
-                <option value="">— Select if needed —</option>
-                {taxonomyTree.map((cat) => <option key={cat.id} value={cat.id}>{cat.label}</option>)}
-              </select>
-            </label>
-            {batchSub1Options.length > 0 && (
-              <label>
-                Default subcategory
-                <select className="adm-select adm-select--enhanced" value={batchDefaultSub1Id} onChange={(e) => setBatchDefaultSub1Id(e.target.value)}>
-                  <option value="">— Optional —</option>
-                  {batchSub1Options.map((opt) => <option key={opt.id} value={opt.id}>{opt.label}</option>)}
-                </select>
-              </label>
-            )}
+            <BatchCategoryPicker
+              taxonomyTree={taxonomyTree}
+              categoryLabel="Default category (new products)"
+              categoryPlaceholder="— Select if needed —"
+              categoryId={batchDefaultCategoryId}
+              setCategoryId={setBatchDefaultCategoryId}
+              sub1Id={batchDefaultSub1Id}
+              setSub1Id={setBatchDefaultSub1Id}
+              sub2Id={batchDefaultSub2Id}
+              setSub2Id={setBatchDefaultSub2Id}
+              sub3Id={batchDefaultSub3Id}
+              setSub3Id={setBatchDefaultSub3Id}
+              sub4Id={batchDefaultSub4Id}
+              setSub4Id={setBatchDefaultSub4Id}
+            />
             <label className="pl-check">
               <input type="checkbox" checked={batchOverwrite} onChange={(e) => setBatchOverwrite(e.target.checked)} />
               Replace images if slot already filled

@@ -1142,4 +1142,40 @@ assert.match(adminCustPreReg, /name: name \|\| email,/, 'pre-reg name falls back
 assert.match(adminCustPreReg, /\? Number\(b\.sales_last_12_months\) \|\| 0 : 0,/, 'pre-reg sales_last_12_months defaults to 0 (NOT NULL)');
 console.log('✓ Add customer: styled inputs + all NOT NULL columns handled');
 
+// Product Loader image uploads — full-depth category picker (subcategory .2/.3/.4)
+// A shared cascading picker renders every level beneath the current selection so
+// a deep path (e.g. Textiles → Ribbons → Satin → 25mm) can be chosen, and the
+// publish path carries all four levels through to website_stock.
+const batchPickerSrc = readSrc('src/components/productLoader/BatchCategoryPicker.jsx');
+assert.match(batchPickerSrc, /Subcategory 2/, 'batch picker renders subcategory level 2');
+assert.match(batchPickerSrc, /Subcategory 3/, 'batch picker renders subcategory level 3');
+assert.match(batchPickerSrc, /Subcategory 4/, 'batch picker renders subcategory level 4');
+assert.match(batchPickerSrc, /setSub2Id\(''\)[\s\S]*?setSub3Id\(''\)[\s\S]*?setSub4Id\(''\)/, 'batch picker resets deeper levels when a parent changes');
+for (const comp of [
+  'src/components/productLoader/ProductLoaderFolder.jsx',
+  'src/components/productLoader/ProductLoaderSingleImage.jsx',
+  'src/components/productLoader/ProductLoaderNutstore.jsx',
+]) {
+  const src = readSrc(comp);
+  assert.match(src, /BatchCategoryPicker/, `${comp} uses the shared deep-category picker`);
+  assert.match(src, /batchDefaultSub4Id/, `${comp} threads the level-4 default through`);
+}
+const folderDeepSrc = readSrc('src/components/productLoader/ProductLoaderFolder.jsx');
+assert.match(folderDeepSrc, /defaultSub2Id: batchDefaultSub2Id[\s\S]*?defaultSub4Id: batchDefaultSub4Id/, 'folder publish passes deep defaults to publishLoaderImageItem');
+const plApiDeepSrc = readSrc('src/lib/productLoaderApi.js');
+assert.match(plApiDeepSrc, /subcategoryThree: sub3Label/, 'publish API helper posts subcategoryThree');
+assert.match(plApiDeepSrc, /subcategoryFour: sub4Label/, 'publish API helper posts subcategoryFour');
+const plPublishDeepSrc = readSrc('api/product-loader-publish.js');
+assert.match(plPublishDeepSrc, /subcategory_three: subcategoryThree \? String\(subcategoryThree\)\.trim\(\) : null/, 'publish endpoint writes subcategory_three');
+assert.match(plPublishDeepSrc, /subcategory_four: subcategoryFour \? String\(subcategoryFour\)\.trim\(\) : null/, 'publish endpoint writes subcategory_four');
+assert.match(plPublishDeepSrc, /subcategory_three: patch\.subcategory_three \|\| null/, 'publish create inserts subcategory_three');
+const nutstoreDeepSrc = readSrc('api/nutstore-process.js');
+assert.match(nutstoreDeepSrc, /subcategory_three: item\.subcategoryThree \|\| item\.subcategory_three \|\| null,\n    subcategory_four/, 'nutstore publish patch carries subcategory_three/four');
+assert.equal(
+  spawnSync('node', ['--check', join(REPO_ROOT, 'api/product-loader-publish.js')], { encoding: 'utf8' }).status,
+  0,
+  'product-loader-publish.js passes node --check',
+);
+console.log('✓ Product Loader image uploads carry deep subcategories (.2/.3/.4)');
+
 console.log('\nAll smoke checks passed.');
