@@ -21,6 +21,9 @@ export default function ApolloOperationalBrief({
   onSend,
   chatBusy,
   chatError,
+  messages = [],
+  onFixLast,
+  onClearChat,
 }) {
   const inboxItems = useMemo(
     () => buildApolloInboxItems(context || {}, { limit: 8 }),
@@ -66,6 +69,9 @@ export default function ApolloOperationalBrief({
       onSend={onSend}
       busy={chatBusy}
       error={chatError}
+      messages={messages}
+      onFixLast={onFixLast}
+      onClearChat={onClearChat}
       onSelectInbox={handleInboxSelect}
       onReviewNotification={onReviewNotification}
     />
