@@ -10,6 +10,7 @@ import { biRun, biFormat, buildDailyBriefContext, formatDailyBriefContext } from
 import { tryProductContextRoute } from './apollo-product-route.js';
 import { getPortalAdminClient } from './_site-config.js';
 import { handleApolloAction } from './intelligence/apollo-action-engine/index.js';
+import { loadWorkspaceDocumentIndex } from './_workspace-document-store.js';
 
 const MODEL = 'google/gemini-2.5-flash';
 
@@ -80,6 +81,69 @@ Your **Daily Brief** loads when you open this tab. Ask me things like:
 - *Morning brief*
 
 I'll answer from live portal and stock data — not guesses.`;
+}
+
+function isWorkspaceDocumentQuery(query) {
+  return /\b(document|documents|file|files|attachment|attachments|pdf|invoice|invoices|quote|quotes|contract|contracts|spreadsheet|spreadsheets|upload|uploaded)\b/i.test(String(query || ''));
+}
+
+function documentSearchTerms(query) {
+  const ignored = new Set([
+    'show', 'find', 'what', 'which', 'where', 'when', 'have', 'with', 'from', 'that',
+    'document', 'documents', 'file', 'files', 'attachment', 'attachments', 'uploaded', 'upload',
+    'apollo', 'please', 'about', 'into', 'workspace', 'workspaces',
+  ]);
+  return [...new Set(String(query || '')
+    .toLowerCase()
+    .match(/[a-z0-9][a-z0-9_-]{2,}/g) || [])]
+    .filter((term) => !ignored.has(term));
+}
+
+async function answerFromWorkspaceDocuments(query) {
+  if (!isWorkspaceDocumentQuery(query)) return null;
+  const supabase = getPortalAdminClient();
+  const data = (await loadWorkspaceDocumentIndex(supabase))
+    .filter((document) => document.upload_status === 'available' && !document.deleted_at)
+    .slice(0, 500);
+
+  const terms = documentSearchTerms(query);
+  const requestedWorkspace = ['orders', 'customers', 'suppliers', 'containers', 'buying']
+    .find((workspace) => new RegExp(`\\b${workspace}\\b`, 'i').test(query));
+  const ranked = (data || [])
+    .map((document) => {
+      if (requestedWorkspace && document.workspace_type !== requestedWorkspace) return null;
+      const searchable = [
+        document.title, document.filename, document.category, document.notes,
+        ...(document.tags || []), document.extracted_text,
+      ].filter(Boolean).join(' ').toLowerCase();
+      const score = terms.reduce((total, term) => total + (searchable.includes(term) ? 1 : 0), 0);
+      return { document, score, searchable };
+    })
+    .filter(Boolean)
+    .filter((row) => !terms.length || row.score > 0)
+    .sort((a, b) => b.score - a.score || new Date(b.document.uploaded_at || b.document.created_at) - new Date(a.document.uploaded_at || a.document.created_at))
+    .slice(0, 12);
+
+  if (!ranked.length) {
+    return {
+      reply: `## Workspace documents\n\nI could not find a current document matching **${query.replace(/[*_`]/g, '')}** in the private Apollo vault. Try the filename, supplier/customer name, document type or workspace.`,
+      source: 'workspace-documents',
+      intent: 'workspace_document_search',
+    };
+  }
+
+  const lines = ranked.map(({ document }) => {
+    const name = document.title || document.filename;
+    const version = document.version > 1 ? ` · v${document.version}` : '';
+    const record = document.record_id ? ' · linked record' : '';
+    const searchable = document.extraction_status === 'ready' ? ' · text searchable' : '';
+    return `- **${name}** — ${document.workspace_type} / ${document.category}${version}${record}${searchable}`;
+  });
+  return {
+    reply: `## Workspace documents\n\n${lines.join('\n')}\n\nSource: private Apollo document vault. Open the relevant Work workspace to preview or download a file.`,
+    source: 'workspace-documents',
+    intent: 'workspace_document_search',
+  };
 }
 
 async function answerFromExperience(userQuery, actorEmail) {
@@ -352,9 +416,6 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: err.message || 'Apollo action failed' });
   }
 
-  const apiKey = process.env.OPENROUTER_API_KEY;
-  if (!apiKey) return res.status(500).json({ error: 'OPENROUTER_API_KEY is not configured' });
-
   if (isGreeting(userQuery)) {
     return res.status(200).json({
       reply: greetingReply(),
@@ -363,6 +424,18 @@ export default async function handler(req, res) {
       indexedAt: new Date().toISOString(),
     });
   }
+
+  try {
+    const documentAnswer = await answerFromWorkspaceDocuments(userQuery);
+    if (documentAnswer) {
+      return res.status(200).json({ ...documentAnswer, indexedAt: new Date().toISOString() });
+    }
+  } catch (error) {
+    console.error('apollo workspace documents:', error?.message || error);
+  }
+
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) return res.status(500).json({ error: 'OPENROUTER_API_KEY is not configured' });
 
   try {
     const actorEmail = req.headers['x-admin-email'] || 'apollo';

@@ -16,8 +16,8 @@ import OrdersWorkspacePanel from './OrdersWorkspacePanel.jsx';
 function WorkShell({ children, chatPanel }) {
   return (
     <div className="apollo-cc-work-shell">
+      <div className="apollo-cc-work-shell-command">{chatPanel}</div>
       <div className="apollo-cc-work-shell-main">{children}</div>
-      <div className="apollo-cc-work-shell-rail">{chatPanel}</div>
     </div>
   );
 }
@@ -64,6 +64,10 @@ export default function ApolloCommandCentre({
 }) {
   const [activeMode, setActiveMode] = useState(APOLLO_COMMAND_DEFAULT_MODE);
   const [activeWorkObject, setActiveWorkObject] = useState(null);
+  const [recentWorkObject, setRecentWorkObject] = useState(() => {
+    try { return window.localStorage.getItem('apollo-recent-work-object') || 'orders'; }
+    catch { return 'orders'; }
+  });
   const hour = new Date().getHours();
   const greeting = greetingForHour(hour);
 
@@ -109,6 +113,8 @@ export default function ApolloCommandCentre({
   const selectWorkObject = (objectId) => {
     setActiveMode('work');
     setActiveWorkObject(objectId);
+    setRecentWorkObject(objectId);
+    try { window.localStorage.setItem('apollo-recent-work-object', objectId); } catch { /* Storage is optional. */ }
   };
 
   const backToWorkGateway = () => setActiveWorkObject(null);
@@ -116,9 +122,20 @@ export default function ApolloCommandCentre({
   const renderWork = () => {
     if (!activeWorkObject) {
       return (
-        <WorkShell chatPanel={chatPanel}>
-          <ApolloWorkGateway onSelectWorkObject={selectWorkObject} />
-        </WorkShell>
+        <ApolloWorkGateway
+          onSelectWorkObject={selectWorkObject}
+          context={briefContext}
+          recentWorkObjectId={recentWorkObject}
+          userName={userName}
+          input={chatInput}
+          onInputChange={onChatInputChange}
+          onSend={onSend}
+          busy={chatBusy}
+          error={chatError}
+          messages={messages}
+          onFixLast={onFixLast}
+          onClearChat={onClearChat}
+        />
       );
     }
 
@@ -134,7 +151,7 @@ export default function ApolloCommandCentre({
 
     return (
       <WorkShell chatPanel={chatPanel}>
-        <ApolloWorkObjectPreview objectId={activeWorkObject} onBack={backToWorkGateway} />
+        <ApolloWorkObjectPreview objectId={activeWorkObject} onBack={backToWorkGateway} onShowToast={onShowToast} />
       </WorkShell>
     );
   };

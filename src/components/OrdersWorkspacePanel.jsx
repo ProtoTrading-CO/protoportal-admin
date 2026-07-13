@@ -12,6 +12,7 @@ import {
   listOrderWorkspaces,
   updateOrderWorkspace,
 } from '../lib/orderWorkspaces';
+import WorkspaceDocuments from './WorkspaceDocuments.jsx';
 
 const STATUSES = ['Draft', 'Pending Review', 'Quoted', 'Waiting Supplier', 'Ordered', 'Waiting Arrival', 'Ready', 'Delivered', 'Closed'];
 
@@ -323,19 +324,13 @@ export default function OrdersWorkspacePanel({ initialWorkspaceId = '', onShowTo
               </section>
 
               <section className="ow-card">
-                <h3>Files</h3>
-                {(workspace.files || []).length ? (
-                  (workspace.files || []).map((file) => (
-                    <div key={file.id} className="ow-mini-row">
-                      <FileText size={14} />
-                      <span>{file.filename} · {file.file_type || 'Attachment'} · {fmtTime(file.uploaded_at)}</span>
-                    </div>
-                  ))
-                ) : (
-                  <p className="adm-muted" style={{ fontSize: 13, margin: 0 }}>
-                    No files attached yet. Excel upload is the next input method after the durable manual workflow.
-                  </p>
-                )}
+                <WorkspaceDocuments
+                  workspaceType="orders"
+                  recordId={workspace.id}
+                  scopeLabel={workspaceTitle(workspace)}
+                  onShowToast={onShowToast}
+                  compact
+                />
               </section>
 
               <section className="ow-card">
@@ -401,4 +396,3 @@ export default function OrdersWorkspacePanel({ initialWorkspaceId = '', onShowTo
     </div>
   );
 }
-

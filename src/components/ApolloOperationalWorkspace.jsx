@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import ApolloChatPanel from './ApolloChatPanel.jsx';
+import WorkspaceDocuments from './WorkspaceDocuments.jsx';
 
 const TABS = [
   { id: 'conversation', label: 'Conversation' },
@@ -99,9 +100,11 @@ export default function ApolloOperationalWorkspace({
           />
         )}
         {activeTab === 'attachments' && (
-          <PlaceholderPane
-            title="Attachments"
-            detail="Files and documents linked to this work."
+          <WorkspaceDocuments
+            workspaceType={item?.workspaceType || item?.workType?.id || 'orders'}
+            recordId={item?.workspaceId || item?.id || ''}
+            scopeLabel={who}
+            compact
           />
         )}
       </div>
