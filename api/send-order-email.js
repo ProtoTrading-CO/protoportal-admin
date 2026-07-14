@@ -88,7 +88,6 @@ function buildEmailHtml({
     : '';
 
   const showPrices = hasPrices && items.some((item) => !item.removed);
-  const pickCell = '<td style="padding:12px;text-align:center"><span style="display:inline-block;width:16px;height:16px;border:2px solid #64748b;border-radius:3px;background:#ffffff"></span></td>';
   const noteSections = buildOrderNoteSections({ assignedTo, autoNotes, userNotes, customerNotes });
 
   const customerBlock = customerDetails.length ? `
@@ -116,7 +115,6 @@ function buildEmailHtml({
           <td style="padding:12px;font-size:14px;color:#94a3b8;text-decoration:line-through;line-height:1.45">${escapeHtml(item.name, '—')}</td>
           <td style="padding:12px;text-align:center;font-size:13px;color:#94a3b8;text-decoration:line-through">${item.originalQty ?? item.qty}</td>
           <td style="padding:12px;text-align:center"><span style="font-size:11px;font-weight:700;color:#dc2626;background:#fee2e2;padding:4px 10px;border-radius:6px">0</span></td>
-          ${pickCell}
           ${showPrices ? '<td style="padding:12px;text-align:right;color:#94a3b8">—</td>' : ''}
         </tr>`;
     }
@@ -136,7 +134,6 @@ function buildEmailHtml({
         </td>
         <td style="padding:12px;text-align:center;font-size:13px;color:#94a3b8">${item.originalQty != null ? item.originalQty : item.qty}</td>
         <td style="padding:12px;text-align:center;font-weight:800;font-size:14px;color:#0f172a">${stockQty}</td>
-        ${pickCell}
         ${lineTotal != null ? `<td style="padding:12px;text-align:right;font-size:13px">R${lineTotal}</td>` : ''}
       </tr>`;
   }).join('');
@@ -203,7 +200,6 @@ function buildEmailHtml({
           <th style="padding:12px;text-align:left;font-size:10px;font-weight:800;color:#ffffff;text-transform:uppercase;letter-spacing:0.06em;background:#111111;border-bottom:2px solid #c40000">Product</th>
           <th style="padding:12px;text-align:center;font-size:10px;font-weight:800;color:#ffffff;text-transform:uppercase;letter-spacing:0.06em;background:#111111;border-bottom:2px solid #c40000">Ordered</th>
           <th style="padding:12px;text-align:center;font-size:10px;font-weight:800;color:#ffffff;text-transform:uppercase;letter-spacing:0.06em;background:#c40000;border-bottom:2px solid #c40000">Stock<br>Available</th>
-          <th style="padding:12px;text-align:center;font-size:10px;font-weight:800;color:#ffffff;text-transform:uppercase;letter-spacing:0.06em;width:44px;background:#111111;border-bottom:2px solid #c40000">Pick</th>
           ${showPrices ? '<th style="padding:12px;text-align:right;font-size:10px;font-weight:800;color:#ffffff;text-transform:uppercase;letter-spacing:0.06em;background:#111111;border-bottom:2px solid #c40000">Total</th>' : ''}
         </tr>
       </thead>
