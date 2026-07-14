@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "protoBuyingData": {
+      "type": "http",
+      "url": "https://admin.proto.co.za/api/proto-buying-mcp",
+      "bearer_token_env_var": "PROTO_BUYING_MCP_TOKEN"
+    }
+  }
+}
