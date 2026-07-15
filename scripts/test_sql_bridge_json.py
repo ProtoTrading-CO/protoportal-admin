@@ -35,6 +35,12 @@ if _bridge_spec is None or _bridge_spec.loader is None:
     raise RuntimeError("Unable to load sql-stmast-bridge.py")
 _bridge = module_from_spec(_bridge_spec)
 _bridge_spec.loader.exec_module(_bridge)
+
+_catalogue_spec = spec_from_file_location("sql_report_catalogue", SCRIPT_DIR / "sql_report_catalogue.py")
+if _catalogue_spec is None or _catalogue_spec.loader is None:
+    raise RuntimeError("Unable to load sql_report_catalogue.py")
+_catalogue = module_from_spec(_catalogue_spec)
+_catalogue_spec.loader.exec_module(_catalogue)
 encode_json_payload = _bridge.encode_json_payload
 row_to_dict = _bridge.row_to_dict
 sanitize_for_json = _bridge.sanitize_for_json
@@ -172,6 +178,40 @@ class TestFixedBridgeJson(unittest.TestCase):
             server.server_close()
             _bridge.BRIDGE_KEY = old_key
             _bridge.verify_database_connection = old_verify
+
+
+class TestSqlReportCatalogue(unittest.TestCase):
+    def test_lists_five_approved_reports(self):
+        report_ids = [item["id"] for item in _catalogue.list_reports()]
+        self.assertEqual(report_ids, [
+            "inventory.product_lookup",
+            "inventory.stock_by_department",
+            "sales.top_products",
+            "sales.product_monthly",
+            "sales.invoice_lines",
+        ])
+
+    def test_rejects_unknown_parameters(self):
+        with self.assertRaises(_catalogue.ReportValidationError):
+            _catalogue.validate_report_params("sales.product_monthly", {
+                "sku": "8612200123",
+                "extra": True,
+            })
+
+    def test_reports_endpoint_is_read_only(self):
+        old_key = _bridge.BRIDGE_KEY
+        _bridge.BRIDGE_KEY = ""
+        server = HTTPServer(("127.0.0.1", 0), _bridge.Handler)
+        worker = threading.Thread(target=server.handle_request, daemon=True)
+        worker.start()
+        try:
+            with urlopen(f"http://127.0.0.1:{server.server_port}/reports", timeout=3) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+            self.assertTrue(payload["readOnly"])
+            self.assertEqual(len(payload["reports"]), 5)
+        finally:
+            server.server_close()
+            _bridge.BRIDGE_KEY = old_key
 
 
 class TestLiveStmastSql(unittest.TestCase):

@@ -9,17 +9,21 @@ param(
   [System.Management.Automation.PSCredential]$Credential
 )
 
-# Deploys one self-contained Python file, then restarts only the process that
-# currently owns the bridge port. It never reboots BLADERUNNER or SQL Server.
+# Deploys bridge + report catalogue to the same folder, then restarts only the
+# process that currently owns the bridge port. It never reboots BLADERUNNER or SQL Server.
 $ErrorActionPreference = 'Stop'
 $sourceScript = Join-Path $PSScriptRoot 'sql-stmast-bridge.py'
+$catalogueScript = Join-Path $PSScriptRoot 'sql_report_catalogue.py'
 if (-not (Test-Path -LiteralPath $sourceScript)) {
   throw "Missing bridge source file: $sourceScript"
+}
+if (-not (Test-Path -LiteralPath $catalogueScript)) {
+  throw "Missing report catalogue file: $catalogueScript"
 }
 
 $gitCommit = (git -C (Split-Path -Parent $PSScriptRoot) rev-parse --short=12 HEAD).Trim()
 if (-not $gitCommit) { $gitCommit = 'not-stamped' }
-$dirtyBridge = git -C (Split-Path -Parent $PSScriptRoot) status --porcelain -- scripts/sql-stmast-bridge.py
+$dirtyBridge = git -C (Split-Path -Parent $PSScriptRoot) status --porcelain -- scripts/sql-stmast-bridge.py scripts/sql_report_catalogue.py
 if ($dirtyBridge) { $gitCommit = "$gitCommit-dirty" }
 $buildDate = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
 
@@ -30,15 +34,20 @@ $session = New-PSSession @sessionParams
 try {
   Write-Host "Copying self-contained bridge to $ComputerName..." -ForegroundColor Cyan
   Copy-Item -LiteralPath $sourceScript -Destination $DestinationScriptPath -ToSession $session -Force
+  $destinationCatalogue = Join-Path (Split-Path -Parent $DestinationScriptPath) 'sql_report_catalogue.py'
+  Copy-Item -LiteralPath $catalogueScript -Destination $destinationCatalogue -ToSession $session -Force
 
   $report = Invoke-Command -Session $session -ArgumentList @(
-    $DestinationScriptPath, $PythonPath, $Sku, $SalesPeriod, $gitCommit, $buildDate
+    $DestinationScriptPath, $destinationCatalogue, $PythonPath, $Sku, $SalesPeriod, $gitCommit, $buildDate
   ) -ScriptBlock {
-    param($bridgePath, $pythonPath, $sku, $salesPeriod, $buildCommit, $buildDateUtc)
+    param($bridgePath, $cataloguePath, $pythonPath, $sku, $salesPeriod, $buildCommit, $buildDateUtc)
 
     $ErrorActionPreference = 'Stop'
     if (-not (Test-Path -LiteralPath $bridgePath)) {
       throw "Bridge copy missing: $bridgePath"
+    }
+    if (-not (Test-Path -LiteralPath $cataloguePath)) {
+      throw "Report catalogue copy missing: $cataloguePath"
     }
     if (-not (Test-Path -LiteralPath $pythonPath)) {
       throw "Python not found: $pythonPath"
@@ -111,6 +120,23 @@ try {
       throw "/top-sellers response has no items array"
     }
 
+    $reports = Invoke-RestMethod -Uri "$baseUrl/reports" -Method GET -Headers $headers -TimeoutSec 10
+    if (-not $reports.reports -or $reports.readOnly -ne $true) {
+      throw "/reports failed validation"
+    }
+
+    $reportRun = Invoke-RestMethod -Uri "$baseUrl/reports/run" -Method POST -Headers $headers `
+      -Body (@{
+        reportId = 'inventory.product_lookup'
+        params = @{ sku = $sku }
+      } | ConvertTo-Json -Compress) -TimeoutSec 25
+    if ($reportRun.readOnly -ne $true -or $reportRun.meta.readOnly -ne $true) {
+      throw "/reports/run failed readOnly validation"
+    }
+    if (-not $reportRun.reportId) {
+      throw "/reports/run failed validation"
+    }
+
     [pscustomobject]@{
       Version = $version.version
       GitCommit = $version.gitCommit
@@ -121,10 +147,12 @@ try {
       StmastOnHand = $stmast.row.ONHAND
       TopSellerItems = @($topSellers.items).Count
       InvoiceHeaders = $topSellers.invoiceHeaderCount
+      ReportCount = @($reports.reports).Count
+      ReportRunId = $reportRun.reportId
     }
   }
 
-  Write-Host 'PASS: /version, /health, /stmast, and /top-sellers' -ForegroundColor Green
+  Write-Host 'PASS: /version, /health, /stmast, /top-sellers, /reports, /reports/run' -ForegroundColor Green
   $report | Format-List
 } catch {
   Write-Host "FAIL: $($_.Exception.Message)" -ForegroundColor Red

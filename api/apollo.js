@@ -11,6 +11,7 @@ import { tryProductContextRoute } from './apollo-product-route.js';
 import { getPortalAdminClient } from './_site-config.js';
 import { handleApolloAction } from './intelligence/apollo-action-engine/index.js';
 import { loadWorkspaceDocumentIndex } from './_workspace-document-store.js';
+import { trySqlReportRoute } from './apollo-sql-reports.js';
 
 const MODEL = 'google/gemini-2.5-flash';
 
@@ -434,6 +435,15 @@ export default async function handler(req, res) {
     }
   } catch (error) {
     console.error('apollo workspace documents:', error?.message || error);
+  }
+
+  try {
+    const sqlReportAnswer = await trySqlReportRoute(userQuery);
+    if (sqlReportAnswer) {
+      return res.status(200).json({ ...sqlReportAnswer, indexedAt: new Date().toISOString() });
+    }
+  } catch (error) {
+    console.error('apollo sql reports:', error?.message || error);
   }
 
   const apiKey = process.env.OPENROUTER_API_KEY;

@@ -15,6 +15,7 @@ Set on Vercel (protoportal-admin):
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import sys
@@ -26,7 +27,14 @@ from typing import Any
 
 import pyodbc
 
-BRIDGE_VERSION = "1.2.0"
+from sql_report_catalogue import (
+    ReportValidationError,
+    list_reports,
+    run_report,
+    validate_report_params,
+)
+
+BRIDGE_VERSION = "1.3.0"
 BUILD_GIT_COMMIT = "not-stamped"
 BUILD_DATE_UTC = "not-stamped"
 STARTED_AT_UTC = datetime.now(timezone.utc)
@@ -203,9 +211,13 @@ def order_clause(scope: str) -> str:
     return "SUM(CAST(d.QTY AS float)) DESC"
 
 
+def connect_read_only(timeout: int = 20):
+    return pyodbc.connect(connection_string(), timeout=timeout)
+
+
 def fetch_row(sku: str) -> dict | None:
     global LAST_QUERY_AT_UTC
-    with pyodbc.connect(connection_string(), timeout=20) as conn:
+    with connect_read_only(timeout=20) as conn:
         cur = conn.cursor()
         cur.execute(STMAST_SELECT, sku)
         row = cur.fetchone()
@@ -244,7 +256,7 @@ def fetch_top_sellers(period: str, scope: str, limit: int) -> dict:
         WHERE DATE >= ? AND DATE < ?
     """
 
-    with pyodbc.connect(connection_string(), timeout=25) as conn:
+    with connect_read_only(timeout=25) as conn:
         cur = conn.cursor()
         cur.execute(count_sql, start, end)
         cnt_row = cur.fetchone()
@@ -287,7 +299,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         path = self.path.rstrip("/")
-        if path not in ("/version", "/health"):
+        if path not in ("/version", "/health", "/reports"):
             self._json(404, {"error": "Not found"})
             return
         if not self._auth_ok():
@@ -295,12 +307,14 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/version":
             self._version()
-        else:
+        elif path == "/health":
             self._health()
+        else:
+            self._json(200, {"reports": list_reports(), "readOnly": True})
 
     def do_POST(self) -> None:
         path = self.path.rstrip("/")
-        if path not in ("/stmast", "/top-sellers", "/version", "/health"):
+        if path not in ("/stmast", "/top-sellers", "/reports/run", "/version", "/health"):
             self._json(404, {"error": "Not found"})
             return
         if not self._auth_ok():
@@ -321,6 +335,19 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         try:
+            if path == "/reports/run":
+                report_id = str(data.get("reportId") or data.get("report") or "").strip()
+                params = data.get("params") or data.get("parameters") or {}
+                result = run_report(
+                    report_id,
+                    params,
+                    connect=connect_read_only,
+                    row_to_dict=row_to_dict,
+                )
+                LAST_QUERY_AT_UTC = datetime.now(timezone.utc)
+                self._json(200, result)
+                return
+
             if path == "/stmast":
                 sku = str(data.get("sku") or "").strip().upper()
                 if not sku:
@@ -335,6 +362,8 @@ class Handler(BaseHTTPRequestHandler):
             limit = int(data.get("limit") or 10)
             payload = fetch_top_sellers(period, scope, limit)
             self._json(200, payload)
+        except ReportValidationError as exc:
+            self._json(400, {"error": str(exc)})
         except Exception as exc:  # noqa: BLE001
             self._json(500, {"error": str(exc)[:500]})
 
@@ -342,9 +371,40 @@ class Handler(BaseHTTPRequestHandler):
         print(f"[sql-bridge] {self.address_string()} - {fmt % args}")
 
 
+def run_cli() -> int:
+    parser = argparse.ArgumentParser(description="Proto SQL bridge utilities")
+    parser.add_argument("--list-reports", action="store_true", help="Print approved SQL report catalogue")
+    parser.add_argument("--report", help="Run an approved report id")
+    parser.add_argument("--params", help="JSON object of report parameters")
+    args = parser.parse_args()
+
+    if args.list_reports:
+        print(json.dumps({"reports": list_reports(), "readOnly": True}, indent=2))
+        return 0
+
+    if args.report:
+        raw_params = json.loads(args.params or "{}")
+        result = run_report(
+            args.report,
+            raw_params,
+            connect=connect_read_only,
+            row_to_dict=row_to_dict,
+        )
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+        return 0
+
+    return 1
+
+
 def main() -> None:
+    if len(sys.argv) > 1 and sys.argv[1].startswith("-"):
+        if not SQL_PASSWORD and "--list-reports" not in sys.argv:
+            raise SystemExit("SQL_PASSWORD required")
+        raise SystemExit(run_cli())
+
     if not SQL_PASSWORD:
         raise SystemExit("SQL_PASSWORD required")
+
     server = HTTPServer(("0.0.0.0", PORT), Handler)
     info = build_info()
     print(
@@ -352,7 +412,10 @@ def main() -> None:
         f"version={info['version']} gitCommit={info['gitCommit']} buildDate={info['buildDate']}",
         flush=True,
     )
-    print(f"SQL bridge listening on :{PORT} (/version, /health, /stmast, /top-sellers)")
+    print(
+        f"SQL bridge listening on :{PORT} "
+        "(/version, /health, /reports, /reports/run, /stmast, /top-sellers)",
+    )
     server.serve_forever()
 
 
