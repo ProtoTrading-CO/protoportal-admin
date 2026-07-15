@@ -1142,4 +1142,15 @@ assert.match(adminCustPreReg, /name: name \|\| email,/, 'pre-reg name falls back
 assert.match(adminCustPreReg, /\? Number\(b\.sales_last_12_months\) \|\| 0 : 0,/, 'pre-reg sales_last_12_months defaults to 0 (NOT NULL)');
 console.log('✓ Add customer: styled inputs + all NOT NULL columns handled');
 
+// Product Loader: place a product at ANY subcategory depth and have it stick.
+// Folder + single image use a full-depth cascading picker (CategoryPathSelect)
+// and send a full categoryPath; the publish API writes every level via
+// labelsToDbFields (subcategory_one..four + subcategory_extra).
+assert.match(readSrc('api/product-loader-publish.js'), /labelsToDbFields\(cleanPath\)/, 'publish persists the full category path via labelsToDbFields (deep move sticks)');
+assert.match(readSrc('src/lib/productLoaderApi.js'), /categoryPath,/, 'shared loader publish sends the full categoryPath for new products');
+assert.match(readSrc('src/components/productLoader/CategoryPathSelect.jsx'), /subcategoryOptionsFromTree/, 'CategoryPathSelect cascades subcategories to any depth');
+assert.match(readSrc('src/components/productLoader/ProductLoaderFolder.jsx'), /CategoryPathSelect/, 'folder loader uses the full-depth category picker');
+assert.match(readSrc('src/components/productLoader/ProductLoaderSingleImage.jsx'), /CategoryPathSelect/, 'single-image loader uses the full-depth category picker');
+console.log('✓ Product Loader: full-depth subcategory picker + deep-path persistence');
+
 console.log('\nAll smoke checks passed.');
