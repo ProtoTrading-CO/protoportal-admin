@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import { catalogueDescription, catalogueDisplayTitle } from '../lib/product-loader-display.mjs';
 import { requireAdminKey } from './_admin-auth.js';
 import { logProductLoaderAudit } from './_product-loader-audit.js';
+import { labelsToDbFields } from './_taxonomy-utils.js';
 
 function getStockClient() {
   return createClient(
@@ -27,6 +28,7 @@ export default async function handler(req, res) {
     imageSource = 'upload',
     overwriteImage = false,
     category,
+    categoryPath,
     subcategoryOne,
     subcategoryTwo,
     description,
@@ -86,12 +88,27 @@ export default async function handler(req, res) {
   // that case keep the existing DB price instead of dropping the product to R0.
   const numericPrice = Number(price);
   const hasValidPrice = Number.isFinite(numericPrice) && numericPrice > 0;
+  // When the caller supplies a full category path (the loader's cascading
+  // picker), persist EVERY level via labelsToDbFields — including
+  // subcategory_three/four and the subcategory_extra overflow — so a move into
+  // a deep subcategory actually sticks. Legacy callers (no categoryPath) keep
+  // the old behaviour: set category + sub1/sub2 only and leave any deeper
+  // levels already stored untouched.
+  const cleanPath = Array.isArray(categoryPath)
+    ? categoryPath.map((v) => String(v ?? '').trim()).filter(Boolean)
+    : [];
+  const catFields = cleanPath.length
+    ? labelsToDbFields(cleanPath)
+    : {
+      category: String(category || '').trim(),
+      subcategory_one: String(subcategoryOne || category || '').trim(),
+      subcategory_two: subcategoryTwo ? String(subcategoryTwo).trim() : null,
+    };
+
   const patch = {
     title: resolvedTitle,
     price: hasValidPrice ? numericPrice : (Number(existing?.price) || 0),
-    category: String(category || '').trim(),
-    subcategory_one: String(subcategoryOne || category || '').trim(),
-    subcategory_two: subcategoryTwo ? String(subcategoryTwo).trim() : null,
+    ...catFields,
     [imageField]: String(imageUrl).trim(),
     updated_at: now,
   };
@@ -114,9 +131,7 @@ export default async function handler(req, res) {
       barcode: erpBarcode,
       title: patch.title,
       price: patch.price,
-      category: patch.category,
-      subcategory_one: patch.subcategory_one,
-      subcategory_two: patch.subcategory_two || null,
+      ...catFields,
       original_description: patch.original_description || '',
       stock_qty: patch.stock_qty ?? 0,
       available_stock: patch.available_stock ?? patch.stock_qty ?? 0,

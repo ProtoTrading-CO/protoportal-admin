@@ -105,36 +105,60 @@ export async function archiveLoaderImageItem(item) {
   return { sku: item.code, action: 'archived' };
 }
 
+// Resolve a contiguous array of taxonomy node ids to their labels, walking the
+// tree so the result is a full [category, sub1, sub2, ...] path.
+function pathLabelsFromIds(tree, ids = []) {
+  const labels = [];
+  let nodes = tree || [];
+  for (const id of (ids || []).filter(Boolean)) {
+    const node = nodes.find((n) => n.id === id);
+    if (!node) break;
+    labels.push(node.label);
+    nodes = node.children || [];
+  }
+  return labels;
+}
+
 export async function publishLoaderImageItem(item, {
   taxonomyTree,
   findNode,
   defaultCategoryId,
   defaultSub1Id,
+  defaultCategoryPathIds,
   overwrite,
   filename,
 }) {
   if (!item?.file || !item.code) throw new Error('Missing image or product code');
 
+  const pathIds = (defaultCategoryPathIds || []).filter(Boolean);
+  const defCatId = defaultCategoryId || pathIds[0] || '';
+  const defSub1Id = defaultSub1Id || pathIds[1] || '';
+
   const needsCategory = !item.websiteRow?.category;
-  if (needsCategory && !defaultCategoryId) {
+  if (needsCategory && !defCatId) {
     throw new Error('Pick a default category for products not already on the website.');
   }
 
   const uploadJson = await uploadLoaderImage(item);
 
   const catId = item.websiteRow?.category
-    ? (taxonomyTree.find((c) => c.label === item.websiteRow.category)?.id || defaultCategoryId)
-    : defaultCategoryId;
+    ? (taxonomyTree.find((c) => c.label === item.websiteRow.category)?.id || defCatId)
+    : defCatId;
   const sub1IdForItem = item.websiteRow?.subcategory_one
-    ? ((findNode(taxonomyTree, catId)?.children || []).find((c) => c.label === item.websiteRow.subcategory_one)?.id || defaultSub1Id)
-    : defaultSub1Id;
+    ? ((findNode(taxonomyTree, catId)?.children || []).find((c) => c.label === item.websiteRow.subcategory_one)?.id || defSub1Id)
+    : defSub1Id;
 
   const catNode = findNode(taxonomyTree, catId);
   const sub1Node = findNode(taxonomyTree, sub1IdForItem);
-  const categoryLabel = catNode?.label || item.websiteRow?.category || '';
+  const defaultPathLabels = pathLabelsFromIds(taxonomyTree, pathIds);
+  const categoryLabel = catNode?.label || item.websiteRow?.category || defaultPathLabels[0] || '';
   const sub1Label = sub1Node?.label || item.websiteRow?.subcategory_one || categoryLabel;
 
   if (!categoryLabel) throw new Error('No category available');
+
+  // New products get the full picked path so a deep subcategory persists;
+  // existing products keep their stored category (the API preserves deeper levels).
+  const categoryPath = needsCategory && defaultPathLabels.length ? defaultPathLabels : undefined;
 
   const publishRes = await fetch('/api/product-loader-publish', {
     method: 'POST',
@@ -152,6 +176,7 @@ export async function publishLoaderImageItem(item, {
       imageSource: 'upload',
       overwriteImage: overwrite || item.warnings?.includes('image_exists'),
       category: categoryLabel,
+      categoryPath,
       subcategoryOne: sub1Label,
       subcategoryTwo: item.websiteRow?.subcategory_two || null,
       description: item.descriptionOverride || catalogueDescription(item),

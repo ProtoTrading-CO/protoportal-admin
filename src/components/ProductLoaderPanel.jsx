@@ -168,8 +168,12 @@ export default function ProductLoaderPanel({
   const [batchScanning, setBatchScanning] = useState(false);
   const [batchProcessing, setBatchProcessing] = useState(false);
   const [batchProgress, setBatchProgress] = useState({ done: 0, total: 0, current: '' });
-  const [batchDefaultCategoryId, setBatchDefaultCategoryId] = useState('');
-  const [batchDefaultSub1Id, setBatchDefaultSub1Id] = useState('');
+  // Full contiguous category path ids for new/loaded products — [mainId,
+  // child1Id, ...] as deep as the taxonomy goes. Deriving the old category/sub1
+  // ids keeps the other panel flows working unchanged.
+  const [batchDefaultPathIds, setBatchDefaultPathIds] = useState([]);
+  const batchDefaultCategoryId = batchDefaultPathIds[0] || '';
+  const batchDefaultSub1Id = batchDefaultPathIds[1] || '';
   const [batchOverwrite, setBatchOverwrite] = useState(false);
   const [batchError, setBatchError] = useState('');
   const [singleImageItem, setSingleImageItem] = useState(null);
@@ -938,9 +942,9 @@ export default function ProductLoaderPanel({
         <ProductLoaderNutstore
           taxonomyTree={taxonomyTree}
           batchDefaultCategoryId={batchDefaultCategoryId}
-          setBatchDefaultCategoryId={setBatchDefaultCategoryId}
+          setBatchDefaultCategoryId={(id) => setBatchDefaultPathIds(id ? [id] : [])}
           batchDefaultSub1Id={batchDefaultSub1Id}
-          setBatchDefaultSub1Id={setBatchDefaultSub1Id}
+          setBatchDefaultSub1Id={(id) => setBatchDefaultPathIds([batchDefaultCategoryId, id].filter(Boolean))}
           batchOverwrite={batchOverwrite}
           setBatchOverwrite={setBatchOverwrite}
           onShowToast={onShowToast}
@@ -951,10 +955,8 @@ export default function ProductLoaderPanel({
       {activeTab === 'single' && (
         <ProductLoaderSingleImage
           taxonomyTree={taxonomyTree}
-          batchDefaultCategoryId={batchDefaultCategoryId}
-          setBatchDefaultCategoryId={setBatchDefaultCategoryId}
-          batchDefaultSub1Id={batchDefaultSub1Id}
-          setBatchDefaultSub1Id={setBatchDefaultSub1Id}
+          batchDefaultPathIds={batchDefaultPathIds}
+          setBatchDefaultPathIds={setBatchDefaultPathIds}
           batchOverwrite={batchOverwrite}
           setBatchOverwrite={setBatchOverwrite}
           onShowToast={onShowToast}
@@ -966,10 +968,8 @@ export default function ProductLoaderPanel({
       {activeTab === 'folder' && (
         <ProductLoaderFolder
           taxonomyTree={taxonomyTree}
-          batchDefaultCategoryId={batchDefaultCategoryId}
-          setBatchDefaultCategoryId={setBatchDefaultCategoryId}
-          batchDefaultSub1Id={batchDefaultSub1Id}
-          setBatchDefaultSub1Id={setBatchDefaultSub1Id}
+          batchDefaultPathIds={batchDefaultPathIds}
+          setBatchDefaultPathIds={setBatchDefaultPathIds}
           batchOverwrite={batchOverwrite}
           setBatchOverwrite={setBatchOverwrite}
           onShowToast={onShowToast}
