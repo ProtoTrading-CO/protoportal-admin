@@ -12,6 +12,8 @@
     "deploy:admin": "node scripts/deploy-admin.mjs",
     "test:bi": "vitest run",
     "test:bridge-json": "python scripts/test_sql_bridge_json.py",
+    "test:buying-data": "vitest run tests/intelligence/sql-buying.test.js tests/intelligence/proto-buying-mcp.test.js",
+    "test:bridge-buying": "node scripts/test-bridge-buying.mjs",
     "test:stmast-repro": "python scripts/test-stmast-decimal-repro.py"
   },
   "dependencies": {

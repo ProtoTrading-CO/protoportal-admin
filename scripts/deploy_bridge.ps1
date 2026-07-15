@@ -111,6 +111,12 @@ try {
       throw "/top-sellers response has no items array"
     }
 
+    $buyingHistory = Invoke-RestMethod -Uri "$baseUrl/buying-history" -Method POST -Headers $headers `
+      -Body (@{ skus = @($sku); months = 12 } | ConvertTo-Json -Compress) -TimeoutSec 45
+    if (@($buyingHistory.items).Count -ne 1 -or -not $buyingHistory.meta.readOnly) {
+      throw "/buying-history failed read-only validation for SKU $sku"
+    }
+
     [pscustomobject]@{
       Version = $version.version
       GitCommit = $version.gitCommit
@@ -121,10 +127,13 @@ try {
       StmastOnHand = $stmast.row.ONHAND
       TopSellerItems = @($topSellers.items).Count
       InvoiceHeaders = $topSellers.invoiceHeaderCount
+      BuyingHistoryItems = @($buyingHistory.items).Count
+      BuyingHistoryMonths = $buyingHistory.meta.months
+      BuyingHistoryReadOnly = $buyingHistory.meta.readOnly
     }
   }
 
-  Write-Host 'PASS: /version, /health, /stmast, and /top-sellers' -ForegroundColor Green
+  Write-Host 'PASS: /version, /health, /stmast, /top-sellers, and /buying-history' -ForegroundColor Green
   $report | Format-List
 } catch {
   Write-Host "FAIL: $($_.Exception.Message)" -ForegroundColor Red

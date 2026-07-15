@@ -174,6 +174,25 @@ class TestFixedBridgeJson(unittest.TestCase):
             _bridge.verify_database_connection = old_verify
 
 
+class TestBuyingHistoryControls(unittest.TestCase):
+    def test_normalizes_and_deduplicates_skus(self):
+        self.assertEqual(
+            _bridge.normalize_buying_skus([" 001-a ", "001-A", "MP133-1"]),
+            ["001-A", "MP133-1"],
+        )
+
+    def test_rejects_empty_and_oversized_sku_lists(self):
+        with self.assertRaisesRegex(ValueError, "at least one sku"):
+            _bridge.normalize_buying_skus([])
+        with self.assertRaisesRegex(ValueError, "maximum of 500"):
+            _bridge.normalize_buying_skus([f"SKU-{index}" for index in range(501)])
+
+    def test_bounds_history_months(self):
+        self.assertEqual(_bridge.normalize_buying_months(0), 1)
+        self.assertEqual(_bridge.normalize_buying_months(12), 12)
+        self.assertEqual(_bridge.normalize_buying_months(100), 36)
+
+
 class TestLiveStmastSql(unittest.TestCase):
     @unittest.skipUnless(
         os.getenv("SQL_PASSWORD", "").strip(),

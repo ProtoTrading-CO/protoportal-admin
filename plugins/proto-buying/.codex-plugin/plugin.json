@@ -1,0 +1,26 @@
+{
+  "name": "proto-buying",
+  "version": "0.1.0",
+  "description": "Read-only live POSWINSQL stock and sales data for Proto buying analysis.",
+  "author": {
+    "name": "Proto Trading",
+    "email": "online@proto.co.za",
+    "url": "https://proto.co.za"
+  },
+  "homepage": "https://admin.proto.co.za",
+  "repository": "https://github.com/danieljoffeinfo-web/protoportal-admin",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Proto Buying Data",
+    "shortDescription": "Live read-only stock and sales for buying",
+    "longDescription": "Connects Proto Buying Analyst to approved read-only POSWINSQL stock and monthly unit-sales operations. It cannot create, change, submit or send supplier orders.",
+    "developerName": "Proto Trading",
+    "category": "Productivity",
+    "capabilities": ["Read"],
+    "websiteURL": "https://admin.proto.co.za",
+    "defaultPrompt": [
+      "Analyse these SKUs against live Proto sales and stock.",
+      "Check live stock and 24 months of sales for this order."
+    ]
+  }
+}

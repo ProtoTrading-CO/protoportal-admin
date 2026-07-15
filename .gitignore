@@ -6,3 +6,5 @@ dist
 .env*
 data/*.numbers
 portal-tmp
+__pycache__/
+*.pyc
