@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { requireAdminKey } from './_admin-auth.js';
+import { requireOwner } from './_admin-auth.js';
 import { isSqlConfigured } from './_sql-provider.js';
 import { fetchDormantSkuSet, resolveProductLoaderMatch, SLOT_FIELDS } from './_product-loader-lookup.js';
 
@@ -12,7 +12,7 @@ function getStockClient() {
 }
 
 export default async function handler(req, res) {
-  if (!(await requireAdminKey(req, res))) return;
+  if (!(await requireOwner(req, res))) return;
   res.setHeader('Cache-Control', 'no-store');
   if (req.method !== 'GET') return res.status(405).end();
 
