@@ -52,8 +52,9 @@ send for email/WhatsApp broadcasts (immediate-send only for both).
 - **Per-template test send**: `api/email-test-send.js` (welcome, campaign,
   order_confirmation, trade_application) → `EmailTemplateTests` in the email modal.
 - **Brevo analytics**: opens/clicks flow via `api/brevo-email-webhook.js`. Set
-  `WEBHOOK_SECRET` in Vercel and append `?secret=…` to the Brevo webhook URL to
-  lock it down; without it the webhook still records (with a warning).
+  `WEBHOOK_SECRET` in Vercel and configure Brevo to send the same value as the
+  `X-Webhook-Secret` header (or Bearer token). The endpoint fails closed when
+  the secret is absent or incorrect.
 
 ## Auth
 
