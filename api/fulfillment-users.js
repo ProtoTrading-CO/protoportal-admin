@@ -1,4 +1,4 @@
-import { requireAdminOrOrderToken, requireAdminKey } from './_admin-auth.js';
+import { requireAdminOrOrderToken, requireOwner } from './_admin-auth.js';
 import { readSiteConfigJson, writeSiteConfigJson } from './_site-config.js';
 import { defaultFulfillmentUsers } from './_fulfillment-defaults.js';
 import { normalizePhone } from './_wati.js';
@@ -26,7 +26,7 @@ export default async function handler(req, res) {
   // GET (team list) is allowed via fulfillment order links; writes need the dashboard key.
   if (req.method === 'GET') {
     if (!(await requireAdminOrOrderToken(req, res))) return;
-  } else if (!(await requireAdminKey(req, res))) return;
+  } else if (!(await requireOwner(req, res))) return;
   res.setHeader('Cache-Control', 'no-store');
 
   if (req.method === 'GET') {
