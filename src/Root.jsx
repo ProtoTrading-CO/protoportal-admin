@@ -3,6 +3,7 @@ import { installAuthFetch } from './lib/adminKey';
 import { clearChunkReloadGuard, lazyRetry } from './lib/lazyRetry';
 import {
   getVerifiedSession,
+  getAdminRole,
   isAllowedAdminEmail,
   onAuthStateChange,
   signOut,
@@ -173,6 +174,7 @@ function AdminGate() {
     role: 'admin',
     name: session.user.user_metadata?.name || email.split('@')[0],
     email,
+    role: getAdminRole(email),
   };
 
   return (
