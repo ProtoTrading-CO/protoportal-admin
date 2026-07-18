@@ -7,6 +7,7 @@ import {
   PAYMENT_RECEIVED_FORBIDDEN,
   isFulfillmentLinkRestrictedTarget,
 } from './_fulfillment-auth.js';
+import { isOwnerEmail } from './_admin-auth.js';
 import { getPortalAdminClient, readOrderNotifyLog, SITE_CONFIG_BUCKET } from './_site-config.js';
 import { isOrderNotifyComplete } from './_order-notify-core.js';
 import { ordersHasConfirmationSentAt } from './_order-confirmation-sent.js';
@@ -424,13 +425,16 @@ export default async function handler(req, res) {
           error: 'Fulfillment links cannot send orders or record payments. Sign in to the admin dashboard to complete this step.',
         });
       }
-      // Keep the existing operational rule for signed-in admins. This check is
-      // intentionally never used to grant a fulfillment-link holder permission.
+      // Customer-facing sends and payment records are Owner actions. The
+      // verified account determines this permission; senderUserId/name are
+      // display metadata only and can never grant it.
       if (auth.type === 'admin'
-        && (target === 'order sent' || target === 'payment received')
-        && !isVictorSender({ userId: senderUserId, name: senderName })) {
+        && isFulfillmentLinkRestrictedTarget(target)
+        && !isOwnerEmail(auth.user?.email)) {
         return res.status(403).json({
-          error: target === 'payment received' ? PAYMENT_RECEIVED_FORBIDDEN : CUSTOMER_SEND_FORBIDDEN,
+          error: target === 'payment received'
+            ? 'Owner access is required to mark payment received.'
+            : 'Owner access is required to send an order to a customer.',
         });
       }
       // A pending order may only leave "New" once the new-order round is done:
