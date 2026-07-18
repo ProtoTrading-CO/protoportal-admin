@@ -5,6 +5,7 @@ import {
   CUSTOMER_SEND_FORBIDDEN,
   isVictorSender,
   PAYMENT_RECEIVED_FORBIDDEN,
+  isFulfillmentLinkRestrictedTarget,
 } from './_fulfillment-auth.js';
 import { getPortalAdminClient, readOrderNotifyLog, SITE_CONFIG_BUCKET } from './_site-config.js';
 import { isOrderNotifyComplete } from './_order-notify-core.js';
@@ -415,7 +416,18 @@ export default async function handler(req, res) {
       if (!allowedTargets.has(target)) {
         return res.status(400).json({ error: `Unsupported workflow target: "${target}"` });
       }
-      if ((target === 'order sent' || target === 'payment received')
+      // A fulfillment URL is a scoped packing link, not a staff identity.
+      // It must never be able to send customer-facing orders or record payment,
+      // even if a browser supplies "victor" as the sender identity.
+      if (auth.type === 'order' && isFulfillmentLinkRestrictedTarget(target)) {
+        return res.status(403).json({
+          error: 'Fulfillment links cannot send orders or record payments. Sign in to the admin dashboard to complete this step.',
+        });
+      }
+      // Keep the existing operational rule for signed-in admins. This check is
+      // intentionally never used to grant a fulfillment-link holder permission.
+      if (auth.type === 'admin'
+        && (target === 'order sent' || target === 'payment received')
         && !isVictorSender({ userId: senderUserId, name: senderName })) {
         return res.status(403).json({
           error: target === 'payment received' ? PAYMENT_RECEIVED_FORBIDDEN : CUSTOMER_SEND_FORBIDDEN,
