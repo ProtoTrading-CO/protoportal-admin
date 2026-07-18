@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { catalogueDescription, catalogueDisplayTitle } from '../lib/product-loader-display.mjs';
-import { requireAdminKey } from './_admin-auth.js';
+import { requireOwner } from './_admin-auth.js';
 import { logProductLoaderAudit } from './_product-loader-audit.js';
 import { downloadNutstoreFile, isNutstoreConfigured, nutstoreSetupMessage } from './_nutstore-webdav.js';
 
@@ -245,7 +245,7 @@ async function archiveOne(sb, item) {
 }
 
 export default async function handler(req, res) {
-  if (!(await requireAdminKey(req, res))) return;
+  if (!(await requireOwner(req, res))) return;
   res.setHeader('Cache-Control', 'no-store');
   if (req.method !== 'POST') return res.status(405).end();
 
