@@ -61,7 +61,7 @@ Supabase email/password login with a **3-email allowlist** (`src/lib/auth.js`, m
 
 - `danieljoffeinfo@gmail.com`, `george@proto.co.za`, `online@proto.co.za`
 
-`Root.jsx` shows `AdminLoginPage` until `getVerifiedSession()` + `/api/auth-check` succeed. API routes use `requireAdminKey` (JWT or optional `ADMIN_DASH_KEY` header). Fulfillment links use per-order HMAC tokens (`ORDER_NOTIFY_SECRET`). Crons require `CRON_SECRET`.
+`Root.jsx` shows `AdminLoginPage` until `getVerifiedSession()` + `/api/auth-check` succeed. API routes use `requireAdminKey` (JWT or optional `ADMIN_DASH_KEY` header). Fulfillment work requires a verified allowlisted admin session; legacy shared per-order bearer tokens are disabled. Crons require `CRON_SECRET`.
 
 ## Apollo governance
 
