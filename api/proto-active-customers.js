@@ -1,4 +1,4 @@
-import { requireAdminKey } from './_admin-auth.js';
+import { requireOwner } from './_admin-auth.js';
 import { createClient } from '@supabase/supabase-js';
 
 export const config = { api: { bodyParser: { sizeLimit: '8mb' } } };
@@ -30,7 +30,7 @@ function normalizeImportRow(raw) {
 
 /** Paginated read + inline edit + CSV import of proto active customer allowlist. */
 export default async function handler(req, res) {
-  if (!(await requireAdminKey(req, res))) return;
+  if (!(await requireOwner(req, res))) return;
 
   if (req.method === 'POST') {
     const { action, rows } = req.body || {};
