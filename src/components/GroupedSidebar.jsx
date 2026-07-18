@@ -78,10 +78,11 @@ export default function GroupedSidebar({
   onSelectSection,
   pendingCustomerCount = 0,
   newOrdersCount = 0,
+  allowedSectionIds = null,
 }) {
   return (
     <nav aria-label="Admin sections">
-      {NAV_ITEMS.map((item) => {
+      {NAV_ITEMS.filter((item) => !allowedSectionIds || allowedSectionIds.includes(item.id)).map((item) => {
         const Icon = item.icon;
         const active = activeSection === item.id;
         const badge = item.id === 'customers' && pendingCustomerCount > 0
