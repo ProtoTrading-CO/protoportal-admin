@@ -1,9 +1,10 @@
-import { createHmac, timingSafeEqual } from 'crypto';
+import { timingSafeEqual } from 'crypto';
 import { createClient } from '@supabase/supabase-js';
 
 /**
  * Admin API auth — Supabase JWT + email allowlist.
- * Fulfillment routes accept admin JWT or valid per-order token.
+ * Fulfillment work requires a verified admin session; shared bearer links are
+ * deliberately not accepted.
  */
 
 export const ADMIN_ROLES = Object.freeze({
@@ -73,45 +74,6 @@ export function hasAdminKey(req) {
   return Boolean(provided) && safeEqual(provided, expected);
 }
 
-const TOKEN_LEN = 12;
-const LEGACY_TOKEN_LEN = 32;
-
-function fullOrderDigest(orderId) {
-  const secret = process.env.ORDER_NOTIFY_SECRET;
-  if (!secret) return '';
-  return createHmac('sha256', secret).update(`order:${String(orderId).trim()}`).digest('hex');
-}
-
-export function orderToken(orderId) {
-  const hex = fullOrderDigest(orderId);
-  return hex ? hex.slice(0, TOKEN_LEN) : '';
-}
-
-export function verifyOrderToken(orderId, token) {
-  if (!orderId || !token) return false;
-  const provided = String(token);
-  const len = provided.length;
-  if (len !== TOKEN_LEN && len !== LEGACY_TOKEN_LEN) return false;
-  const hex = fullOrderDigest(orderId);
-  if (!hex) return false;
-  return safeEqual(provided, hex.slice(0, len));
-}
-
-function extractOrderId(req) {
-  return String(
-    req.headers['x-order-id']
-    || req.query?.orderId
-    || req.query?.id
-    || req.body?.orderId
-    || req.body?.id
-    || '',
-  ).trim();
-}
-
-function extractOrderToken(req) {
-  return String(req.headers['x-order-token'] || req.query?.k || req.body?.orderToken || '').trim();
-}
-
 function sendUnauthorized(res, message = 'Authentication required') {
   if (!res.headersSent) res.status(401).json({ error: message });
   return false;
@@ -153,18 +115,17 @@ export async function requireOwner(req, res) {
 export async function resolveRequestAuth(req) {
   if (hasAdminKey(req)) return { type: 'admin' };
   const admin = await verifyAdminUser(req);
-  if (admin) return { type: 'admin', user: admin };
-  const orderId = extractOrderId(req);
-  const token = extractOrderToken(req);
-  if (orderId && verifyOrderToken(orderId, token)) return { type: 'order', orderId };
-  return null;
+  return admin ? { type: 'admin', user: admin } : null;
 }
 
-/** Admin JWT or scoped fulfillment order token. */
+/**
+ * Backward-compatible helper name for fulfillment routes. Shared order tokens
+ * are intentionally disabled; a verified admin session is required.
+ */
 export async function requireAdminOrOrderToken(req, res) {
   const auth = await resolveRequestAuth(req);
   if (auth) return auth;
-  return sendUnauthorized(res);
+  return sendUnauthorized(res, 'Sign in to access fulfillment work');
 }
 
 /** Vercel cron secret or admin JWT. */
