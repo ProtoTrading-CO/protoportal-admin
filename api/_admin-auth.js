@@ -16,7 +16,7 @@ export const ADMIN_ROLES = Object.freeze({
 export const ADMIN_USERS = new Map([
   ['danieljoffeinfo@gmail.com', ADMIN_ROLES.OWNER],
   ['george@proto.co.za', ADMIN_ROLES.OWNER],
-  ['online@proto.co.za', ADMIN_ROLES.CUSTOMER_SERVICE],
+  ['online@proto.co.za', ADMIN_ROLES.OWNER],
 ]);
 
 export const ADMIN_EMAILS = new Set(ADMIN_USERS.keys());
