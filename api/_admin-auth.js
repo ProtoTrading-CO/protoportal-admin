@@ -6,11 +6,28 @@ import { createClient } from '@supabase/supabase-js';
  * Fulfillment routes accept admin JWT or valid per-order token.
  */
 
-export const ADMIN_EMAILS = new Set([
-  'danieljoffeinfo@gmail.com',
-  'george@proto.co.za',
-  'online@proto.co.za',
-].map((e) => e.toLowerCase()));
+export const ADMIN_ROLES = Object.freeze({
+  OWNER: 'owner',
+  CUSTOMER_SERVICE: 'customer_service',
+});
+
+// Server-side source of truth for the current small admin team. Authorization
+// is based on the verified Supabase user's email, never a browser-supplied role.
+export const ADMIN_USERS = new Map([
+  ['danieljoffeinfo@gmail.com', ADMIN_ROLES.OWNER],
+  ['george@proto.co.za', ADMIN_ROLES.OWNER],
+  ['online@proto.co.za', ADMIN_ROLES.CUSTOMER_SERVICE],
+]);
+
+export const ADMIN_EMAILS = new Set(ADMIN_USERS.keys());
+
+export function getAdminRole(email) {
+  return ADMIN_USERS.get(String(email || '').trim().toLowerCase()) || null;
+}
+
+export function isOwnerEmail(email) {
+  return getAdminRole(email) === ADMIN_ROLES.OWNER;
+}
 
 function safeEqual(a, b) {
   const bufA = Buffer.from(String(a));
@@ -119,6 +136,18 @@ export async function requireAdminKey(req, res) {
   } catch {
     return sendUnauthorized(res);
   }
+}
+
+
+/** Requires a verified Owner account for irreversible or site-wide operations. */
+export async function requireOwner(req, res) {
+  // ADMIN_DASH_KEY remains an emergency server-to-server break-glass credential.
+  // It is not exposed by the browser application.
+  if (hasAdminKey(req)) return true;
+  const user = await verifyAdminUser(req);
+  if (!user) return sendUnauthorized(res, 'Invalid or expired session');
+  if (!isOwnerEmail(user.email)) return sendForbidden(res, 'Owner access is required for this operation');
+  return true;
 }
 
 export async function resolveRequestAuth(req) {
