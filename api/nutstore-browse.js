@@ -1,4 +1,4 @@
-import { requireAdminKey } from './_admin-auth.js';
+import { requireOwner } from './_admin-auth.js';
 import {
   clampToLibrary,
   formatNutstoreError,
@@ -16,7 +16,7 @@ function nutstoreErrorStatus(err) {
 }
 
 export default async function handler(req, res) {
-  if (!(await requireAdminKey(req, res))) return;
+  if (!(await requireOwner(req, res))) return;
   res.setHeader('Cache-Control', 'no-store');
 
   if (!isNutstoreConfigured()) {
