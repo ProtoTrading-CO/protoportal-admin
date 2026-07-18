@@ -1,4 +1,4 @@
-import { requireAdminKey } from './_admin-auth.js';
+import { requireOwner } from './_admin-auth.js';
 import { createClient } from '@supabase/supabase-js';
 import { loadTaxonomy, resolveCategoryIds } from './_taxonomy-utils.js';
 
@@ -79,7 +79,7 @@ function adapt(row, tree) {
 }
 
 export default async function handler(req, res) {
-  if (!(await requireAdminKey(req, res))) return;
+  if (!(await requireOwner(req, res))) return;
   if (req.method !== 'GET') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
