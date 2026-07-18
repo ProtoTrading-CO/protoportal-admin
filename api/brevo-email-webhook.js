@@ -1,4 +1,16 @@
+import { timingSafeEqual } from 'crypto';
 import { recordEmailWebhookEvent } from './_email-campaigns.js';
+
+function safeEqual(a, b) {
+  const left = Buffer.from(String(a || ''));
+  const right = Buffer.from(String(b || ''));
+  return left.length > 0 && left.length === right.length && timingSafeEqual(left, right);
+}
+
+function bearerToken(req) {
+  const value = String(req.headers.authorization || '');
+  return value.replace(/^Bearer\\s+/i, '').trim();
+}
 
 function extractMessageId(payload = {}) {
   return String(
@@ -27,16 +39,18 @@ export default async function handler(req, res) {
     return res.status(405).end();
   }
 
-  // When WEBHOOK_SECRET is configured, require it (query ?secret= OR the
-  // X-Webhook-Secret header) — this is the locked-down mode. When it is NOT
-  // configured, accept events so analytics work out of the box (open/click
-  // counters only; nothing destructive), and log a one-line nudge to set it.
-  const webhookSecret = process.env.WEBHOOK_SECRET;
-  if (webhookSecret) {
-    const provided = String(req.query?.secret || req.headers['x-webhook-secret'] || '');
-    if (provided !== webhookSecret) return res.status(401).json({ error: 'Unauthorized' });
-  } else {
-    console.warn('brevo-email-webhook: WEBHOOK_SECRET not set — accepting events unauthenticated. Set WEBHOOK_SECRET in Vercel and append ?secret=… to the Brevo webhook URL to lock this down.');
+  // Production must fail closed. Configure this secret in Vercel, then send
+  // it from Brevo as X-Webhook-Secret (preferred) or Authorization: Bearer.
+  // Query-string secrets are deliberately not accepted because URLs leak into
+  // logs, browser history, and monitoring tools.
+  const webhookSecret = String(process.env.WEBHOOK_SECRET || '').trim();
+  if (!webhookSecret) {
+    console.error('brevo-email-webhook: WEBHOOK_SECRET is not configured; rejecting event.');
+    return res.status(503).json({ error: 'Webhook authentication is not configured' });
+  }
+  const headerSecret = String(req.headers['x-webhook-secret'] || '').trim();
+  if (!safeEqual(headerSecret, webhookSecret) && !safeEqual(bearerToken(req), webhookSecret)) {
+    return res.status(401).json({ error: 'Unauthorized' });
   }
 
   const payload = req.body || {};
