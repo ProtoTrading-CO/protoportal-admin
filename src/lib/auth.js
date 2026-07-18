@@ -1,13 +1,26 @@
 import { supabase } from './supabase';
 
-export const ADMIN_EMAILS = new Set([
-  'danieljoffeinfo@gmail.com',
-  'george@proto.co.za',
-  'online@proto.co.za',
-].map((e) => e.toLowerCase()));
+export const ADMIN_ROLES = Object.freeze({
+  OWNER: 'owner',
+  CUSTOMER_SERVICE: 'customer_service',
+});
+
+// Presentation mirror of the server-side role map. The server always makes
+// the authorization decision; this only keeps the workspace focused.
+const ADMIN_USERS = new Map([
+  ['danieljoffeinfo@gmail.com', ADMIN_ROLES.OWNER],
+  ['george@proto.co.za', ADMIN_ROLES.OWNER],
+  ['online@proto.co.za', ADMIN_ROLES.CUSTOMER_SERVICE],
+]);
+
+export const ADMIN_EMAILS = new Set(ADMIN_USERS.keys());
+
+export function getAdminRole(email) {
+  return ADMIN_USERS.get(String(email || '').trim().toLowerCase()) || null;
+}
 
 export function isAllowedAdminEmail(email) {
-  return ADMIN_EMAILS.has(String(email || '').trim().toLowerCase());
+  return Boolean(getAdminRole(email));
 }
 
 export async function getSession() {
