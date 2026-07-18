@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { catalogueDescription, catalogueDisplayTitle } from '../lib/product-loader-display.mjs';
-import { requireAdminKey } from './_admin-auth.js';
+import { requireOwner } from './_admin-auth.js';
 import { logProductLoaderAudit } from './_product-loader-audit.js';
 import { labelsToDbFields } from './_taxonomy-utils.js';
 
@@ -15,7 +15,7 @@ function getStockClient() {
 const SLOT_FIELDS = ['image_url_one', 'image_url_two', 'image_url_three', 'image_url_four'];
 
 export default async function handler(req, res) {
-  if (!(await requireAdminKey(req, res))) return;
+  if (!(await requireOwner(req, res))) return;
   res.setHeader('Cache-Control', 'no-store');
   if (req.method !== 'POST') return res.status(405).end();
 
