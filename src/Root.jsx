@@ -37,13 +37,7 @@ export default function Root() {
   const isFulfillment = path === '/fulfillment' || path === '/f' || path.startsWith('/f/');
   const isResetPassword = path === '/reset-password';
 
-  if (isFulfillment) {
-    return (
-      <Suspense fallback={loadingFallback}>
-        <FulfillmentPage />
-      </Suspense>
-    );
-  }
+  if (isFulfillment) return <AdminGate fulfillment />;
 
   if (isResetPassword) {
     const token = new URLSearchParams(window.location.search).get('token') || '';
@@ -58,7 +52,7 @@ export default function Root() {
   return <AdminGate />;
 }
 
-function AdminGate() {
+function AdminGate({ fulfillment = false }) {
   const [session, setSession] = useState(null);
   const [booting, setBooting] = useState(true);
 
@@ -180,11 +174,15 @@ function AdminGate() {
   return (
     <QueryProvider>
       <Suspense fallback={loadingFallback}>
-        <AdminPage
-          customer={customer}
-          onSignOut={() => void signOut().then(() => setSession(null))}
-          onViewPortal={() => { window.location.href = PROTO_URLS.site; }}
-        />
+        {fulfillment ? (
+          <FulfillmentPage />
+        ) : (
+          <AdminPage
+            customer={customer}
+            onSignOut={() => void signOut().then(() => setSession(null))}
+            onViewPortal={() => { window.location.href = PROTO_URLS.site; }}
+          />
+        )}
       </Suspense>
     </QueryProvider>
   );
