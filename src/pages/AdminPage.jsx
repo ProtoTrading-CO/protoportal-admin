@@ -161,6 +161,13 @@ function LazySectionFallback({ label = 'Loading section…' }) {
 }
 
 const ADMIN_PAGE_SIZE = 50;
+const CUSTOMER_SERVICE_SECTIONS = ['orders', 'apollo', 'customers', 'crm'];
+
+function sectionsForAdminRole(role) {
+  return role === 'customer_service'
+    ? CUSTOMER_SERVICE_SECTIONS
+    : NAV_GROUPS.map((item) => item.id);
+}
 const randFormatter = new Intl.NumberFormat('en-ZA', { style: 'currency', currency: 'ZAR', minimumFractionDigits: 2, maximumFractionDigits: 4 });
 
 function formatRandAmount(value) {
@@ -479,7 +486,11 @@ function WhatsappOptIn({ value }) {
 
 export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   const initialOrderWorkspaceId = useMemo(() => orderWorkspaceIdFromPath(), []);
-  const [activeSection, setActiveSection] = useState(initialOrderWorkspaceId ? 'orders' : 'catalogue');
+  const allowedSectionIds = useMemo(() => sectionsForAdminRole(customer?.role), [customer?.role]);
+  const [activeSection, setActiveSection] = useState(() => {
+    const preferred = initialOrderWorkspaceId ? 'orders' : 'catalogue';
+    return allowedSectionIds.includes(preferred) ? preferred : allowedSectionIds[0] || 'orders';
+  });
   // Apollo panel keeps its own state (chat, staged image ops). Track when it
   // was first opened so we can lazily mount it once and then keep it in the
   // DOM via CSS display, matching the pre-lazy behaviour.
@@ -2019,6 +2030,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
           {sidebarOpen && <div className="adm-sidebar-backdrop" onClick={() => setSidebarOpen(false)} />}
           <aside className={`adm-sidebar${sidebarOpen ? ' adm-sidebar--open' : ''}`}>
             <GroupedSidebar
+          allowedSectionIds={allowedSectionIds}
               activeSection={activeSection}
               onSelectSection={(id) => {
                 if (id === 'team') {
