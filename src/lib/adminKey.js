@@ -4,7 +4,9 @@ import { supabase } from './supabase';
 export function getOrderAccessFromUrl() {
   try {
     const path = window.location.pathname || '';
-    const match = path.match(/^\/f\/([^/]+)\/?$/);
+    // Accept legacy /f/<orderId>/<old-token> URLs for their order ID only.
+    // The trailing token is deliberately ignored; authentication is session-based.
+    const match = path.match(/^\/f\/([^/]+)(?:\/[^/]+)?\/?$/);
     if (match) return { orderId: decodeURIComponent(match[1]) };
     const params = new URLSearchParams(window.location.search);
     const orderId = params.get('o') || params.get('id') || '';
