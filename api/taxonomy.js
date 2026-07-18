@@ -1,4 +1,4 @@
-import { requireAdminKey } from './_admin-auth.js';
+import { requireOwner } from './_admin-auth.js';
 import { createClient } from '@supabase/supabase-js';
 import { readSiteConfigJson, writeSiteConfigJson } from './_site-config.js';
 import {
@@ -71,7 +71,7 @@ function taxonomyConflictResponse(res, err) {
 }
 
 export default async function handler(req, res) {
-  if (!(await requireAdminKey(req, res))) return;
+  if (!(await requireOwner(req, res))) return;
 
   if (req.method === 'GET') {
     try {
