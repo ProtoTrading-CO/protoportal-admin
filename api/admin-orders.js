@@ -1,12 +1,7 @@
 import { requireAdminOrOrderToken } from './_admin-auth.js';
 import { createClient } from '@supabase/supabase-js';
 import { advanceOrderStatusToTarget, normalizeOrderStatus } from './_order-status.js';
-import {
-  CUSTOMER_SEND_FORBIDDEN,
-  isVictorSender,
-  PAYMENT_RECEIVED_FORBIDDEN,
-  isFulfillmentLinkRestrictedTarget,
-} from './_fulfillment-auth.js';
+import { isFulfillmentLinkRestrictedTarget } from './_fulfillment-auth.js';
 import { isOwnerEmail } from './_admin-auth.js';
 import { getPortalAdminClient, readOrderNotifyLog, SITE_CONFIG_BUCKET } from './_site-config.js';
 import { isOrderNotifyComplete } from './_order-notify-core.js';
