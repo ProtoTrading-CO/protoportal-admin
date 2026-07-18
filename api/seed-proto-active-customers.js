@@ -1,4 +1,4 @@
-import { requireAdminKey } from './_admin-auth.js';
+import { requireOwner } from './_admin-auth.js';
 import { createClient } from '@supabase/supabase-js';
 import seedData from '../data/proto-active-customers.json' with { type: 'json' };
 
@@ -78,7 +78,7 @@ async function preserveManualNames(sb, rows) {
 }
 /** One-time / refresh import of proto active allowlist from bundled JSON. */
 export default async function handler(req, res) {
-  if (!(await requireAdminKey(req, res))) return;
+  if (!(await requireOwner(req, res))) return;
   if (req.method !== 'POST') return res.status(405).end();
 
   try {
