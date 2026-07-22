@@ -75,20 +75,26 @@ function MultiCategoryBadge({ item, tree }) {
       : null,
     ...placements.map((path) => resolvePathLabels(tree, path).join(' › ') || path.join(' › ')),
   ].filter(Boolean);
+  // Count every place a customer can find it: primary + Mottaro + placements.
+  const total = (primary ? 1 : 0) + alsoIn.length;
+  // Blue when the product was deliberately placed by an admin, purple for a
+  // Mottaro-only product, so the two reasons are distinguishable at a glance.
+  const placed = placements.length > 0;
   return (
     <span
-      title={`Primary: ${primary}\nAlso in: ${alsoIn.join('\n')}`}
+      title={`Primary: ${primary || 'Uncategorised'}\nAlso in:\n  ${alsoIn.join('\n  ')}`}
       style={{
         fontSize: 10,
         fontWeight: 700,
-        color: '#5b21b6',
-        background: '#ede9fe',
+        color: placed ? '#075985' : '#5b21b6',
+        background: placed ? '#e0f2fe' : '#ede9fe',
+        border: `1px solid ${placed ? '#7dd3fc' : '#ddd6fe'}`,
         borderRadius: 4,
         padding: '1px 6px',
         whiteSpace: 'nowrap',
       }}
     >
-      Multi-category
+      In {total} categories
     </span>
   );
 }

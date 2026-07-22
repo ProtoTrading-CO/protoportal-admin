@@ -3472,14 +3472,18 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
               </>
               )}
             </div>
-            </div>
             {/* Extra categories are stored separately from the product row, so
-                they are only editable once the product exists. */}
+                they are only editable once the product exists.
+
+                MUST stay inside the scrollable body above. Outside it, the
+                panel sits in the modal's fixed region and pushes its own Add
+                button past maxHeight: 92vh, where it cannot be clicked. */}
             {editingProduct?.sku && (
-              <div style={{ marginTop: 14, flexShrink: 0 }}>
+              <div style={{ marginTop: 14 }}>
                 <PlacementsEditor websiteSku={editingProduct.sku} taxonomyTree={taxonomyTree} />
               </div>
             )}
+            </div>
             {editorError && (
               <div style={{ marginTop: 12, padding: '8px 12px', background: '#fef2f2', borderRadius: 6, color: '#c40000', fontSize: 13, flexShrink: 0 }}>
                 {editorError}
