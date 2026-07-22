@@ -130,10 +130,13 @@ try {
         reportId = 'inventory.product_lookup'
         params = @{ sku = $sku }
       } | ConvertTo-Json -Compress) -TimeoutSec 25
-    if ($reportRun.readOnly -ne $true -or $reportRun.meta.readOnly -ne $true) {
+    if ($reportRun.meta.readOnly -ne $true -or $reportRun.meta.source -ne 'POSWINSQL') {
       throw "/reports/run failed readOnly validation"
     }
-    if (-not $reportRun.reportId) {
+    if ($reportRun.schemaVersion -ne 'proto.sql-report.v1' -or $reportRun.engineVersion -ne '4.3.0') {
+      throw "/reports/run failed v4.3 contract validation"
+    }
+    if (-not $reportRun.report.id) {
       throw "/reports/run failed validation"
     }
 
@@ -148,7 +151,7 @@ try {
       TopSellerItems = @($topSellers.items).Count
       InvoiceHeaders = $topSellers.invoiceHeaderCount
       ReportCount = @($reports.reports).Count
-      ReportRunId = $reportRun.reportId
+      ReportRunId = $reportRun.report.id
     }
   }
 
