@@ -34,7 +34,7 @@ from sql_report_catalogue import (
     validate_report_params,
 )
 
-BRIDGE_VERSION = "1.3.0"
+BRIDGE_VERSION = "1.4.0"
 BUILD_GIT_COMMIT = "not-stamped"
 BUILD_DATE_UTC = "not-stamped"
 STARTED_AT_UTC = datetime.now(timezone.utc)
@@ -131,6 +131,8 @@ def build_info() -> dict[str, str]:
         "sqlServer": SQL_SERVER,
         "database": SQL_DATABASE,
         "connection": "ReadOnly",
+        "reportSchemaVersion": "proto.sql-report.v1",
+        "reportEngineVersion": "4.3.0",
     }
 
 
@@ -310,7 +312,12 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/health":
             self._health()
         else:
-            self._json(200, {"reports": list_reports(), "readOnly": True})
+            self._json(200, {
+                "reports": list_reports(),
+                "readOnly": True,
+                "schemaVersion": "proto.sql-report.v1",
+                "engineVersion": "4.3.0",
+            })
 
     def do_POST(self) -> None:
         path = self.path.rstrip("/")
