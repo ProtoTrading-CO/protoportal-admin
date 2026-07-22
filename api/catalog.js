@@ -43,14 +43,22 @@ async function fetchLiveRowsBySku(sb, skus) {
  * The SQL narrow filters on the primary category columns, so a placed product
  * is invisible to it. Rows are re-sorted after the merge because the appended
  * rows arrive outside the original ORDER BY.
+ *
+ * toOrderOnly must be re-applied here: fetchAllLiveRows pushes it into SQL, but
+ * these rows are fetched by sku and would otherwise bypass the filter entirely
+ * — the same trap the Mottaro branch already guards against.
  */
-async function appendPlacedRows(sb, rows, placedSkus, sort) {
+export async function appendPlacedRows(sb, rows, placedSkus, sort, { toOrderOnly = false } = {}) {
   if (!placedSkus?.size) return rows;
   const have = new Set(rows.map((r) => r.sku));
   const missing = [...placedSkus].filter((sku) => !have.has(sku));
   if (!missing.length) return rows;
 
-  const merged = [...rows, ...(await fetchLiveRowsBySku(sb, missing))];
+  let fetched = await fetchLiveRowsBySku(sb, missing);
+  if (toOrderOnly) fetched = fetched.filter((r) => r.to_order);
+  if (!fetched.length) return rows;
+
+  const merged = [...rows, ...fetched];
   merged.sort((a, b) => (sort === 'updated'
     ? String(b.updated_at || '').localeCompare(String(a.updated_at || ''))
     : String(a.title || '').localeCompare(String(b.title || ''))));
@@ -303,7 +311,7 @@ export default async function handler(req, res) {
           if (toOrderOnly) rows = rows.filter((r) => r.to_order);
         } else {
           rows = await fetchAllLiveRows(sb, { search, categoryPath, tree, sort, toOrderOnly });
-          rows = await appendPlacedRows(sb, rows, placedSkus, sort);
+          rows = await appendPlacedRows(sb, rows, placedSkus, sort, { toOrderOnly });
         }
         rows = await enrichRowsWithProductStock(sb, rows);
         if (onlyInStock) {
