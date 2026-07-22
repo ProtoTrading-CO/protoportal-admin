@@ -29,7 +29,7 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'POST') {
-    if (!(await requireAdminKey(req, res))) return;
+    if (!(await requireOwner(req, res))) return;
     const body = req.body || {};
     const { categoryKey, skuOrder, legacyKeys = [], expectedStoreUpdatedAt } = body;
     const key = String(categoryKey || '').trim();

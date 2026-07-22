@@ -66,14 +66,18 @@ const STOCK_STATUSES = new Set(['live', 'archived']);
 const LARGE_BULK_MOVE_THRESHOLD = 100;
 
 function MultiCategoryBadge({ item, tree }) {
-  if (!item?.isMultiCategory) return null;
+  const placements = item?.placementPaths || [];
+  if (!item?.isMultiCategory && !placements.length) return null;
   const primary = [item.categoryLabel, ...(item.subcategoryLabels || [])].filter(Boolean).join(' › ');
-  const mottaroLabels = item.alternateCategoryPath?.length
-    ? resolvePathLabels(tree, item.alternateCategoryPath).join(' › ')
-    : 'Motarro';
+  const alsoIn = [
+    item.isMultiCategory
+      ? (item.alternateCategoryPath?.length ? resolvePathLabels(tree, item.alternateCategoryPath).join(' › ') : 'Motarro')
+      : null,
+    ...placements.map((path) => resolvePathLabels(tree, path).join(' › ') || path.join(' › ')),
+  ].filter(Boolean);
   return (
     <span
-      title={`Primary: ${primary}\nAlso in: ${mottaroLabels}`}
+      title={`Primary: ${primary}\nAlso in: ${alsoIn.join('\n')}`}
       style={{
         fontSize: 10,
         fontWeight: 700,
@@ -89,8 +93,9 @@ function MultiCategoryBadge({ item, tree }) {
   );
 }
 
-function ProductCategoryLine({ item }) {
-  if (!item.categoryLabel && !item.isMultiCategory) return null;
+function ProductCategoryLine({ item, tree }) {
+  const placements = item.placementPaths || [];
+  if (!item.categoryLabel && !item.isMultiCategory && !placements.length) return null;
   const primary = [item.categoryLabel, ...(item.subcategoryLabels || [])].filter(Boolean).join(' › ');
   return (
     <div className="adm-muted" style={{ fontSize: 11 }}>
@@ -100,6 +105,11 @@ function ProductCategoryLine({ item }) {
           + Motarro › {item.alternateCategoryPath.slice(1).map((id) => id.replace(/^mottaro-/, '').replace(/-/g, ' ')).join(' › ')}
         </span>
       )}
+      {placements.map((path) => (
+        <span key={path.join('/')} style={{ display: 'block', color: '#0369a1', marginTop: 2 }}>
+          + {resolvePathLabels(tree, path).join(' › ') || path.join(' › ')}
+        </span>
+      ))}
     </div>
   );
 }
@@ -277,7 +287,7 @@ function PmMobileProductCard({
             {item.price > 0 && <span>R{formatWebsitePrice(item.price)}</span>}
           </div>
           {item.categoryLabel && (
-            <ProductCategoryLine item={item} />
+            <ProductCategoryLine item={item} tree={tree} />
           )}
           {showStockColumn && (
             <div className="pm-mobile-card-stock">
@@ -1762,7 +1772,7 @@ export default function ProductManagerEngine({
                             </span>
                           )}
                         </div>
-                        <ProductCategoryLine item={item} />
+                        <ProductCategoryLine item={item} tree={tree} />
                         {status === 'approval' && item.stockError && (
                           <span className="adm-list-warn" style={{ fontSize: 11 }}>{item.stockError}</span>
                         )}

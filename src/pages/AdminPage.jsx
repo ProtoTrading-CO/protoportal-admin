@@ -95,6 +95,7 @@ import { formatWebsitePrice } from '../lib/pricing';
 import { fetchSpecials, saveSpecials } from '../lib/specials';
 import TaxonomyModals from '../components/TaxonomyModals';
 import SectionErrorBoundary from '../components/SectionErrorBoundary';
+import PlacementsEditor from '../components/PlacementsEditor';
 import ComingSoonPanel from '../components/ComingSoonPanel';
 import OrderWhatsappNotify from '../components/OrderWhatsappNotify';
 import ProductManagerEngine from '../components/ProductManagerEngine';
@@ -3472,6 +3473,13 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
               )}
             </div>
             </div>
+            {/* Extra categories are stored separately from the product row, so
+                they are only editable once the product exists. */}
+            {editingProduct?.sku && (
+              <div style={{ marginTop: 14, flexShrink: 0 }}>
+                <PlacementsEditor websiteSku={editingProduct.sku} taxonomyTree={taxonomyTree} />
+              </div>
+            )}
             {editorError && (
               <div style={{ marginTop: 12, padding: '8px 12px', background: '#fef2f2', borderRadius: 6, color: '#c40000', fontSize: 13, flexShrink: 0 }}>
                 {editorError}

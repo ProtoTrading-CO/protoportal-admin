@@ -3,6 +3,7 @@ import { join } from 'path';
 import { readSiteConfigJson, writeSiteConfigJson } from './_site-config.js';
 import { isPublishableOnWebsite } from '../lib/catalog-stock.mjs';
 import { isMotarroProduct, inferMotarroPathFromRow, injectMotarroIntoTree } from './_mottaro-category.js';
+import { collectCountableNodeIds } from './_placements.js';
 import {
   escapeIlikePattern,
   matchesTaxonomyLabel,
@@ -654,14 +655,21 @@ export function resolveLabelsFromPathIds(tree, pathIds = []) {
 }
 
 // Requires migration 038 (mottaro_path) to be applied before deploy.
-const COUNT_ROW_COLS = 'category,subcategory_one,subcategory_two,subcategory_three,subcategory_four,subcategory_extra,title,available_stock,stock_qty,mottaro_path,keep_live_when_oos';
+// sku is selected so additional placements (migration 049) can be joined on.
+const COUNT_ROW_COLS = 'sku,category,subcategory_one,subcategory_two,subcategory_three,subcategory_four,subcategory_extra,title,available_stock,stock_qty,mottaro_path,keep_live_when_oos';
 
 /**
  * Count live products per taxonomy node (includes all descendants).
  * Default counts every live row so badges match the Product Manager's default
  * view; pass onlyInStock=true to mirror the "Show only in stock" toggle.
+ *
+ * `placements` is an optional sku -> paths[] Map (see _placements.js). When
+ * supplied, a product also counts under every additional placement. Node ids
+ * are collected into a Set first, so a product filed under both a category and
+ * one of its own descendants counts once per node rather than inflating every
+ * shared ancestor. Omit it and the counts are byte-identical to before.
  */
-export async function buildCategoryProductCounts(supabase, tree, { onlyInStock = false } = {}) {
+export async function buildCategoryProductCounts(supabase, tree, { onlyInStock = false, placements = null } = {}) {
   const counts = { __uncategorized__: 0, __all__: 0 };
   let mottaroLive = 0;
   let from = 0;
@@ -684,10 +692,10 @@ export async function buildCategoryProductCounts(supabase, tree, { onlyInStock =
       const { categoryPath } = resolveCategoryIds(row, tree);
       if (!categoryPath.length) {
         counts.__uncategorized__ += 1;
-      } else {
-        for (const id of categoryPath) {
-          counts[id] = (counts[id] || 0) + 1;
-        }
+      }
+      const extraPaths = placements ? (placements.get(row.sku) || []) : [];
+      for (const id of collectCountableNodeIds([categoryPath, ...extraPaths])) {
+        counts[id] = (counts[id] || 0) + 1;
       }
 
       if (isMottaro) {
