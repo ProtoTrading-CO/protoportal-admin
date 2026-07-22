@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Loader2, Plus, X } from 'lucide-react';
-import CategoryPathSelect from './productLoader/CategoryPathSelect';
 import { addPlacement, fetchPlacements, placementTrail, removePlacement } from '../lib/placements';
 import { resolvePathLabels } from './CategorySidebar';
 
@@ -9,7 +8,24 @@ import { resolvePathLabels } from './CategorySidebar';
  *
  * The primary category is shown read-only for context — it is edited with the
  * normal category controls, and the API rejects adding a placement equal to it.
+ *
+ * The cascading selects are owned here rather than reusing the Product
+ * Loader's CategoryPathSelect: that component renders bare <label> elements
+ * styled by the loader's own CSS, and depending on someone else's markup for
+ * a control this fiddly made a broken selection impossible to diagnose.
  */
+
+function childrenOf(tree, id) {
+  if (!id) return [];
+  const stack = [...(tree || [])];
+  while (stack.length) {
+    const node = stack.shift();
+    if (node.id === id) return node.children || [];
+    if (node.children?.length) stack.push(...node.children);
+  }
+  return [];
+}
+
 export default function PlacementsEditor({ websiteSku, taxonomyTree = [] }) {
   const [placements, setPlacements] = useState([]);
   const [primaryPath, setPrimaryPath] = useState([]);
@@ -36,7 +52,11 @@ export default function PlacementsEditor({ websiteSku, taxonomyTree = [] }) {
   useEffect(() => { void load(); }, [load]);
 
   const onAdd = async () => {
-    if (!draft.length || busy) return;
+    if (busy) return;
+    if (!draft.length) {
+      setError('Pick a category first.');
+      return;
+    }
     setBusy(true);
     setError('');
     try {
@@ -62,9 +82,24 @@ export default function PlacementsEditor({ websiteSku, taxonomyTree = [] }) {
     }
   };
 
-  const primaryTrail = primaryPath.length
-    ? resolvePathLabels(taxonomyTree, primaryPath).join(' › ')
-    : 'Uncategorised';
+  // One select per level, plus an empty one below the deepest choice.
+  const levels = [{ options: taxonomyTree || [], selected: draft[0] || '' }];
+  for (let i = 0; i < draft.length; i += 1) {
+    const options = childrenOf(taxonomyTree, draft[i]);
+    if (!options.length) break;
+    levels.push({ options, selected: draft[i + 1] || '' });
+  }
+
+  const setLevel = (index, id) => {
+    setError('');
+    setDraft(id ? [...draft.slice(0, index), id] : draft.slice(0, index));
+  };
+
+  const draftTrail = draft.length ? resolvePathLabels(taxonomyTree, draft).join(' › ') : '';
+  const selectStyle = {
+    width: '100%', padding: '6px 8px', borderRadius: 6,
+    border: '1px solid #cbd5e1', fontSize: 13, background: '#fff',
+  };
 
   return (
     <div style={{ border: '1px solid #e2e8f0', borderRadius: 10, padding: 12, background: '#fff' }}>
@@ -72,7 +107,7 @@ export default function PlacementsEditor({ websiteSku, taxonomyTree = [] }) {
         Also appears in
       </div>
       <div className="adm-muted" style={{ fontSize: 11, marginTop: 4 }}>
-        Primary: {primaryTrail}
+        Primary: {primaryPath.length ? resolvePathLabels(taxonomyTree, primaryPath).join(' › ') : 'Uncategorised'}
       </div>
 
       {loading ? (
@@ -82,9 +117,7 @@ export default function PlacementsEditor({ websiteSku, taxonomyTree = [] }) {
       ) : (
         <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
           {!placements.length && (
-            <div className="adm-muted" style={{ fontSize: 12 }}>
-              Only in its primary category.
-            </div>
+            <div className="adm-muted" style={{ fontSize: 12 }}>Only in its primary category.</div>
           )}
           {placements.map((placement) => (
             <div
@@ -99,9 +132,7 @@ export default function PlacementsEditor({ websiteSku, taxonomyTree = [] }) {
               <span style={{ flex: 1, color: placement.orphaned ? '#b91c1c' : '#334155' }}>
                 {placementTrail(placement)}
                 {placement.orphaned && (
-                  <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700 }}>
-                    category deleted — remove this
-                  </span>
+                  <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700 }}>category deleted — remove this</span>
                 )}
               </span>
               <button
@@ -109,7 +140,6 @@ export default function PlacementsEditor({ websiteSku, taxonomyTree = [] }) {
                 onClick={() => void onRemove(placement)}
                 disabled={busy}
                 className="adm-btn-ghost"
-                title="Remove this location"
                 aria-label={`Remove ${placementTrail(placement)}`}
               >
                 <X size={14} />
@@ -120,19 +150,45 @@ export default function PlacementsEditor({ websiteSku, taxonomyTree = [] }) {
       )}
 
       <div style={{ marginTop: 12, borderTop: '1px solid #f1f5f9', paddingTop: 10 }}>
-        <CategoryPathSelect
-          taxonomyTree={taxonomyTree}
-          value={draft}
-          onChange={setDraft}
-          mainLabel="Add another location"
-          mainPlaceholder="— Choose a category —"
-        />
+        <div style={{ fontSize: 12, fontWeight: 600, color: '#334155', marginBottom: 6 }}>
+          Add another location
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {levels.map((level, index) => (
+            <select
+              key={index}
+              value={level.selected}
+              onChange={(e) => setLevel(index, e.target.value)}
+              style={selectStyle}
+            >
+              <option value="">
+                {index === 0 ? '— Choose a category —' : '— Optional subcategory —'}
+              </option>
+              {level.options.map((opt) => (
+                <option key={opt.id} value={opt.id}>{opt.label}</option>
+              ))}
+            </select>
+          ))}
+        </div>
+
+        {draftTrail && (
+          <div style={{ fontSize: 12, color: '#0369a1', marginTop: 8 }}>
+            Will be added to: <strong>{draftTrail}</strong>
+          </div>
+        )}
+
         <button
           type="button"
           onClick={() => void onAdd()}
-          disabled={!draft.length || busy}
-          className="adm-btn"
-          style={{ marginTop: 8, display: 'inline-flex', alignItems: 'center', gap: 6 }}
+          disabled={busy}
+          style={{
+            marginTop: 10, display: 'inline-flex', alignItems: 'center', gap: 6,
+            padding: '7px 14px', borderRadius: 8, fontSize: 13, fontWeight: 600,
+            border: '1px solid #0369a1',
+            background: draft.length ? '#0369a1' : '#e2e8f0',
+            color: draft.length ? '#fff' : '#64748b',
+            cursor: busy ? 'wait' : 'pointer',
+          }}
         >
           {busy ? <Loader2 size={14} className="spin" /> : <Plus size={14} />}
           Add location
@@ -140,7 +196,14 @@ export default function PlacementsEditor({ websiteSku, taxonomyTree = [] }) {
       </div>
 
       {error && (
-        <div style={{ marginTop: 8, fontSize: 12, color: '#b91c1c' }} role="alert">
+        <div
+          role="alert"
+          style={{
+            marginTop: 10, fontSize: 12, color: '#b91c1c',
+            background: '#fef2f2', border: '1px solid #fecaca',
+            borderRadius: 6, padding: '6px 8px',
+          }}
+        >
           {error}
         </div>
       )}
