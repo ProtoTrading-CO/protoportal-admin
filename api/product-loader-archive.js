@@ -6,6 +6,15 @@ import { NUTSTORE_ARCHIVED_BY } from './nutstore-process.js';
 const ARCHIVE_DEFAULT_CATEGORY = 'Uncategorised';
 const ARCHIVE_DEFAULT_SUB = 'General';
 
+// bashews.jpg -> slot 1, bashews.2.jpg -> slot 2, and so on. parseLoaderFilename
+// already derives the slot; this maps it to the column it must land in.
+const SLOT_COLUMNS = ['image_url_one', 'image_url_two', 'image_url_three', 'image_url_four'];
+
+function slotColumn(rawSlot) {
+  const slot = Number(rawSlot) || 1;
+  return SLOT_COLUMNS[Math.min(4, Math.max(1, slot)) - 1];
+}
+
 function getStockClient() {
   return createClient(
     process.env.VITE_STOCK_SUPABASE_URL,
@@ -33,6 +42,7 @@ export default async function handler(req, res) {
 
   const now = new Date().toISOString();
   const title = String(body.title || '').trim() || String(body.displayCode || '').trim() || sku;
+  const imageColumn = slotColumn(body.imageSlot);
   const payload = {
     sku,
     barcode: String(body.barcode || sku).trim(),
@@ -42,7 +52,10 @@ export default async function handler(req, res) {
     category: String(body.category || '').trim() || ARCHIVE_DEFAULT_CATEGORY,
     subcategory_one: String(body.subcategoryOne || '').trim() || ARCHIVE_DEFAULT_SUB,
     subcategory_two: body.subcategoryTwo || null,
-    image_url_one: imageUrl,
+    // Slot-aware: a .2/.3/.4 file must not overwrite image 1. Only the target
+    // column is written, so uploading a folder of bashews, bashews.2,
+    // bashews.3, bashews.4 fills all four slots instead of fighting over one.
+    [imageColumn]: imageUrl,
     archived_by: NUTSTORE_ARCHIVED_BY,
     archived_at: now,
     updated_at: now,
@@ -53,7 +66,7 @@ export default async function handler(req, res) {
   const sb = getStockClient();
   try {
     const [{ data: liveRow }, { data: archivedRow }] = await Promise.all([
-      sb.from('website_stock').select('sku, image_url_one').eq('sku', sku).maybeSingle(),
+      sb.from('website_stock').select(`sku, ${imageColumn}`).eq('sku', sku).maybeSingle(),
       sb.from('archived_products').select('sku, archived_by').eq('sku', sku).maybeSingle(),
     ]);
 
@@ -65,7 +78,7 @@ export default async function handler(req, res) {
     if (liveRow) {
       const { error: patchErr } = await sb
         .from('website_stock')
-        .update({ image_url_one: liveRow.image_url_one || imageUrl, updated_at: now })
+        .update({ [imageColumn]: liveRow[imageColumn] || imageUrl, updated_at: now })
         .eq('sku', sku);
       if (patchErr) throw patchErr;
       const { error: rpcErr } = await sb.rpc('archive_product', { p_sku: sku, p_by: NUTSTORE_ARCHIVED_BY });
