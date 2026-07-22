@@ -4,6 +4,7 @@ import {
   collectCountableNodeIds,
   mergeCategoryPaths,
   normalizePlacementPath,
+  parsePlacementInput,
   placementPathKey,
 } from '../api/_placements.js';
 
@@ -98,6 +99,34 @@ describe('mergeCategoryPaths', () => {
 
   it('returns an empty list when there is nothing at all', () => {
     expect(mergeCategoryPaths([], [])).toEqual([]);
+  });
+});
+
+describe('parsePlacementInput', () => {
+  it('accepts a valid body', () => {
+    expect(parsePlacementInput({ websiteSku: 'SKU1', nodePath: ['a', 'b'] })).toEqual({
+      sku: 'SKU1',
+      path: ['a', 'b'],
+    });
+  });
+
+  it('trims the sku', () => {
+    expect(parsePlacementInput({ websiteSku: '  SKU1 ', nodePath: ['a'] }).sku).toBe('SKU1');
+  });
+
+  it('rejects a missing sku', () => {
+    expect(parsePlacementInput({ nodePath: ['a'] }).error).toMatch(/websiteSku/);
+    expect(parsePlacementInput({ websiteSku: '   ', nodePath: ['a'] }).error).toMatch(/websiteSku/);
+  });
+
+  it('rejects a missing or empty node path', () => {
+    expect(parsePlacementInput({ websiteSku: 'SKU1' }).error).toMatch(/nodePath/);
+    expect(parsePlacementInput({ websiteSku: 'SKU1', nodePath: [] }).error).toMatch(/nodePath/);
+    expect(parsePlacementInput({ websiteSku: 'SKU1', nodePath: 'nope' }).error).toMatch(/nodePath/);
+  });
+
+  it('rejects a null body without throwing', () => {
+    expect(parsePlacementInput(null).error).toMatch(/websiteSku/);
   });
 });
 

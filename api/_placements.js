@@ -73,6 +73,18 @@ export function mergeCategoryPaths(primaryPath, extraPaths) {
 }
 
 /**
+ * Validate an add/remove placement request body.
+ * Returns { sku, path } or { error } so the route stays a thin shell.
+ */
+export function parsePlacementInput(body) {
+  const sku = String(body?.websiteSku ?? '').trim();
+  if (!sku) return { error: 'websiteSku is required' };
+  const path = normalizePlacementPath(body?.nodePath);
+  if (!path) return { error: 'nodePath must be a non-empty array of category node ids' };
+  return { sku, path };
+}
+
+/**
  * Every distinct node id across a product's paths.
  *
  * Returned as a Set so a product filed under both an ancestor and one of its
