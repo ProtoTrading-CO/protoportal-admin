@@ -45,6 +45,9 @@
     "api/bulk-image-replace.js": {
       "maxDuration": 60
     },
+    "api/apollo-daily-brief.js": {
+      "maxDuration": 60
+    },
     "api/apply-category-moves.js": {
       "maxDuration": 300,
       "includeFiles": "data/category-move-*.xlsx"
@@ -53,6 +56,7 @@
   "crons": [
     { "path": "/api/order-notify-sweep", "schedule": "*/10 * * * *" },
     { "path": "/api/brevo-sync", "schedule": "*/15 * * * *" },
+    { "path": "/api/apollo-daily-brief", "schedule": "0 6 * * 1-5" },
     { "path": "/api/purge-expired-staging", "schedule": "0 3 * * *" }
   ]
 }
