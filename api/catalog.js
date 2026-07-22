@@ -15,10 +15,47 @@ import {
   isPublishableOnWebsite,
 } from './_catalog-adapt.js';
 import { isMotarroBrowsePath, isMotarroProduct } from './_mottaro-category.js';
+import { loadPlacementMapIfEnabled, skusMatchingBrowsePath } from './_placements.js';
 
 const VALID_STATUS = new Set(['live', 'archived', 'new-items', 'approval', 'recycle']);
 const EXCLUDE_ARCHIVED = ['new-products', 'recycle-bin'];
 const PAGE_CHUNK = 1000;
+const SKU_FETCH_CHUNK = 200;
+
+/** Fetch live rows for an explicit sku list, chunked to keep the URL sane. */
+async function fetchLiveRowsBySku(sb, skus) {
+  const list = [...skus];
+  const out = [];
+  for (let i = 0; i < list.length; i += SKU_FETCH_CHUNK) {
+    const { data, error } = await sb
+      .from('website_stock')
+      .select('*')
+      .in('sku', list.slice(i, i + SKU_FETCH_CHUNK));
+    if (error) throw error;
+    out.push(...(data || []));
+  }
+  return out;
+}
+
+/**
+ * Add products that belong to this category only via an additional placement.
+ *
+ * The SQL narrow filters on the primary category columns, so a placed product
+ * is invisible to it. Rows are re-sorted after the merge because the appended
+ * rows arrive outside the original ORDER BY.
+ */
+async function appendPlacedRows(sb, rows, placedSkus, sort) {
+  if (!placedSkus?.size) return rows;
+  const have = new Set(rows.map((r) => r.sku));
+  const missing = [...placedSkus].filter((sku) => !have.has(sku));
+  if (!missing.length) return rows;
+
+  const merged = [...rows, ...(await fetchLiveRowsBySku(sb, missing))];
+  merged.sort((a, b) => (sort === 'updated'
+    ? String(b.updated_at || '').localeCompare(String(a.updated_at || ''))
+    : String(a.title || '').localeCompare(String(b.title || ''))));
+  return merged;
+}
 
 async function fetchAllMotarroRows(sb, { search, categoryPath, tree, sort }) {
   const rows = [];
@@ -241,6 +278,9 @@ export default async function handler(req, res) {
   try {
     const sb = getStockClient();
     const tree = await loadTaxonomy().catch(() => []);
+    // null when the feature is off — no extra query, behaviour unchanged.
+    const placements = await loadPlacementMapIfEnabled(sb);
+    const placedSkus = skusMatchingBrowsePath(placements, categoryPath);
 
     let result;
     let stockAlreadyEnriched = false;
@@ -249,8 +289,13 @@ export default async function handler(req, res) {
       // Paths deeper than the fixed subcategory columns can't get an exact SQL
       // count (subcategory_extra is only coarsely narrowed), so full-scan them
       // and refine + paginate in JS.
+      //
+      // Products in this category only via an additional placement are also
+      // invisible to the SQL count, so they force the full scan too — but only
+      // for a category that actually has placements, so the fast path survives
+      // everywhere else.
       const useFullScan = onlyInStock || isMotarroBrowsePath(categoryPath) || term
-        || categoryPathExceedsFixedColumns(categoryPath);
+        || categoryPathExceedsFixedColumns(categoryPath) || placedSkus.size > 0;
       if (useFullScan) {
         let rows;
         if (isMotarroBrowsePath(categoryPath)) {
@@ -258,6 +303,7 @@ export default async function handler(req, res) {
           if (toOrderOnly) rows = rows.filter((r) => r.to_order);
         } else {
           rows = await fetchAllLiveRows(sb, { search, categoryPath, tree, sort, toOrderOnly });
+          rows = await appendPlacedRows(sb, rows, placedSkus, sort);
         }
         rows = await enrichRowsWithProductStock(sb, rows);
         if (onlyInStock) {
@@ -352,7 +398,10 @@ export default async function handler(req, res) {
       enriched = await enrichRowsWithProductStock(sb, enriched, { includePrice: status === 'new-items' });
     }
 
-    const adapted = enriched.map((r) => adaptCatalogRow(r, tree, { archived: result.archived }));
+    const adapted = enriched.map((r) => adaptCatalogRow(r, tree, {
+      archived: result.archived,
+      placementPaths: placements ? (placements.get(r.sku) || []) : null,
+    }));
 
     res.setHeader('Cache-Control', 'no-store');
     return res.status(200).json({

@@ -6,6 +6,7 @@ import {
   isMotarroProduct,
 } from './_mottaro-category.js';
 import { escapeIlikePattern, parseExtraLabels } from '../lib/taxonomy-match.mjs';
+import { mergeCategoryPaths } from './_placements.js';
 import { isExactlyZeroStock, isPublishableOnWebsite, isNegativeStock } from '../lib/catalog-stock.mjs';
 
 const SUB_FIELDS = ['subcategory_one', 'subcategory_two', 'subcategory_three', 'subcategory_four'];
@@ -102,7 +103,14 @@ export function applySearchFilter(rows, search) {
   });
 }
 
-export function adaptCatalogRow(row, tree, { archived = false } = {}) {
+/**
+ * Adapt a DB row for the admin catalogue.
+ *
+ * `placementPaths` are the product's ADDITIONAL locations (migration 049).
+ * categoryPath stays the primary so every existing reader is unaffected;
+ * categoryPaths carries the full set, merged with any Mottaro path.
+ */
+export function adaptCatalogRow(row, tree, { archived = false, placementPaths = null } = {}) {
   const images = [row.image_url_one, row.image_url_two, row.image_url_three, row.image_url_four].filter(Boolean);
   const subLabels = [...SUB_FIELDS.map((f) => row[f]), ...parseExtraLabels(row.subcategory_extra)].filter(Boolean);
   const { categoryId, categoryPath } = resolveCategoryIds(row, tree);
@@ -158,7 +166,15 @@ export function adaptCatalogRow(row, tree, { archived = false } = {}) {
     stockError: row._stockError ?? null,
     stockLinked: row.stockLinked !== false,
   };
-  return enrichMotarroCategoryFields(base, row, tree, categoryPath);
+  const enriched = enrichMotarroCategoryFields(base, row, tree, categoryPath);
+  const extras = Array.isArray(placementPaths) ? placementPaths : [];
+  return {
+    ...enriched,
+    // Primary first, then the Mottaro path, then placements — deduped, so a
+    // placement equal to the primary does not render the product twice.
+    categoryPaths: mergeCategoryPaths(categoryPath, [...(enriched.categoryPaths || []), ...extras]),
+    placementPaths: extras,
+  };
 }
 
 export function paginateRows(rows, page, pageSize) {

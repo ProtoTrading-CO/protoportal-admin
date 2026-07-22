@@ -103,6 +103,36 @@ export function collectCountableNodeIds(paths) {
 }
 
 /**
+ * Skus whose ADDITIONAL placements fall under a browse path.
+ *
+ * Matching is prefix-based and depth-aware, mirroring filterByCategoryPath:
+ * a placement counts if the browse path is a prefix of it, so browsing
+ * "Art Supplies" finds something placed at "Art Supplies > Paint", but
+ * browsing "Art Supplies > Paint" does not surface a product placed only at
+ * the shallower "Art Supplies".
+ *
+ * Returns an empty Set for an empty browse path — the root listing already
+ * shows everything, so there is nothing extra to pull in.
+ */
+export function skusMatchingBrowsePath(placementMap, browsePath) {
+  const target = normalizePlacementPath(browsePath);
+  const out = new Set();
+  if (!target || !placementMap) return out;
+
+  for (const [sku, paths] of placementMap) {
+    for (const candidate of paths || []) {
+      const path = normalizePlacementPath(candidate);
+      if (!path || path.length < target.length) continue;
+      if (target.every((segment, i) => path[i] === segment)) {
+        out.add(sku);
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+/**
  * Load every placement as a sku -> paths[] Map, or null when the feature is off.
  *
  * Returning null (rather than an empty Map) lets callers distinguish "feature

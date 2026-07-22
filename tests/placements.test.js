@@ -6,6 +6,7 @@ import {
   normalizePlacementPath,
   parsePlacementInput,
   placementPathKey,
+  skusMatchingBrowsePath,
 } from '../api/_placements.js';
 
 describe('normalizePlacementPath', () => {
@@ -147,5 +148,45 @@ describe('collectCountableNodeIds', () => {
   it('handles an empty input', () => {
     expect(collectCountableNodeIds([]).size).toBe(0);
     expect(collectCountableNodeIds(null).size).toBe(0);
+  });
+});
+
+describe('skusMatchingBrowsePath', () => {
+  const map = buildPlacementMap([
+    { website_sku: 'A', node_path: ['art-supplies', 'paint'] },
+    { website_sku: 'B', node_path: ['art-supplies'] },
+    { website_sku: 'C', node_path: ['school-and-office', 'writing'] },
+    { website_sku: 'A', node_path: ['school-and-office'] },
+  ]);
+
+  it('finds a product placed deeper than the browsed node', () => {
+    expect([...skusMatchingBrowsePath(map, ['art-supplies'])].sort()).toEqual(['A', 'B']);
+  });
+
+  it('matches an exact placement', () => {
+    expect([...skusMatchingBrowsePath(map, ['art-supplies', 'paint'])]).toEqual(['A']);
+  });
+
+  // Browsing a child must not surface a product placed only at the parent —
+  // same depth rule filterByCategoryPath uses for primary paths.
+  it('does not surface a shallower placement when browsing a child', () => {
+    expect([...skusMatchingBrowsePath(map, ['school-and-office', 'writing'])]).toEqual(['C']);
+  });
+
+  it('returns each sku once even with several matching placements', () => {
+    const dupes = buildPlacementMap([
+      { website_sku: 'A', node_path: ['art-supplies', 'paint'] },
+      { website_sku: 'A', node_path: ['art-supplies', 'brushes'] },
+    ]);
+    expect([...skusMatchingBrowsePath(dupes, ['art-supplies'])]).toEqual(['A']);
+  });
+
+  it('returns nothing for an empty or missing browse path', () => {
+    expect(skusMatchingBrowsePath(map, []).size).toBe(0);
+    expect(skusMatchingBrowsePath(map, null).size).toBe(0);
+  });
+
+  it('returns nothing when the feature is off (null map)', () => {
+    expect(skusMatchingBrowsePath(null, ['art-supplies']).size).toBe(0);
   });
 });
