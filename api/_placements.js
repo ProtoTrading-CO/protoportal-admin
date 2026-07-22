@@ -6,10 +6,11 @@
  * also appear under. Paths are arrays of stable taxonomy node ids, the same
  * shape as website_stock.mottaro_path.
  *
- * Everything here is pure — no DB access — so it is cheap to unit test and
- * safe to share between the catalog read path, taxonomy counts, and the
- * placement CRUD endpoint.
+ * Everything here is pure except loadPlacementMapIfEnabled at the bottom, so
+ * the path logic stays cheap to unit test and is shared between the catalog
+ * read path, taxonomy counts, and the placement CRUD endpoint.
  */
+import { readFeatureFlags } from './_feature-flags.js';
 
 /**
  * Normalize a placement path to clean node ids.
@@ -99,4 +100,36 @@ export function collectCountableNodeIds(paths) {
     for (const id of path) ids.add(id);
   }
   return ids;
+}
+
+/**
+ * Load every placement as a sku -> paths[] Map, or null when the feature is off.
+ *
+ * Returning null (rather than an empty Map) lets callers distinguish "feature
+ * disabled — behave exactly as before" from "enabled but nothing placed yet",
+ * and keeps the disabled path free of any extra query.
+ *
+ * The whole table is read in one pass because callers need arbitrary sku
+ * lookups across a full catalogue scan; it holds only additional placements,
+ * so it stays far smaller than website_stock.
+ */
+export async function loadPlacementMapIfEnabled(supabase, { force = false } = {}) {
+  const flags = await readFeatureFlags({ force });
+  if (!flags.multiPlacement) return null;
+
+  const rows = [];
+  const PAGE = 1000;
+  let from = 0;
+  while (true) {
+    const { data, error } = await supabase
+      .from('product_placements')
+      .select('website_sku,node_path')
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+    const batch = data || [];
+    rows.push(...batch);
+    if (batch.length < PAGE) break;
+    from += PAGE;
+  }
+  return buildPlacementMap(rows);
 }
