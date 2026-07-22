@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { Loader2, Plus, X } from 'lucide-react';
 import { addPlacement, fetchPlacements, placementTrail, removePlacement } from '../lib/placements';
 import { resolvePathLabels } from './CategorySidebar';
+import { queryClient } from '../lib/queryClient';
+import { invalidateAdminCache } from '../lib/products';
 
 /**
  * View and edit the EXTRA categories a product appears under.
@@ -51,6 +53,14 @@ export default function PlacementsEditor({ websiteSku, taxonomyTree = [] }) {
 
   useEffect(() => { void load(); }, [load]);
 
+  // The product row behind this modal renders its category badge from the
+  // catalogue query. Without this the save succeeds but the row keeps showing
+  // the old categories, which reads as "nothing happened".
+  const refreshCatalogue = () => {
+    invalidateAdminCache();
+    queryClient.invalidateQueries({ queryKey: ['catalog'] });
+  };
+
   const onAdd = async () => {
     if (busy) return;
     if (!draft.length) {
@@ -62,6 +72,7 @@ export default function PlacementsEditor({ websiteSku, taxonomyTree = [] }) {
     try {
       setPlacements(await addPlacement(websiteSku, draft));
       setDraft([]);
+      refreshCatalogue();
     } catch (err) {
       setError(err.message || 'Could not add that location');
     } finally {
@@ -75,6 +86,7 @@ export default function PlacementsEditor({ websiteSku, taxonomyTree = [] }) {
     setError('');
     try {
       setPlacements(await removePlacement(websiteSku, { id: placement.id }));
+      refreshCatalogue();
     } catch (err) {
       setError(err.message || 'Could not remove that location');
     } finally {
@@ -106,6 +118,18 @@ export default function PlacementsEditor({ websiteSku, taxonomyTree = [] }) {
       <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
         Also appears in
       </div>
+      {error && (
+        <div
+          role="alert"
+          style={{
+            marginTop: 8, fontSize: 12, color: '#b91c1c', fontWeight: 600,
+            background: '#fef2f2', border: '1px solid #fecaca',
+            borderRadius: 6, padding: '7px 9px',
+          }}
+        >
+          {error}
+        </div>
+      )}
       <div className="adm-muted" style={{ fontSize: 11, marginTop: 4 }}>
         Primary: {primaryPath.length ? resolvePathLabels(taxonomyTree, primaryPath).join(' › ') : 'Uncategorised'}
       </div>
@@ -195,18 +219,6 @@ export default function PlacementsEditor({ websiteSku, taxonomyTree = [] }) {
         </button>
       </div>
 
-      {error && (
-        <div
-          role="alert"
-          style={{
-            marginTop: 10, fontSize: 12, color: '#b91c1c',
-            background: '#fef2f2', border: '1px solid #fecaca',
-            borderRadius: 6, padding: '6px 8px',
-          }}
-        >
-          {error}
-        </div>
-      )}
     </div>
   );
 }

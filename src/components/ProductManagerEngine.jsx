@@ -34,6 +34,7 @@ import { sortOrderCategoryKey, lookupSortOrder, applySkuOrder, sortOrderLookupKe
 import { persistSortOrder, fetchSortOrderStore, sortMetaForPath, formatSortSavedAt, fetchSortMetaForCategory } from '../lib/sortOrderStore';
 import { exportProductsCatalogXlsx, exportAllProductsCatalogXlsx, exportSelectedProductsXlsx } from '../lib/exportLiveProducts';
 import { bulkMoveProducts, bulkRemoveFromCategory, invalidateAdminCache, updateProduct, previewFloaters, archiveFloaters } from '../lib/products';
+import { partitionPlacedOnly } from '../lib/placements';
 import { formatWebsitePrice } from '../lib/pricing';
 import { childrenOfTree, fetchCategoryProductCounts, subcategoryOptionsFromTree, listHiddenMottaro, restoreMottaroNode } from '../lib/taxonomyAdmin';
 
@@ -832,13 +833,27 @@ export default function ProductManagerEngine({
     if (reorderSaveTimerRef.current) clearTimeout(reorderSaveTimerRef.current);
   }, []);
 
+  // Rows the admin selected by hand that are only in this category via a
+  // placement. Bulk actions rewrite the PRIMARY category, so these need an
+  // explicit warning before anything destructive runs.
+  const placedOnlySelected = () => {
+    const rows = [...selected].map((id) => selectedRowsRef.current.get(id)).filter(Boolean);
+    return partitionPlacedOnly(rows, categoryPath).placedOnly;
+  };
+
+  const placedOnlyWarning = (verb) => {
+    const placed = placedOnlySelected();
+    if (!placed.length) return '';
+    return `\n\nWARNING: ${placed.length} of these are only PLACED in this category — their main category is elsewhere. ${verb} will change their main category.`;
+  };
+
   const confirmBulkMove = async ({ categoryPathIds, categoryId, subcategoryId, destinationLabel }) => {
     const skus = [...selected];
     if (!skus.length || categoryPathIds.length < 2) {
       onShowToast?.('Choose a main category and at least one subcategory', 'error');
       return;
     }
-    if (!window.confirm(`Move ${skus.length} product(s) to:\n${destinationLabel}?`)) return;
+    if (!window.confirm(`Move ${skus.length} product(s) to:\n${destinationLabel}?${placedOnlyWarning('Moving')}`)) return;
     setMoveSaving(true);
     if (skus.length > LARGE_BULK_MOVE_THRESHOLD) {
       onShowToast?.(`Moving ${skus.length} products…`, 'info');
@@ -1106,10 +1121,22 @@ export default function ProductManagerEngine({
         archivedSource: status === 'archived' && archiveStockView === 'archived' ? archiveSourceFilter : undefined,
         onlyInStock: status === 'live' && onlyInStock,
       });
-      selectedRowsRef.current = new Map(allRows.map((r) => [r.id, r]));
-      setSelected(new Set(allRows.map((r) => r.id)));
+      // Products that are in this category only via an additional placement
+      // are NOT selected. Bulk move/archive rewrite the PRIMARY category, so
+      // sweeping them up here would silently destroy the real filing of a
+      // product that lives somewhere else entirely.
+      const browsePath = debouncedSearch ? [] : categoryPath;
+      const { owned, placedOnly } = partitionPlacedOnly(allRows, browsePath);
+
+      selectedRowsRef.current = new Map(owned.map((r) => [r.id, r]));
+      setSelected(new Set(owned.map((r) => r.id)));
       setSelectAllView(true);
-      onShowToast?.(`Selected ${allRows.length} product(s)`, 'success');
+      onShowToast?.(
+        placedOnly.length
+          ? `Selected ${owned.length} product(s) — skipped ${placedOnly.length} only placed here (their main category is elsewhere)`
+          : `Selected ${owned.length} product(s)`,
+        'success',
+      );
     } catch (err) {
       onShowToast?.(err.message || 'Failed to select all', 'error');
     } finally {
@@ -1121,7 +1148,7 @@ export default function ProductManagerEngine({
     const skus = [...selected];
     if (!skus.length) return;
     const noun = skus.length === 1 ? 'product' : 'products';
-    if (!window.confirm(`Archive ${skus.length} selected ${noun}? They will be hidden from the trade website.`)) return;
+    if (!window.confirm(`Archive ${skus.length} selected ${noun}? They will be hidden from the trade website.${placedOnlyWarning('Archiving')}`)) return;
     setBulkActionPending(true);
     try {
       await mutations.bulkArchive.mutateAsync(skus);
