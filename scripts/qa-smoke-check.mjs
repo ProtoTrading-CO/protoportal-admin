@@ -461,7 +461,11 @@ assert.match(readSrc('api/email-test-send.js'), /template === 'order_confirmatio
 assert.match(readSrc('src/components/EmailTemplateTests.jsx'), /sendEmailTemplateTest/, 'template test UI present');
 const webhookSrc2 = readSrc('api/brevo-email-webhook.js');
 assert.match(webhookSrc2, /x-webhook-secret/, 'webhook accepts the secret via header');
-assert.match(webhookSrc2, /accepting events unauthenticated/, 'webhook works when no secret is set (with a warning)');
+// Was: asserted the webhook accepted events unauthenticated with a warning.
+// a0278f7 deliberately made it fail closed, so that assertion has been failing
+// since 2026-07-18 and was pinning the insecure behaviour.
+assert.match(webhookSrc2, /Webhook authentication is not configured/, 'webhook fails closed when no secret is set');
+assert.match(webhookSrc2, /Bearer\\s\+/, 'webhook strips the Bearer prefix before comparing');
 console.log('✓ Add-customer, last-email status, per-template test send, webhook robustness');
 
 // Simplified email merge fields — one reliable "name", no blank-prone codes
@@ -933,6 +937,15 @@ assert.equal(
   'lib/mottaro-category.mjs must stay byte-identical to Proto-Website-/lib/mottaro-category.mjs — edit both copies together and update the pinned hash in both qa-smoke-check.mjs files',
 );
 console.log('✓ Shared Mottaro module in sync with Proto-Website-');
+
+// Shared placements module — must stay byte-identical to the portal copy
+const PLACEMENTS_SHARED_HASH = 'a73d1bb627f01442';
+assert.equal(
+  createHash('sha256').update(readSrc('lib/placements.mjs')).digest('hex').slice(0, 16),
+  PLACEMENTS_SHARED_HASH,
+  'lib/placements.mjs must stay byte-identical to Proto-Website-/lib/placements.mjs — edit both copies together and update the pinned hash in both qa-smoke-check.mjs files',
+);
+console.log('✓ Shared placements module in sync with Proto-Website-');
 
 // A5 — counts refresh after PM bulk move
 const pmMoveBlock = pmEngineSrc2.match(/const confirmBulkMove = async[\s\S]*?finally \{\s*setMoveSaving\(false\);/)?.[0] || '';
