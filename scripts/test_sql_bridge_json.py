@@ -181,14 +181,25 @@ class TestFixedBridgeJson(unittest.TestCase):
 
 
 class TestSqlReportCatalogue(unittest.TestCase):
-    def test_lists_five_approved_reports(self):
+    def test_lists_v43_approved_reports(self):
         report_ids = [item["id"] for item in _catalogue.list_reports()]
         self.assertEqual(report_ids, [
+            "business.executive_snapshot",
             "inventory.product_lookup",
+            "inventory.department_directory",
             "inventory.stock_by_department",
+            "inventory.stock_health",
+            "inventory.dormant_stock",
+            "buying.sku_evidence",
+            "system.database_capacity",
+            "system.purchase_schema",
             "sales.top_products",
             "sales.product_monthly",
             "sales.invoice_lines",
+            "sales.period_comparison",
+            "sales.department_summary",
+            "sales.daily_trend",
+            "sales.returns_credits",
         ])
 
     def test_rejects_unknown_parameters(self):
@@ -208,7 +219,9 @@ class TestSqlReportCatalogue(unittest.TestCase):
             with urlopen(f"http://127.0.0.1:{server.server_port}/reports", timeout=3) as response:
                 payload = json.loads(response.read().decode("utf-8"))
             self.assertTrue(payload["readOnly"])
-            self.assertEqual(len(payload["reports"]), 5)
+            self.assertEqual(len(payload["reports"]), 16)
+            self.assertEqual(payload["schemaVersion"], "proto.sql-report.v1")
+            self.assertEqual(payload["engineVersion"], "4.3.0")
         finally:
             server.server_close()
             _bridge.BRIDGE_KEY = old_key
