@@ -9,7 +9,7 @@ function safeEqual(a, b) {
 
 function bearerToken(req) {
   const value = String(req.headers.authorization || '');
-  return value.replace(/^Bearer\\s+/i, '').trim();
+  return value.replace(/^Bearer\s+/i, '').trim();
 }
 
 function extractMessageId(payload = {}) {
@@ -32,7 +32,7 @@ function extractEmail(payload = {}) {
   return String(payload.email || payload.recipient || payload.to || '').trim().toLowerCase();
 }
 
-/** Brevo transactional webhook — configure URL with ?secret=WEBHOOK_SECRET when set. */
+/** Brevo transactional webhook — authenticate with the X-Webhook-Secret header. */
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST');
