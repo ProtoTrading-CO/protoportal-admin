@@ -28,8 +28,16 @@ function extractSku(query) {
 
 function extractDateRange(query) {
   const dates = [...String(query || '').matchAll(DATE_CAPTURE)].map((match) => match[1]);
-  if (dates.length >= 2) return { startDate: dates[0], endDate: dates[1] };
+  if (dates.length >= 2) return { date_from: dates[0], date_to: dates[1] };
   return null;
+}
+
+function dateRangeForDays(days) {
+  const end = new Date();
+  const start = new Date(end);
+  start.setDate(start.getDate() - Math.max(1, days) + 1);
+  const iso = (value) => value.toISOString().slice(0, 10);
+  return { date_from: iso(start), date_to: iso(end) };
 }
 
 function extractMonths(query) {
@@ -64,7 +72,7 @@ export function resolveSqlReportRoute(query) {
     if (!sku) return null;
     return {
       reportId: 'sales.product_monthly',
-      params: { sku, months: extractMonths(q) || 12 },
+      params: { sku, ...dateRangeForDays((extractMonths(q) || 12) * 31) },
       mode: 'run',
     };
   }
@@ -74,7 +82,7 @@ export function resolveSqlReportRoute(query) {
     if (!sku) return null;
     return {
       reportId: 'sales.invoice_lines',
-      params: { sku, days: extractDays(q) || 30 },
+      params: { sku, ...dateRangeForDays(extractDays(q) || 30), limit: 200 },
       mode: 'run',
     };
   }
@@ -86,7 +94,7 @@ export function resolveSqlReportRoute(query) {
       reportId: 'inventory.stock_by_department',
       params: {
         department,
-        negativeOnly: /\bnegative stock\b/i.test(q),
+        stock_state: /\bnegative stock\b/i.test(q) ? 'negative' : 'all',
         limit: 100,
       },
       mode: 'run',
@@ -100,7 +108,7 @@ export function resolveSqlReportRoute(query) {
       reportId: 'sales.top_products',
       params: {
         ...range,
-        sortBy: /\brevenue\b/i.test(q) ? 'revenue' : 'units',
+        sort: /\brevenue\b/i.test(q) ? 'revenue' : 'quantity',
         limit: 25,
       },
       mode: 'run',
@@ -126,33 +134,35 @@ function formatRows(reportId, rows = []) {
       `- **Description:** ${row.DESCR || row.description || '—'}`,
       `- **On hand:** ${row.ONHAND ?? row.onhand ?? '—'}`,
       `- **Booked:** ${row.BOOKED ?? row.booked ?? '—'}`,
-      `- **Available:** ${row.available ?? '—'}`,
+      `- **Available:** ${row.AVAILABLE ?? row.available ?? '—'}`,
       `- **Department:** ${row.DEPT || row.dept || '—'}`,
     ].join('\n');
   }
 
   if (reportId === 'inventory.stock_by_department') {
     return rows.slice(0, 15).map((row, index) => (
-      `${index + 1}. **${row.CODE || row.code}** — ${row.DESCR || row.description || '—'} · available **${row.available ?? '—'}**`
+      `${index + 1}. **${row.CODE || row.code}** — ${row.DESCR || row.description || '—'} · available **${row.AVAILABLE ?? row.available ?? '—'}**`
     )).join('\n');
   }
 
   if (reportId === 'sales.product_monthly') {
     return rows.map((row) => (
-      `- **${row.salesMonth}** — ${row.units ?? 0} units · R ${Number(row.salesValue || 0).toLocaleString('en-ZA')}`
+      `- **${row.SALES_YEAR || row.salesYear}-${String(row.SALES_MONTH || row.salesMonth || '').padStart(2, '0')}** — ${row.UNITS ?? row.units ?? 0} units · R ${Number(row.SALES_VALUE ?? row.salesValue ?? 0).toLocaleString('en-ZA')}`
     )).join('\n');
   }
 
   if (reportId === 'sales.top_products') {
     return rows.slice(0, 15).map((row, index) => (
-      `${index + 1}. **${row.sku}** — ${row.description || '—'} · ${row.units ?? 0} units · R ${Number(row.revenue || 0).toLocaleString('en-ZA')}`
+      `${index + 1}. **${row.CODE || row.sku || '—'}** — ${row.DESCRIPTION || row.description || '—'} · ${row.UNITS ?? row.units ?? 0} units · R ${Number(row.SALES_VALUE ?? row.revenue ?? 0).toLocaleString('en-ZA')}`
     )).join('\n');
   }
 
   if (reportId === 'sales.invoice_lines') {
     return rows.slice(0, 15).map((row, index) => {
-      const date = row.invoiceDate ? new Date(row.invoiceDate).toLocaleDateString('en-ZA') : '—';
-      return `${index + 1}. **${row.invoiceNo || '—'}** · ${date} · qty **${row.quantity ?? 0}** · R ${Number(row.lineTotal || 0).toLocaleString('en-ZA')}`;
+      const dateValue = row.INVOICE_DATE || row.invoiceDate;
+      const date = dateValue ? new Date(dateValue).toLocaleDateString('en-ZA') : '—';
+      const lineValue = row.LINE_VALUE ?? row.lineTotal ?? 0;
+      return `${index + 1}. **${row.INVOICE_NUMBER || row.invoiceNo || '—'}** · ${date} · qty **${row.QUANTITY ?? row.quantity ?? 0}** · R ${Number(lineValue).toLocaleString('en-ZA')}`;
     }).join('\n');
   }
 
