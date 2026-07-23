@@ -253,7 +253,7 @@ export default function OrdersWorkspacePanel({ initialWorkspaceId = '', onShowTo
             </label>
             <div className="ow-list">
               {rows.map((row) => (
-                <button key={row.id} type="button" className={`ow-list-row${workspace?.id === row.id ? ' ow-list-row--active' : ''}`} onClick={() => selectWorkspace(row)}>
+                <button key={row.id} type="button" className={`ow-list-row${workspace?.id === row.id ? ' ow-list-row--active' : ''}`} onClick={() => { selectWorkspace(row); loadWorkspace(row.id, { replace: true }).catch((err) => toast(err.message || 'Could not open workspace', 'error')); }}>
                   <strong>{workspaceTitle(row)}</strong>
                   <span>{row.status} · {fmtDate(row.due_date)}</span>
                 </button>
