@@ -2,6 +2,28 @@
 
 export const SQL_REPORT_SOURCE = 'POSWINSQL';
 
+// The bridge owns parameter validation for this shared v4.3 catalogue.  The
+// admin API still keeps the report-ID allow-list here: callers can never send
+// arbitrary SQL or select an unapproved report.
+const V43_REPORT_IDS = new Set([
+  'business.executive_snapshot',
+  'inventory.product_lookup',
+  'inventory.department_directory',
+  'inventory.stock_by_department',
+  'inventory.stock_health',
+  'inventory.dormant_stock',
+  'buying.sku_evidence',
+  'system.database_capacity',
+  'system.purchase_schema',
+  'sales.top_products',
+  'sales.product_monthly',
+  'sales.invoice_lines',
+  'sales.period_comparison',
+  'sales.department_summary',
+  'sales.daily_trend',
+  'sales.returns_credits',
+]);
+
 export const SQL_REPORT_CATALOGUE = {
   'inventory.product_lookup': {
     title: 'Product lookup',
@@ -18,9 +40,9 @@ export const SQL_REPORT_CATALOGUE = {
     category: 'inventory',
     maxRows: 500,
     parameters: {
-      department: { type: 'string', required: true, description: 'STMAST DEPT value' },
-      negativeOnly: { type: 'boolean', required: false, default: false },
-      limit: { type: 'integer', required: false, default: 100, max: 500 },
+      department: { type: 'string', required: false, description: 'Optional STMAST DEPT value' },
+      stock_state: { type: 'enum', required: false, default: 'all', enum: ['all', 'positive', 'zero', 'negative', 'non_positive'] },
+      limit: { type: 'integer', required: false, default: 200, max: 500 },
     },
   },
   'sales.top_products': {
@@ -29,10 +51,10 @@ export const SQL_REPORT_CATALOGUE = {
     category: 'sales',
     maxRows: 100,
     parameters: {
-      startDate: { type: 'date', required: true, description: 'Inclusive start date (YYYY-MM-DD, SAST)' },
-      endDate: { type: 'date', required: true, description: 'Inclusive end date (YYYY-MM-DD, SAST)' },
-      sortBy: { type: 'enum', required: false, default: 'revenue', enum: ['revenue', 'units'] },
-      limit: { type: 'integer', required: false, default: 25, max: 100 },
+      date_from: { type: 'date', required: false, description: 'Inclusive start date (YYYY-MM-DD)' },
+      date_to: { type: 'date', required: false, description: 'Inclusive end date (YYYY-MM-DD)' },
+      sort: { type: 'enum', required: false, default: 'quantity', enum: ['quantity', 'revenue', 'worst'] },
+      limit: { type: 'integer', required: false, default: 50, max: 100 },
     },
   },
   'sales.product_monthly': {
@@ -42,7 +64,8 @@ export const SQL_REPORT_CATALOGUE = {
     maxRows: 36,
     parameters: {
       sku: { type: 'string', required: true, description: 'Proto SKU / item code' },
-      months: { type: 'integer', required: false, default: 12, max: 36 },
+      date_from: { type: 'date', required: false, description: 'Inclusive start date (YYYY-MM-DD)' },
+      date_to: { type: 'date', required: false, description: 'Inclusive end date (YYYY-MM-DD)' },
     },
   },
   'sales.invoice_lines': {
@@ -51,8 +74,9 @@ export const SQL_REPORT_CATALOGUE = {
     category: 'sales',
     maxRows: 500,
     parameters: {
-      sku: { type: 'string', required: true, description: 'Proto SKU / item code' },
-      days: { type: 'integer', required: false, default: 30, max: 366 },
+      sku: { type: 'string', required: false, description: 'Optional Proto SKU / item code' },
+      date_from: { type: 'date', required: false, description: 'Inclusive start date (YYYY-MM-DD)' },
+      date_to: { type: 'date', required: false, description: 'Inclusive end date (YYYY-MM-DD)' },
       limit: { type: 'integer', required: false, default: 200, max: 500 },
     },
   },
@@ -118,7 +142,7 @@ function parseDate(name, value) {
 
 export function validateSqlReportParams(reportId, rawParams = {}) {
   const spec = getSqlReportDefinition(reportId);
-  if (!spec) {
+  if (!spec && !V43_REPORT_IDS.has(reportId)) {
     const err = new Error(`Unapproved report: ${reportId}`);
     err.code = 'UNAPPROVED_REPORT';
     throw err;
@@ -129,6 +153,11 @@ export function validateSqlReportParams(reportId, rawParams = {}) {
     err.code = 'INVALID_PARAMS';
     throw err;
   }
+
+  // Metadata for reports beyond the original five is served by the protected
+  // bridge. Its Python catalogue validates every parameter before executing a
+  // fixed SELECT statement. This adapter deliberately forwards no SQL text.
+  if (!spec) return { ...rawParams };
 
   const schema = spec.parameters;
   const unknown = Object.keys(rawParams).filter((key) => !(key in schema));
@@ -185,31 +214,39 @@ export function validateSqlReportParams(reportId, rawParams = {}) {
   }
   if (reportId === 'inventory.stock_by_department') {
     const dept = String(normalized.department || '').trim();
-    if (!dept || dept.length > 64) {
-      const err = new Error('Param "department" must be 1-64 characters');
+    if (dept.length > 64) {
+      const err = new Error('Param "department" must be at most 64 characters');
       err.code = 'INVALID_PARAMS';
       throw err;
     }
     normalized.department = dept;
-    normalized.negativeOnly = normalized.negativeOnly ?? false;
+    normalized.stock_state = normalized.stock_state || 'all';
     normalized.limit = parseIntParam('limit', normalized.limit, schema.limit.default, schema.limit.max);
   }
   if (reportId === 'sales.top_products') {
-    if (normalized.endDate < normalized.startDate) {
-      const err = new Error('endDate must be on or after startDate');
+    if (normalized.date_from && normalized.date_to && normalized.date_to < normalized.date_from) {
+      const err = new Error('date_to must be on or after date_from');
       err.code = 'INVALID_PARAMS';
       throw err;
     }
-    normalized.sortBy = normalized.sortBy || 'revenue';
+    normalized.sort = normalized.sort || 'quantity';
     normalized.limit = parseIntParam('limit', normalized.limit, schema.limit.default, schema.limit.max);
   }
   if (reportId === 'sales.product_monthly') {
     normalized.sku = normalizeSku(normalized.sku);
-    normalized.months = parseIntParam('months', normalized.months, schema.months.default, schema.months.max);
+    if (normalized.date_from && normalized.date_to && normalized.date_to < normalized.date_from) {
+      const err = new Error('date_to must be on or after date_from');
+      err.code = 'INVALID_PARAMS';
+      throw err;
+    }
   }
   if (reportId === 'sales.invoice_lines') {
     normalized.sku = normalizeSku(normalized.sku);
-    normalized.days = parseIntParam('days', normalized.days, schema.days.default, schema.days.max);
+    if (normalized.date_from && normalized.date_to && normalized.date_to < normalized.date_from) {
+      const err = new Error('date_to must be on or after date_from');
+      err.code = 'INVALID_PARAMS';
+      throw err;
+    }
     normalized.limit = parseIntParam('limit', normalized.limit, schema.limit.default, schema.limit.max);
   }
 
@@ -269,18 +306,21 @@ export async function runSqlReport(reportId, rawParams = {}) {
     throw err;
   }
 
+  // Apollo SQL Bridge v4.3 returns its fixed report metadata under `report`,
+  // request values under `params`, and provenance under `meta`. Retain the
+  // legacy fields as a safe fallback while never accepting SQL from callers.
   return {
-    reportId: json.reportId || reportId,
-    parameters: json.parameters || params,
+    reportId: json.report?.id || json.reportId || reportId,
+    parameters: json.params || json.parameters || params,
     rows: Array.isArray(json.rows) ? json.rows : [],
     rowCount: Number(json.rowCount) || (Array.isArray(json.rows) ? json.rows.length : 0),
-    source: json.source || SQL_REPORT_SOURCE,
-    generatedAt: json.generatedAt || new Date().toISOString(),
-    readOnly: json.readOnly !== false,
+    source: json.meta?.source || json.source || SQL_REPORT_SOURCE,
+    generatedAt: json.meta?.generatedAt || json.generatedAt || new Date().toISOString(),
+    readOnly: json.meta?.readOnly !== false && json.readOnly !== false,
     meta: {
-      readOnly: json.meta?.readOnly !== false,
-      truncated: Boolean(json.meta?.truncated),
-      maxRows: Number(json.meta?.maxRows) || getSqlReportDefinition(reportId)?.maxRows || null,
+      readOnly: json.meta?.readOnly !== false && json.readOnly !== false,
+      truncated: Boolean(json.meta?.rowCapReached ?? json.meta?.truncated),
+      maxRows: Number(json.report?.max_rows ?? json.meta?.maxRows) || getSqlReportDefinition(reportId)?.maxRows || null,
       returnedRows: Number(json.meta?.returnedRows) || Number(json.rowCount) || 0,
     },
   };
