@@ -47,15 +47,39 @@ export function createEmailOrderItems(items = []) {
   }));
 }
 
+/** Reconciliation key for one order line. Not guaranteed unique across lines. */
+export function orderLineKey(item) {
+  const productId = String(item?.productId ?? '').trim();
+  const code = String(item?.code ?? '').trim();
+  return productId || code;
+}
+
 /** Compare original vs final order rows for email/PDF when sending from the admin list. */
 export function buildEmailItemsFromOrder(order) {
   const original = Array.isArray(order?.original_items) ? order.original_items : (Array.isArray(order?.items) ? order.items : []);
   const final = Array.isArray(order?.final_items) ? order.final_items : original;
-  const finalByKey = new Map(final.map((it) => [it.productId || it.code, it]));
+
+  // Keys can legitimately collide (two lines sharing a barcode) — a plain Map
+  // would keep only the last line and silently drop or duplicate rows on the
+  // confirmation. Group final rows per key and consume one per matching
+  // original so duplicate keys pair one-to-one; unconsumed rows are additions.
+  const finalByKey = new Map();
+  final.forEach((it) => {
+    const key = orderLineKey(it);
+    const bucket = finalByKey.get(key);
+    if (bucket) bucket.push(it);
+    else finalByKey.set(key, [it]);
+  });
+  const takeFinal = (key) => {
+    const bucket = finalByKey.get(key);
+    if (!bucket?.length) return undefined;
+    const fin = bucket.shift();
+    if (!bucket.length) finalByKey.delete(key);
+    return fin;
+  };
 
   const rows = original.map((orig) => {
-    const key = orig.productId || orig.code;
-    const fin = finalByKey.get(key);
+    const fin = takeFinal(orderLineKey(orig));
     const removed = !fin;
     return {
       ...orig,
@@ -71,9 +95,8 @@ export function buildEmailItemsFromOrder(order) {
     };
   });
 
-  final.forEach((fin) => {
-    const key = fin.productId || fin.code;
-    if (!original.some((o) => (o.productId || o.code) === key)) {
+  for (const bucket of finalByKey.values()) {
+    bucket.forEach((fin) => {
       rows.push({
         ...fin,
         qty: fin.qty,
@@ -83,8 +106,8 @@ export function buildEmailItemsFromOrder(order) {
         swapped: true,
         unitPrice: fin.unitPrice ?? fin.price ?? 0,
       });
-    }
-  });
+    });
+  }
 
   return rows;
 }
