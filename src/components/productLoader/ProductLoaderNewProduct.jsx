@@ -25,7 +25,9 @@ export default function ProductLoaderNewProduct({ taxonomyTree = [], publishedBy
   const [error, setError] = useState('');
   const fileRefs = useRef({});
 
-  const sku = code.trim().toUpperCase();
+  // Match the storage-path sanitisation in upload-product-image + the publish
+  // endpoint so the code the admin sees is exactly the SKU that gets stored.
+  const sku = code.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '');
 
   // Images upload under the product code (`${SKU}/${slot}`), so if the code
   // changes any already-uploaded slot points at the wrong path — clear them.
@@ -45,11 +47,16 @@ export default function ProductLoaderNewProduct({ taxonomyTree = [], publishedBy
     if (!file || !file.type?.startsWith('image/')) return;
     if (!sku) { setError('Enter the product code before uploading images.'); return; }
     setError('');
+    const uploadSku = sku;
     setSlot(slot, { uploading: true, error: '', name: file.name });
     try {
-      const { url } = await uploadProductImageSlot({ file, sku, slot });
+      const { url } = await uploadProductImageSlot({ file, sku: uploadSku, slot });
+      // If the code changed while this upload was in flight, the image lives
+      // under the old SKU's path — drop the result rather than attaching it.
+      if (lastSkuRef.current !== uploadSku) return;
       setSlot(slot, { url, uploading: false });
     } catch (err) {
+      if (lastSkuRef.current !== uploadSku) return;
       setSlot(slot, { uploading: false, error: err.message || 'Upload failed' });
     }
   };

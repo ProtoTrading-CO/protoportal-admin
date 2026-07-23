@@ -46,7 +46,11 @@ export default async function handler(req, res) {
     requireNew = false,
   } = req.body || {};
 
-  const sku = String(code || '').trim().toUpperCase();
+  // Normalize the SKU the SAME way upload-product-image sanitizes its storage
+  // path (`[^A-Z0-9_-]` stripped), so the DB key and the image object prefix
+  // stay in lock-step — otherwise a code like "T BAG 91" stores images under
+  // TBAG91/ but a row keyed "T BAG 91" that nothing can re-target.
+  const sku = String(code || '').trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '');
   if (!sku) return res.status(400).json({ error: 'code is required' });
   if (!category) return res.status(400).json({ error: 'category is required' });
 
@@ -111,7 +115,12 @@ export default async function handler(req, res) {
     sqlRow: sqlRow || null,
     websiteRow: websiteRow || null,
   };
-  const resolvedTitle = catalogueDisplayTitle(catalogItem);
+  // For an authored new product the admin's typed title IS the source of truth —
+  // don't run it through catalogueDisplayTitle, which blanks any title that
+  // looks like the code/barcode (e.g. a commodity SKU named the same as itself).
+  const resolvedTitle = requireNew
+    ? String(title || '').trim()
+    : catalogueDisplayTitle(catalogItem);
   const resolvedDescription = catalogueDescription(catalogItem);
 
   // Never overwrite a real price with 0. On re-publish (e.g. adding an image
@@ -171,13 +180,27 @@ export default async function handler(req, res) {
       image_url_three: null,
       image_url_four: null,
       ...imageFields,
+      // An authored product has no ERP stock feed, so a 0-stock row would be
+      // hidden by isPublishableOnWebsite. Keep it live regardless — the admin
+      // explicitly chose to publish it (auto-OOS archiving is off anyway).
+      ...(requireNew ? { keep_live_when_oos: true } : {}),
       updated_at: now,
     };
     const { error } = await sb.from('website_stock').insert(insertRow);
     writeError = error;
   }
 
-  if (writeError) return res.status(400).json({ error: writeError.message });
+  if (writeError) {
+    // Concurrent authoring of the same new code: the unique sku key fires here
+    // after both callers passed the existence check. Return the clean 409.
+    if (writeError.code === '23505') {
+      return res.status(409).json({
+        error: 'A product with this code already exists. Use the Single Image flow to add an image to it.',
+        code: 'exists',
+      });
+    }
+    return res.status(400).json({ error: writeError.message });
+  }
 
   await logProductLoaderAudit(sb, {
     sku,
