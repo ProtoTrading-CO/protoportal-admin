@@ -10,6 +10,7 @@ import {
   FolderPlus,
   FolderTree,
   Grip,
+  Layers,
   Loader2,
   PackagePlus,
   Pencil,
@@ -25,6 +26,7 @@ import CategorySidebar, { resolvePathLabels } from './CategorySidebar';
 import ActionMenu from './ActionMenu';
 import BulkProductEditModal from './BulkProductEditModal';
 import BulkMoveModal from './BulkMoveModal';
+import MergeIntoGroupModal from './MergeIntoGroupModal';
 import { useCatalogQuery, buildCatalogParams, fetchAllCatalogRows, CATALOG_STATUSES } from '../hooks/useCatalog';
 import { useCatalogMutations } from '../hooks/useCatalogMutations';
 import { useMediaQuery } from '../hooks/useMediaQuery';
@@ -294,6 +296,11 @@ function PmMobileProductCard({
           )}
           {item.toOrder && (
             <span className="pm-mobile-card-badge" style={{ background: '#b45309', color: '#fff' }}>To order</span>
+          )}
+          {item.variantGroup?.isPrimary && (
+            <span className="pm-mobile-card-badge" style={{ background: '#6d28d9', color: '#fff' }}>
+              {item.variantGroup.variantCount ? `${item.variantGroup.variantCount} variants` : 'Group'}
+            </span>
           )}
           <NutstoreArchiveBadge archivedBy={item.archivedBy} />
           <NeedsSohPriceBadge item={item} />
@@ -965,6 +972,46 @@ export default function ProductManagerEngine({
       } else {
         onShowToast?.(err.message || 'Remove from category failed', 'error');
       }
+    } finally {
+      setBulkActionPending(false);
+    }
+  };
+
+  // Variant grouping (migration 052) — gated by the catalogGrouping flag.
+  const [catalogGrouping, setCatalogGrouping] = useState(false);
+  const [mergeOpen, setMergeOpen] = useState(false);
+  const [mergeRows, setMergeRows] = useState([]);
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/feature-flags')
+      .then((r) => r.json())
+      .then((j) => { if (!cancelled) setCatalogGrouping(Boolean(j?.flags?.catalogGrouping)); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
+  const openMerge = () => {
+    setMergeRows([...selected].map((id) => selectedRowsRef.current.get(id)).filter(Boolean));
+    setMergeOpen(true);
+  };
+  const afterGroupChange = () => {
+    clearSelection();
+    invalidateAdminCache();
+    queryClient.invalidateQueries({ queryKey: ['catalog'] });
+    setInStockCountsNonce((n) => n + 1);
+  };
+  const ungroupSelected = async (groupId) => {
+    if (!groupId) return;
+    if (!window.confirm('Ungroup — split this back into separate product cards?')) return;
+    setBulkActionPending(true);
+    try {
+      const res = await fetch(`/api/product-groups?groupId=${encodeURIComponent(groupId)}`, { method: 'DELETE' });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || 'Ungroup failed');
+      onShowToast?.('Group split back into separate products', 'success');
+      afterGroupChange();
+    } catch (err) {
+      onShowToast?.(err.message || 'Ungroup failed', 'error');
     } finally {
       setBulkActionPending(false);
     }
@@ -1675,6 +1722,30 @@ export default function ProductManagerEngine({
                         <Pencil size={14} /> Bulk edit
                       </button>
                     )}
+                    {status === 'live' && catalogGrouping && selected.size >= 2 && (
+                      <button
+                        type="button"
+                        className="adm-btn-ghost adm-btn--sm"
+                        onClick={openMerge}
+                        title="Merge these products into one storefront card with a variant selector"
+                      >
+                        <Layers size={14} /> Merge into group
+                      </button>
+                    )}
+                    {status === 'live' && catalogGrouping && selected.size === 1 && (() => {
+                      const row = selectedRowsRef.current.get([...selected][0]);
+                      return row?.variantGroup?.isPrimary ? (
+                        <button
+                          type="button"
+                          className="adm-btn-ghost adm-btn--sm"
+                          disabled={bulkActionPending}
+                          onClick={() => void ungroupSelected(row.variantGroup.groupId)}
+                          title="Split this group back into separate product cards"
+                        >
+                          <Layers size={14} /> Ungroup
+                        </button>
+                      ) : null;
+                    })()}
                   </div>
 
                   <div className="pm-bulk-group pm-bulk-group--end">
@@ -1818,6 +1889,11 @@ export default function ProductManagerEngine({
                           )}
                           {item.toOrder && (
                             <span style={{ fontSize: 10, fontWeight: 700, color: '#fff', background: '#b45309', borderRadius: 4, padding: '1px 5px' }}>To order</span>
+                          )}
+                          {item.variantGroup?.isPrimary && (
+                            <span style={{ fontSize: 10, fontWeight: 700, color: '#fff', background: '#6d28d9', borderRadius: 4, padding: '1px 5px' }} title="Variant group — shows as one card on the site">
+                              {item.variantGroup.variantCount ? `${item.variantGroup.variantCount} variants` : 'Group'}
+                            </span>
                           )}
                           <NutstoreArchiveBadge archivedBy={item.archivedBy} />
                           <NeedsSohPriceBadge item={item} />
@@ -2068,6 +2144,14 @@ export default function ProductManagerEngine({
           onRefreshTaxonomy={onRefreshTaxonomy}
         />
       )}
+
+      <MergeIntoGroupModal
+        open={mergeOpen}
+        onClose={() => setMergeOpen(false)}
+        rows={mergeRows}
+        onCreated={afterGroupChange}
+        onShowToast={onShowToast}
+      />
 
       <BulkMoveModal
         open={moveModalOpen}
