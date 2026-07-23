@@ -16,6 +16,22 @@ import {
 } from './_catalog-adapt.js';
 import { isMotarroBrowsePath, isMotarroProduct } from './_mottaro-category.js';
 import { loadPlacementMapIfEnabled, skusMatchingBrowsePath } from './_placements.js';
+import { loadGroupContextIfEnabled } from './_groups.js';
+import { normalizeMemberSku } from '../lib/product-groups.mjs';
+
+// Variant grouping: a curated feature merges a handful of SKUs, so the suppress
+// list stays small. Above this many, skip the SQL `.not in` (URL-length risk)
+// and force the full-scan path, which filters in JS instead.
+const GROUP_SUPPRESS_SQL_MAX = 800;
+
+/** Exclude non-primary group members from a live query (keeps count/range exact). */
+function applyGroupSuppression(q, suppressSkus) {
+  if (suppressSkus?.length && suppressSkus.length <= GROUP_SUPPRESS_SQL_MAX) {
+    const quoted = suppressSkus.map((s) => `"${s}"`).join(',');
+    q = q.not('sku', 'in', `(${quoted})`);
+  }
+  return q;
+}
 
 const VALID_STATUS = new Set(['live', 'archived', 'new-items', 'approval', 'recycle']);
 const EXCLUDE_ARCHIVED = ['new-products', 'recycle-bin'];
@@ -89,7 +105,7 @@ async function fetchAllMotarroRows(sb, { search, categoryPath, tree, sort }) {
   return filterByCategoryPath(rows, categoryPath, tree);
 }
 
-async function fetchAllLiveRows(sb, { search, categoryPath, tree, sort, toOrderOnly = false }) {
+async function fetchAllLiveRows(sb, { search, categoryPath, tree, sort, toOrderOnly = false, suppressSkus = [] }) {
   const rows = [];
   let from = 0;
   while (true) {
@@ -100,6 +116,7 @@ async function fetchAllLiveRows(sb, { search, categoryPath, tree, sort, toOrderO
     }
     q = applyCategoryFiltersToQuery(q, resolveCategoryFilters(tree, categoryPath));
     if (toOrderOnly) q = q.eq('to_order', true);
+    q = applyGroupSuppression(q, suppressSkus);
     if (sort === 'updated') q = q.order('updated_at', { ascending: false });
     else q = q.order('title', { ascending: true });
     q = q.range(from, from + PAGE_CHUNK - 1);
@@ -180,10 +197,14 @@ function applyCatalogSearchFilter(q, term) {
   ].join(','));
 }
 
-async function queryLivePaginated(sb, { search, categoryPath, tree, page, pageSize, sort, toOrderOnly = false }) {
+async function queryLivePaginated(sb, { search, categoryPath, tree, page, pageSize, sort, toOrderOnly = false, suppressSkus = [] }) {
   if (isMotarroBrowsePath(categoryPath)) {
     let rows = await fetchAllMotarroRows(sb, { search, categoryPath, tree, sort });
     if (toOrderOnly) rows = rows.filter((r) => r.to_order);
+    if (suppressSkus.length) {
+      const s = new Set(suppressSkus);
+      rows = rows.filter((r) => !s.has(normalizeMemberSku(r.sku)));
+    }
     rows = applySearchFilter(rows, search);
     const pageSlice = paginateRows(rows, page, pageSize);
     return { ...pageSlice, archived: false };
@@ -197,6 +218,7 @@ async function queryLivePaginated(sb, { search, categoryPath, tree, page, pageSi
   }
   q = applyCategoryFiltersToQuery(q, resolveCategoryFilters(tree, categoryPath));
   if (toOrderOnly) q = q.eq('to_order', true);
+  q = applyGroupSuppression(q, suppressSkus);
   if (sort === 'updated') q = q.order('updated_at', { ascending: false });
   else q = q.order('title', { ascending: true });
   q = q.range(from, to);
@@ -289,6 +311,15 @@ export default async function handler(req, res) {
     // null when the feature is off — no extra query, behaviour unchanged.
     const placements = await loadPlacementMapIfEnabled(sb);
     const placedSkus = skusMatchingBrowsePath(placements, categoryPath);
+    // Variant grouping (migration 052) — null when catalogGrouping is off, so
+    // the live listing is unchanged. Non-primary members are suppressed so a
+    // group shows as one card; the primary carries the group roll-up.
+    const groupCtx = await loadGroupContextIfEnabled(sb);
+    const suppressSet = new Set(groupCtx?.nonPrimaryMemberSkus || []);
+    const suppressSkus = [...suppressSet];
+    const groupBySku = groupCtx?.bySku || null;
+    const groupSizeById = new Map((groupCtx?.groups || []).map((g) => [g.id, (g.members || []).length]));
+    const bigSuppression = suppressSet.size > GROUP_SUPPRESS_SQL_MAX;
 
     let result;
     let stockAlreadyEnriched = false;
@@ -303,16 +334,19 @@ export default async function handler(req, res) {
       // for a category that actually has placements, so the fast path survives
       // everywhere else.
       const useFullScan = onlyInStock || isMotarroBrowsePath(categoryPath) || term
-        || categoryPathExceedsFixedColumns(categoryPath) || placedSkus.size > 0;
+        || categoryPathExceedsFixedColumns(categoryPath) || placedSkus.size > 0 || bigSuppression;
       if (useFullScan) {
         let rows;
         if (isMotarroBrowsePath(categoryPath)) {
           rows = await fetchAllMotarroRows(sb, { search, categoryPath, tree, sort });
           if (toOrderOnly) rows = rows.filter((r) => r.to_order);
         } else {
-          rows = await fetchAllLiveRows(sb, { search, categoryPath, tree, sort, toOrderOnly });
+          rows = await fetchAllLiveRows(sb, { search, categoryPath, tree, sort, toOrderOnly, suppressSkus });
           rows = await appendPlacedRows(sb, rows, placedSkus, sort, { toOrderOnly });
         }
+        // Catch-all: the SQL suppression covers fetchAllLiveRows, but Motarro
+        // rows, placed rows, and the >MAX big-list case are filtered here.
+        if (suppressSet.size) rows = rows.filter((r) => !suppressSet.has(normalizeMemberSku(r.sku)));
         rows = await enrichRowsWithProductStock(sb, rows);
         if (onlyInStock) {
           rows = rows.filter(isPublishableOnWebsite);
@@ -322,7 +356,7 @@ export default async function handler(req, res) {
         result = { ...pageSlice, archived: false };
         stockAlreadyEnriched = true;
       } else {
-        result = await queryLivePaginated(sb, { search, categoryPath, tree, page, pageSize, sort, toOrderOnly });
+        result = await queryLivePaginated(sb, { search, categoryPath, tree, page, pageSize, sort, toOrderOnly, suppressSkus });
         const rows = await enrichRowsWithProductStock(sb, result.rows);
         result = { ...result, rows };
         stockAlreadyEnriched = true;
@@ -406,10 +440,27 @@ export default async function handler(req, res) {
       enriched = await enrichRowsWithProductStock(sb, enriched, { includePrice: status === 'new-items' });
     }
 
-    const adapted = enriched.map((r) => adaptCatalogRow(r, tree, {
-      archived: result.archived,
-      placementPaths: placements ? (placements.get(r.sku) || []) : null,
-    }));
+    const adapted = enriched.map((r) => {
+      const row = adaptCatalogRow(r, tree, {
+        archived: result.archived,
+        placementPaths: placements ? (placements.get(r.sku) || []) : null,
+      });
+      if (groupBySku) {
+        const gi = groupBySku.get(normalizeMemberSku(r.sku));
+        // Suppressed members are already filtered out on the live path, so any
+        // surviving grouped row is a primary — badge it for the admin UI.
+        if (gi) {
+          row.variantGroup = {
+            groupId: gi.groupId,
+            title: gi.groupTitle,
+            isPrimary: gi.isPrimary,
+            primarySku: gi.groupPrimarySku,
+            variantCount: groupSizeById.get(gi.groupId) || null,
+          };
+        }
+      }
+      return row;
+    });
 
     res.setHeader('Cache-Control', 'no-store');
     return res.status(200).json({
