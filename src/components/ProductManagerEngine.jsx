@@ -1017,6 +1017,36 @@ export default function ProductManagerEngine({
     }
   };
 
+  // Owner-only kill-switch for the whole variant-grouping feature. Flipping it
+  // on reveals the Merge/Ungroup affordances here and collapses grouped SKUs on
+  // the storefront; flipping it off is the instant rollback (data is kept).
+  const [groupingToggleBusy, setGroupingToggleBusy] = useState(false);
+  const toggleCatalogGrouping = async () => {
+    const next = !catalogGrouping;
+    if (!window.confirm(
+      next
+        ? 'Turn variant grouping ON? Merged groups will collapse into one storefront card.'
+        : 'Turn variant grouping OFF? The catalogue reverts to one card per SKU (your groups are kept and re-appear when you turn it back on).',
+    )) return;
+    setGroupingToggleBusy(true);
+    try {
+      const res = await fetch('/api/feature-flags', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: 'catalogGrouping', value: next }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || `Failed (${res.status})`);
+      setCatalogGrouping(Boolean(json?.flags?.catalogGrouping));
+      onShowToast?.(`Variant grouping ${json?.flags?.catalogGrouping ? 'enabled' : 'disabled'}`, 'success');
+      afterGroupChange();
+    } catch (err) {
+      onShowToast?.(err.message || 'Could not change variant grouping', 'error');
+    } finally {
+      setGroupingToggleBusy(false);
+    }
+  };
+
   const [floaterSweeping, setFloaterSweeping] = useState(false);
   const handleFloaterSweep = async () => {
     setFloaterSweeping(true);
@@ -1441,6 +1471,23 @@ export default function ProductManagerEngine({
                 Export all
               </button>
             </>
+          )}
+          {status === 'live' && !reorderMode && (
+            <button
+              type="button"
+              className="adm-btn-ghost adm-btn--sm"
+              style={catalogGrouping ? { background: '#0f766e', color: '#fff', borderColor: '#0f766e' } : undefined}
+              disabled={groupingToggleBusy}
+              onClick={() => void toggleCatalogGrouping()}
+              title={catalogGrouping
+                ? 'Variant grouping is ON — click to turn off (groups are kept). Owner only.'
+                : 'Variant grouping is OFF — click to turn on so merged SKUs collapse into one card. Owner only.'}
+            >
+              {groupingToggleBusy
+                ? <Loader2 size={14} className="spin" />
+                : <Layers size={14} />}
+              Variant grouping: {catalogGrouping ? 'On' : 'Off'}
+            </button>
           )}
           {isFetching && !isLoading && <Loader2 size={16} className="spin" aria-label="Refreshing" />}
         </div>
