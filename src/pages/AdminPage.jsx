@@ -190,6 +190,20 @@ function orderAmountExVat(order) {
   return sum;
 }
 
+// Promo/discount the customer applied at checkout (migration 028 columns on the
+// order row). Returns null when no code was used.
+function orderPromo(order) {
+  const code = String(order?.promo_code || '').trim();
+  if (!code) return null;
+  const discountPct = Number(order?.discount_pct);
+  const discountAmount = Number(order?.discount_amount);
+  return {
+    code,
+    discountPct: Number.isFinite(discountPct) ? discountPct : null,
+    discountAmount: Number.isFinite(discountAmount) ? discountAmount : null,
+  };
+}
+
 function formatDateTime(value) {
   if (!value) return '—';
   const date = new Date(value);
@@ -2583,6 +2597,15 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                           <div>
                             <div style={{ fontSize: 13, fontWeight: 700 }}>{formatRandAmount(orderAmountExVat(order))}</div>
                             <div className="adm-muted" style={{ fontSize: 11 }}>ex VAT</div>
+                            {(() => {
+                              const promo = orderPromo(order);
+                              if (!promo) return null;
+                              return (
+                                <div style={{ fontSize: 11, fontWeight: 700, color: '#15803d', marginTop: 2 }}>
+                                  {promo.code}{promo.discountPct != null ? ` −${promo.discountPct}%` : ''}
+                                </div>
+                              );
+                            })()}
                           </div>
                           <div onClick={(e) => e.stopPropagation()} className="adm-presale-col">
                             {orderTab === 'sent' && isPreSale ? (
@@ -2622,6 +2645,26 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                               ))}
                             </div>
                             <OrderWhatsappNotify orderId={order.id} orderStatus={normalizeOrderStatus(order.status)} />
+                            {(() => {
+                              const promo = orderPromo(order);
+                              if (!promo) return null;
+                              const gross = orderAmountExVat(order);
+                              const net = promo.discountAmount != null ? Math.max(0, gross - promo.discountAmount) : null;
+                              return (
+                                <div style={{ margin: '0 0 14px', padding: '10px 14px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'center' }}>
+                                  <span style={{ fontSize: 12, fontWeight: 800, color: '#15803d', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Promo applied</span>
+                                  <span style={{ fontSize: 13, fontWeight: 700, color: '#166534' }}>
+                                    {promo.code}{promo.discountPct != null ? ` · ${promo.discountPct}% off` : ''}
+                                  </span>
+                                  {promo.discountAmount != null && (
+                                    <span style={{ fontSize: 13, color: '#166534' }}>Discount −{formatRandAmount(promo.discountAmount)}</span>
+                                  )}
+                                  {net != null && (
+                                    <span style={{ fontSize: 13, color: '#166534' }}>Est. net {formatRandAmount(net)} <span style={{ color: '#4d7c5a' }}>ex VAT</span></span>
+                                  )}
+                                </div>
+                              );
+                            })()}
                             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
                               <OrderItemsList label="Order placed" items={order.original_items || order.items || []} />
                               <OrderItemsList label="Order final" items={order.final_items || order.items || []} />

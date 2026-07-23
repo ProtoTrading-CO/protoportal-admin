@@ -127,7 +127,13 @@ export async function restoreArchivedToLive(supabase, sku, { keepLiveWhenOos = t
       .from('website_stock')
       .update({ keep_live_when_oos: true, updated_at: new Date().toISOString() })
       .eq('sku', cleanSku);
-    if (keepErr) console.warn('restoreArchivedToLive keep_live_when_oos:', keepErr.message);
+    if (keepErr) {
+      console.warn('restoreArchivedToLive keep_live_when_oos:', keepErr.message);
+      // Without this flag the next visibility sync re-hides a zero-stock
+      // product — the exact "half-restored silently" failure syncWarnings
+      // exists to surface.
+      syncWarnings.push(formatSyncWarning('keep_live_when_oos', keepErr));
+    }
   }
 
   const { data: syncResult, error: syncErr } = await supabase.rpc('sync_website_from_products');
