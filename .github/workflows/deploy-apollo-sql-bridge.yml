@@ -26,16 +26,15 @@ jobs:
     runs-on: [self-hosted, Windows, X64, proto-bridge]
     timeout-minutes: 10
     steps:
-      - name: Download approved main branch, deploy, and verify
+      - name: Download approved bridge files, deploy, and verify
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $archive = Join-Path $env:RUNNER_TEMP 'protoportal-admin-main.zip'
-          $extract = Join-Path $env:RUNNER_TEMP 'protoportal-admin-main'
-          Remove-Item -LiteralPath $archive -Force -ErrorAction SilentlyContinue
-          Remove-Item -LiteralPath $extract -Recurse -Force -ErrorAction SilentlyContinue
-          Invoke-WebRequest -Uri 'https://github.com/ProtoTrading-CO/protoportal-admin/archive/refs/heads/main.zip' -OutFile $archive
-          Expand-Archive -LiteralPath $archive -DestinationPath $extract -Force
-          $source = Get-ChildItem -LiteralPath $extract -Directory | Select-Object -First 1
-          if (-not $source) { throw 'Could not find the downloaded main branch source.' }
-          & (Join-Path $source.FullName 'scripts\deploy_bridge_local.ps1') -Sku '${{ inputs.sku }}' -ExpectedCommit '${{ github.sha }}'
+          $source = Join-Path $env:RUNNER_TEMP 'protoportal-admin-bridge-source'
+          Remove-Item -LiteralPath $source -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path (Join-Path $source 'scripts') | Out-Null
+          $baseUrl = 'https://raw.githubusercontent.com/ProtoTrading-CO/protoportal-admin/${{ github.sha }}'
+          foreach ($file in @('sql-stmast-bridge.py', 'sql_report_catalogue.py', 'deploy_bridge_local.ps1')) {
+            Invoke-WebRequest -Uri "$baseUrl/scripts/$file" -OutFile (Join-Path $source "scripts\$file") -TimeoutSec 60
+          }
+          & (Join-Path $source 'scripts\deploy_bridge_local.ps1') -Sku '${{ inputs.sku }}' -ExpectedCommit '${{ github.sha }}'
