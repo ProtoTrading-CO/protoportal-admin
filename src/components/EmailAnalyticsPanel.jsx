@@ -30,7 +30,7 @@ export default function EmailAnalyticsPanel({ onShowToast }) {
 
   useEffect(() => {
     const onRefresh = (event) => {
-      if (event.detail === 'customers') void load();
+      if (event.detail === 'customers' || event.detail === 'comms') void load();
     };
     window.addEventListener(ADMIN_REFRESH_EVENT, onRefresh);
     return () => window.removeEventListener(ADMIN_REFRESH_EVENT, onRefresh);
