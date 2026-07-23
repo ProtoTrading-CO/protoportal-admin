@@ -1,5 +1,6 @@
 import { requireOwner } from './_admin-auth.js';
 import { createClient } from '@supabase/supabase-js';
+import { detachSkuFromGroup } from './_group-cascade.js';
 
 function getStockAdminClient() {
   return createClient(
@@ -26,6 +27,8 @@ export default async function handler(req, res) {
   const { error: archError } = await supabase.from('archived_products').delete().eq('sku', sku);
   if (archError) errors.push(archError.message);
   await supabase.from('staged_product_previews').delete().eq('sku', sku);
+  // Keep any variant group consistent (promote a new primary / disband).
+  await detachSkuFromGroup(supabase, sku);
 
   if (errors.length) return res.status(400).json({ error: errors.join('; ') });
 
