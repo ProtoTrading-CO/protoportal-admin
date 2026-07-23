@@ -12,6 +12,7 @@ import { getPortalAdminClient } from './_site-config.js';
 import { handleApolloAction } from './intelligence/apollo-action-engine/index.js';
 import { loadWorkspaceDocumentIndex } from './_workspace-document-store.js';
 import { trySqlReportRoute } from './apollo-sql-reports.js';
+import { tryDeterministicProductLookup } from './apollo-product-intelligence.js';
 
 const MODEL = 'google/gemini-2.5-flash';
 
@@ -435,6 +436,15 @@ export default async function handler(req, res) {
     }
   } catch (error) {
     console.error('apollo workspace documents:', error?.message || error);
+  }
+
+  try {
+    const productIntelligence = await tryDeterministicProductLookup(userQuery);
+    if (productIntelligence) {
+      return res.status(200).json({ ...productIntelligence, indexedAt: new Date().toISOString() });
+    }
+  } catch (error) {
+    console.error('apollo deterministic product lookup:', error?.message || error);
   }
 
   try {
