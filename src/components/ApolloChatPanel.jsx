@@ -133,6 +133,8 @@ function ChatMessage({ msg, isLastAssistant, onExportPdf, onFix, fixBusy }) {
           {!isUser && msg.source && (
             <span className={`apollo-source apollo-source--${msg.source}`}>
               {msg.source === 'live-index' ? 'Live index'
+                : msg.source === 'positill-product-lookup' ? 'POSWINSQL'
+                  : msg.source === 'sql-reports' ? 'POSWINSQL'
                 : msg.source === 'fixed' ? 'Fixed'
                   : msg.source === 'live' ? 'Live data'
                     : 'AI'}
