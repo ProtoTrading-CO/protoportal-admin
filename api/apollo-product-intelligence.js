@@ -1,5 +1,6 @@
 import { runSqlReport, SQL_REPORT_SOURCE } from './_sql-reports.js';
 import { getPortalAdminClient } from './_site-config.js';
+import { calculateBuyerQuantity, readBuyingLedger } from './_apollo-buying-ledger.js';
 
 const SKU_CAPTURE = /\b([A-Z0-9][A-Z0-9._-]{3,63})\b/i;
 const SKU_ONLY_RE = /^[A-Z0-9][A-Z0-9._-]{3,63}[?.!]*$/i;
@@ -181,7 +182,7 @@ function reorderDecision({ available, sales3m, sales6m, sales12m }) {
   };
 }
 
-export function formatReorderDecision({ lookup, evidence, supplier = '', generatedAt = new Date().toISOString() }) {
+export function formatReorderDecision({ lookup, evidence, supplier = '', ledger = null, generatedAt = new Date().toISOString() }) {
   const product = lookup.rows?.[0] || null;
   const requestedSku = lookup.parameters?.sku || evidence.parameters?.skus?.[0] || '—';
   if (!product) {
@@ -195,6 +196,17 @@ export function formatReorderDecision({ lookup, evidence, supplier = '', generat
   const sales12m = number(row.SALES_12M ?? row.sales12m);
   const decision = reorderDecision({ available, sales3m, sales6m, sales12m });
   const supplierName = String(supplier || '').trim();
+  const monthlyVelocity = sales3m / 3;
+  const buyerQuantity = calculateBuyerQuantity({
+    available,
+    monthlyVelocity,
+    rule: ledger?.rule || null,
+    incomingBeforeLeadTime: ledger?.incomingBeforeLeadTime || 0,
+  });
+  const incomingLines = ledger?.incoming || [];
+  const incomingSummary = incomingLines.length
+    ? incomingLines.map((line) => `- **${line.shipmentRef}:** ${line.outstanding} units · ETA ${line.eta || 'unconfirmed'} · ${line.status}`).join('\n')
+    : '- No confirmed incoming shipment is recorded.';
 
   return [
     '## Reorder decision',
@@ -212,17 +224,25 @@ export function formatReorderDecision({ lookup, evidence, supplier = '', generat
     `- **Last 6 months:** ${sales6m} units`,
     `- **Last 12 months:** ${sales12m} units`,
     `- **Last sale:** ${dateLabel(row.LAST_SALE_DATE ?? row.lastSaleDate)}`,
-    `- **Recent velocity:** ${(sales3m / 3).toFixed(1)} units/month`,
+    `- **Recent velocity:** ${monthlyVelocity.toFixed(1)} units/month`,
     `- **Estimated cover:** ${decision.monthsCover == null ? 'not available' : `${decision.monthsCover.toFixed(1)} months`}`,
+    '',
+    '### Confirmed incoming stock',
+    incomingSummary,
     '',
     '### Apollo recommendation',
     `**${decision.label}** — ${decision.detail}`,
     '',
     '### Before placing an order',
-    supplierName
-      ? `- Supplier **${supplierName}** is linked from the product master. Lead time, MOQ/pack size, and incoming container stock are not connected yet.`
-      : '- Supplier lead time, MOQ/pack size, and incoming container stock are not connected to this decision yet.',
-    '- No reorder quantity is suggested until those inputs are live.',
+    supplierName ? `- Supplier **${supplierName}** is linked from the product master.` : '- No supplier is linked in the product master yet.',
+    ledger?.rule
+      ? `- Planning rule: ${ledger.rule.lead_time_days ?? '—'} day lead time · MOQ ${ledger.rule.moq ?? 'not set'} · pack ${ledger.rule.pack_size ?? 'not set'} · ${ledger.rule.target_cover_months} month target cover.`
+      : '- Lead time, MOQ and pack size have not been entered for this supplier/SKU yet.',
+    buyerQuantity
+      ? (buyerQuantity.quantity > 0
+        ? `- **Buyer review quantity:** **${buyerQuantity.quantity} units**. This is calculated from explicit lead time, target cover and confirmed incoming stock; it is not an order.`
+        : '- Current stock plus confirmed incoming stock covers the configured target at the supplier lead time; no additional quantity is indicated.')
+      : '- No reorder quantity is suggested until lead time, MOQ and pack size are entered.',
     '',
     `_Source: ${SQL_REPORT_SOURCE} · read-only · generated ${generatedAt}_`,
   ].join('\n');
@@ -291,13 +311,14 @@ export async function tryReorderDecision(query) {
       ? await runSqlReport('buying.sku_evidence', { skus: [sku] })
       : { rows: [], parameters: { skus: [sku] } };
     const supplier = lookup.rows?.length ? await supplierForSku(sku) : '';
+    const ledger = lookup.rows?.length ? await readBuyingLedger(sku, supplier) : null;
 
     return {
-      reply: formatReorderDecision({ lookup, evidence, supplier }),
+      reply: formatReorderDecision({ lookup, evidence, supplier, ledger }),
       source: 'positill-reorder-decision',
       intent: 'reorder_decision',
       businessIntent: 'buying_reorder_decision',
-      productIntelligence: { sku, lookup, evidence, supplier },
+      productIntelligence: { sku, lookup, evidence, supplier, ledger },
     };
   } catch (err) {
     return {
