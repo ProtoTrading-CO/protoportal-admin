@@ -71,21 +71,21 @@ export default function SpecialsPanel({
     const next = specials.map((s) => (s.productId === productId ? { ...s, ...patch } : s));
     onSpecialsChange(next);
     setSaving(true);
-    try { await saveSpecials(next); } catch { /* silent */ } finally { setSaving(false); }
+    try { await saveSpecials(next); } catch (err) { toast(err.message || 'Failed to save specials', 'error'); } finally { setSaving(false); }
   };
 
   const removeSpecial = async (productId) => {
     const next = specials.filter((s) => s.productId !== productId);
     onSpecialsChange(next);
     setSaving(true);
-    try { await saveSpecials(next); } catch { /* silent */ } finally { setSaving(false); }
+    try { await saveSpecials(next); } catch (err) { toast(err.message || 'Failed to save specials', 'error'); } finally { setSaving(false); }
   };
 
   const clearAll = async () => {
     if (!window.confirm('Remove all specials?')) return;
     onSpecialsChange([]);
     setSaving(true);
-    try { await saveSpecials([]); } catch { /* silent */ } finally { setSaving(false); }
+    try { await saveSpecials([]); } catch (err) { toast(err.message || 'Failed to save specials', 'error'); } finally { setSaving(false); }
   };
 
   const savePopup = async () => {

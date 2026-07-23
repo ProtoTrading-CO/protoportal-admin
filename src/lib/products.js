@@ -540,13 +540,14 @@ export async function updateProduct(sku, payload) {
 }
 
 export async function archiveProduct(sku, shouldArchive = true) {
-  if (shouldArchive) {
-    await stockAction({ action: 'archive', sku, by: 'product-manager' });
-  } else {
-    await stockAction({ action: 'unarchive', sku });
-  }
+  // Restore responses can carry syncWarnings (restored but a storefront sync
+  // RPC failed) — return the payload so callers can warn the admin.
+  const json = shouldArchive
+    ? await stockAction({ action: 'archive', sku, by: 'product-manager' })
+    : await stockAction({ action: 'unarchive', sku });
   invalidateProductCache();
   invalidateAdminCache();
+  return json;
 }
 
 /** Swap two staged Approval preview slots (1–4) before go-live. */
@@ -602,9 +603,10 @@ export async function recycleProduct(sku, { fromArchive = false } = {}) {
 }
 
 export async function restoreRecycledProduct(sku) {
-  await stockAction({ action: 'unarchive', sku });
+  const json = await stockAction({ action: 'unarchive', sku });
   invalidateProductCache();
   invalidateAdminCache();
+  return json;
 }
 
 export async function deleteProduct(sku) {

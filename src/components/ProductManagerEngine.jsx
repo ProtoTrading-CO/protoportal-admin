@@ -66,6 +66,18 @@ const STOCK_STATUSES = new Set(['live', 'archived']);
 
 const LARGE_BULK_MOVE_THRESHOLD = 100;
 
+/**
+ * Toast text for a restore that succeeded but where a storefront sync RPC
+ * failed (server returns the failures in `syncWarnings`) — the product is
+ * unarchived yet may be missing from the site until the next sync runs.
+ */
+function syncWarningMessage(syncWarnings, { plural = false } = {}) {
+  const detail = (syncWarnings || []).join('; ');
+  return plural
+    ? `Products restored, but storefront sync failed: ${detail}. They may not appear on the site until the next sync.`
+    : `Product restored, but storefront sync failed: ${detail}. It may not appear on the site until the next sync.`;
+}
+
 function MultiCategoryBadge({ item, tree }) {
   const placements = item?.placementPaths || [];
   if (!item?.isMultiCategory && !placements.length) return null;
@@ -387,7 +399,16 @@ function PmMobileProductCard({
         )}
         {status === 'recycle' && (
           <>
-            <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => mutations.restoreRecycle.mutate(item.sku, { onSuccess: () => onRefreshStats?.() })}>
+            <button
+              type="button"
+              className="adm-btn-ghost adm-btn--sm"
+              onClick={() => mutations.restoreRecycle.mutate(item.sku, {
+                onSuccess: (data) => {
+                  onRefreshStats?.();
+                  if (data?.syncWarnings?.length) onShowToast?.(syncWarningMessage(data.syncWarnings), 'warning');
+                },
+              })}
+            >
               <ArchiveRestore size={14} /> Restore
             </button>
             <button type="button" className="adm-btn-red adm-btn--sm" onClick={() => mutations.permanentDelete.mutate(item.sku, { onSuccess: () => onRefreshStats?.() })}>Delete</button>
@@ -1185,9 +1206,11 @@ export default function ProductManagerEngine({
     const skus = [...selected];
     if (!skus.length) return;
     const errors = [];
+    const syncWarnings = [];
     for (const sku of skus) {
       try {
-        await action.mutateAsync(sku);
+        const result = await action.mutateAsync(sku);
+        if (result?.syncWarnings?.length) syncWarnings.push(`${sku}: ${result.syncWarnings.join('; ')}`);
       } catch (err) {
         errors.push(`${sku}: ${err.message}`);
       }
@@ -1197,6 +1220,8 @@ export default function ProductManagerEngine({
     onRefreshStats?.();
     if (errors.length) {
       onShowToast?.(`${skus.length - errors.length} ok, ${errors.length} failed`, 'warning');
+    } else if (syncWarnings.length) {
+      onShowToast?.(syncWarningMessage(syncWarnings, { plural: skus.length > 1 }), 'warning');
     } else {
       onShowToast?.(successMessage || `${skus.length} updated`, 'success');
     }
@@ -1222,16 +1247,20 @@ export default function ProductManagerEngine({
     setMakeLiveSaving(true);
     try {
       await updateProduct(makeLiveItem.sku, { categoryPath: path });
-      await mutations.unarchive.mutateAsync(makeLiveItem.sku);
+      const restored = await mutations.unarchive.mutateAsync(makeLiveItem.sku);
       queryClient.invalidateQueries({ queryKey: ['catalog'] });
       onRefreshStats?.();
       const zeroStock = (makeLiveItem.stockOnHand ?? makeLiveItem.stockQty ?? 0) === 0;
-      onShowToast?.(
-        zeroStock
-          ? `"${name}" is live and will stay visible at 0 stock — set price and stock on hand when ready.`
-          : `"${name}" is now live on the website`,
-        'success',
-      );
+      if (restored?.syncWarnings?.length) {
+        onShowToast?.(syncWarningMessage(restored.syncWarnings), 'warning');
+      } else {
+        onShowToast?.(
+          zeroStock
+            ? `"${name}" is live and will stay visible at 0 stock — set price and stock on hand when ready.`
+            : `"${name}" is now live on the website`,
+          'success',
+        );
+      }
       setMakeLiveItem(null);
     } catch (err) {
       onShowToast?.(err.message || 'Make live failed', 'error');
@@ -1247,11 +1276,15 @@ export default function ProductManagerEngine({
     if (!window.confirm(`Make ${skus.length} selected ${noun} live on the website?`)) return;
     setBulkActionPending(true);
     try {
-      await mutations.bulkUnarchive.mutateAsync(skus);
+      const result = await mutations.bulkUnarchive.mutateAsync(skus);
       clearSelection();
       queryClient.invalidateQueries({ queryKey: ['catalog'] });
       onRefreshStats?.();
-      onShowToast?.(`${skus.length} ${noun} now live`, 'success');
+      if (result?.syncWarnings?.length) {
+        onShowToast?.(syncWarningMessage(result.syncWarnings, { plural: skus.length > 1 }), 'warning');
+      } else {
+        onShowToast?.(`${skus.length} ${noun} now live`, 'success');
+      }
     } catch (err) {
       onShowToast?.(err.message || 'Bulk restore failed', 'error');
     } finally {
@@ -1909,7 +1942,16 @@ export default function ProductManagerEngine({
                         )}
                         {status === 'recycle' && (
                           <>
-                            <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => mutations.restoreRecycle.mutate(item.sku, { onSuccess: () => onRefreshStats?.() })}>
+                            <button
+                              type="button"
+                              className="adm-btn-ghost adm-btn--sm"
+                              onClick={() => mutations.restoreRecycle.mutate(item.sku, {
+                                onSuccess: (data) => {
+                                  onRefreshStats?.();
+                                  if (data?.syncWarnings?.length) onShowToast?.(syncWarningMessage(data.syncWarnings), 'warning');
+                                },
+                              })}
+                            >
                               <ArchiveRestore size={14} /> Restore
                             </button>
                             <button type="button" className="adm-btn-red adm-btn--sm" onClick={() => mutations.permanentDelete.mutate(item.sku, { onSuccess: () => onRefreshStats?.() })}>Delete forever</button>

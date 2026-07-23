@@ -9,6 +9,7 @@ export default function ComingSoonPanel({ taxonomyTree = [] }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
+  const [updatedAt, setUpdatedAt] = useState(null);
 
   const load = async () => {
     setLoading(true);
@@ -18,6 +19,7 @@ export default function ComingSoonPanel({ taxonomyTree = [] }) {
       if (!res.ok) throw new Error(json.error || 'Failed to load');
       setCategoryIds(json.categoryIds || []);
       setSkus(json.skus || []);
+      setUpdatedAt(json.updatedAt || null);
     } catch (err) {
       setMessage(err.message);
     } finally {
@@ -49,10 +51,15 @@ export default function ComingSoonPanel({ taxonomyTree = [] }) {
       const res = await fetch('/api/coming-soon', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ categoryIds, skus }),
+        body: JSON.stringify({
+          categoryIds,
+          skus,
+          ...(updatedAt ? { baseUpdatedAt: updatedAt } : {}),
+        }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Save failed');
+      setUpdatedAt(json.updatedAt || null);
       setMessage('Saved. Storefront can read this config in a follow-up PR.');
     } catch (err) {
       setMessage(err.message);

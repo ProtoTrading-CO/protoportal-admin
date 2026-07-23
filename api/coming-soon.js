@@ -1,5 +1,6 @@
 import { requireAdminKey } from './_admin-auth.js';
-import { readSiteConfigJson, writeSiteConfigJson } from './_site-config.js';
+import { readSiteConfigJson } from './_site-config.js';
+import { mutateSiteConfigJson } from './_site-config-mutate.js';
 
 const COMING_SOON_FILE = 'site-config/coming-soon.json';
 
@@ -34,8 +35,25 @@ export default async function handler(req, res) {
         .filter(Boolean),
     )];
 
+    const baseUpdatedAt = req.body?.baseUpdatedAt ? String(req.body.baseUpdatedAt) : null;
+
     try {
-      const saved = await writeSiteConfigJson(COMING_SOON_FILE, { categoryIds, skus });
+      let conflict = null;
+      // Compare-and-set through the shared mutator so two admins saving at
+      // once serialize instead of silently clobbering each other's config.
+      const saved = await mutateSiteConfigJson(COMING_SOON_FILE, DEFAULT, (store) => {
+        if (baseUpdatedAt && (store?.updatedAt || null) !== baseUpdatedAt) {
+          conflict = { currentUpdatedAt: store?.updatedAt || null };
+          return { abort: true };
+        }
+        return { categoryIds, skus };
+      });
+      if (conflict) {
+        return res.status(409).json({
+          error: 'This content was changed by someone else since you loaded it. Refresh and re-apply your edit.',
+          currentUpdatedAt: conflict.currentUpdatedAt,
+        });
+      }
       return res.status(200).json({
         ok: true,
         categoryIds: saved.categoryIds || categoryIds,

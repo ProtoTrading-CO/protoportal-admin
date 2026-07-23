@@ -38,6 +38,12 @@ export async function ensureProductFromCatalogueRow(supabase, row) {
   return { ok: true, sku: payload.sku, created: true, existing: false };
 }
 
+/** Format a failed sync step as "step: message" for a syncWarnings entry. */
+export function formatSyncWarning(step, error) {
+  const message = String(error?.message || error || 'unknown error').trim() || 'unknown error';
+  return `${step}: ${message}`;
+}
+
 /** Pick the richest catalogue row per ERP barcode (live preferred over archive). */
 export function groupCatalogueRowsByErpKey(rows, { preferLiveSkus = null } = {}) {
   const liveSet = preferLiveSkus instanceof Set ? preferLiveSkus : new Set();
@@ -88,7 +94,7 @@ export async function restoreArchivedToLive(supabase, sku, { keepLiveWhenOos = t
 
   if (!archived) {
     const { data: live } = await supabase.from('website_stock').select('sku').eq('sku', cleanSku).maybeSingle();
-    if (live) return { ok: true, sku: cleanSku, alreadyLive: true };
+    if (live) return { ok: true, sku: cleanSku, alreadyLive: true, syncWarnings: [] };
     throw new Error('Product not in archive');
   }
 
@@ -101,8 +107,17 @@ export async function restoreArchivedToLive(supabase, sku, { keepLiveWhenOos = t
   const { error: unErr } = await supabase.rpc('unarchive_product', { p_sku: cleanSku });
   if (unErr) throw unErr;
 
+  // Post-restore sync RPC failures leave the product half-restored (unarchived
+  // but not synced to the storefront). The restore itself succeeded, so still
+  // return ok: true — but collect each failure so callers can warn the admin
+  // instead of silently dropping it.
+  const syncWarnings = [];
+
   const { error: upsertErr } = await supabase.rpc('upsert_website_product_from_stock', { p_website_sku: cleanSku });
-  if (upsertErr) console.warn('upsert_website_product_from_stock:', upsertErr.message);
+  if (upsertErr) {
+    console.warn('upsert_website_product_from_stock:', upsertErr.message);
+    syncWarnings.push(formatSyncWarning('upsert_website_product_from_stock', upsertErr));
+  }
 
   // Set the keep-live flag AFTER the upsert (which could reset it) and BEFORE
   // the visibility sync (which reads it), so an explicit publish survives the
@@ -116,7 +131,10 @@ export async function restoreArchivedToLive(supabase, sku, { keepLiveWhenOos = t
   }
 
   const { data: syncResult, error: syncErr } = await supabase.rpc('sync_website_from_products');
-  if (syncErr) console.warn('sync_website_from_products:', syncErr.message);
+  if (syncErr) {
+    console.warn('sync_website_from_products:', syncErr.message);
+    syncWarnings.push(formatSyncWarning('sync_website_from_products', syncErr));
+  }
 
-  return { ok: true, sku: cleanSku, sync: syncResult };
+  return { ok: true, sku: cleanSku, sync: syncResult, syncWarnings };
 }

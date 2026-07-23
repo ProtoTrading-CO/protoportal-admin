@@ -82,7 +82,11 @@ async function archiveProduct(supabase, sku) {
 async function unarchiveProduct(supabase, sku) {
   try {
     const result = await restoreArchivedToLive(supabase, sku);
-    return { sku, ok: true, alreadyLive: !!result.alreadyLive };
+    const row = { sku, ok: true, alreadyLive: !!result.alreadyLive };
+    // Restored but not synced to the storefront — carry the warnings so the
+    // response can surface them instead of silently dropping the failure.
+    if (result.syncWarnings?.length) row.syncWarnings = result.syncWarnings;
+    return row;
   } catch (err) {
     return { sku, ok: false, error: err.message || 'Restore failed' };
   }
@@ -329,10 +333,14 @@ export default async function handler(req, res) {
     if (action === 'unarchive') {
       const results = await bulkArchiveOrUnarchive(supabase, normalizedSkus, 'unarchive');
       const failed = results.filter((r) => !r.ok);
+      // "sku: rpc: message" per failed sync step — restored rows that missed a
+      // storefront sync RPC may not appear on the site until the next sync.
+      const syncWarnings = results.flatMap((r) => (r.syncWarnings || []).map((w) => `${r.sku}: ${w}`));
       return res.status(failed.length ? 207 : 200).json({
         ok: failed.length === 0,
         restored: results.filter((r) => r.ok).length,
         failed,
+        syncWarnings,
       });
     }
 

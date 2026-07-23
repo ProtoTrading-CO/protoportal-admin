@@ -1241,21 +1241,21 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
     }
     setSpecials(next);
     setSpecialsSaving(true);
-    try { await saveSpecials(next); } catch { /* silent */ } finally { setSpecialsSaving(false); }
+    try { await saveSpecials(next); } catch (err) { showToast(err.message || 'Failed to save specials', 'error'); } finally { setSpecialsSaving(false); }
   };
 
   const updateSpecialDeal = async (productId, patch) => {
     const next = specials.map((s) => s.productId === productId ? { ...s, ...patch } : s);
     setSpecials(next);
     setSpecialsSaving(true);
-    try { await saveSpecials(next); } catch { /* silent */ } finally { setSpecialsSaving(false); }
+    try { await saveSpecials(next); } catch (err) { showToast(err.message || 'Failed to save specials', 'error'); } finally { setSpecialsSaving(false); }
   };
 
   const clearAllSpecials = async () => {
     if (!window.confirm('Remove all specials?')) return;
     setSpecials([]);
     setSpecialsSaving(true);
-    try { await saveSpecials([]); } catch { /* silent */ } finally { setSpecialsSaving(false); }
+    try { await saveSpecials([]); } catch (err) { showToast(err.message || 'Failed to save specials', 'error'); } finally { setSpecialsSaving(false); }
   };
 
   const uploadImageFile = async (file) => {

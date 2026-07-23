@@ -1,5 +1,6 @@
 import { requireOwner } from './_admin-auth.js';
 import { createClient } from '@supabase/supabase-js';
+import { mutateSiteConfigJson } from './_site-config-mutate.js';
 
 const BUCKET = 'site-config';
 const FILE = 'featured-products.json';
@@ -53,18 +54,24 @@ export default async function handler(req, res) {
     try {
       const body = req.body || {};
       const items = normalizeItems(body.items);
-      const updatedAt = new Date().toISOString();
-      const payload = JSON.stringify({ items, updatedAt });
-      const supabase = getAdminClient();
-
-      await supabase.storage.createBucket(BUCKET, { public: false }).catch(() => {});
-
-      const { error } = await supabase.storage.from(BUCKET).upload(FILE, payload, {
-        contentType: 'application/json',
-        upsert: true,
+      const baseUpdatedAt = body.baseUpdatedAt ? String(body.baseUpdatedAt) : null;
+      let conflict = null;
+      // Compare-and-set through the shared mutator so two admins saving at
+      // once serialize instead of silently clobbering each other's list.
+      const written = await mutateSiteConfigJson(FILE, { items: [], updatedAt: null }, (store) => {
+        if (baseUpdatedAt && (store?.updatedAt || null) !== baseUpdatedAt) {
+          conflict = { currentUpdatedAt: store?.updatedAt || null };
+          return { abort: true };
+        }
+        return { items };
       });
-      if (error) throw error;
-      return res.status(200).json({ ok: true, items, updatedAt });
+      if (conflict) {
+        return res.status(409).json({
+          error: 'This content was changed by someone else since you loaded it. Refresh and re-apply your edit.',
+          currentUpdatedAt: conflict.currentUpdatedAt,
+        });
+      }
+      return res.status(200).json({ ok: true, items, updatedAt: written?.updatedAt || null });
     } catch (err) {
       return res.status(400).json({ error: err.message || 'Save failed' });
     }
