@@ -5,6 +5,7 @@ import { ensureProductFromCatalogueRow, restoreArchivedToLive } from './_ensure-
 import { collectImageUrlsFromRow, removeStagingObjects } from './_staging-storage.js';
 import { reorderStagedImageSlots } from './_stage-dormant.js';
 import { isExactlyZeroStock } from './_catalog-adapt.js';
+import { detachSkuFromGroup } from './_group-cascade.js';
 
 const PAGE_SIZE = 1000;
 
@@ -112,6 +113,10 @@ export default async function handler(req, res) {
       if (!sku) return res.status(400).json({ error: 'sku required' });
       const { error } = await supabase.rpc('archive_product', { p_sku: sku, p_by: String(by).slice(0, 60) });
       if (error) throw error;
+      // Archiving removes the SKU from the live catalogue, so detach it from any
+      // variant group (promote a new primary / disband) to avoid a group whose
+      // card points at an archived product.
+      await detachSkuFromGroup(supabase, sku);
       return res.status(200).json({ ok: true });
     }
 
