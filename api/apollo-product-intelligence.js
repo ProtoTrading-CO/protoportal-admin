@@ -1,4 +1,5 @@
 import { runSqlReport, SQL_REPORT_SOURCE } from './_sql-reports.js';
+import { getPortalAdminClient } from './_site-config.js';
 
 const SKU_CAPTURE = /\b([A-Z0-9][A-Z0-9._-]{3,63})\b/i;
 const SKU_ONLY_RE = /^[A-Z0-9][A-Z0-9._-]{3,63}[?.!]*$/i;
@@ -180,7 +181,7 @@ function reorderDecision({ available, sales3m, sales6m, sales12m }) {
   };
 }
 
-export function formatReorderDecision({ lookup, evidence, generatedAt = new Date().toISOString() }) {
+export function formatReorderDecision({ lookup, evidence, supplier = '', generatedAt = new Date().toISOString() }) {
   const product = lookup.rows?.[0] || null;
   const requestedSku = lookup.parameters?.sku || evidence.parameters?.skus?.[0] || '—';
   if (!product) {
@@ -193,6 +194,7 @@ export function formatReorderDecision({ lookup, evidence, generatedAt = new Date
   const sales6m = number(row.SALES_6M ?? row.sales6m);
   const sales12m = number(row.SALES_12M ?? row.sales12m);
   const decision = reorderDecision({ available, sales3m, sales6m, sales12m });
+  const supplierName = String(supplier || '').trim();
 
   return [
     '## Reorder decision',
@@ -203,6 +205,7 @@ export function formatReorderDecision({ lookup, evidence, generatedAt = new Date
     `- **SKU:** ${text(product, 'CODE', 'code', 'SKU', 'sku')}`,
     `- **Department:** ${text(product, 'DEPT', 'dept')}`,
     `- **Available now:** **${available} units**`,
+    `- **Supplier:** ${supplierName || 'not yet linked'}`,
     '',
     '### Demand evidence',
     `- **Last 3 months:** ${sales3m} units`,
@@ -216,11 +219,29 @@ export function formatReorderDecision({ lookup, evidence, generatedAt = new Date
     `**${decision.label}** — ${decision.detail}`,
     '',
     '### Before placing an order',
-    '- Supplier lead time, MOQ/pack size, and incoming container stock are not connected to this decision yet.',
+    supplierName
+      ? `- Supplier **${supplierName}** is linked from the product master. Lead time, MOQ/pack size, and incoming container stock are not connected yet.`
+      : '- Supplier lead time, MOQ/pack size, and incoming container stock are not connected to this decision yet.',
     '- No reorder quantity is suggested until those inputs are live.',
     '',
     `_Source: ${SQL_REPORT_SOURCE} · read-only · generated ${generatedAt}_`,
   ].join('\n');
+}
+
+async function supplierForSku(sku) {
+  try {
+    const { data, error } = await getPortalAdminClient()
+      .from('stmast_cache')
+      .select('supplier')
+      .eq('code', sku)
+      .maybeSingle();
+    if (error) throw error;
+    return String(data?.supplier || '').trim();
+  } catch {
+    // Supplier enrichment is useful context, never a reason to block an
+    // otherwise valid live POS decision.
+    return '';
+  }
 }
 
 export async function tryDeterministicProductLookup(query) {
@@ -269,13 +290,14 @@ export async function tryReorderDecision(query) {
     const evidence = lookup.rows?.length
       ? await runSqlReport('buying.sku_evidence', { skus: [sku] })
       : { rows: [], parameters: { skus: [sku] } };
+    const supplier = lookup.rows?.length ? await supplierForSku(sku) : '';
 
     return {
-      reply: formatReorderDecision({ lookup, evidence }),
+      reply: formatReorderDecision({ lookup, evidence, supplier }),
       source: 'positill-reorder-decision',
       intent: 'reorder_decision',
       businessIntent: 'buying_reorder_decision',
-      productIntelligence: { sku, lookup, evidence },
+      productIntelligence: { sku, lookup, evidence, supplier },
     };
   } catch (err) {
     return {
