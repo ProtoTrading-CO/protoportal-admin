@@ -1,0 +1,39 @@
+name: Deploy Apollo SQL bridge
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: Type DEPLOY to copy and restart the read-only bridge on BLADERUNNER-PC
+        required: true
+        type: string
+      sku:
+        description: SKU used for the post-deploy read-only product lookup
+        required: false
+        default: '8626100145'
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apollo-sql-bridge-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.event.inputs.confirm == 'DEPLOY'
+    runs-on: [self-hosted, Windows, X64, proto-bridge]
+    timeout-minutes: 10
+    steps:
+      - name: Check out approved main branch
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Deploy and verify the read-only bridge
+        shell: pwsh
+        run: >-
+          .\scripts\deploy_bridge_local.ps1
+          -Sku '${{ inputs.sku }}'
+          -ExpectedCommit '${{ github.sha }}'
