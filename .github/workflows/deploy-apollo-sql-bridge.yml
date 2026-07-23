@@ -26,14 +26,16 @@ jobs:
     runs-on: [self-hosted, Windows, X64, proto-bridge]
     timeout-minutes: 10
     steps:
-      - name: Check out approved main branch
-        uses: actions/checkout@v4
-        with:
-          ref: main
-
-      - name: Deploy and verify the read-only bridge
+      - name: Download approved main branch, deploy, and verify
         shell: pwsh
-        run: >-
-          .\scripts\deploy_bridge_local.ps1
-          -Sku '${{ inputs.sku }}'
-          -ExpectedCommit '${{ github.sha }}'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $archive = Join-Path $env:RUNNER_TEMP 'protoportal-admin-main.zip'
+          $extract = Join-Path $env:RUNNER_TEMP 'protoportal-admin-main'
+          Remove-Item -LiteralPath $archive -Force -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath $extract -Recurse -Force -ErrorAction SilentlyContinue
+          Invoke-WebRequest -Uri 'https://github.com/ProtoTrading-CO/protoportal-admin/archive/refs/heads/main.zip' -OutFile $archive
+          Expand-Archive -LiteralPath $archive -DestinationPath $extract -Force
+          $source = Get-ChildItem -LiteralPath $extract -Directory | Select-Object -First 1
+          if (-not $source) { throw 'Could not find the downloaded main branch source.' }
+          & (Join-Path $source.FullName 'scripts\deploy_bridge_local.ps1') -Sku '${{ inputs.sku }}' -ExpectedCommit '${{ github.sha }}'
