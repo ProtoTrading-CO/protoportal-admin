@@ -1,12 +1,20 @@
 import { isAdminEmail } from './_admin-auth.js';
 import { PROTO_URLS } from './_proto-urls.js';
 import {
-  ensureAdminAuthUser,
+  findAdminAuthUser,
   getAdminAuthClient,
   getResetSecret,
+  getResetTokenVersion,
   makeResetToken,
   sendAdminResetEmail,
 } from './_admin-password-reset.js';
+import { checkRateLimit, clientIp } from './_rate-limit.js';
+
+// Identical response for every input — no account-existence oracle.
+const GENERIC_OK = {
+  ok: true,
+  message: 'If that email has admin access, a reset link is on its way.',
+};
 
 /** Send admin password reset via Brevo (Supabase built-in email is not used). */
 export default async function handler(req, res) {
@@ -14,28 +22,41 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
 
   const email = String(req.body?.email || '').trim().toLowerCase();
-  if (!email) return res.status(400).json({ error: 'Email is required' });
-
-  if (!isAdminEmail(email)) {
-    return res.status(403).json({ error: 'This email is not authorized for the admin dashboard.' });
-  }
 
   const secret = getResetSecret();
   if (!secret) return res.status(500).json({ error: 'Server misconfigured' });
 
-  try {
-    const supabase = getAdminAuthClient();
-    await ensureAdminAuthUser(supabase, email);
-
-    const token = makeResetToken(email, secret);
-    const adminUrl = PROTO_URLS.admin;
-    const resetLink = `${adminUrl}/reset-password?token=${encodeURIComponent(token)}`;
-
-    await sendAdminResetEmail(email, resetLink);
-
-    return res.status(200).json({ ok: true, message: 'Reset link sent.' });
-  } catch (err) {
-    console.error('admin-forgot-password:', err.message);
-    return res.status(500).json({ error: err.message || 'Failed to send reset email' });
+  // Rate limit per IP and per email (fixed 1h window). Generic 429 either way.
+  const ip = clientIp(req);
+  const ipLimit = await checkRateLimit({ bucket: `admin-forgot:ip:${ip}`, max: 10, windowSeconds: 3600 });
+  const emailLimit = email
+    ? await checkRateLimit({ bucket: `admin-forgot:email:${email}`, max: 5, windowSeconds: 3600 })
+    : { allowed: true };
+  if (!ipLimit.allowed || !emailLimit.allowed) {
+    const retryAfter = Math.max(ipLimit.retryAfter || 0, emailLimit.retryAfter || 0);
+    if (retryAfter) res.setHeader('Retry-After', String(retryAfter));
+    return res.status(429).json({ error: 'Too many reset requests. Please wait and try again.' });
   }
+
+  // Only allowlisted admin emails with an EXISTING auth account receive mail.
+  // We never auto-create accounts from this unauthenticated endpoint, and we
+  // always return the same generic 200 so this cannot be used to probe which
+  // addresses exist.
+  try {
+    if (email && isAdminEmail(email)) {
+      const supabase = getAdminAuthClient();
+      const user = await findAdminAuthUser(supabase, email);
+      if (user) {
+        const token = makeResetToken(email, secret, getResetTokenVersion(user));
+        const resetLink = `${PROTO_URLS.admin}/reset-password?token=${encodeURIComponent(token)}`;
+        await sendAdminResetEmail(email, resetLink);
+      }
+    }
+  } catch (err) {
+    // Log server-side but still return generic success — an internal error must
+    // not become a side-channel that distinguishes known from unknown emails.
+    console.error('admin-forgot-password:', err.message);
+  }
+
+  return res.status(200).json(GENERIC_OK);
 }
