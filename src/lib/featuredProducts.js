@@ -11,7 +11,7 @@ export async function fetchFeaturedProducts() {
   };
 }
 
-export async function saveFeaturedProducts(items) {
+export async function saveFeaturedProducts(items, baseUpdatedAt = null) {
   const normalized = (items || []).slice(0, FEATURED_HARD_CAP).map((row) => ({
     sku: String(row.sku || '').trim().toUpperCase(),
     addedAt: row.addedAt || new Date().toISOString(),
@@ -20,7 +20,10 @@ export async function saveFeaturedProducts(items) {
   const res = await fetch('/api/featured-products', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ items: normalized }),
+    body: JSON.stringify({
+      items: normalized,
+      ...(baseUpdatedAt ? { baseUpdatedAt } : {}),
+    }),
   });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(json.error || 'Failed to save featured products');

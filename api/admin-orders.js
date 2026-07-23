@@ -247,8 +247,18 @@ async function purgeOrderSiteConfigFiles() {
   const prefixes = ['fulfillment/progress', 'orders/confirmation', 'orders/notify'];
   const files = [];
   for (const prefix of prefixes) {
+    // Guard: never purge from an empty prefix (whole bucket) or the backups tree.
+    if (!prefix || prefix === 'backups' || prefix.startsWith('backups/')) continue;
     const listed = await listAllStorageFiles(supabase, prefix);
-    files.push(...listed);
+    // Only delete paths strictly under the prefix we listed — a listing quirk
+    // (or future prefix edit) must never widen the blast radius to the rest
+    // of the site-config bucket (sort orders, specials, backups, …).
+    const safe = listed.filter((p) => p.startsWith(`${prefix}/`) && !p.startsWith('backups/'));
+    const skipped = listed.filter((p) => !safe.includes(p));
+    if (skipped.length) {
+      console.warn(`purgeOrderSiteConfigFiles: skipping ${skipped.length} out-of-prefix path(s):`, skipped.slice(0, 20));
+    }
+    files.push(...safe);
   }
   if (!files.length) return 0;
   const chunkSize = 100;

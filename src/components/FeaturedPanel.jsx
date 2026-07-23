@@ -280,7 +280,10 @@ function FeaturedPanelInner({ taxonomyTree = [], onShowToast }) {
   }), [featuredItems, catalogBySku]);
 
   const saveMutation = useMutation({
-    mutationFn: saveFeaturedProducts,
+    mutationFn: (items) => saveFeaturedProducts(
+      items,
+      queryClient.getQueryData(queryKeys.featuredProducts())?.updatedAt || null,
+    ),
     onSuccess: (data) => {
       queryClient.setQueryData(queryKeys.featuredProducts(), data);
       setSaveMeta({ updatedAt: data.updatedAt });

@@ -51,12 +51,16 @@
     "api/apply-category-moves.js": {
       "maxDuration": 300,
       "includeFiles": "data/category-move-*.xlsx"
+    },
+    "api/site-config-backup.js": {
+      "maxDuration": 60
     }
   },
   "crons": [
     { "path": "/api/order-notify-sweep", "schedule": "*/10 * * * *" },
     { "path": "/api/brevo-sync", "schedule": "*/15 * * * *" },
     { "path": "/api/apollo-daily-brief", "schedule": "0 6 * * 1-5" },
-    { "path": "/api/purge-expired-staging", "schedule": "0 3 * * *" }
+    { "path": "/api/purge-expired-staging", "schedule": "0 3 * * *" },
+    { "path": "/api/site-config-backup", "schedule": "0 2 * * *" }
   ]
 }

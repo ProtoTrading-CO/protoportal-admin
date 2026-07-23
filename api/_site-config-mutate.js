@@ -22,8 +22,8 @@ export async function mutateSiteConfigJson(file, fallback, mutator, { maxRetries
     }
 
     try {
-      await writeSiteConfigJson(file, next);
-      return result?.store ? result : next;
+      const written = await writeSiteConfigJson(file, next);
+      return result?.store ? { ...result, store: written } : written;
     } catch (err) {
       lastErr = err;
       await sleep(40 + attempt * 60);
