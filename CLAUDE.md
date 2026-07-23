@@ -28,7 +28,8 @@ npm run build
 `orders` (Order Requests) · `product-loader` · `image-replace` · `apollo`
 (conversational analyst — **no image gen**) · `catalogue` (Product Manager,
 live only) · `archive` (archived products, no category sidebar) · `reorder`
-(Reorder Grid) · `customers` (incl. Email Analytics tab)
+(Reorder Grid) · `customers` · `comms` (Email CRM: Brevo-synced contacts +
+broadcast composer + Email Analytics)
 · `site-content` (Featured + Specials + Banner Editor) · `crm` (WhatsApp) ·
 `analytics` · `pricing` · `team` (opens fulfillment team modal).
 

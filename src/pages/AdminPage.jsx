@@ -3,7 +3,6 @@ import {
   Archive,
   ArchiveRestore,
   ArrowLeftRight,
-  BarChart2,
   Bot,
   MessageCircle,
   Building2,
@@ -114,7 +113,6 @@ const ApolloPanel = lazyRetry(() => import('../components/ApolloPanel'));
 const ProductLoaderPanel = lazyRetry(() => import('../components/ProductLoaderPanel'));
 const BulkImageReplacePanel = lazyRetry(() => import('../components/BulkImageReplacePanel'));
 const WhatsappPanel = lazyRetry(() => import('../components/WhatsappPanel'));
-const EmailAnalyticsPanel = lazyRetry(() => import('../components/EmailAnalyticsPanel'));
 const BannerPanel = lazyRetry(() => import('../components/BannerPanel'));
 const FeaturedPanel = lazyRetry(() => import('../components/FeaturedPanel'));
 const SpecialsPanel = lazyRetry(() => import('../components/SpecialsPanel'));
@@ -137,6 +135,7 @@ function SectionSuspenseFallback({ label = 'Loading…' }) {
 
 // Modal-only — chunk downloads the first time the admin opens the dialog.
 const CustomerEmailModal = lazyRetry(() => import('../components/CustomerEmailModal'));
+const CommsPanel = lazyRetry(() => import('../components/CommsPanel'));
 // AddCustomerModal is tiny and eager (not lazy) so opening it can never hit a
 // stale-chunk load failure — which the recovery would resolve by reloading the
 // whole page (reads as "the button just refreshes").
@@ -162,7 +161,7 @@ function LazySectionFallback({ label = 'Loading section…' }) {
 }
 
 const ADMIN_PAGE_SIZE = 50;
-const CUSTOMER_SERVICE_SECTIONS = ['orders', 'apollo', 'customers', 'crm'];
+const CUSTOMER_SERVICE_SECTIONS = ['orders', 'apollo', 'customers', 'comms', 'crm'];
 
 function sectionsForAdminRole(role) {
   return role === 'customer_service'
@@ -1426,10 +1425,6 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
 
   const refreshCurrentSection = async () => {
     if (activeSection === 'customers') {
-      if (customerTab === 'email-analytics') {
-        dispatchAdminRefresh('customers');
-        return;
-      }
       return loadCustomers();
     }
     if (activeSection === 'reorder') {
@@ -2279,14 +2274,8 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                   <button onClick={() => setCustomerTab('requests')} className={`adm-tab${customerTab === 'requests' ? ' adm-tab--active' : ''}`}>Trade Requests</button>
                   <button onClick={() => setCustomerTab('proto-active')} className={`adm-tab${customerTab === 'proto-active' ? ' adm-tab--active' : ''}`}>Pre-registration</button>
                   <button onClick={() => setCustomerTab('regular')} className={`adm-tab${customerTab === 'regular' ? ' adm-tab--active' : ''}`}>Approved</button>
-                  <button onClick={() => setCustomerTab('email-analytics')} className={`adm-tab${customerTab === 'email-analytics' ? ' adm-tab--active' : ''}`}>
-                    <BarChart2 size={14} style={{ marginRight: 6, verticalAlign: -2 }} />
-                    Email Analytics
-                  </button>
-                  {customerTab !== 'email-analytics' && (
-                    <label className="adm-search adm-search--inline"><Search size={14} /><input value={customerSearch} onChange={(e) => setCustomerSearch(e.target.value)} placeholder="Search…" className="adm-search-input" /></label>
-                  )}
-                  {customerTab !== 'proto-active' && customerTab !== 'email-analytics' && (
+                  <label className="adm-search adm-search--inline"><Search size={14} /><input value={customerSearch} onChange={(e) => setCustomerSearch(e.target.value)} placeholder="Search…" className="adm-search-input" /></label>
+                  {customerTab !== 'proto-active' && (
                     <select
                       className="adm-select"
                       value={customerBusinessType}
@@ -2308,11 +2297,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                   </p>
                 )}
 
-                {customerTab === 'email-analytics' ? (
-                  <Suspense fallback={<LazySectionFallback label="Loading Email Analytics…" />}>
-                    <EmailAnalyticsPanel onShowToast={showToast} />
-                  </Suspense>
-                ) : customerTab === 'proto-active' ? (
+                {customerTab === 'proto-active' ? (
                   <div className="adm-list">
                     <div className="adm-list-head" style={{ gridTemplateColumns: '80px 1.2fr 110px 90px 1.1fr 100px 80px 100px 120px' }}>
                       <span>Code</span><span>Business</span><span>Contact</span><span>First name</span><span>Email</span><span>12mo Sales</span><span>Invoices</span><span>Last purchase</span><span>Actions</span>
@@ -2695,6 +2680,18 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
             )}
 
             {/* WHATSAPP */}
+            {/* EMAIL CRM — contacts + composer + campaign analytics in one place */}
+            {activeSection === 'comms' && (
+              <SectionErrorBoundary name="comms" title="Email CRM crashed" resetKey={activeSection}>
+                <Suspense fallback={<LazySectionFallback label="Loading Email CRM…" />}>
+                  <CommsPanel
+                    onCompose={() => setCustomerEmailOpen(true)}
+                    onShowToast={showToast}
+                  />
+                </Suspense>
+              </SectionErrorBoundary>
+            )}
+
             {activeSection === 'crm' && (
               <SectionErrorBoundary name="crm" title="WhatsApp crashed" resetKey={activeSection}>
               <div className="adm-panel">
