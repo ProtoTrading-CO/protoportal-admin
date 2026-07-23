@@ -7,6 +7,10 @@ import { reorderStagedImageSlots } from './_stage-dormant.js';
 import { isExactlyZeroStock } from './_catalog-adapt.js';
 import { detachSkuFromGroup } from './_group-cascade.js';
 
+// Full listings load every row in memory; give them headroom past the platform
+// default so a large catalogue degrades to "slow" rather than a hard timeout.
+export const config = { maxDuration: 60 };
+
 const PAGE_SIZE = 1000;
 
 /** Columns needed for admin catalogue adapt() — avoids select('*') timeouts on ~5k rows. */
@@ -18,6 +22,11 @@ const LIVE_LIST_COLS = [
   'original_description', 'pack_description', 'units_of_issue',
   'created_at', 'updated_at', 'keep_live_when_oos',
 ].join(', ');
+
+// Above this, a single unbounded listing is loading enough rows into serverless
+// memory to be worth flagging (see catalog.js FULL_SCAN_WARN_ROWS) — logged, not
+// enforced, so listings stay complete while the size is surfaced for ops.
+const FULL_SCAN_WARN_ROWS = 15000;
 
 async function fetchAllRows(supabase, table, { filter = null, orderBy = null, select = '*' } = {}) {
   const rows = [];
@@ -32,6 +41,9 @@ async function fetchAllRows(supabase, table, { filter = null, orderBy = null, se
     rows.push(...(data || []));
     if ((data || []).length < PAGE_SIZE) break;
     from += PAGE_SIZE;
+  }
+  if (rows.length > FULL_SCAN_WARN_ROWS) {
+    console.warn(`stock-actions full listing large: ${rows.length} rows from ${table} (threshold ${FULL_SCAN_WARN_ROWS}) — consider server-side pagination.`);
   }
   return rows;
 }

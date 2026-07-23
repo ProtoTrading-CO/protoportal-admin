@@ -562,22 +562,6 @@ export async function reorderStagedApprovalImages(sku, fromSlot, toSlot) {
 }
 
 /** Go live from New Products — applies staged image if product is still on site, else unarchives. */
-export async function applyDormantLive(sku) {
-  const res = await fetch('/api/apply-dormant-live', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sku }),
-  });
-  const json = await readApiJson(res, { fallback: 'Go live failed' });
-  // Targeted refresh — avoid nuking the full admin catalogue cache (causes flashing load errors).
-  queryClient.invalidateQueries({
-    predicate: (q) => q.queryKey[0] === 'catalog' && q.queryKey[1]?.status === 'live',
-  });
-  queryClient.invalidateQueries({ queryKey: queryKeys.dashboardStats() });
-  window.dispatchEvent(new CustomEvent('proto-approval-refresh'));
-  return json;
-}
-
 /** Toggle curated New Arrivals placement on the trade site homepage. */
 export async function setNewArrival(sku, isNewArrival) {
   await stockAction({ action: 'setNewArrival', sku, isNewArrival: !!isNewArrival });

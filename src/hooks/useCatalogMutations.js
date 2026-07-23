@@ -1,7 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '../lib/queryKeys';
 import {
-  applyDormantLive,
   archiveProduct,
   bulkArchiveProducts,
   bulkUnarchiveProducts,
@@ -35,10 +34,6 @@ function invalidateCatalogAndStats(queryClient, statuses = []) {
   window.dispatchEvent(new CustomEvent('proto-catalog-mutated'));
 }
 
-function refreshApproval() {
-  window.dispatchEvent(new CustomEvent('proto-approval-refresh'));
-}
-
 export function useCatalogMutations() {
   const queryClient = useQueryClient();
 
@@ -50,13 +45,6 @@ export function useCatalogMutations() {
   const unarchive = useMutation({
     mutationFn: (sku) => archiveProduct(sku, false),
     onSettled: () => invalidateCatalogAndStats(queryClient, ['live', 'archived']),
-  });
-
-  const setLive = useMutation({
-    mutationFn: (sku) => applyDormantLive(sku),
-    onError: (err) => {
-      console.error('setLive:', err.message);
-    },
   });
 
   const softDelete = useMutation({
@@ -76,14 +64,6 @@ export function useCatalogMutations() {
   const permanentDelete = useMutation({
     mutationFn: (sku) => deleteProduct(sku),
     onSettled: () => invalidateCatalogAndStats(queryClient, ['live', 'archived', 'recycle']),
-  });
-
-  const discardPreview = useMutation({
-    mutationFn: (sku) => stockMutate({ action: 'deleteStagedPreview', sku }),
-    onSettled: () => {
-      refreshApproval();
-      invalidateCatalogAndStats(queryClient, []);
-    },
   });
 
   const setNewArrival = useMutation({
@@ -111,11 +91,9 @@ export function useCatalogMutations() {
     unarchive,
     bulkArchive,
     bulkUnarchive,
-    setLive,
     softDelete,
     restoreRecycle,
     permanentDelete,
-    discardPreview,
     setNewArrival,
     setToOrder,
   };

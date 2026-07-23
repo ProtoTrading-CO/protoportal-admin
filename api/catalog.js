@@ -1,6 +1,5 @@
 import { requireOwner } from './_admin-auth.js';
 import { loadTaxonomy } from './_taxonomy-utils.js';
-import { mergeStagedImagesOntoLive, batchValidateStockReady } from './_stage-dormant.js';
 import { getStockClient, enrichRowsWithProductStock } from './_stock-client.js';
 import {
   adaptCatalogRow,
@@ -18,6 +17,11 @@ import { isMotarroBrowsePath, isMotarroProduct } from './_mottaro-category.js';
 import { loadPlacementMapIfEnabled, skusMatchingBrowsePath } from './_placements.js';
 import { loadGroupContextIfEnabled } from './_groups.js';
 import { normalizeMemberSku } from '../lib/product-groups.mjs';
+
+// The full-scan paths load and refine the whole matching set in memory; give
+// them headroom past the platform default so a large catalogue degrades to
+// "slow" rather than a hard timeout. (Matches customer-email-broadcast.)
+export const config = { maxDuration: 60 };
 
 // Variant grouping: a curated feature merges a handful of SKUs, so the suppress
 // list stays small. Above this many, skip the SQL `.not in` (URL-length risk)
@@ -43,10 +47,24 @@ function hasUnsafeSuppressSku(suppressSkus) {
   return (suppressSkus || []).some((s) => !SAFE_SKU_RE.test(s));
 }
 
-const VALID_STATUS = new Set(['live', 'archived', 'new-items', 'approval', 'recycle']);
+const VALID_STATUS = new Set(['live', 'archived', 'new-items', 'recycle']);
 const EXCLUDE_ARCHIVED = ['new-products', 'recycle-bin'];
 const PAGE_CHUNK = 1000;
 const SKU_FETCH_CHUNK = 200;
+
+// The full-scan paths (a search-less "in stock only" toggle, deep category
+// paths, Motarro browse, placements) load every matching row into serverless
+// memory and refine in JS. That is comfortable at the current catalogue size
+// but scales linearly. This is the "real row-count check": once a single scan
+// crosses the threshold we log a structured warning (visible in the function
+// logs) so the move to a server-side paginated strategy happens before scans
+// start timing out — without altering results, count, or pagination today.
+const FULL_SCAN_WARN_ROWS = 15000;
+function warnIfFullScanLarge(count, label) {
+  if (count > FULL_SCAN_WARN_ROWS) {
+    console.warn(`catalog full-scan large: ${count} rows loaded for ${label} (threshold ${FULL_SCAN_WARN_ROWS}) — consider a server-side paginated path.`);
+  }
+}
 
 /** Fetch live rows for an explicit sku list, chunked to keep the URL sane. */
 async function fetchLiveRowsBySku(sb, skus) {
@@ -112,6 +130,7 @@ async function fetchAllMotarroRows(sb, { search, categoryPath, tree, sort }) {
     if ((data || []).length < PAGE_CHUNK) break;
     from += PAGE_CHUNK;
   }
+  warnIfFullScanLarge(rows.length, 'live/motarro');
   return filterByCategoryPath(rows, categoryPath, tree);
 }
 
@@ -136,6 +155,7 @@ async function fetchAllLiveRows(sb, { search, categoryPath, tree, sort, toOrderO
     if ((data || []).length < PAGE_CHUNK) break;
     from += PAGE_CHUNK;
   }
+  warnIfFullScanLarge(rows.length, 'live');
   // The SQL filter is exact only within the fixed subcategory columns; a path
   // deeper than subcategory_four is coarsely narrowed by ilike, so refine it to
   // an exact ordered-prefix match in JS (extras-aware via rowCategoryPath).
@@ -169,6 +189,7 @@ async function fetchAllArchivedRows(sb, { archivedBy, excludeBy, sort, search, c
     if ((data || []).length < PAGE_CHUNK) break;
     from += PAGE_CHUNK;
   }
+  warnIfFullScanLarge(rows.length, 'archived');
   // Exact ordered-prefix refine for paths deeper than the fixed columns (the
   // SQL filter only coarsely narrows subcategory_extra via ilike). Motarro
   // browse paths are refined by their own caller.
@@ -269,32 +290,6 @@ async function fetchLiveSkus(sb) {
     from += 1000;
   }
   return skus;
-}
-
-async function loadApprovalRows(sb) {
-  const staged = await fetchAllArchivedRows(sb, { archivedBy: 'new-products', sort: 'updated' });
-  const skus = staged.map((r) => r.sku).filter(Boolean);
-  if (!skus.length) return [];
-  const { data: liveRows } = await sb.from('website_stock').select('*').in('sku', skus);
-  const liveBySku = new Map((liveRows || []).map((r) => [r.sku, r]));
-  const barcodes = (staged || []).map((r) => r.barcode || r.sku).filter(Boolean);
-  const stockChecks = await batchValidateStockReady(sb, barcodes);
-  const rows = [];
-  for (const row of staged) {
-    const live = liveBySku.get(row.sku);
-    if (!live) continue;
-    const { appliedSlots } = mergeStagedImagesOntoLive(row, live);
-    if (!appliedSlots.length) continue;
-    const stockCheck = stockChecks.get(String(row.barcode || row.sku || '').trim()) || { ok: false, error: 'Missing barcode' };
-    rows.push({
-      ...row,
-      _live: live,
-      _changedSlots: appliedSlots,
-      _stockReady: stockCheck.ok,
-      _stockError: stockCheck.ok ? null : stockCheck.error,
-    });
-  }
-  return rows;
 }
 
 /** Paginated catalogue read for unified Product Manager. */
@@ -437,16 +432,10 @@ export default async function handler(req, res) {
       rows = applySearchFilter(rows, search);
       const pageSlice = paginateRows(rows, page, pageSize);
       result = { ...pageSlice, archived: true };
-    } else if (status === 'approval') {
-      let rows = await loadApprovalRows(sb);
-      rows = filterByCategoryPath(rows, categoryPath, tree);
-      rows = applySearchFilter(rows, search);
-      const pageSlice = paginateRows(rows, page, pageSize);
-      result = { ...pageSlice, archived: true };
     }
 
     const needsStock = status === 'live' || status === 'archived' || status === 'recycle'
-      || status === 'new-items' || status === 'approval';
+      || status === 'new-items';
     let enriched = result.rows;
     if (needsStock && enriched.length && !stockAlreadyEnriched) {
       enriched = await enrichRowsWithProductStock(sb, enriched, { includePrice: status === 'new-items' });
