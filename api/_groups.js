@@ -14,14 +14,24 @@ export async function fetchAllGroupsWithMembers(sb, { activeOnly = false } = {})
   if (gErr) throw gErr;
 
   const ids = (groups || []).map((g) => g.id);
-  let members = [];
+  const members = [];
   if (ids.length) {
-    const { data, error } = await sb
-      .from(MEMBER_TABLE)
-      .select('group_id,website_sku,variant_label,sort_order')
-      .in('group_id', ids);
-    if (error) throw error;
-    members = data || [];
+    // Paginate — a single .in() is capped at PostgREST's 1000-row default, which
+    // would silently drop members (and leak them onto the listing) at scale.
+    const PAGE = 1000;
+    let from = 0;
+    while (true) {
+      const { data, error } = await sb
+        .from(MEMBER_TABLE)
+        .select('group_id,website_sku,variant_label,sort_order')
+        .in('group_id', ids)
+        .range(from, from + PAGE - 1);
+      if (error) throw error;
+      const batch = data || [];
+      members.push(...batch);
+      if (batch.length < PAGE) break;
+      from += PAGE;
+    }
   }
   const byGroup = new Map();
   for (const m of members) {
@@ -43,6 +53,13 @@ export async function fetchAllGroupsWithMembers(sb, { activeOnly = false } = {})
 export async function loadGroupContextIfEnabled(sb) {
   const flags = await readFeatureFlags();
   if (!flags.catalogGrouping) return null;
-  const groups = await fetchAllGroupsWithMembers(sb, { activeOnly: true });
-  return { groups, ...buildGroupMaps(groups) };
+  try {
+    const groups = await fetchAllGroupsWithMembers(sb, { activeOnly: true });
+    return { groups, ...buildGroupMaps(groups) };
+  } catch (err) {
+    // Flag on but migration 052 not applied yet — degrade to "off" rather than
+    // 500-ing the whole admin catalogue. (detachSkuFromGroup guards the same.)
+    if (err?.code === '42P01') return null;
+    throw err;
+  }
 }

@@ -124,37 +124,70 @@ export default async function handler(req, res) {
       const groupId = String(body.groupId || '').trim();
       if (!groupId) return res.status(400).json({ error: 'groupId is required' });
 
-      const patch = { updated_at: new Date().toISOString() };
-      if (body.title !== undefined) patch.title = String(body.title || '').trim() || null;
-      if (body.active !== undefined) patch.active = Boolean(body.active);
-      if (body.primaryWebsiteSku !== undefined) patch.primary_website_sku = normSku(body.primaryWebsiteSku);
-      const { error: uErr } = await sb.from(GROUP_TABLE).update(patch).eq('id', groupId);
-      if (uErr) throw uErr;
+      // Load the current group + members first, then compute the RESULTING state
+      // in memory and validate it fully before writing anything. Persisting a bad
+      // primary (or dropping below two members) and only catching it afterwards
+      // would leave the group in the invalid state the check rejected.
+      const existing = (await fetchAllGroupsWithMembers(sb)).find((g) => g.id === groupId);
+      if (!existing) return res.status(404).json({ error: 'Group not found' });
 
-      const removeMembers = Array.isArray(body.removeMembers) ? body.removeMembers.map(normSku).filter(Boolean) : [];
-      if (removeMembers.length) {
-        const { error } = await sb.from(MEMBER_TABLE).delete().eq('group_id', groupId).in('website_sku', removeMembers);
-        if (error) throw error;
-      }
+      const removeMembers = Array.isArray(body.removeMembers)
+        ? new Set(body.removeMembers.map(normSku).filter(Boolean))
+        : new Set();
       const addMembers = parseMembers({ members: body.addMembers || [] });
+
+      // Resulting member SKU set: current − removed + added (dedup).
+      const resultSkus = new Set(existing.members.map((m) => normSku(m.website_sku)));
+      for (const s of removeMembers) resultSkus.delete(s);
+      for (const m of addMembers) resultSkus.add(m.sku);
+
+      // Resulting primary: the requested one if provided, else the unchanged one.
+      const nextPrimary = body.primaryWebsiteSku !== undefined
+        ? normSku(body.primaryWebsiteSku)
+        : normSku(existing.primary_website_sku);
+
+      // Validate the resulting state before any write.
+      if (resultSkus.size < 2) {
+        return res.status(400).json({ error: 'A group needs at least two products.' });
+      }
+      if (!nextPrimary || !resultSkus.has(nextPrimary)) {
+        return res.status(400).json({ error: 'The primary product must be a member of the group.' });
+      }
+      // New members must exist and not already belong to another group.
       if (addMembers.length) {
         const skus = addMembers.map((m) => m.sku);
         const missing = await missingSkus(sb, skus);
         if (missing.length) return res.status(400).json({ error: `Unknown product(s): ${missing.join(', ')}` });
         const taken = await alreadyGrouped(sb, skus, groupId);
         if (taken.length) return res.status(409).json({ error: `Already in another group: ${taken.join(', ')}` });
+      }
+
+      // All checks passed — apply the writes.
+      const patch = { updated_at: new Date().toISOString() };
+      if (body.title !== undefined) patch.title = String(body.title || '').trim() || null;
+      if (body.active !== undefined) patch.active = Boolean(body.active);
+      if (body.primaryWebsiteSku !== undefined) patch.primary_website_sku = nextPrimary;
+      const { error: uErr } = await sb.from(GROUP_TABLE).update(patch).eq('id', groupId);
+      if (uErr) throw uErr;
+
+      if (removeMembers.size) {
+        const { error } = await sb.from(MEMBER_TABLE)
+          .delete().eq('group_id', groupId).in('website_sku', [...removeMembers]);
+        if (error) throw error;
+      }
+      if (addMembers.length) {
         const rows = addMembers.map((m) => ({
           group_id: groupId, website_sku: m.sku, variant_label: m.variantLabel, sort_order: m.sortOrder,
         }));
         const { error } = await sb.from(MEMBER_TABLE).insert(rows);
-        if (error) throw error;
+        if (error) {
+          if (error.code === '23505') return res.status(409).json({ error: 'One of those products is already in another group.' });
+          throw error;
+        }
       }
 
       const groups = await fetchAllGroupsWithMembers(sb);
       const group = groups.find((g) => g.id === groupId) || null;
-      if (group && !group.members.some((m) => normSku(m.website_sku) === normSku(group.primary_website_sku))) {
-        return res.status(400).json({ error: 'The primary product must be a member of the group.' });
-      }
       return res.status(200).json({ ok: true, group });
     } catch (err) {
       console.error('product-groups PATCH:', err?.message || err);

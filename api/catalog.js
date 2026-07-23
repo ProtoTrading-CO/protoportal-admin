@@ -24,13 +24,23 @@ import { normalizeMemberSku } from '../lib/product-groups.mjs';
 // and force the full-scan path, which filters in JS instead.
 const GROUP_SUPPRESS_SQL_MAX = 800;
 
+// Only SKUs of this safe shape go into the PostgREST filter string; anything
+// with punctuation that could break the `(...)` list is handled by the full-scan
+// JS filter instead (see hasUnsafeSuppressSku).
+const SAFE_SKU_RE = /^[A-Z0-9_-]+$/;
+
 /** Exclude non-primary group members from a live query (keeps count/range exact). */
 function applyGroupSuppression(q, suppressSkus) {
-  if (suppressSkus?.length && suppressSkus.length <= GROUP_SUPPRESS_SQL_MAX) {
-    const quoted = suppressSkus.map((s) => `"${s}"`).join(',');
+  const safe = (suppressSkus || []).filter((s) => SAFE_SKU_RE.test(s));
+  if (safe.length && safe.length <= GROUP_SUPPRESS_SQL_MAX) {
+    const quoted = safe.map((s) => `"${s}"`).join(',');
     q = q.not('sku', 'in', `(${quoted})`);
   }
   return q;
+}
+
+function hasUnsafeSuppressSku(suppressSkus) {
+  return (suppressSkus || []).some((s) => !SAFE_SKU_RE.test(s));
 }
 
 const VALID_STATUS = new Set(['live', 'archived', 'new-items', 'approval', 'recycle']);
@@ -319,7 +329,9 @@ export default async function handler(req, res) {
     const suppressSkus = [...suppressSet];
     const groupBySku = groupCtx?.bySku || null;
     const groupSizeById = new Map((groupCtx?.groups || []).map((g) => [g.id, (g.members || []).length]));
-    const bigSuppression = suppressSet.size > GROUP_SUPPRESS_SQL_MAX;
+    // Force the full-scan (JS-filter) path when the suppress list is too big for
+    // a SQL `.not in` URL, or contains a SKU we won't safely interpolate.
+    const bigSuppression = suppressSet.size > GROUP_SUPPRESS_SQL_MAX || hasUnsafeSuppressSku(suppressSkus);
 
     let result;
     let stockAlreadyEnriched = false;
