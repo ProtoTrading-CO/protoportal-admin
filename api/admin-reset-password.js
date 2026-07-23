@@ -1,5 +1,4 @@
 import {
-  bumpResetTokenVersion,
   findAdminAuthUser,
   getAdminAuthClient,
   getResetSecret,
@@ -53,14 +52,19 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'This reset link has already been used or replaced. Request a new one.' });
     }
 
+    // Atomic single-use: rotate the password AND bump reset_token_version in
+    // the SAME write, so a partial failure can never leave the link replayable
+    // for the rest of its TTL (a separate bump could fail after the password
+    // already changed).
+    const nextVersion = getResetTokenVersion(user) + 1;
     const { error } = await supabase.auth.admin.updateUserById(user.id, {
       password,
       email_confirm: true,
+      app_metadata: { ...(user.app_metadata || {}), reset_token_version: nextVersion },
     });
     if (error) return res.status(400).json({ error: error.message });
 
-    // Invalidate all outstanding links, then log out every existing session.
-    await bumpResetTokenVersion(supabase, user);
+    // Then log out every existing session.
     await revokeUserSessions(supabase, user.id);
 
     return res.status(200).json({ ok: true });
