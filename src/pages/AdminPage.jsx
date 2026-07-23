@@ -558,6 +558,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
   const [customerRows, setCustomerRows] = useState([]);
   const [customerTotal, setCustomerTotal] = useState(0);
   const [customerEmailOpen, setCustomerEmailOpen] = useState(false);
+  const [composeTarget, setComposeTarget] = useState(null);
   const [addCustomerOpen, setAddCustomerOpen] = useState(false);
   const [profileSource, setProfileSource] = useState('portal');
   const [approvalCodes, setApprovalCodes] = useState({});
@@ -2264,7 +2265,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                     <button type="button" className="adm-btn-ghost" onClick={() => setAddCustomerOpen(true)} title="Manually add a customer into a chosen section">
                       <UserPlus size={14} /> Add customer
                     </button>
-                    <button type="button" className="adm-btn-red" onClick={() => setCustomerEmailOpen(true)}>
+                    <button type="button" className="adm-btn-red" onClick={() => { setComposeTarget(null); setCustomerEmailOpen(true); }}>
                       <Mail size={14} /> Send email
                     </button>
                   </div>
@@ -2685,7 +2686,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
               <SectionErrorBoundary name="comms" title="Email CRM crashed" resetKey={activeSection}>
                 <Suspense fallback={<LazySectionFallback label="Loading Email CRM…" />}>
                   <CommsPanel
-                    onCompose={() => setCustomerEmailOpen(true)}
+                    onCompose={(target) => { setComposeTarget(target || null); setCustomerEmailOpen(true); }}
                     onShowToast={showToast}
                   />
                 </Suspense>
@@ -2941,11 +2942,14 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
         <Suspense fallback={null}>
           <CustomerEmailModal
             open={customerEmailOpen}
-            onClose={() => setCustomerEmailOpen(false)}
+            onClose={() => { setCustomerEmailOpen(false); setComposeTarget(null); }}
             customerTab={customerTab}
             onSend={sendCustomerEmailBroadcast}
             onShowToast={showToast}
             adminEmail={customer?.email || ''}
+            initialAudience={composeTarget?.audience || null}
+            initialBusinessTypes={composeTarget?.businessTypes || null}
+            initialRecipients={composeTarget?.recipients || null}
           />
         </Suspense>
       )}

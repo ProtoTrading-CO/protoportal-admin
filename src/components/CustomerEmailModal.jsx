@@ -95,6 +95,9 @@ export default function CustomerEmailModal({
   onSend,
   onShowToast,
   adminEmail = '',
+  initialAudience = null,
+  initialBusinessTypes = null,
+  initialRecipients = null,
 }) {
   const [subject, setSubject] = useState('');
   const [introBody, setIntroBody] = useState('');
@@ -117,14 +120,29 @@ export default function CustomerEmailModal({
   const imageRef = useRef(null);
   const activeFieldRef = useRef('intro');
 
+  // Seed targeting ONCE when the modal opens. Depending on the initial* props
+  // (fresh array refs each parent render) would re-run this on every render and
+  // wipe the form mid-edit, so it keys only on `open` and reads the rest via
+  // closure at open time.
   useEffect(() => {
     if (!open) return;
-    setAudience(defaultAudienceForTab(customerTab));
     setHtmlPane('split');
     setShowHtml(false);
-    setFilterBusinessTypes(false);
-    setBusinessTypes([]);
-  }, [open, customerTab]);
+    const recips = Array.isArray(initialRecipients) ? initialRecipients.filter(Boolean) : [];
+    if (recips.length) {
+      setAudience('selected');
+      setRecipientsText(recips.join('\n'));
+      setFilterBusinessTypes(false);
+      setBusinessTypes([]);
+    } else {
+      setAudience(initialAudience || defaultAudienceForTab(customerTab));
+      setRecipientsText('');
+      const types = Array.isArray(initialBusinessTypes) ? initialBusinessTypes.filter(Boolean) : [];
+      setFilterBusinessTypes(types.length > 0);
+      setBusinessTypes(types);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   // Delivery analytics for recent campaigns, shown inside the compose modal.
   useEffect(() => {
