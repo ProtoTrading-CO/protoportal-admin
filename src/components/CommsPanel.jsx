@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState, Suspense } from 'react';
-import { BarChart2, ChevronLeft, ChevronRight, Loader2, Mail, RefreshCw, Search, Users } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState, Suspense } from 'react';
+import { BarChart2, ChevronLeft, ChevronRight, Loader2, Mail, RefreshCw, Search, Send, Users } from 'lucide-react';
 import { ADMIN_REFRESH_EVENT } from '../lib/adminRefresh';
 import { lazyRetry } from '../lib/lazyRetry';
+import { BUSINESS_TYPES } from '../lib/businessTypes';
 
 const EmailAnalyticsPanel = lazyRetry(() => import('./EmailAnalyticsPanel'));
 
@@ -14,67 +15,115 @@ function formatWhen(value) {
   return date.toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 }
 
-function listNames(contact) {
-  const names = Array.isArray(contact?.list_names) ? contact.list_names : [];
-  return names.filter(Boolean).join(', ');
+function contactEmail(c) {
+  return String(c?.email || '').trim().toLowerCase();
+}
+
+function contactBusiness(c) {
+  return c?.business_name || c?.name || '—';
+}
+
+function contactPerson(c) {
+  return c?.contact_name || c?.first_name || '—';
+}
+
+function contactLocation(c) {
+  return [c?.city, c?.province].filter(Boolean).join(', ') || '—';
 }
 
 /**
- * Email CRM (comms) — one place for customer email work: Brevo-synced contacts,
- * the existing broadcast composer (opened via onCompose), and campaign
- * analytics. Assembles existing pieces; adds no new Brevo calls — contacts come
- * from the background-synced crm_contacts cache (api/brevo-sync.js cron).
+ * Email CRM (comms) — one place for customer email work, sourced from the
+ * SITE's own approved customers (portal `customers` table via api/admin-customers),
+ * not Brevo. Filter by business type, select contacts, and send targeted
+ * campaigns through the existing composer. Analytics tab embeds the existing
+ * EmailAnalyticsPanel.
  */
 export default function CommsPanel({ onCompose, onShowToast }) {
   const [tab, setTab] = useState('contacts');
-  const [contacts, setContacts] = useState([]);
+  const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
   const [searchDebounced, setSearchDebounced] = useState('');
+  const [businessType, setBusinessType] = useState('');
   const [loading, setLoading] = useState(false);
-  const [lastSyncedAt, setLastSyncedAt] = useState(null);
-  const [syncNote, setSyncNote] = useState('');
+  const [selected, setSelected] = useState(() => new Set());
 
   useEffect(() => {
     const t = setTimeout(() => setSearchDebounced(search.trim()), 300);
     return () => clearTimeout(t);
   }, [search]);
 
-  const loadContacts = useCallback(async (pageArg, searchArg) => {
+  const loadContacts = useCallback(async (pageArg, searchArg, typeArg) => {
     setLoading(true);
     try {
-      const params = new URLSearchParams({ page: String(pageArg), pageSize: String(PAGE_SIZE) });
+      const params = new URLSearchParams({ tab: 'regular', page: String(pageArg), pageSize: String(PAGE_SIZE) });
       if (searchArg) params.set('search', searchArg);
-      const res = await fetch(`/api/crm-contacts?${params.toString()}`);
+      if (typeArg) params.set('business_type', typeArg);
+      const res = await fetch(`/api/admin-customers?${params.toString()}`);
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Failed to load contacts');
-      setContacts(json.rows || []);
+      setRows(json.rows || []);
       setTotal(Number(json.total || 0));
-      setLastSyncedAt(json.lastSyncedAt || null);
-      setSyncNote(json.syncRequired ? (json.message || 'Contact sync is not set up yet.') : '');
     } catch (err) {
       onShowToast?.(err.message || 'Failed to load contacts', 'error');
-      setContacts([]);
+      setRows([]);
       setTotal(0);
     } finally {
       setLoading(false);
     }
   }, [onShowToast]);
 
-  useEffect(() => { setPage(1); }, [searchDebounced]);
-  useEffect(() => { void loadContacts(page, searchDebounced); }, [page, searchDebounced, loadContacts]);
+  useEffect(() => { setPage(1); }, [searchDebounced, businessType]);
+  useEffect(() => { void loadContacts(page, searchDebounced, businessType); }, [page, searchDebounced, businessType, loadContacts]);
 
   useEffect(() => {
     const onRefresh = (event) => {
-      if (event.detail === 'comms') void loadContacts(page, searchDebounced);
+      if (event.detail === 'comms') void loadContacts(page, searchDebounced, businessType);
     };
     window.addEventListener(ADMIN_REFRESH_EVENT, onRefresh);
     return () => window.removeEventListener(ADMIN_REFRESH_EVENT, onRefresh);
-  }, [loadContacts, page, searchDebounced]);
+  }, [loadContacts, page, searchDebounced, businessType]);
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const lastSynced = lastSyncedAt;
+
+  const emailableRows = useMemo(() => rows.filter((r) => contactEmail(r).includes('@')), [rows]);
+  const pageEmails = useMemo(() => emailableRows.map(contactEmail), [emailableRows]);
+  const allPageSelected = pageEmails.length > 0 && pageEmails.every((e) => selected.has(e));
+
+  const toggleOne = (email) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(email)) next.delete(email); else next.add(email);
+      return next;
+    });
+  };
+  const togglePage = () => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (allPageSelected) pageEmails.forEach((e) => next.delete(e));
+      else pageEmails.forEach((e) => next.add(e));
+      return next;
+    });
+  };
+  const clearSelection = () => setSelected(new Set());
+
+  const emailSelected = () => {
+    const recipients = [...selected];
+    if (!recipients.length) return;
+    onCompose?.({ audience: 'selected', recipients });
+  };
+
+  const emailAudience = () => {
+    onCompose?.({
+      audience: 'all-approved',
+      businessTypes: businessType && businessType !== '__unspecified__' ? [businessType] : [],
+    });
+  };
+
+  const audienceLabel = businessType && businessType !== '__unspecified__'
+    ? `all approved · ${businessType}`
+    : 'all approved';
 
   return (
     <div className="adm-panel">
@@ -82,8 +131,8 @@ export default function CommsPanel({ onCompose, onShowToast }) {
         <div>
           <h2 className="adm-section-title">Email CRM</h2>
           <p className="adm-section-note">
-            Compose and send campaigns, browse Brevo-synced contacts, and track opens and clicks — all in one place.
-            Contacts sync automatically every 15 minutes{lastSynced ? ` (last: ${formatWhen(lastSynced)})` : ''}.
+            Your approved site customers. Filter by business type, tick the ones you want, and send — or email a whole
+            audience. Contacts come straight from the portal, not Brevo.
           </p>
         </div>
         <button type="button" className="adm-btn-red" onClick={() => onCompose?.()}>
@@ -103,15 +152,28 @@ export default function CommsPanel({ onCompose, onShowToast }) {
         </button>
         {tab === 'contacts' && (
           <>
+            <select
+              className="adm-select"
+              value={businessType}
+              onChange={(e) => setBusinessType(e.target.value)}
+              aria-label="Filter by business type"
+              style={{ marginLeft: 4 }}
+            >
+              <option value="">All business types</option>
+              <option value="__unspecified__">Unspecified</option>
+              {BUSINESS_TYPES.map((type) => (
+                <option key={type} value={type}>{type}</option>
+              ))}
+            </select>
             <label className="adm-search adm-search--inline">
               <Search size={14} />
-              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search email or name…" className="adm-search-input" />
+              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name, email, business…" className="adm-search-input" />
             </label>
             <button
               type="button"
               className="adm-btn-ghost"
               style={{ fontSize: 12, padding: '4px 10px' }}
-              onClick={() => void loadContacts(page, searchDebounced)}
+              onClick={() => void loadContacts(page, searchDebounced, businessType)}
               disabled={loading}
               title="Reload contacts"
             >
@@ -127,35 +189,84 @@ export default function CommsPanel({ onCompose, onShowToast }) {
         </Suspense>
       ) : (
         <>
-          <div className="adm-list">
-            <div className="adm-list-head" style={{ gridTemplateColumns: '1.4fr 1fr 1fr 1.1fr 110px 110px 110px' }}>
-              <span>Email</span><span>Name</span><span>Lists</span><span>Last campaign</span><span>Last sent</span><span>Last open</span><span>Last click</span>
+          <div
+            style={{
+              display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', justifyContent: 'space-between',
+              marginBottom: 10, padding: '10px 14px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10,
+            }}
+          >
+            <div style={{ fontSize: 13, color: '#334155' }}>
+              {selected.size > 0
+                ? <><strong>{selected.size}</strong> contact{selected.size === 1 ? '' : 's'} selected <button type="button" onClick={clearSelection} style={{ marginLeft: 8, background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 12, textDecoration: 'underline', padding: 0 }}>clear</button></>
+                : <>Tick contacts to email specific people, or email the whole filtered audience.</>}
             </div>
-            {contacts.map((contact) => (
-              <div key={contact.id || contact.email} className="adm-list-row" style={{ gridTemplateColumns: '1.4fr 1fr 1fr 1.1fr 110px 110px 110px' }}>
-                <div style={{ fontSize: 13, fontWeight: 600, wordBreak: 'break-all' }}>{contact.email}</div>
-                <div style={{ fontSize: 13 }}>{contact.name || <span className="adm-muted">—</span>}</div>
-                <div className="adm-muted" style={{ fontSize: 12 }}>{listNames(contact) || '—'}</div>
-                <div style={{ fontSize: 12 }}>{contact.last_campaign_name || <span className="adm-muted">—</span>}</div>
-                <div className="adm-muted" style={{ fontSize: 12 }}>{formatWhen(contact.last_sent_at)}</div>
-                <div style={{ fontSize: 12, color: contact.last_open_at ? '#15803d' : undefined }} className={contact.last_open_at ? undefined : 'adm-muted'}>{formatWhen(contact.last_open_at)}</div>
-                <div style={{ fontSize: 12, color: contact.last_click_at ? '#15803d' : undefined }} className={contact.last_click_at ? undefined : 'adm-muted'}>{formatWhen(contact.last_click_at)}</div>
-              </div>
-            ))}
-            {!loading && contacts.length === 0 && (
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className="adm-btn-red"
+                style={{ fontSize: 13, padding: '7px 14px', opacity: selected.size ? 1 : 0.5 }}
+                onClick={emailSelected}
+                disabled={!selected.size}
+              >
+                <Send size={13} style={{ marginRight: 6, verticalAlign: -2 }} />
+                Email selected ({selected.size})
+              </button>
+              <button
+                type="button"
+                className="adm-btn-ghost"
+                style={{ fontSize: 13, padding: '7px 14px' }}
+                onClick={emailAudience}
+                title="Opens the composer targeting every approved customer in the current business-type filter (not just this page)."
+              >
+                <Users size={13} style={{ marginRight: 6, verticalAlign: -2 }} />
+                Email {audienceLabel}
+              </button>
+            </div>
+          </div>
+
+          <div className="adm-list">
+            <div className="adm-list-head" style={{ gridTemplateColumns: '36px 1.3fr 1fr 1.3fr 1fr 0.9fr 110px' }}>
+              <span>
+                <input type="checkbox" checked={allPageSelected} onChange={togglePage} aria-label="Select all on this page" style={{ accentColor: '#dc2626' }} disabled={!pageEmails.length} />
+              </span>
+              <span>Business</span><span>Contact</span><span>Email</span><span>Business type</span><span>Location</span><span>Last emailed</span>
+            </div>
+            {rows.map((c) => {
+              const email = contactEmail(c);
+              const hasEmail = email.includes('@');
+              return (
+                <div key={c.id || email} className="adm-list-row" style={{ gridTemplateColumns: '36px 1.3fr 1fr 1.3fr 1fr 0.9fr 110px' }}>
+                  <span>
+                    <input
+                      type="checkbox"
+                      checked={selected.has(email)}
+                      onChange={() => toggleOne(email)}
+                      disabled={!hasEmail}
+                      aria-label={`Select ${contactBusiness(c)}`}
+                      style={{ accentColor: '#dc2626' }}
+                    />
+                  </span>
+                  <div style={{ fontSize: 13, fontWeight: 600 }}>{contactBusiness(c)}</div>
+                  <div style={{ fontSize: 13 }}>{contactPerson(c)}</div>
+                  <div style={{ fontSize: 12, wordBreak: 'break-all', color: hasEmail ? undefined : '#94a3b8' }}>{email || '— no email —'}</div>
+                  <div className="adm-muted" style={{ fontSize: 12 }}>{c.business_type || '—'}</div>
+                  <div className="adm-muted" style={{ fontSize: 12 }}>{contactLocation(c)}</div>
+                  <div className="adm-muted" style={{ fontSize: 12 }} title={c.last_email_type ? `Last: ${c.last_email_type}` : ''}>{formatWhen(c.last_email_at)}</div>
+                </div>
+              );
+            })}
+            {!loading && rows.length === 0 && (
               <div style={{ padding: '20px 16px', color: '#6b7280', fontSize: 13 }}>
-                {syncNote
-                  || (searchDebounced
-                    ? 'No contacts match your search.'
-                    : 'No synced contacts yet. The Brevo sync cron fills this list automatically (api/brevo-sync every 15 min).')}
+                {searchDebounced || businessType ? 'No customers match this filter.' : 'No approved customers yet.'}
               </div>
             )}
-            {loading && contacts.length === 0 && (
+            {loading && rows.length === 0 && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '20px 16px', color: '#6b7280', fontSize: 13 }}>
                 <Loader2 size={16} className="spin" /> Loading contacts…
               </div>
             )}
           </div>
+
           {totalPages > 1 && (
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
               <button type="button" className="adm-btn-ghost" style={{ padding: '4px 10px' }} disabled={page <= 1 || loading} onClick={() => setPage((p) => Math.max(1, p - 1))} aria-label="Previous page">
