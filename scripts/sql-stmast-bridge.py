@@ -213,7 +213,13 @@ def order_clause(scope: str) -> str:
     return "SUM(CAST(d.QTY AS float)) DESC"
 
 
-def connect_read_only(timeout: int = 20):
+def connect_read_only(_catalogue_connection_string: str | None = None, timeout: int = 20):
+    """Open the fixed read-only POSWINSQL connection.
+
+    The approved report catalogue calls its connector with a connection-string
+    argument plus ``timeout``. The bridge deliberately ignores that supplied
+    string and always uses its own read-only connection configuration.
+    """
     return pyodbc.connect(connection_string(), timeout=timeout)
 
 
