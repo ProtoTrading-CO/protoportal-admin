@@ -4,7 +4,6 @@ import { fetchAdminProductsPage, setLiveTaxonomyTree } from './products';
 const STATUS_LABELS = {
   live: 'Live',
   archived: 'Archived',
-  approval: 'Approval',
   recycle: 'Recycle bin',
 };
 
@@ -110,9 +109,6 @@ async function fetchAllCatalogProducts(status) {
 }
 
 async function fetchProductsForStatus(status) {
-  if (status === 'approval') {
-    return fetchAllCatalogProducts('approval');
-  }
   if (status === 'archived') {
     const { rows } = await fetchAdminProductsPage({
       page: 1,

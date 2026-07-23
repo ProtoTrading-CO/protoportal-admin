@@ -2,7 +2,6 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Archive,
   ArchiveRestore,
-  CheckCircle,
   ChevronRight,
   ChevronLeft,
   FileSpreadsheet,
@@ -53,14 +52,12 @@ function readOnlyInStockPref() {
 const STATUS_META = {
   live: { label: 'Live', icon: PackagePlus },
   archived: { label: 'Archived', icon: Archive },
-  approval: { label: 'Approval', icon: CheckCircle },
   recycle: { label: 'Recycle Bin', icon: Trash2 },
 };
 
 const ROW_COLUMNS = {
   live: '32px 96px 2fr 140px 140px',
   archived: '32px 96px 2fr 140px 140px',
-  approval: '32px 96px 2fr 140px',
   recycle: '32px 96px 2fr 140px',
 };
 
@@ -378,32 +375,6 @@ function PmMobileProductCard({
             <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => recycleSku(item.sku, true)}>To recycle</button>
           </>
         )}
-        {status === 'approval' && (
-          <>
-            <button
-              type="button"
-              className="adm-btn-red adm-btn--sm"
-              disabled={item.stockReady === false || mutations.setLive.isPending}
-              onClick={() => mutations.setLive.mutate(item.sku, {
-                onSuccess: () => onRefreshStats?.(),
-                onError: (err) => onShowToast?.(err.message, 'error'),
-              })}
-            >
-              {mutations.setLive.isPending ? <Loader2 size={14} className="spin" /> : null}
-              Set live
-            </button>
-            <button
-              type="button"
-              className="adm-btn-ghost adm-btn--sm"
-              disabled={mutations.discardPreview.isPending}
-              onClick={() => mutations.discardPreview.mutate(item.sku, {
-                onError: (err) => onShowToast?.(err.message, 'error'),
-              })}
-            >
-              Discard
-            </button>
-          </>
-        )}
         {status === 'recycle' && (
           <>
             <button
@@ -663,11 +634,7 @@ export default function ProductManagerEngine({
     toOrderOnly: status === 'live' && toOrderOnly,
   }), [status, page, pageSize, debouncedSearch, categoryPath, archiveStockView, archiveSourceFilter, onlyInStock, toOrderOnly]);
 
-  const catalogQueryEnabled = status !== 'approval';
-
-  const { data, isLoading, isFetching, isPlaceholderData } = useCatalogQuery(catalogParams, {
-    enabled: catalogQueryEnabled,
-  });
+  const { data, isLoading, isFetching, isPlaceholderData } = useCatalogQuery(catalogParams);
   const rowsStale = Boolean(data && data.page !== page);
   const rows = rowsStale ? [] : (data?.rows || []);
   rowsRef.current = rows;
@@ -1448,7 +1415,7 @@ export default function ProductManagerEngine({
           <p className="adm-section-note">{note}</p>
         </div>
         <div className="pm-engine-head-actions">
-          {status !== 'approval' && !reorderMode && (
+          {!reorderMode && (
             <>
               <button
                 type="button"
@@ -1675,7 +1642,7 @@ export default function ProductManagerEngine({
                   ].filter(Boolean)}
                 />
               )}
-              {rows.length > 0 && status !== 'approval' && !reorderMode && (
+              {rows.length > 0 && !reorderMode && (
                 <div className="pm-select-toolbar" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', width: '100%' }}>
                   <button
                     type="button"
@@ -1830,9 +1797,6 @@ export default function ProductManagerEngine({
                         <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => runBulk({ mutateAsync: (sku) => mutations.softDelete.mutateAsync({ sku, fromArchive: true }) })}>To recycle</button>
                       </>
                     )}
-                    {status === 'approval' && (
-                      <button type="button" className="adm-btn-red adm-btn--sm" onClick={() => runBulk(mutations.setLive)}>Set live</button>
-                    )}
                     {status === 'recycle' && (
                       <>
                         <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => runBulk(mutations.restoreRecycle)}>Restore</button>
@@ -1962,9 +1926,6 @@ export default function ProductManagerEngine({
                           )}
                         </div>
                         <ProductCategoryLine item={item} tree={tree} />
-                        {status === 'approval' && item.stockError && (
-                          <span className="adm-list-warn" style={{ fontSize: 11 }}>{item.stockError}</span>
-                        )}
                       </div>
                       {showStockColumn && (
                         <div>
@@ -2040,27 +2001,6 @@ export default function ProductManagerEngine({
                               <ArchiveRestore size={14} /> Make live
                             </button>
                             <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => recycleSku(item.sku, true)}>To recycle</button>
-                          </>
-                        )}
-                        {status === 'approval' && (
-                          <>
-                            {onEditProduct && (
-                              <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => onEditProduct(item)}>
-                                <Pencil size={14} /> Edit
-                              </button>
-                            )}
-                            <button
-                              type="button"
-                              className="adm-btn-red adm-btn--sm"
-                              disabled={item.stockReady === false}
-                              onClick={() => mutations.setLive.mutate(item.sku, {
-                                onSuccess: () => onRefreshStats?.(),
-                                onError: (err) => onShowToast?.(err.message, 'error'),
-                              })}
-                            >
-                              Set live
-                            </button>
-                            <button type="button" className="adm-btn-ghost adm-btn--sm" onClick={() => mutations.discardPreview.mutate(item.sku)}>Discard</button>
                           </>
                         )}
                         {status === 'recycle' && (

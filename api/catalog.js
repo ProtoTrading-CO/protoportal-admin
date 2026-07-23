@@ -1,6 +1,5 @@
 import { requireOwner } from './_admin-auth.js';
 import { loadTaxonomy } from './_taxonomy-utils.js';
-import { mergeStagedImagesOntoLive, batchValidateStockReady } from './_stage-dormant.js';
 import { getStockClient, enrichRowsWithProductStock } from './_stock-client.js';
 import {
   adaptCatalogRow,
@@ -48,7 +47,7 @@ function hasUnsafeSuppressSku(suppressSkus) {
   return (suppressSkus || []).some((s) => !SAFE_SKU_RE.test(s));
 }
 
-const VALID_STATUS = new Set(['live', 'archived', 'new-items', 'approval', 'recycle']);
+const VALID_STATUS = new Set(['live', 'archived', 'new-items', 'recycle']);
 const EXCLUDE_ARCHIVED = ['new-products', 'recycle-bin'];
 const PAGE_CHUNK = 1000;
 const SKU_FETCH_CHUNK = 200;
@@ -293,32 +292,6 @@ async function fetchLiveSkus(sb) {
   return skus;
 }
 
-async function loadApprovalRows(sb) {
-  const staged = await fetchAllArchivedRows(sb, { archivedBy: 'new-products', sort: 'updated' });
-  const skus = staged.map((r) => r.sku).filter(Boolean);
-  if (!skus.length) return [];
-  const { data: liveRows } = await sb.from('website_stock').select('*').in('sku', skus);
-  const liveBySku = new Map((liveRows || []).map((r) => [r.sku, r]));
-  const barcodes = (staged || []).map((r) => r.barcode || r.sku).filter(Boolean);
-  const stockChecks = await batchValidateStockReady(sb, barcodes);
-  const rows = [];
-  for (const row of staged) {
-    const live = liveBySku.get(row.sku);
-    if (!live) continue;
-    const { appliedSlots } = mergeStagedImagesOntoLive(row, live);
-    if (!appliedSlots.length) continue;
-    const stockCheck = stockChecks.get(String(row.barcode || row.sku || '').trim()) || { ok: false, error: 'Missing barcode' };
-    rows.push({
-      ...row,
-      _live: live,
-      _changedSlots: appliedSlots,
-      _stockReady: stockCheck.ok,
-      _stockError: stockCheck.ok ? null : stockCheck.error,
-    });
-  }
-  return rows;
-}
-
 /** Paginated catalogue read for unified Product Manager. */
 export default async function handler(req, res) {
   if (!(await requireOwner(req, res))) return;
@@ -459,16 +432,10 @@ export default async function handler(req, res) {
       rows = applySearchFilter(rows, search);
       const pageSlice = paginateRows(rows, page, pageSize);
       result = { ...pageSlice, archived: true };
-    } else if (status === 'approval') {
-      let rows = await loadApprovalRows(sb);
-      rows = filterByCategoryPath(rows, categoryPath, tree);
-      rows = applySearchFilter(rows, search);
-      const pageSlice = paginateRows(rows, page, pageSize);
-      result = { ...pageSlice, archived: true };
     }
 
     const needsStock = status === 'live' || status === 'archived' || status === 'recycle'
-      || status === 'new-items' || status === 'approval';
+      || status === 'new-items';
     let enriched = result.rows;
     if (needsStock && enriched.length && !stockAlreadyEnriched) {
       enriched = await enrichRowsWithProductStock(sb, enriched, { includePrice: status === 'new-items' });

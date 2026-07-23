@@ -2,7 +2,7 @@ import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { queryKeys } from '../lib/queryKeys';
 import { readApiJson } from '../lib/apiError';
 
-export const CATALOG_STATUSES = ['live', 'archived', 'approval', 'recycle'];
+export const CATALOG_STATUSES = ['live', 'archived', 'recycle'];
 
 export function buildCatalogParams({
   status = 'live',

@@ -4,7 +4,6 @@ export const queryKeys = {
   dashboardStats: () => ['dashboard-stats'],
   taxonomy: () => ['taxonomy'],
   catalog: (params) => ['catalog', params],
-  approvalStaging: (params) => ['catalog', { ...params, status: 'approval' }],
   crmContacts: (params) => ['crm-contacts', params],
   sortOrder: (categoryKey) => ['sort-order', categoryKey],
   banner: () => ['banner'],

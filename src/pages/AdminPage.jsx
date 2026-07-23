@@ -1449,7 +1449,6 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
       return;
     }
     if (activeSection === 'apollo') {
-      window.dispatchEvent(new CustomEvent('proto-approval-refresh'));
       queryClient.invalidateQueries({ queryKey: queryKeys.dashboardStats() });
       refreshDashboardStats();
       return;
