@@ -8,6 +8,13 @@ const EmailAnalyticsPanel = lazyRetry(() => import('./EmailAnalyticsPanel'));
 
 const PAGE_SIZE = 50;
 
+// Same strictness the composer uses (parseEmailList) so a contact that can't be
+// sent to can't be ticked — keeps the "Email selected (N)" count truthful.
+const SENDABLE_EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+function isSendableEmail(email) {
+  return SENDABLE_EMAIL_RE.test(email);
+}
+
 function formatWhen(value) {
   if (!value) return '—';
   const date = new Date(value);
@@ -87,7 +94,7 @@ export default function CommsPanel({ onCompose, onShowToast }) {
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
-  const emailableRows = useMemo(() => rows.filter((r) => contactEmail(r).includes('@')), [rows]);
+  const emailableRows = useMemo(() => rows.filter((r) => isSendableEmail(contactEmail(r))), [rows]);
   const pageEmails = useMemo(() => emailableRows.map(contactEmail), [emailableRows]);
   const allPageSelected = pageEmails.length > 0 && pageEmails.every((e) => selected.has(e));
 
@@ -114,14 +121,21 @@ export default function CommsPanel({ onCompose, onShowToast }) {
     onCompose?.({ audience: 'selected', recipients });
   };
 
+  // The audience resolver can't target "no business type" as a segment (an empty
+  // businessTypes list means "everyone"), so emailing the whole audience while
+  // the list is filtered to Unspecified would silently send to ALL approved.
+  // Block that path — the admin ticks contacts and uses "Email selected" instead.
+  const unspecifiedFilter = businessType === '__unspecified__';
+
   const emailAudience = () => {
+    if (unspecifiedFilter) return;
     onCompose?.({
       audience: 'all-approved',
-      businessTypes: businessType && businessType !== '__unspecified__' ? [businessType] : [],
+      businessTypes: businessType ? [businessType] : [],
     });
   };
 
-  const audienceLabel = businessType && businessType !== '__unspecified__'
+  const audienceLabel = businessType && !unspecifiedFilter
     ? `all approved · ${businessType}`
     : 'all approved';
 
@@ -214,9 +228,12 @@ export default function CommsPanel({ onCompose, onShowToast }) {
               <button
                 type="button"
                 className="adm-btn-ghost"
-                style={{ fontSize: 13, padding: '7px 14px' }}
+                style={{ fontSize: 13, padding: '7px 14px', opacity: unspecifiedFilter ? 0.5 : 1 }}
                 onClick={emailAudience}
-                title="Opens the composer targeting every approved customer in the current business-type filter (not just this page)."
+                disabled={unspecifiedFilter}
+                title={unspecifiedFilter
+                  ? 'Customers with no business type can’t be emailed as an audience — tick them and use “Email selected”.'
+                  : 'Opens the composer targeting every approved customer in the current business-type filter (not just this page).'}
               >
                 <Users size={13} style={{ marginRight: 6, verticalAlign: -2 }} />
                 Email {audienceLabel}
@@ -233,7 +250,7 @@ export default function CommsPanel({ onCompose, onShowToast }) {
             </div>
             {rows.map((c) => {
               const email = contactEmail(c);
-              const hasEmail = email.includes('@');
+              const hasEmail = isSendableEmail(email);
               return (
                 <div key={c.id || email} className="adm-list-row" style={{ gridTemplateColumns: '36px 1.3fr 1fr 1.3fr 1fr 0.9fr 110px' }}>
                   <span>
