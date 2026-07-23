@@ -80,6 +80,27 @@ export async function loadWorkspace(supabase, id) {
   return row;
 }
 
+/**
+ * Lightweight list rows for the workspace picker: the workspace columns plus a
+ * minimal customer snapshot (for the row title). ONE extra query covers every
+ * row, instead of loadWorkspace()'s seven-per-row deep fetch — the old list ran
+ * 8×N queries (up to ~800 for a 100-row page). The detail pane re-fetches the
+ * full workspace by id when a row is opened.
+ */
+export async function loadWorkspaceSummaries(supabase, workspaces) {
+  const list = workspaces || [];
+  if (!list.length) return [];
+  const ids = list.map((w) => w.id);
+  const { data: customers, error } = await supabase
+    .from('order_workspace_customers')
+    .select('workspace_id, customer_id, customer_name, account, contact, email, phone')
+    .in('workspace_id', ids);
+  if (error) throw error;
+  const byWorkspace = new Map();
+  for (const c of customers || []) byWorkspace.set(c.workspace_id, c);
+  return list.map((w) => ({ ...w, customer: byWorkspace.get(w.id) || null }));
+}
+
 export async function findCustomers(supabase, query) {
   const safe = safeSearchTerm(query);
   if (!safe) return [];
@@ -212,7 +233,8 @@ export default async function handler(req, res) {
       if (safe) query = query.or(`command.ilike.%${safe}%,supplier.ilike.%${safe}%,notes.ilike.%${safe}%`);
       const { data, error } = await query;
       if (error) throw error;
-      const rows = await Promise.all((data || []).map((row) => loadWorkspace(supabase, row.id)));
+      // Summary rows only (batched) — the deep per-row load was an 8×N N+1.
+      const rows = await loadWorkspaceSummaries(supabase, data || []);
       return res.status(200).json({ rows });
     }
 
