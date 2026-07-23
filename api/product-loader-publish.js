@@ -42,15 +42,35 @@ export default async function handler(req, res) {
     displayCode,
     sqlRow,
     websiteRow,
+    images,
+    requireNew = false,
   } = req.body || {};
 
   const sku = String(code || '').trim().toUpperCase();
   if (!sku) return res.status(400).json({ error: 'code is required' });
-  if (!imageUrl) return res.status(400).json({ error: 'imageUrl is required' });
   if (!category) return res.status(400).json({ error: 'category is required' });
 
-  const slot = Math.min(4, Math.max(1, Number(imageSlot) || 1));
-  const imageField = SLOT_FIELDS[slot - 1];
+  // Accept either a single image (imageUrl + imageSlot — existing callers) or a
+  // full set via `images: [{ slot, url }]` (the New Product authoring flow), and
+  // write every provided slot in one publish.
+  const slotUrls = {};
+  if (Array.isArray(images)) {
+    for (const img of images) {
+      const s = Math.min(4, Math.max(1, Number(img?.slot) || 0));
+      const u = String(img?.url || '').trim();
+      if (s >= 1 && s <= 4 && u) slotUrls[s] = u;
+    }
+  }
+  const singleSlot = Math.min(4, Math.max(1, Number(imageSlot) || 1));
+  if (!Object.keys(slotUrls).length && imageUrl) slotUrls[singleSlot] = String(imageUrl).trim();
+  const filledSlots = Object.keys(slotUrls).map(Number).sort((a, b) => a - b);
+  if (!filledSlots.length) return res.status(400).json({ error: 'At least one image is required' });
+
+  const primarySlot = slotUrls[1] ? 1 : filledSlots[0];
+  const imageUrlPrimary = slotUrls[primarySlot];
+  const imageField = SLOT_FIELDS[primarySlot - 1];
+  const imageFields = {};
+  for (const s of filledSlots) imageFields[SLOT_FIELDS[s - 1]] = slotUrls[s];
 
   const sb = getStockClient();
 
@@ -62,11 +82,22 @@ export default async function handler(req, res) {
 
   if (lookupErr) return res.status(400).json({ error: lookupErr.message });
 
-  if (existing?.[imageField] && !overwriteImage) {
+  // "Author a new product" must never silently overwrite an existing SKU.
+  if (requireNew && existing) {
     return res.status(409).json({
-      error: `Image slot ${slot} already has an image. Confirm overwrite to replace it.`,
-      code: 'image_exists',
+      error: 'A product with this code already exists. Use the Single Image flow to add an image to it.',
+      code: 'exists',
     });
+  }
+
+  if (existing && !overwriteImage) {
+    const clash = filledSlots.filter((s) => existing[SLOT_FIELDS[s - 1]]);
+    if (clash.length) {
+      return res.status(409).json({
+        error: `Image slot${clash.length > 1 ? 's' : ''} ${clash.join(', ')} already ${clash.length > 1 ? 'have' : 'has'} an image. Confirm overwrite to replace.`,
+        code: 'image_exists',
+      });
+    }
   }
 
   const now = new Date().toISOString();
@@ -109,7 +140,7 @@ export default async function handler(req, res) {
     title: resolvedTitle,
     price: hasValidPrice ? numericPrice : (Number(existing?.price) || 0),
     ...catFields,
-    [imageField]: String(imageUrl).trim(),
+    ...imageFields,
     updated_at: now,
   };
 
@@ -139,7 +170,7 @@ export default async function handler(req, res) {
       image_url_two: null,
       image_url_three: null,
       image_url_four: null,
-      [imageField]: String(imageUrl).trim(),
+      ...imageFields,
       updated_at: now,
     };
     const { error } = await sb.from('website_stock').insert(insertRow);
@@ -153,7 +184,7 @@ export default async function handler(req, res) {
     action,
     source: 'manual_product_loader',
     publishMode: String(publishMode || 'direct'),
-    imageSlot: slot,
+    imageSlot: primarySlot,
     imageSource: String(imageSource || 'upload'),
     categoryConfidence: categoryConfidence != null ? Number(categoryConfidence) : null,
     oldValues: existing
@@ -171,8 +202,9 @@ export default async function handler(req, res) {
       price: patch.price,
       category: patch.category,
       subcategoryOne: patch.subcategory_one,
-      imageUrl,
-      imageSlot: slot,
+      imageUrl: imageUrlPrimary,
+      imageSlot: primarySlot,
+      imageSlots: filledSlots,
       imageSource,
       publishMode,
       filename: String(filename || '').trim() || null,

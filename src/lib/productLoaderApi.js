@@ -58,6 +58,76 @@ function fileToBase64(file) {
   });
 }
 
+/** Upload one image file to a product's slot (1-4). Returns { url }. */
+export async function uploadProductImageSlot({ file, sku, slot }) {
+  if (!file) throw new Error('No file');
+  if (!sku) throw new Error('Enter the product code first');
+  const b64 = await fileToBase64(file);
+  const res = await fetch('/api/upload-product-image', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      filename: file.name,
+      contentType: file.type || 'image/jpeg',
+      base64: b64,
+      sku: String(sku).trim().toUpperCase(),
+      imageSlot: Math.min(4, Math.max(1, Number(slot) || 1)),
+    }),
+  });
+  return readApiJson(res, { fallback: 'Upload failed' });
+}
+
+/**
+ * Author a brand-new product (no ERP/catalogue match required) with up to four
+ * image slots and its metadata in one publish. `images` is [{ slot, url }].
+ * `categoryPathIds` is the contiguous taxonomy id array from CategoryPathSelect.
+ */
+export async function publishNewProduct({
+  code, title, price, barcode, description, stockQty, availableStock,
+  images = [], categoryPathIds = [], taxonomyTree = [], publishedBy = '',
+}) {
+  const sku = String(code || '').trim().toUpperCase();
+  if (!sku) throw new Error('Product code is required');
+  const cleanTitle = String(title || '').trim();
+  if (!cleanTitle) throw new Error('Title is required');
+  const numericPrice = Number(price);
+  if (!Number.isFinite(numericPrice) || numericPrice <= 0) throw new Error('Enter a price greater than 0');
+
+  const labels = pathLabelsFromIds(taxonomyTree, categoryPathIds);
+  if (!labels.length) throw new Error('Pick a category');
+
+  const cleanImages = (images || [])
+    .filter((i) => i?.url)
+    .map((i) => ({ slot: Number(i.slot), url: i.url, source: 'upload' }));
+  if (!cleanImages.some((i) => i.slot === 1)) throw new Error('Upload the main image (slot 1)');
+
+  const res = await fetch('/api/product-loader-publish', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      code: sku,
+      title: cleanTitle,
+      price: numericPrice,
+      barcode: String(barcode || '').trim() || sku,
+      description: String(description || '').trim(),
+      images: cleanImages,
+      imageUrl: cleanImages.find((i) => i.slot === 1)?.url || cleanImages[0].url,
+      imageSlot: 1,
+      imageSource: 'upload',
+      category: labels[0],
+      categoryPath: labels,
+      subcategoryOne: labels[1] || labels[0],
+      ...(stockQty != null && stockQty !== '' ? { stockQty: Number(stockQty) } : {}),
+      ...(availableStock != null && availableStock !== '' ? { availableStock: Number(availableStock) } : {}),
+      requireNew: true,
+      publishMode: 'direct',
+      publishedBy,
+    }),
+  });
+  const json = await readApiJson(res, { fallback: 'Publish failed' });
+  return { sku, action: json.action || 'create' };
+}
+
 async function uploadLoaderImage(item) {
   const b64 = await fileToBase64(item.file);
   const uploadRes = await fetch('/api/upload-product-image', {

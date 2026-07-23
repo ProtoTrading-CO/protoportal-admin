@@ -15,6 +15,7 @@ import categories from '../data/categories.json';
 import { isImageFile } from '../lib/parseIntakeFilename.js';
 import { readApiJson } from '../lib/apiError.js';
 import ProductLoaderNutstore from './productLoader/ProductLoaderNutstore';
+import ProductLoaderNewProduct from './productLoader/ProductLoaderNewProduct';
 import ProductLoaderSingleImage from './productLoader/ProductLoaderSingleImage';
 import ProductLoaderFolder from './productLoader/ProductLoaderFolder';
 import ProductLoaderPublishHistory from './productLoader/ProductLoaderPublishHistory';
@@ -24,6 +25,7 @@ import { catalogueDisplayTitle, catalogueDescription } from '../lib/productLoade
 
 const LOADER_TABS = [
   { id: 'nutstore', label: 'Nutstore' },
+  { id: 'new', label: 'New Product' },
   { id: 'single', label: 'Single Image' },
   { id: 'folder', label: 'Local Folder' },
   { id: 'history', label: 'Publish History' },
@@ -157,6 +159,7 @@ export default function ProductLoaderPanel({
   initialCode = '',
   onInitialCodeConsumed,
   mainSiteUrl = 'https://site.proto.co.za',
+  publishedBy = '',
 }) {
   const [activeTab, setActiveTab] = useState('nutstore');
   const [publishSuccess, setPublishSuccess] = useState(null);
@@ -947,6 +950,15 @@ export default function ProductLoaderPanel({
           setBatchDefaultSub1Id={(id) => setBatchDefaultPathIds([batchDefaultCategoryId, id].filter(Boolean))}
           batchOverwrite={batchOverwrite}
           setBatchOverwrite={setBatchOverwrite}
+          onShowToast={onShowToast}
+          onPublished={(result) => setPublishSuccess(result)}
+        />
+      )}
+
+      {activeTab === 'new' && (
+        <ProductLoaderNewProduct
+          taxonomyTree={taxonomyTree}
+          publishedBy={publishedBy}
           onShowToast={onShowToast}
           onPublished={(result) => setPublishSuccess(result)}
         />

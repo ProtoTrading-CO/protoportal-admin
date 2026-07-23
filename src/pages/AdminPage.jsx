@@ -2141,6 +2141,7 @@ export default function AdminPage({ customer, onViewPortal, onSignOut }) {
                   onShowToast={showToast}
                   initialCode={productLoaderCode}
                   onInitialCodeConsumed={() => setProductLoaderCode('')}
+                  publishedBy={customer?.email || ''}
                 />
                 </Suspense>
               </SectionErrorBoundary>
