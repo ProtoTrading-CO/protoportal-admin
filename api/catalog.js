@@ -19,6 +19,11 @@ import { loadPlacementMapIfEnabled, skusMatchingBrowsePath } from './_placements
 import { loadGroupContextIfEnabled } from './_groups.js';
 import { normalizeMemberSku } from '../lib/product-groups.mjs';
 
+// The full-scan paths load and refine the whole matching set in memory; give
+// them headroom past the platform default so a large catalogue degrades to
+// "slow" rather than a hard timeout. (Matches customer-email-broadcast.)
+export const config = { maxDuration: 60 };
+
 // Variant grouping: a curated feature merges a handful of SKUs, so the suppress
 // list stays small. Above this many, skip the SQL `.not in` (URL-length risk)
 // and force the full-scan path, which filters in JS instead.
@@ -47,6 +52,20 @@ const VALID_STATUS = new Set(['live', 'archived', 'new-items', 'approval', 'recy
 const EXCLUDE_ARCHIVED = ['new-products', 'recycle-bin'];
 const PAGE_CHUNK = 1000;
 const SKU_FETCH_CHUNK = 200;
+
+// The full-scan paths (a search-less "in stock only" toggle, deep category
+// paths, Motarro browse, placements) load every matching row into serverless
+// memory and refine in JS. That is comfortable at the current catalogue size
+// but scales linearly. This is the "real row-count check": once a single scan
+// crosses the threshold we log a structured warning (visible in the function
+// logs) so the move to a server-side paginated strategy happens before scans
+// start timing out — without altering results, count, or pagination today.
+const FULL_SCAN_WARN_ROWS = 15000;
+function warnIfFullScanLarge(count, label) {
+  if (count > FULL_SCAN_WARN_ROWS) {
+    console.warn(`catalog full-scan large: ${count} rows loaded for ${label} (threshold ${FULL_SCAN_WARN_ROWS}) — consider a server-side paginated path.`);
+  }
+}
 
 /** Fetch live rows for an explicit sku list, chunked to keep the URL sane. */
 async function fetchLiveRowsBySku(sb, skus) {
@@ -112,6 +131,7 @@ async function fetchAllMotarroRows(sb, { search, categoryPath, tree, sort }) {
     if ((data || []).length < PAGE_CHUNK) break;
     from += PAGE_CHUNK;
   }
+  warnIfFullScanLarge(rows.length, 'live/motarro');
   return filterByCategoryPath(rows, categoryPath, tree);
 }
 
@@ -136,6 +156,7 @@ async function fetchAllLiveRows(sb, { search, categoryPath, tree, sort, toOrderO
     if ((data || []).length < PAGE_CHUNK) break;
     from += PAGE_CHUNK;
   }
+  warnIfFullScanLarge(rows.length, 'live');
   // The SQL filter is exact only within the fixed subcategory columns; a path
   // deeper than subcategory_four is coarsely narrowed by ilike, so refine it to
   // an exact ordered-prefix match in JS (extras-aware via rowCategoryPath).
@@ -169,6 +190,7 @@ async function fetchAllArchivedRows(sb, { archivedBy, excludeBy, sort, search, c
     if ((data || []).length < PAGE_CHUNK) break;
     from += PAGE_CHUNK;
   }
+  warnIfFullScanLarge(rows.length, 'archived');
   // Exact ordered-prefix refine for paths deeper than the fixed columns (the
   // SQL filter only coarsely narrows subcategory_extra via ilike). Motarro
   // browse paths are refined by their own caller.
