@@ -68,8 +68,12 @@ export default function BuyingWorkspacePanel({ onShowToast }) {
     finally { setSaving(''); }
   };
   const setStatus = async (shipmentId, status) => {
+    const landedDate = status === 'Landed â awaiting GRV'
+      ? window.prompt('Enter the landed date (YYYY-MM-DD):', new Date().toISOString().slice(0, 10))
+      : undefined;
+    if (status === 'Landed â awaiting GRV' && !landedDate) return;
     setSaving(shipmentId);
-    try { setLedger(await updateIncomingShipmentStatus({ shipmentId, status })); toast('Shipment status updated.'); }
+    try { setLedger(await updateIncomingShipmentStatus({ shipmentId, status, landedDate })); toast('Shipment status updated.'); }
     catch (error) { toast(error.message || 'Could not update shipment', 'error'); }
     finally { setSaving(''); }
   };
