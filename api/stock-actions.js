@@ -7,10 +7,7 @@ import { reorderStagedImageSlots } from './_stage-dormant.js';
 import { isExactlyZeroStock } from './_catalog-adapt.js';
 import { detachSkuFromGroup } from './_group-cascade.js';
 
-// Full listings load every row in memory; give them headroom past the platform
-// default so a large catalogue degrades to "slow" rather than a hard timeout.
-export const config = { maxDuration: 60 };
-
+// maxDuration for this route is set in vercel.json (functions."api/stock-actions.js").
 const PAGE_SIZE = 1000;
 
 /** Columns needed for admin catalogue adapt() — avoids select('*') timeouts on ~5k rows. */

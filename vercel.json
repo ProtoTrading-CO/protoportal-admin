@@ -12,9 +12,6 @@
     "api/seed-proto-active-customers.js": {
       "includeFiles": "data/proto-active-customers.json"
     },
-    "api/apply-dormant-live.js": {
-      "maxDuration": 60
-    },
     "api/stock-actions.js": {
       "maxDuration": 60
     },
