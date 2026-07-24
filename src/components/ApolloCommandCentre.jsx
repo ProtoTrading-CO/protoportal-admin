@@ -11,6 +11,7 @@ import ApolloKnowledgeHub from './ApolloKnowledgeHub.jsx';
 import ApolloOperationalBrief from './ApolloOperationalBrief.jsx';
 import ApolloWorkGateway from './ApolloWorkGateway.jsx';
 import ApolloWorkObjectPreview from './ApolloWorkObjectPreview.jsx';
+import BuyingWorkspacePanel from './BuyingWorkspacePanel.jsx';
 import OrdersWorkspacePanel from './OrdersWorkspacePanel.jsx';
 
 function WorkShell({ children, chatPanel }) {
@@ -144,6 +145,16 @@ export default function ApolloCommandCentre({
         <WorkShell chatPanel={chatPanel}>
           <ActiveWorkChrome objectId="orders" onBack={backToWorkGateway}>
             <OrdersWorkspacePanel onShowToast={onShowToast} />
+          </ActiveWorkChrome>
+        </WorkShell>
+      );
+    }
+
+    if (activeWorkObject === 'buying') {
+      return (
+        <WorkShell chatPanel={chatPanel}>
+          <ActiveWorkChrome objectId="buying" onBack={backToWorkGateway}>
+            <BuyingWorkspacePanel onShowToast={onShowToast} />
           </ActiveWorkChrome>
         </WorkShell>
       );
