@@ -18,10 +18,7 @@ import { loadPlacementMapIfEnabled, skusMatchingBrowsePath } from './_placements
 import { loadGroupContextIfEnabled } from './_groups.js';
 import { normalizeMemberSku } from '../lib/product-groups.mjs';
 
-// The full-scan paths load and refine the whole matching set in memory; give
-// them headroom past the platform default so a large catalogue degrades to
-// "slow" rather than a hard timeout. (Matches customer-email-broadcast.)
-export const config = { maxDuration: 60 };
+// maxDuration for this route is set in vercel.json (functions."api/catalog.js").
 
 // Variant grouping: a curated feature merges a handful of SKUs, so the suppress
 // list stays small. Above this many, skip the SQL `.not in` (URL-length risk)
